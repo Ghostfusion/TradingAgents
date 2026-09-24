@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **53 of the 101 `enable_*` keys** in
+policy, data-surface and context gates: **54 of the 102 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -285,6 +285,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_triadic_stress` | `TRADINGAGENTS_ENABLE_TRIADIC_STRESS` | names WHERE a cross-sectional stress is centred - a triadic stress index over the correlation network with a per-node diag(A^3) epicentre - labelled coincident on every read and refused on a thin cross-section | `tradingagents/strategies/triadic_stress.py`::`_gate_on` (the read) / `::`triadic_stress`, registered PRINTED in `tradingagents/strategies/risk_score.py`::COMPONENTS | `test_triadic_stress.py` | wired |
 | `enable_refusal_ledger` | `TRADINGAGENTS_ENABLE_REFUSAL_LEDGER` | records candidates the engine REFUSED (risk governor, knife guard, tradability, news admission, value-dip floors) with their reasons, and classifies each against its forward path, so a guardrail's precision becomes measurable instead of assumed | `tradingagents/strategies/refusal_ledger.py`::`gate_on` (the read, consulted at the head of every write), writers in `risk_governor.py` / `knife_guard.py` / `market_tradability.py` / `news_relevance.py` / `value_dip.py`, read by `scripts/refusal_scorecard.py` | `test_refusal_ledger.py` | wired |
 | `enable_materiality_verdict` | `TRADINGAGENTS_ENABLE_MATERIALITY_VERDICT` | the three-way verdict vocabulary - SUPPORTED / REFUTED / INCONCLUSIVE - over a pre-declared materiality threshold, plus a family-level FDR and an exposure-time-matched benchmark arm, so an underpowered result is recorded as unresolved instead of as evidence of no edge | `tradingagents/strategies/evaluate.py`::`_materiality_gate_on` / `::`materiality_verdict` / `::`family_materiality` / `::`benchmark_table`, `tradingagents/agents/utils/report_verifier.py`::`_materiality_gate_on` (per-stem verdict and tree-level family emission) | `test_materiality_verdict.py` | wired |
+| `enable_accuracy_ceiling` | `TRADINGAGENTS_ENABLE_ACCURACY_CEILING` | the R-squared ceiling and the excess-accuracy read, so an impossible (2DA-1)^2 vs R2_OOS/kappa point above the 45-degree line is FLAGGED - a falsifier, never a validator | `tradingagents/strategies/alpha_eval.py`::`_ceiling_gate` / `::`ceiling_ratio`, `tradingagents/strategies/calibration.py`::`_ceiling_gate` / `::`excess_accuracy`, reported by `tradingagents/graph/trading_graph.py`::`_maybe_report_accuracy_ceiling` | `test_accuracy_ceiling.py` | wired |
 
 ## 8. Adding a gate — the rule
 

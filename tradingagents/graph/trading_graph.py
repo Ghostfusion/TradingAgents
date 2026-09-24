@@ -82,6 +82,21 @@ def _data_quality_blocks_position(pm_decision: dict | None) -> bool:
     return dq in ("stale", "partial")
 
 
+def _rating_sign(rating: str | None) -> float:
+    """The directional call a stored 5-tier rating makes: +1 long, -1 short, 0 none.
+
+    Hold — and anything unrecognised — carries no direction, so it reads 0 and
+    the accuracy instrument drops the row rather than scoring it as a miss for
+    the model. The tiers are ``RATINGS_5_TIER``'s five, spelled the same way.
+    """
+    r = str(rating or "").strip().lower()
+    if r in ("buy", "overweight"):
+        return 1.0
+    if r in ("underweight", "sell"):
+        return -1.0
+    return 0.0
+
+
 def _coerce_max_retries(value):
     """Validate an ``llm_max_retries`` value to a non-negative int.
 
@@ -463,6 +478,8 @@ class TradingAgentsGraph:
 
         benchmark = self._resolve_benchmark(ticker)
         updates = []
+        forecasts: list[float] = []
+        realized: list[float] = []
         for entry in pending:
             raw, alpha, days = self._fetch_returns(
                 ticker,
@@ -479,6 +496,8 @@ class TradingAgentsGraph:
             )
             self._maybe_record_reflection_outcome(ticker, entry["date"], alpha)
             self._maybe_record_calibration(ticker, entry["date"], alpha)
+            forecasts.append(_rating_sign(entry.get("rating")))
+            realized.append(raw)
             updates.append(
                 {
                     "ticker": ticker,
@@ -492,6 +511,43 @@ class TradingAgentsGraph:
 
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
+            self._maybe_report_accuracy_ceiling(forecasts, realized)
+
+    def _maybe_report_accuracy_ceiling(self, forecasts, realized) -> None:
+        """H4: score this ticker's resolved calls against the always-up baseline.
+
+        Advisory and default off (``enable_accuracy_ceiling``). Every resolved
+        entry carries the directional call it made (its stored rating) and the
+        return that call realized — a forecast series and a returns series on
+        identical rows, which is what the accuracy instrument reads:
+        ``calibration.excess_accuracy`` for the excess over always-up, and
+        ``alpha_eval.ceiling_ratio`` for the out-of-sample R-squared ceiling.
+
+        The engine's call is a *direction*, not a magnitude, so the ceiling is
+        read on a unit-scaled sign forecast — the paper's own construction (a
+        constant-magnitude directional call). A handful of resolved decisions
+        sits far below either instrument's floor, and both say so: they report
+        ``unavailable`` with the row count rather than a hit rate off three
+        rows. Never raises — a measurement must not break a run.
+        """
+        if not self.config.get("enable_accuracy_ceiling"):
+            return
+        try:
+            from tradingagents.strategies.alpha_eval import ceiling_ratio
+            from tradingagents.strategies.calibration import excess_accuracy
+
+            excess = excess_accuracy(forecasts, realized)
+            ceiling = ceiling_ratio(realized, forecasts)
+            logger.info(
+                "accuracy ceiling (H4) %s: excess=%s%s | ceiling flagged=%s%s",
+                self.ticker,
+                excess.get("excess"),
+                f" ({excess.get('unavailable')})" if excess.get("unavailable") else "",
+                ceiling.get("flagged"),
+                f" ({ceiling.get('unavailable')})" if ceiling.get("unavailable") else "",
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory; never breaks a run
+            logger.warning("accuracy ceiling skipped: %s", exc)
 
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         """Resolve ticker identity once and return the full instrument context.

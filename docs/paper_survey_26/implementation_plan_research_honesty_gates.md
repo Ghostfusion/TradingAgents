@@ -1,6 +1,6 @@
 # Implementation Plan - Honest Evaluation Gates
 
-Status: **IN PROGRESS** - wave 0+1 build started: H10, H1, H11 (both halves), H7 and H6 landed (2026-09-23). H4 is in flight. The rest of this plan is not started.
+Status: **IN PROGRESS** - wave 0 (P0) is COMPLETE: H10, H1, H7, H11 (both halves), H4 and H6 all landed (2026-09-23). The P2/P3/P4 items of this plan are not started.
 2026 `q-fin` corpus survey - the gates that decide whether a claim the engine publishes is
 *earned*. Parent survey: [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).
 **Parent design:** [`design_research_honesty_gates.md`](design_research_honesty_gates.md)

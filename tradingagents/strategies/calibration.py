@@ -266,7 +266,143 @@ def scorecard(scored_rows: list[dict], agent_field: str = "agent") -> list[dict]
     return sorted(out, key=lambda o: (o["hit_rate"] is None, -(o["hit_rate"] or 0)))
 
 
+# ---------------------------------------------------------------------------
+# H4 excess accuracy (paper-survey honest-evaluation). Every hit rate this
+# module and `alpha_eval.alpha_score` publish is quoted with no reference to
+# what it is worth on the same rows: a 58% directional hit rate means nothing
+# until the always-up base rate over the identical window is beside it. This
+# reports the difference, per walk-forward fold, with the interval H11 earns.
+# ---------------------------------------------------------------------------
+
+#: Below this many usable rows the excess-accuracy report is refused.
+EXCESS_MIN_N = 40
+#: Sequential walk-forward folds the per-fold table is cut into.
+EXCESS_FOLDS = 5
+
+
+def _ceiling_gate() -> bool:
+    """Is the H4 accuracy-ceiling instrument switched on? (``enable_accuracy_ceiling``)
+
+    The same gate as ``alpha_eval.ceiling_ratio``: both are the one accuracy
+    instrument. Off by default, so a gate-off caller reads exactly what it read
+    before the excess existed. A config read must never break the read it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_accuracy_ceiling", False))
+
+
+def excess_accuracy(pred, realized, baseline: str = "always_up", *,
+                    folds: int = EXCESS_FOLDS, alpha: float = 0.1,
+                    min_n: int = EXCESS_MIN_N) -> dict:
+    """H4: the model's hit rate minus the always-up baseline's, on the same rows.
+
+    ``pred`` and ``realized`` are the forecast and the realized return on the
+    same rows, in order. The model calls the sign of ``pred``; the ``always_up``
+    baseline calls +1 on every row, so its hit rate over a window is just the
+    share of positive realized returns. Both are scored on the *identical*
+    rows — a row with a zero return or no forecast sign carries no direction and
+    is excluded from both counts, never counted as a miss for either arm.
+
+    ``per_fold`` cuts the rows into ``folds`` sequential walk-forward blocks and
+    reports each arm's hit rate and the difference, so one lucky block is
+    visible rather than averaged away. ``interval`` is H11's moving-block
+    bootstrap over the paired per-row differences (``model_hit - base_hit``),
+    whose block length comes from the series' own autocorrelation: the excess
+    is a mean over adjacent observations, and an IID interval under-covers it.
+
+    Returns ``{n, folds, per_fold, model_hit_rate, baseline_hit_rate, excess,
+    interval, baseline, basis, unavailable}``. Missing, thin or unknown input —
+    under ``min_n`` usable rows, an unknown ``baseline``, the gate off — is
+    ``unavailable`` with the reason, never a zero.
+    """
+    rec = {
+        "n": 0,
+        "folds": int(folds),
+        "per_fold": [],
+        "model_hit_rate": None,
+        "baseline_hit_rate": None,
+        "excess": None,
+        "interval": None,
+        "baseline": baseline,
+        "basis": None,
+        "unavailable": None,
+    }
+    if not _ceiling_gate():
+        rec["unavailable"] = "excess accuracy off (enable_accuracy_ceiling)"
+        return rec
+    if baseline != "always_up":
+        rec["unavailable"] = (
+            f"excess accuracy unavailable: unknown baseline {baseline!r} "
+            f"(only 'always_up' is defined)"
+        )
+        return rec
+    rows: list[tuple[float, float]] = []
+    for p, r in zip(pred or [], realized or [], strict=False):
+        try:
+            pv = float(p)
+            rv = float(r)
+        except (TypeError, ValueError):
+            continue
+        if pv == 0.0 or rv == 0.0:
+            continue  # no direction on one side: not a miss for either arm
+        rows.append((pv, rv))
+    rec["n"] = len(rows)
+    if len(rows) < max(2, int(min_n)):
+        rec["unavailable"] = (
+            f"excess accuracy unavailable: {len(rows)} usable row(s) below the "
+            f"{int(min_n)}-row floor"
+        )
+        return rec
+    diffs = [
+        (1.0 if pv * rv > 0.0 else 0.0) - (1.0 if rv > 0.0 else 0.0)
+        for pv, rv in rows
+    ]
+    rec["model_hit_rate"] = sum(1.0 for pv, rv in rows if pv * rv > 0.0) / len(rows)
+    rec["baseline_hit_rate"] = sum(1.0 for _, rv in rows if rv > 0.0) / len(rows)
+    rec["excess"] = sum(diffs) / len(diffs)
+    k = max(1, min(int(folds), len(rows)))
+    rec["folds"] = k
+    per = []
+    for i in range(k):
+        start = i * len(rows) // k
+        stop = (i + 1) * len(rows) // k
+        block = rows[start:stop]
+        if not block:
+            continue
+        model = sum(1.0 for pv, rv in block if pv * rv > 0.0) / len(block)
+        base = sum(1.0 for _, rv in block if rv > 0.0) / len(block)
+        per.append({
+            "fold": i + 1,
+            "n": len(block),
+            "model_hit_rate": round(model, 4),
+            "baseline_hit_rate": round(base, 4),
+            "excess": round(model - base, 4),
+        })
+    rec["per_fold"] = per
+    try:
+        from tradingagents.strategies.conformal import block_bootstrap_interval
+
+        rec["interval"] = block_bootstrap_interval(diffs, alpha=alpha)
+    except Exception:  # noqa: BLE001 - an interval is never worth breaking the read
+        rec["interval"] = None
+    rec["basis"] = (
+        f"excess accuracy {rec['excess']:+.4f} over {len(rows)} row(s) on "
+        f"identical rows: model hit rate {rec['model_hit_rate']:.4f} minus "
+        f"always-up {rec['baseline_hit_rate']:.4f}; {k} sequential walk-forward "
+        f"fold(s); the interval is a moving-block bootstrap over the paired "
+        f"per-row differences, so read the realized block length, never the "
+        f"nominal level alone"
+    )
+    return rec
+
+
 __all__ = ["calibration_table", "scorecard", "_BINS", "fit_buckets",
            "fit_buckets_by_regime", "calibrated_confidence",
            "calibrated_confidence_by_regime", "isotonic_calibrate",
-           "calibration_table_text", "record_calibration_entry"]
+           "calibration_table_text", "record_calibration_entry",
+           "excess_accuracy", "EXCESS_FOLDS", "EXCESS_MIN_N"]

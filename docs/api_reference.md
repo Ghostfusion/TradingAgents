@@ -260,6 +260,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_TRIADIC_STRESS` | `enable_triadic_stress` | default `false` |
 | `TRADINGAGENTS_ENABLE_REFUSAL_LEDGER` | `enable_refusal_ledger` | default `false` |
 | `TRADINGAGENTS_ENABLE_MATERIALITY_VERDICT` | `enable_materiality_verdict` | default `false` |
+| `TRADINGAGENTS_ENABLE_ACCURACY_CEILING` | `enable_accuracy_ceiling` | default `false` |
 | `TRADINGAGENTS_ENABLE_COVERAGE_WINDOW` | `enable_coverage_window` | default `false` |
 | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | `enable_altman_variants` | default `false` |
 | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | `enable_f_score_detail` | default `false` |
