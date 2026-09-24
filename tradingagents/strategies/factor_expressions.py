@@ -14,6 +14,9 @@ leading ``None`` padding under min-observation, plus:
 - an **expression-string-keyed cache** (Qlib pillar 20: 7.4 s vs 184.4 s on
   a 14-feature build) layered on the caller's raw OHLCV dict, invalidated by
   the as-of window.
+- ``availability_gate(expr, ...)`` — the H2 registration-time AST gate that
+  refuses a forward shift or a field whose declared observability is later than
+  the decision date, so look-ahead is inexpressible rather than discouraged.
 
 No-fabrication: under min-obs or degenerate input a factor is ``None`` /
 ``unavailable``, never a guessed number.
@@ -21,6 +24,7 @@ No-fabrication: under min-obs or degenerate input a factor is ``None`` /
 
 from __future__ import annotations
 
+import ast
 import math
 
 import numpy as np
@@ -443,10 +447,216 @@ def _side_vol(rets: list, k: int, up: bool) -> list[float | None]:
     return _roll_apply(vals, k, _f)
 
 
+# ---------------------------------------------------------------------------
+# Availability gate (H2): refuse look-ahead at registration, not at the score
+# ---------------------------------------------------------------------------
+#
+# The DSL is bounded and the purity gate makes an expression *pure*, but pure is
+# not causal: a side-effect-free expression can still reference a field that was
+# not observable at the decision date, or shift a series forward. H2 makes both
+# inexpressible rather than discouraged - a static AST check at registration
+# time, so the cost is paid once at admission and never per run.
+
+#: Operators whose second argument is a shift. A negative ``k`` reads the
+#: future: ``ref(close, -1)`` is tomorrow's close, ``delta(close, -1)`` a
+#: forward difference, ``pct_change(close, -1)`` a forward return.
+_SHIFT_OPERATORS = {"ref", "delta", "pct_change"}
+
+
+def _availability_gate_on(cfg: dict | None) -> bool:
+    """Is the availability gate on? Default off (``enable_factor_availability_gate``).
+
+    The key is read by its literal name in the ``cfg.get("...")`` idiom: the
+    gate registry's read-site scan looks for a quoted key in an access idiom,
+    and a gate read through a variable is a gate the registry cannot see. The
+    read works with the key absent (``DEFAULT_CONFIG`` is the integrator's), so
+    an unregistered gate is inert and today's behaviour is unchanged.
+    """
+    if cfg is None:
+        try:
+            from tradingagents.dataflows.config import get_config
+
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - a missing config is an ungated read
+            cfg = {}
+    return bool(cfg.get("enable_factor_availability_gate", False))
+
+
+def _is_negative_literal(node) -> bool:
+    """True when an AST node is a negative numeric literal (``-1``, ``-7.0``)."""
+    return (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.USub)
+        and isinstance(node.operand, ast.Constant)
+        and isinstance(node.operand.value, (int, float))
+        and not isinstance(node.operand.value, bool)
+        and node.operand.value > 0
+    )
+
+
+def _forward_shifts(tree) -> list[str]:
+    """The forward-shifting calls in an expression, spelled for the refusal."""
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id not in _SHIFT_OPERATORS:
+            continue
+        if len(node.args) >= 2 and _is_negative_literal(node.args[1]):
+            hits.append(f"{node.func.id}(..., {ast.unparse(node.args[1])})")
+    return hits
+
+
+def _referenced_fields(tree, fields: set) -> list[str]:
+    """The data fields an expression references, in first-appearance order."""
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in fields and node.id not in out:
+            out.append(node.id)
+    return out
+
+
+def _declared_observability(field: str, declared: dict | None):
+    """The declaration for ``field``: the caller's, else the record's own.
+
+    The caller's map wins (a registration may date one field differently), then
+    the ``factor_schema`` record answers for its factor, then the table's
+    general lookup. Anything left is undeclared and fails closed downstream.
+    """
+    if declared and field in declared:
+        return declared[field]
+    from tradingagents.strategies.factor_schema import FACTOR_SCHEMA, observability_for
+
+    if field in FACTOR_SCHEMA:
+        return FACTOR_SCHEMA[field].observability
+    return observability_for(field)
+
+
+def _observable_at(field: str, decl, decision_date: str | None,
+                   pit_root: str | None = None) -> tuple[bool, str]:
+    """Is ``field`` observable at ``decision_date``, given its declaration? ``(ok, reason)``
+
+    ``decl`` is an observability class string, or ``{"class": ..., "as_of": ...,
+    "symbol": ...}``. The dated classes are bound to the producers that already
+    know the answer: ``data_quality.fundamentals_pit_ok`` decides a filing/macro
+    date against the decision date, and, when the declaration names a symbol,
+    ``dataflows.pit_registry.read_as_of`` must carry a vintage visible at the
+    decision date or the declaration cannot be corroborated.
+
+    Fail closed throughout: an undeclared field, a class that needs a date and
+    has none, a decision date to measure against that was not supplied, or a
+    vintage the registry cannot place is refused with its reason - never assumed
+    safe (H8's per-field lag table is not built, and no lag is invented here).
+    """
+    from tradingagents.strategies.factor_schema import (
+        NEXT_SESSION,
+        OBSERVABILITY_CLASSES,
+        SESSION_CLOSE,
+    )
+
+    if decl is None:
+        return False, (
+            f"field {field!r} has no declared observability class; refused "
+            "(fail closed: no publication lag is invented here - H8's "
+            "per-field lag table is not built)"
+        )
+    cls = decl.get("class") if isinstance(decl, dict) else decl
+    if cls not in OBSERVABILITY_CLASSES:
+        return False, f"field {field!r} declares unknown observability class {cls!r}"
+    if cls == SESSION_CLOSE:
+        return True, ""
+    if cls == NEXT_SESSION:
+        return False, (
+            f"field {field!r} is declared {NEXT_SESSION!r}: not observable until "
+            "the next session, i.e. after a decision taken at this session's close"
+        )
+    as_of = decl.get("as_of") if isinstance(decl, dict) else None
+    if not as_of:
+        return False, (
+            f"field {field!r} is declared {cls!r} with no as_of date; refused "
+            "(fail closed)"
+        )
+    if not decision_date:
+        return False, (
+            f"field {field!r} is declared {cls!r} but no decision date was "
+            "supplied to measure it against; refused (fail closed)"
+        )
+    from tradingagents.strategies.data_quality import fundamentals_pit_ok
+
+    if not fundamentals_pit_ok(str(as_of), str(decision_date)):
+        return False, (
+            f"field {field!r} dates from {as_of} ({cls}), later than the decision "
+            f"date {decision_date}: look-ahead refused"
+        )
+    symbol = decl.get("symbol") if isinstance(decl, dict) else None
+    if symbol:
+        from tradingagents.dataflows.pit_registry import read_as_of
+
+        if read_as_of(str(symbol), str(decision_date), root=pit_root) is None:
+            return False, (
+                f"field {field!r} has no PIT snapshot for {symbol!r} visible at "
+                f"{decision_date}; the vintage is unverifiable (refused, fail closed)"
+            )
+    return True, ""
+
+
+def availability_gate(expr: str, *, declared: dict | None = None,
+                      decision_date: str | None = None,
+                      pit_root: str | None = None,
+                      cfg: dict | None = None) -> tuple[bool, str]:
+    """Registration-time AST gate: refuse a look-ahead expression. ``(ok, reason)``
+
+    Runs the zoo's ``purity_gate`` first and unchanged, then adds H2's two
+    refusals, so a pure expression that is not *causal* is refused before it can
+    run:
+
+    * any **forward shift** - a negative ``k`` in ``ref`` / ``delta`` /
+      ``pct_change`` reads the future;
+    * any referenced **field whose declared availability is later than the
+      decision date** - the class comes from the ``factor_schema`` record (or a
+      caller's ``declared`` map) and is measured by
+      ``data_quality.fundamentals_pit_ok`` and ``pit_registry.read_as_of``.
+
+    ``declared`` maps a field name to an observability class or to
+    ``{"class": ..., "as_of": ..., "symbol": ...}``; it also widens the
+    expression's field vocabulary, because the schema's factors are not OHLCV
+    columns. Static analysis only - no evaluation, no per-run cost.
+
+    Behind ``enable_factor_availability_gate`` (default off). With the gate off
+    this returns the unchanged ``purity_gate`` verdict, so the zoo behaves
+    exactly as it did before H2 existed. Fail closed: a field with no declared
+    availability is refused with its reason, never assumed safe.
+    """
+    from tradingagents.strategies.alpha_zoo import purity_gate
+
+    if not _availability_gate_on(cfg):
+        return purity_gate(expr)
+    from tradingagents.strategies.factor_schema import FACTOR_SCHEMA, MARKET_CLOSE_FIELDS
+
+    fields = set(MARKET_CLOSE_FIELDS) | set(declared or {}) | set(FACTOR_SCHEMA)
+    ok, reason = purity_gate(expr, extra_fields=fields)
+    if not ok:
+        return False, reason
+    try:
+        tree = ast.parse(str(expr or "").strip(), mode="eval")
+    except SyntaxError as ex:  # unreachable after purity_gate, kept fail-closed
+        return False, f"invalid syntax: {ex}"
+    shifts = _forward_shifts(tree)
+    if shifts:
+        return False, "forward shift refused (reads the future): " + ", ".join(shifts)
+    for field in _referenced_fields(tree, fields):
+        observable, why = _observable_at(
+            field, _declared_observability(field, declared), decision_date, pit_root,
+        )
+        if not observable:
+            return False, why
+    return True, ""
+
+
 __all__ = [
     "ref", "delta", "mean", "std", "zscore", "rsi", "bias", "mom", "corr",
     "avg_vol", "high_low_range", "cross_sectional_rank",
     "fit_zscore", "apply_zscore", "fit_winsorize", "apply_winsorize",
     "alpha158_subset", "cached_expression", "clear_expr_cache", "expr_cache_size",
-    "_ALPHA158_SUBSET",
+    "availability_gate", "_ALPHA158_SUBSET",
 ]

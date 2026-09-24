@@ -24,6 +24,11 @@ Three rules this module exists to enforce, all of them the owner's:
 The run-time state is the panel's own: a declared-present factor that a given
 name does not carry is simply absent from that name's row, which is what the
 coverage floor and `withheld` are for.
+
+The record also answers **when** its value becomes observable (H2): the
+``observability`` class is declared per factor in :func:`observability_for` and
+read straight off the record, so the expression gate can refuse a look-ahead at
+registration time. An undeclared field has no class, and the gate fails closed.
 """
 
 from __future__ import annotations
@@ -52,6 +57,48 @@ SUBSCORES: tuple[str, ...] = ("FQS", "FGS", "VS", "FRS")
 PRESENT = "present"
 NA = "NA"
 
+# --- The observability class (H2) ------------------------------------------
+#
+# ``availability`` above answers DATA PRESENCE - whether this repo's panel path
+# carries the field at all. It does not answer WHEN the value becomes
+# observable, and a side-effect-free expression over a field that was not
+# observable at the decision date is pure but not causal. H2 declares that
+# second question here, on the record that already carries the first, so an
+# expression that reads the future is refused at registration rather than
+# scored after the fact.
+#
+# Only the classes this repo can honestly state are declared: a market column is
+# known at the close of the session it is stamped for; a statement factor is
+# known at its filing date (``dataflows/pit_registry``); a macro release is
+# known only after a declared release lag. **No vendor publication lag is
+# invented** - H8's per-field lag table is not built and its owner decision is
+# open, so a field with no declaration below FAILS CLOSED: the gate refuses it
+# with its reason rather than assuming it safe.
+SESSION_CLOSE = "session_close"
+NEXT_SESSION = "next_session"
+FILING_DATE = "filing_date"
+MACRO_RELEASE_LAG = "macro_release_lag"
+
+#: Every legal observability class, soonest-observable first. The first three
+#: are declared on a field below; ``macro_release_lag`` is available to a caller
+#: but is not applied to any field here (this repo carries no macro field in the
+#: DSL's vocabulary, and inventing one would be the H8 decision).
+OBSERVABILITY_CLASSES: tuple[str, ...] = (
+    SESSION_CLOSE,
+    NEXT_SESSION,
+    FILING_DATE,
+    MACRO_RELEASE_LAG,
+)
+
+#: The DSL's market columns (``alpha_zoo._COLUMNS``, the OHLCV engine in
+#: ``factor_expressions``). Every one is known at the close of the session it is
+#: stamped for, so an expression over them is observable at a session-close
+#: decision. Declared here, with this cross-reference, rather than imported, so
+#: the record module stays independent of the engine it types.
+MARKET_CLOSE_FIELDS: tuple[str, ...] = (
+    "open", "high", "low", "close", "volume", "returns", "vwap",
+)
+
 
 class FactorSpec(NamedTuple):
     """One factor's schema record. Nine fields, no more (Q3)."""
@@ -65,6 +112,17 @@ class FactorSpec(NamedTuple):
     normalization_method: str
     supplier: str
     availability: str
+
+    @property
+    def observability(self) -> str | None:
+        """The factor's declared observability class (H2), or ``None``.
+
+        A property rather than a tenth field: Q3 fixes the record at nine
+        fields, and ``availability`` stays the data-presence vocabulary the
+        engines partition on. ``None`` means undeclared, which the availability
+        gate refuses rather than treats as safe.
+        """
+        return observability_for(self.factor)
 
 
 def _spec(factor, category, formula, direction, supplier, availability=PRESENT,
@@ -88,6 +146,30 @@ def _spec(factor, category, formula, direction, supplier, availability=PRESENT,
         supplier=supplier,
         availability=availability,
     )
+
+
+def observability_for(field: str) -> str | None:
+    """The declared observability class for ``field``, or ``None`` (fail closed).
+
+    ``None`` is the honest answer for a field this repo cannot place. H8's
+    per-field publication-lag table is the thing that would fill the gap and it
+    is not built, so the availability gate refuses an undeclared field with its
+    reason rather than assuming it is safe.
+
+    What can be stated from this repo's own producers: the DSL's market columns
+    are known at session close, and every ``FACTOR_SCHEMA`` factor is
+    statement-derived and therefore known at its filing date - except the one
+    caller-supplied price field (``dcf_upside``), whose price is known at
+    session close like any other quote.
+    """
+    if field in MARKET_CLOSE_FIELDS:
+        return SESSION_CLOSE
+    spec = FACTOR_SCHEMA.get(field)
+    if spec is None:
+        return None
+    if str(spec.supplier).startswith("caller"):
+        return SESSION_CLOSE
+    return FILING_DATE
 
 
 # --- The record ------------------------------------------------------------
@@ -402,6 +484,11 @@ def validate_schema(table: dict | None = None) -> None:
         for f in factors:
             if f not in table:
                 raise ValueError(f"{sub}: {f!r} has no schema record")
+    # H2: a record that cannot say WHEN its value becomes observable is a
+    # look-ahead hazard, so it must not enter the table at all.
+    undeclared = sorted(s.factor for s in table.values() if s.observability is None)
+    if undeclared:
+        raise ValueError(f"factor(s) with no declared observability class: {undeclared}")
     # No factor may enter two sub-scores (master rule 15: one number, one
     # category of the composite).
     counts: dict[str, list[str]] = {}

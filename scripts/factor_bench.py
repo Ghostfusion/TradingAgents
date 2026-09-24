@@ -5,8 +5,11 @@
     py -3.12 scripts/factor_bench.py --zoo-file zoo.csv --symbol AAPL
 
 Pure + offline (no LLM): evaluates each gated expression against a symbol's
-OHLCV via the vendor chain and prints rank-IC vs forward returns. The
-purity gate rejects anything outside the safe operator menu.
+OHLCV via the vendor chain and prints rank-IC vs forward returns. Two gates
+admit an expression: the purity gate rejects anything outside the safe operator
+menu, and - with ``enable_factor_availability_gate`` on - the H2 availability
+gate additionally refuses a forward shift or a field whose declared
+observability is later than ``--decision-date``.
 """
 
 from __future__ import annotations
@@ -39,9 +42,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="run combinatorial purged CV and flag overfit (W2-2)")
     parser.add_argument("--n-trials", type=int, default=1,
                         help="factors tried; >1 deflates the IC/Sharpe (W2-1)")
+    parser.add_argument("--decision-date", default=None,
+                        help="as-of date the expressions are admitted for; the "
+                             "H2 availability gate measures a dated field's class "
+                             "against it (with the gate off it is unused)")
     args = parser.parse_args(argv)
 
-    from tradingagents.strategies.alpha_zoo import bench_zoo, purity_gate
+    from tradingagents.strategies.alpha_zoo import bench_zoo
+    from tradingagents.strategies.factor_expressions import availability_gate
 
     exprs: list[str] = []
     if args.expr:
@@ -59,9 +67,13 @@ def main(argv: list[str] | None = None) -> int:
         exprs = ["close", "pct_change(close, 1)", "delta(close, 1)",
                  "zscore(mean(close, 5), 10)", "rank(close)", "volume"]
 
-    bad = [e for e in exprs if not purity_gate(e)[0]]
+    refused = {e: availability_gate(e, decision_date=args.decision_date)[1]
+               for e in exprs}
+    bad = [e for e, why in refused.items() if why]
     if bad:
-        print("[err] expressions failed the purity gate:", bad, file=sys.stderr)
+        print("[err] expressions failed the admission gates:", file=sys.stderr)
+        for e in bad:
+            print(f"  {e}: {refused[e]}", file=sys.stderr)
         return 3
 
     recs = _fetch_records(args.symbol, args.days)
