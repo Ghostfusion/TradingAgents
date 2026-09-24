@@ -159,6 +159,205 @@ def term_structure_slope(atm_iv_short: float | None, atm_iv_long: float | None) 
 
 
 # ---------------------------------------------------------------------------
+# Pre-event ATM term-structure shape in EVENT time (V4)
+# ---------------------------------------------------------------------------
+
+#: Distinct expiries the pre-event ATM shape needs before it is a shape at all.
+#: Below this the read is ``unavailable`` -- never a one-point "curve".
+PRE_EVENT_MIN_EXPIRIES = 2
+
+#: What the record names itself (V4). 2608.10693's robust half is the *event*
+#: pattern -- ATM implied volatility rising into a scheduled catalyst -- not the
+#: ConvLSTM surface forecast the same paper fits, whose Diebold-Mariano edge is
+#: "rarely statistically significant". This read describes the chain in hand;
+#: it never forecasts it.
+PRE_EVENT_IV_LIFT_LABEL = "event-time ATM term-structure shape"
+
+
+def _chain_rows_and_calendar(chain) -> tuple[list, object, object]:
+    """``(rows, as_of, fed_rows)`` from a chain bundle or a bare row list.
+
+    The bundle is the shape the engine already holds -- ``{'rows': [...],
+    'as_of': 'YYYY-MM-DD', 'fed_watch': [...]}`` -- so a caller that only has
+    the rows still gets a (refused) record rather than an exception.
+    """
+    if isinstance(chain, dict):
+        return chain.get("rows") or [], chain.get("as_of"), chain.get("fed_watch")
+    return chain or [], None, None
+
+
+def _atm_iv_by_expiry(rows: list[dict]) -> dict[int, dict]:
+    """ATM implied vol per expiry from an option chain, keyed by days to expiry.
+
+    Rows are grouped by ``days_to_expiry`` and, inside each expiry, the row(s)
+    whose strike sits closest to their own ``spot`` are kept -- the call and the
+    put are averaged when both quote that strike, so the ATM read is not
+    side-biased. A row missing strike / spot / iv / days_to_expiry, or quoting a
+    non-positive iv, is dropped: an unquoted strike is not a vol.
+    """
+    by_expiry: dict[int, list[tuple[float, float, float]]] = {}
+    for r in rows or []:
+        try:
+            k = float(r.get("strike"))
+            s = float(r.get("spot"))
+            iv = float(r.get("iv"))
+            d = float(r.get("days_to_expiry"))
+        except (TypeError, ValueError):
+            continue
+        if k <= 0 or s <= 0 or iv <= 0 or d < 0:
+            continue
+        by_expiry.setdefault(int(round(d)), []).append((abs(k - s), k, iv))
+    out: dict[int, dict] = {}
+    for d, pts in by_expiry.items():
+        nearest = min(p[0] for p in pts)
+        at = [p for p in pts if p[0] == nearest]
+        out[d] = {"atm_iv": sum(p[2] for p in at) / len(at), "strike": at[0][1],
+                  "n_rows": len(at)}
+    return out
+
+
+def pre_event_iv_lift(chain, event_date=None, *, as_of=None, fed_rows=None,
+                      window_days: int = 14) -> dict:
+    """ATM term-structure shape in **event time** around a scheduled catalyst (V4).
+
+    ``chain``: the option chain -- either the rows themselves (``strike`` /
+    ``iv`` / ``days_to_expiry`` / ``spot``, the same rows `surface_shape` reads)
+    or the bundle the engine already holds: ``{'rows': [...], 'as_of':
+    'YYYY-MM-DD', 'fed_watch': [...]}``, where ``fed_watch`` is
+    ``catalyst.fetch_catalyst_data(...)['fed_watch']``.
+
+    ``event_date``: the scheduled catalyst (ISO date), or None to take the
+    calendar's own next meeting. ``catalyst.fed_imminence`` is the authority on
+    it -- the read is refused unless that calendar's next scheduled meeting is
+    the named date, and its day count (never a recomputed one) is the event-time
+    origin, so no second authority for "days to the catalyst" is created.
+
+    The shape is the chain's ATM implied vol indexed by **days to event**
+    (``days_until_event - days_to_expiry``), never by calendar days to expiry:
+    the same chain read against a different catalyst gives a different shape,
+    because the axis is re-anchored on the event. Only expiries dated at or
+    before the catalyst carry a value -- this describes the surface *into* the
+    event and has no forecasting leg past it -- and expiries dated after the
+    event are counted (``n_post_event_expiries``), never valued. ``lift`` is the
+    nearest-to-event ATM vol over the furthest-before-it one, minus one: the
+    paper's robust finding, stated as a description of the chain in hand.
+
+    Refuses (``status: 'unavailable'``, ``unavailable`` carrying the reason,
+    never 0 and never a substituted default) when the as-of date is missing or
+    unparseable; when ``fed_imminence`` finds no scheduled meeting inside
+    ``window_days``; when a named ``event_date`` is not that meeting; or when
+    fewer than ``PRE_EVENT_MIN_EXPIRIES`` expiries sit at or before the catalyst.
+
+    Returns ``{'label', 'status', 'event_date', 'as_of', 'days_until_event',
+    'window_days', 'calendar', 'points', 'n_points', 'n_post_event_expiries',
+    'atm_iv_at_event', 'atm_iv_near', 'atm_iv_far', 'lift', 'unavailable',
+    'basis'}``.
+    """
+    from tradingagents.strategies.catalyst import (
+        calendar_days_between,
+        fed_imminence,
+        parse_date,
+    )
+
+    rows, chain_as_of, chain_fed = _chain_rows_and_calendar(chain)
+    as_of = as_of or chain_as_of
+    if fed_rows is None:
+        fed_rows = chain_fed
+    rec: dict = {
+        "label": PRE_EVENT_IV_LIFT_LABEL,
+        "status": "unavailable",
+        "event_date": None,
+        "as_of": None,
+        "days_until_event": None,
+        "window_days": int(window_days),
+        "calendar": None,
+        "points": [],
+        "n_points": 0,
+        "n_post_event_expiries": 0,
+        "atm_iv_at_event": None,
+        "atm_iv_near": None,
+        "atm_iv_far": None,
+        "lift": None,
+        "unavailable": None,
+        "basis": "",
+    }
+
+    def _refuse(reason: str) -> dict:
+        rec["unavailable"] = reason
+        rec["basis"] = f"{PRE_EVENT_IV_LIFT_LABEL} unavailable: {reason}"
+        return rec
+
+    td = parse_date(as_of)
+    if td is None:
+        return _refuse("no as-of date: the read has no clock to place the catalyst on")
+    rec["as_of"] = td.strftime("%Y-%m-%d")
+
+    cal = fed_imminence(fed_rows or [], rec["as_of"], window_days=rec["window_days"])
+    rec["calendar"] = cal
+    days_until = cal.get("days_until")
+    if days_until is None:
+        return _refuse(
+            f"no scheduled catalyst within {rec['window_days']} calendar days of "
+            f"{rec['as_of']} (fed_imminence found no meeting)"
+        )
+    if event_date is not None:
+        ed = parse_date(event_date)
+        if ed is None:
+            return _refuse(f"unparseable event date {event_date!r}")
+        rec["event_date"] = ed.strftime("%Y-%m-%d")
+        if calendar_days_between(rec["as_of"], rec["event_date"]) != days_until:
+            return _refuse(
+                f"named event date {rec['event_date']} is not the calendar's next "
+                f"scheduled catalyst ({days_until}d out)"
+            )
+    else:
+        from datetime import timedelta
+
+        rec["event_date"] = (td + timedelta(days=int(days_until))).strftime("%Y-%m-%d")
+    rec["days_until_event"] = int(days_until)
+
+    atm = _atm_iv_by_expiry(rows)
+    points: list[dict] = []
+    n_post = 0
+    for d in sorted(atm):
+        days_to_event = int(days_until) - d
+        if days_to_event < 0:
+            n_post += 1
+            continue
+        points.append({"days_to_event": days_to_event, "days_to_expiry": d,
+                       "strike": atm[d]["strike"],
+                       "atm_iv": round(atm[d]["atm_iv"], 6)})
+    points.sort(key=lambda p: p["days_to_event"])
+    rec["points"] = points
+    rec["n_points"] = len(points)
+    rec["n_post_event_expiries"] = n_post
+    if len(points) < PRE_EVENT_MIN_EXPIRIES:
+        return _refuse(
+            f"needs at least {PRE_EVENT_MIN_EXPIRIES} expiries dated at or before the "
+            f"{rec['event_date']} catalyst, got {len(points)}"
+        )
+
+    near, far = points[0], points[-1]
+    rec["atm_iv_near"] = near["atm_iv"]
+    rec["atm_iv_far"] = far["atm_iv"]
+    rec["atm_iv_at_event"] = next(
+        (p["atm_iv"] for p in points if p["days_to_event"] == 0), None
+    )
+    rec["lift"] = round(near["atm_iv"] / far["atm_iv"] - 1.0, 6)
+    rec["status"] = "ok"
+    modal = cal.get("modal_prob")
+    rec["basis"] = (
+        f"{PRE_EVENT_IV_LIFT_LABEL}: ATM IV at {len(points)} expiries dated at or "
+        f"before the {rec['event_date']} catalyst ({rec['days_until_event']}d out, "
+        f"modal probability {'n/a' if modal is None else format(float(modal), '.1f') + '%'}); "
+        f"nearest {near['days_to_event']}d before it {near['atm_iv']:.4f} vs furthest "
+        f"{far['days_to_event']}d {far['atm_iv']:.4f}; {n_post} post-event expiries "
+        f"carry no value (descriptive read, no forecasting leg)"
+    )
+    return rec
+
+
+# ---------------------------------------------------------------------------
 # Cross-strike IV skew proxy (K3) -- a labelled proxy, never a constant
 # ---------------------------------------------------------------------------
 
@@ -351,4 +550,5 @@ __all__ = ["iv_percentile", "iv_skew", "put_call_oi_concentration",
            "implied_move_pct", "expected_move_from_chain",
            "volatility_risk_premium", "surface_shape", "term_structure_slope",
            "rn_skew_proxy", "RN_SKEW_LABEL", "RN_SKEW_MIN_STRIKES",
-           "parity_violation"]
+           "pre_event_iv_lift", "PRE_EVENT_IV_LIFT_LABEL",
+           "PRE_EVENT_MIN_EXPIRIES", "parity_violation"]

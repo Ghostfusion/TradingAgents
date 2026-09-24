@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **49 of the 97 `enable_*` keys** in
+policy, data-surface and context gates: **50 of the 98 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -281,6 +281,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_mp_lower_spectrum` | `TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM` | counts the panel correlation eigenvalues below the Marchenko-Pastur lower bound, so a collapse in the effective number of independent bets is visible as a count rather than a story | `tradingagents/strategies/sector_breadth.py`::`mp_lower_spectrum` (the only reader of the gate; `None` when off), reported by `tradingagents/strategies/market_breadth.py`::`market_breadth` | `test_strategies_market_breadth.py` | wired |
 | `enable_long_memory` | `TRADINGAGENTS_ENABLE_LONG_MEMORY` | a rolling semiparametric memory parameter (GPH and local Whittle) plus a HAR-family realized-volatility forecast, with d reported BESIDE the forecast rather than instead of it | `tradingagents/strategies/long_memory.py`::`long_memory_enabled` (the read), read by `tradingagents/strategies/mean_reversion.py`::`memory_profile` | `test_long_memory.py` | wired |
 | `enable_bootstrap_intervals` | `TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS` | an autocorrelation-aware interval for a claim statistic - a moving-block bootstrap whose block length comes from the series' own ACF decay, checked against an ADF stationarity test - plus the information-gap axis, which says whether a band is wide because it knows something | `tradingagents/strategies/conformal.py`::`_bootstrap_gate` (the read), `::`iid_interval` / `::`block_bootstrap_interval` / `::`information_gap` / `::`block_length` (the estimators), added to `::`rolling_band` beside its realized coverage | `test_bootstrap_intervals.py` | wired |
+| `enable_event_iv_lift` | `TRADINGAGENTS_ENABLE_EVENT_IV_LIFT` | the ATM term-structure shape around a scheduled catalyst indexed in EVENT time (days to the meeting, not calendar days to expiry), refusing when the calendar certifies no meeting and valuing nothing past it | `tradingagents/agents/utils/analysis_tools.py`::`get_vol_surface_shape` (the `_flag` read), `tradingagents/strategies/options_surface.py`::`pre_event_iv_lift` (the read) | `test_options_surface.py` | wired |
 
 ## 8. Adding a gate — the rule
 

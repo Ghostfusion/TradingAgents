@@ -70,6 +70,7 @@ REGISTRY: dict[str, str] = {
     "enable_mp_lower_spectrum": "wired",
     "enable_long_memory": "wired",
     "enable_bootstrap_intervals": "wired",
+    "enable_event_iv_lift": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

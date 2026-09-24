@@ -8180,6 +8180,49 @@ def get_vol_surface_shape(
                 )
             else:
                 lines.append(f"- cross-strike IV proxy: n/a ({proxy['unavailable']})")
+        # V4: the pre-event ATM term-structure shape, in EVENT time (days to the
+        # scheduled catalyst, not calendar days to expiry). The Fed calendar the
+        # engine already fetches is the authority on the event date, and the
+        # module refuses rather than forecast one the calendar does not hold. The
+        # gate is off by default, so nothing here runs unless it is enabled.
+        try:
+            from tradingagents.agents.utils.quant_formula_tools import _flag
+
+            event_gate = _flag("enable_event_iv_lift")
+        except Exception:  # noqa: BLE001 - a config read must never break a tool
+            event_gate = False
+        if event_gate:
+            from datetime import date as _date
+
+            from tradingagents.strategies.catalyst import fetch_catalyst_data
+            from tradingagents.strategies.options_surface import (
+                pre_event_iv_lift as _pre_event,
+            )
+
+            today = _date.today().isoformat()
+            # the near/far chains above are two of these expiries - reuse them
+            # rather than paying for the same option_chain twice.
+            event_rows = list(near_rows) + list(far_rows)
+            for exp in expiries[:6]:
+                if exp not in (near_exp, far_exp):
+                    event_rows.extend(_rows_for(exp)[0])
+            data = fetch_catalyst_data(ticker, today) or {}
+            lift = _pre_event(
+                {"rows": event_rows, "as_of": today,
+                 "fed_watch": data.get("fed_watch") or []},
+                None,
+            )
+            if lift["status"] == "ok":
+                near_pt, far_pt = lift["points"][0], lift["points"][-1]
+                lines.append(
+                    f"- pre-event ATM IV shape ({lift['n_points']} expiries in event time, "
+                    f"{lift['days_until_event']}d to {lift['event_date']}): "
+                    f"{near_pt['atm_iv']:.4f} at {near_pt['days_to_event']}d before the "
+                    f"catalyst vs {far_pt['atm_iv']:.4f} at {far_pt['days_to_event']}d "
+                    f"(lift {lift['lift']:+.1%}); descriptive, not a forecast"
+                )
+            else:
+                lines.append(f"- pre-event ATM IV shape: n/a ({lift['unavailable']})")
         lines.append("")
         lines.append("Interpretation: RR < 0 = downside puts rich (skew); BF > 0 = smile "
                      "curvature (wings rich); TS = IV(long) - IV(short): TS > 0 = contango "
