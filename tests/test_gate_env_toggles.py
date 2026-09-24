@@ -72,6 +72,7 @@ REGISTRY: dict[str, str] = {
     "enable_bootstrap_intervals": "wired",
     "enable_event_iv_lift": "wired",
     "enable_triadic_stress": "wired",
+    "enable_refusal_ledger": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates

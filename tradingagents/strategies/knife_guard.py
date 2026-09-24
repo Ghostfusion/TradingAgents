@@ -30,7 +30,10 @@ K = sum(w_i * s_i), weights default to the material's suggested balance
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
+
+from .refusal_ledger import log_refusal
 
 DEFAULT_WEIGHTS: dict[str, float] = {
     "ret": 0.25,
@@ -161,6 +164,9 @@ def knife_score(
     vpin_downside: float | None = None,
     weights: dict[str, float] | None = None,
     ema_window: int = 20,
+    *,
+    symbol: str | None = None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     """Composite falling-knife score.
 
@@ -176,6 +182,10 @@ def knife_score(
             leg; None disables.
         weights: per-leg weights; defaults to ``DEFAULT_WEIGHTS``.
         ema_window: slow EMA for the regime conditioning.
+        symbol/as_of: keyword-only, optional H7 refusal identity forwarded to
+            ``knife_factor`` so a block-band refusal is recorded against the
+            name. Purely observational; default None records the score with no
+            name attached.
 
     Returns:
         dict: {K, factors, severities, z's, regime, factor, band}
@@ -214,7 +224,7 @@ def knife_score(
         + w.get("dd", 0.20) * s_dd
         + w.get("of", 0.15) * s_of
     )
-    factor, band = knife_factor(K)
+    factor, band = knife_factor(K, symbol=symbol, as_of=as_of)
     return {
         "K": round(float(K), 4),
         "factor": factor,
@@ -245,12 +255,21 @@ def knife_score(
 def knife_factor(
     K: float,
     bands: tuple[float, float, float] = DEFAULT_BANDS,
+    *,
+    symbol: str | None = None,
+    as_of: str | None = None,
 ) -> tuple[float, str]:
     """Graduated knife multiplier from the composite score.
 
     F = 1.0 (K < 1.5) / 0.5 (1.5-2.5) / 0.25 (2.5-3.0) / 0.0 (>= 3.0).
     Returns (factor, band_label). Bands are config defaults, not universal —
     calibrate from your universe / backtests.
+
+    The ``0.0`` / ``block`` band is a REFUSAL, so it is recorded in the H7
+    refusal ledger (``symbol``/``as_of`` are its keyword-only, optional
+    identity). Purely observational: the returned multiplier is the same either
+    way, the row is written only when ``enable_refusal_ledger`` is on, and a
+    ledger failure never reaches the caller.
     """
     b1, b2, b3 = bands
     if b1 > K:
@@ -259,6 +278,17 @@ def knife_factor(
         return 0.5, "reduce"
     if b3 > K:
         return 0.25, "caution"
+    with contextlib.suppress(Exception):
+        log_refusal(
+            symbol=symbol,
+            as_of=as_of,
+            gate="knife_guard",
+            reason=(
+                f"composite K={float(K):.2f} >= block band {float(b3):g} "
+                "(size multiplier 0.0)"
+            ),
+            snapshot={"K": float(K), "bands": [float(b1), float(b2), float(b3)]},
+        )
     return 0.0, "block"
 
 

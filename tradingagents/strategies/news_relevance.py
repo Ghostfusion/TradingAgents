@@ -16,7 +16,10 @@ Pure + hermetic; no network.
 
 from __future__ import annotations
 
+import contextlib
 import re
+
+from .refusal_ledger import log_refusal
 
 # Official financial sources that get a relevance boost (hosts the fork
 # actually consumes; CNT official hosts retained for the future).
@@ -94,15 +97,34 @@ def score_news_article(title: str, url: str = "", snippet: str = "",
     return {"score": round(score, 1), "reasons": reasons[:5]}
 
 
-def admit_article(title: str, url: str = "", content_signals: str = "") -> bool:
+def admit_article(title: str, url: str = "", content_signals: str = "",
+                  *, symbol: str | None = None, as_of: str | None = None) -> bool:
     """Admission: official sources pass; spam/app-download signals drop.
 
     Content-signal regexes (not domain blacklists) — DSA admission rule.
+
+    A dropped article is a REFUSAL and is recorded in the H7 refusal ledger
+    (``symbol``/``as_of`` are its keyword-only, optional identity). Purely
+    observational: the returned bool is the same either way, the row is written
+    only when ``enable_refusal_ledger`` is on, and a ledger failure never
+    reaches the caller.
     """
     if is_official(url):
         return True
     hay = f"{title} {content_signals}".lower()
-    return not any(p.search(hay) for p in _SPAM_PATTERNS)
+    blocked = next((p.pattern for p in _SPAM_PATTERNS if p.search(hay)), None)
+    if blocked is None:
+        return True
+    with contextlib.suppress(Exception):
+        log_refusal(
+            symbol=symbol,
+            as_of=as_of,
+            gate="news_admission",
+            reason=f"admission refused: content signal {blocked!r}",
+            snapshot={"title": title, "url": url, "content_signals": content_signals,
+                      "rule": "admit_article"},
+        )
+    return False
 
 
 def degrade_triple(all_failed: bool, empty: bool, feature_off: bool = False) -> str:

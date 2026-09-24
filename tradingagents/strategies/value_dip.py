@@ -25,8 +25,10 @@ Gap coverage vs the existing codebase:
 
 from __future__ import annotations
 
+import contextlib
 import math
 
+from .refusal_ledger import log_refusal
 from .risk_sizing import riskable_money  # noqa: E402 (lazy single-primitive sizer)
 from .size import atr as _atr
 from .swing import rsi as _rsi
@@ -1023,6 +1025,9 @@ def value_dip_setup(
     require_knife: bool = False,
     knife_weights: dict | None = None,
     knife_bands: tuple | None = None,
+    *,
+    symbol: str | None = None,
+    as_of: str | None = None,
 ) -> dict:
     """The hybrid allocation matrix (§4) as one combined setup gate.
 
@@ -1051,6 +1056,14 @@ def value_dip_setup(
     balance_sheet + profitability. The VDU/divergence/support rows are
     computed and displayed; their dedicated tools (`get_vdu_entry_setup`, etc.)
     expose the full Step-2 ladder as its own candidate.
+
+    ``symbol`` / ``as_of`` (keyword-only, optional) are the H7 refusal ledger's
+    identity for a refused setup: a ``candidate: False`` return appends one
+    refusal row naming this gate and the reasons. Purely observational - the
+    returned dict is unchanged either way, the row is written only when
+    ``enable_refusal_ledger`` is on, and a ledger failure never reaches the
+    caller. A ``"no data"`` return is NOT recorded: that is missing data, not a
+    gate refusing a measured candidate.
     """
     if not closes or len(closes) < min_closes or not highs or not lows:
         return {"candidate": False, "reasons": ["no data"], "rows": {}}
@@ -1452,8 +1465,33 @@ def value_dip_setup(
             measured_gates.append(bool(vdu["candidate"]))
         if vdu and vdu.get("candidate") is False:
             reasons.append("VDU hard gate blocked (no dry-up + trigger + RVOL confirmation)")
+    candidate = bool(all(measured_gates))
+    if not candidate:
+        # H7: the engine records decisions TAKEN; this records the setup its own
+        # floors and gates REFUSED. Strictly additive - the returned dict is
+        # unchanged and a ledger failure must never break the gate it observes.
+        with contextlib.suppress(Exception):
+            log_refusal(
+                symbol=symbol,
+                as_of=as_of,
+                gate="value_dip",
+                reason="; ".join(reasons) or "value-dip setup refused",
+                snapshot={
+                    "closes": closes,
+                    "highs": highs,
+                    "lows": lows,
+                    "volumes": volumes,
+                    "margin_of_safety": margin_of_safety,
+                    "fcf_yield": fcf_yield,
+                    "val_z": val_z,
+                    "atr_value": atr_value,
+                    "debt_to_equity": debt_to_equity,
+                    "current_ratio": current_ratio,
+                    "roe": roe,
+                },
+            )
     return {
-        "candidate": bool(all(measured_gates)),
+        "candidate": candidate,
         "reasons": reasons,
         "rows": rows,
         "price": round(price, 4),

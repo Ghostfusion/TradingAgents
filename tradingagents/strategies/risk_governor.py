@@ -12,7 +12,10 @@ Pure and unit-testable; the graph calls it after the position contract.
 
 from __future__ import annotations
 
+import contextlib
 import json
+
+from .refusal_ledger import log_refusal
 
 LIMITS_KEYS = (
     "max_position_pct",  # per-trade size cap
@@ -51,6 +54,8 @@ def govern(
     liquidity_verdict: str | None = None,
     liquidity_dangers: list[str] | None = None,
     sizing: dict | None = None,
+    symbol: str | None = None,
+    as_of: str | None = None,
 ) -> dict:
     """Evaluate decision size against limits; PASS/WARN/REJECT + reasons.
 
@@ -74,6 +79,13 @@ def govern(
     :func:`book_risk.min_cvar_weights` output). When supplied it is stored
     verbatim on the returned dict; it is purely additive and never changes the
     verdict - default None -> the returned dict is byte-identical to today.
+
+    ``symbol`` / ``as_of`` (keyword-only, optional) are the H7 refusal ledger's
+    identity for the candidate this call REJECTs: a REJECT appends one refusal
+    row naming this gate and the reasons. Purely observational - the verdict and
+    the returned dict are unchanged either way, the row is written only when
+    ``enable_refusal_ledger`` is on, and a ledger failure never reaches the
+    caller. Default None -> the row records the reasons with no name attached.
     """
     limits = default_limits(cfg)
     reasons = []
@@ -159,6 +171,28 @@ def govern(
                 touches.append("liquidity: " + "; ".join(liquidity_dangers))
 
     if reasons:
+        # H7: the engine records decisions TAKEN; this records the candidate the
+        # governor REFUSED. Strictly additive - the ledger never changes the
+        # verdict, and a ledger failure must never break the gate it observes.
+        with contextlib.suppress(Exception):
+            log_refusal(
+                symbol=symbol,
+                as_of=as_of,
+                gate="risk_governor",
+                reason="; ".join(reasons),
+                snapshot={
+                    "size_pct": size_pct,
+                    "book_total_pct": book_total_pct,
+                    "cvar_pct": cvar_pct,
+                    "drawdown_pct": drawdown_pct,
+                    "daily_loss_pct": daily_loss_pct,
+                    "hwm_drawdown_pct": hwm_drawdown_pct,
+                    "sector_pct": sector_pct,
+                    "capital_at_risk_pct": capital_at_risk_pct,
+                    "liquidity_verdict": liquidity_verdict,
+                    "halted": halted,
+                },
+            )
         return _out({"verdict": "REJECT", "reasons": reasons, "touches": touches})
     if touches:
         return _out({"verdict": "WARN", "reasons": [], "touches": touches})

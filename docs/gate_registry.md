@@ -23,7 +23,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **51 of the 99 `enable_*` keys** in
+policy, data-surface and context gates: **52 of the 100 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -283,6 +283,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_bootstrap_intervals` | `TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS` | an autocorrelation-aware interval for a claim statistic - a moving-block bootstrap whose block length comes from the series' own ACF decay, checked against an ADF stationarity test - plus the information-gap axis, which says whether a band is wide because it knows something | `tradingagents/strategies/conformal.py`::`_bootstrap_gate` (the read), `::`iid_interval` / `::`block_bootstrap_interval` / `::`information_gap` / `::`block_length` (the estimators), added to `::`rolling_band` beside its realized coverage | `test_bootstrap_intervals.py` | wired |
 | `enable_event_iv_lift` | `TRADINGAGENTS_ENABLE_EVENT_IV_LIFT` | the ATM term-structure shape around a scheduled catalyst indexed in EVENT time (days to the meeting, not calendar days to expiry), refusing when the calendar certifies no meeting and valuing nothing past it | `tradingagents/agents/utils/analysis_tools.py`::`get_vol_surface_shape` (the `_flag` read), `tradingagents/strategies/options_surface.py`::`pre_event_iv_lift` (the read) | `test_options_surface.py` | wired |
 | `enable_triadic_stress` | `TRADINGAGENTS_ENABLE_TRIADIC_STRESS` | names WHERE a cross-sectional stress is centred - a triadic stress index over the correlation network with a per-node diag(A^3) epicentre - labelled coincident on every read and refused on a thin cross-section | `tradingagents/strategies/triadic_stress.py`::`_gate_on` (the read) / `::`triadic_stress`, registered PRINTED in `tradingagents/strategies/risk_score.py`::COMPONENTS | `test_triadic_stress.py` | wired |
+| `enable_refusal_ledger` | `TRADINGAGENTS_ENABLE_REFUSAL_LEDGER` | records candidates the engine REFUSED (risk governor, knife guard, tradability, news admission, value-dip floors) with their reasons, and classifies each against its forward path, so a guardrail's precision becomes measurable instead of assumed | `tradingagents/strategies/refusal_ledger.py`::`gate_on` (the read, consulted at the head of every write), writers in `risk_governor.py` / `knife_guard.py` / `market_tradability.py` / `news_relevance.py` / `value_dip.py`, read by `scripts/refusal_scorecard.py` | `test_refusal_ledger.py` | wired |
 
 ## 8. Adding a gate — the rule
 

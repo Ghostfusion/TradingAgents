@@ -308,6 +308,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS": "enable_bootstrap_intervals",
     "TRADINGAGENTS_ENABLE_EVENT_IV_LIFT": "enable_event_iv_lift",
     "TRADINGAGENTS_ENABLE_TRIADIC_STRESS": "enable_triadic_stress",
+    "TRADINGAGENTS_ENABLE_REFUSAL_LEDGER": "enable_refusal_ledger",
     # _apply_env_overrides only reads names in this dict, so an unmapped
     # TRADINGAGENTS_ENABLE_* is silently ignored.
     "TRADINGAGENTS_ENABLE_COVERAGE_WINDOW": "enable_coverage_window",
@@ -1117,6 +1118,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_bootstrap_intervals": False,
         "enable_event_iv_lift": False,
         "enable_triadic_stress": False,
+        "enable_refusal_ledger": False,
         # one read and all default OFF, so a gate-off run is byte-identical to the
         # run before the gate existed.
         "enable_coverage_window": False,
