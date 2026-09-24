@@ -255,7 +255,7 @@ def _composite_floor() -> int:
     return max(1, min(int(COMPOSITE_MIN_COVERAGE), len(_declared_set()[0])))
 
 
-def regime_score(components: dict, *, weights: dict | None = None) -> dict:
+def regime_score(components: dict, *, weights: dict | None = None, panel: dict | None = None) -> dict:
     """The 0-100 market-environment score over the declared components.
 
     ``components`` is ``{component: raw value}`` over the declared set: the six
@@ -265,12 +265,12 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
     because no per-component weight vector is published - the owner's table is at
     category level and splitting it inside a category would fabricate a
     coefficient (master rule 6). The basis prints both facts and the distortion
-    the equal vector implies.
+    the equal vector implies. ``panel`` is R5's cross-section, PRINTED only.
 
     Returns ``{"score", "coverage", "components", "aligned", "measured",
     "absent", "band", "status", "withheld", "weights", "owner_categories",
-    "basis"}``. ``status`` is ``RESEARCH_ONLY``: the ramps are declared policy and
-    the combination is unvalidated.
+    "basis"}``, plus ``"printed"`` (R5, gate on). ``status`` is ``RESEARCH_ONLY``:
+    the ramps are declared policy and the combination is unvalidated.
     """
     declared = _declared_set()[0]
     aligned = align_components(components)
@@ -308,7 +308,7 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
             "advisory environment read: never a gate, never a size, never a direction",
         ]
     )
-    return {
+    return _attach_forward_stress({
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
         "floor": combined.get("floor"),
@@ -338,7 +338,7 @@ def regime_score(components: dict, *, weights: dict | None = None) -> dict:
             "event_category_moved_to": EVENT_CATEGORY_MOVED_TO,
         },
         "basis": basis,
-    }
+    }, panel)
 
 
 def market_trend(benchmark_closes: list) -> dict:
@@ -570,6 +570,62 @@ def _spectral_change_values(
     return {SPECTRAL_CHANGE_KEY: 1.0 if read["flag"] else 0.0}
 
 
+# --- R5: the forward-stress read (PRINTED, never scored) -------------------
+#
+# R5's probability is a cross-SECTION read with a stated horizon, and it is
+# IN-SAMPLE calibrated: the number and the evidence behind it are one object. It
+# is PRINTED beside the score and never scored BY it - an environment band is not
+# a probability, and no per-component weight vector exists to score a seventh leg
+# - so it never enters the declared/scored set and the coverage denominator and
+# every pinned count over the component table are untouched. The block is added
+# only while `enable_forward_stress_probability` is on: with the gate off (the
+# default) the returned dict is byte-identical to the run before the read existed.
+
+#: The key R5's read is printed under.
+FORWARD_STRESS_KEY = "forward_stress_probability"
+
+
+def _forward_stress_gate() -> bool:
+    """Is R5's forward-stress read switched on?
+    (``enable_forward_stress_probability``)
+
+    The key is read by its literal name so the gate registry's read-site scan
+    finds it. Off by default, and an unreadable config leaves it off - a config
+    read must never break the score it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_forward_stress_probability", False))
+
+
+def _forward_stress_printed(panel, *, cfg: dict | None = None) -> dict:
+    """R5's read for the PRINTED block - the ONE producer, never a second one.
+
+    Deferred import: the producer lives in ``market_breadth`` and reads its own
+    gate, so a gate-off caller gets the producer's refusal (with its reason)
+    rather than an empty block. Printing it here is what makes R5 reachable from
+    this engine without adding a scored leg.
+    """
+    from .market_breadth import forward_stress_probability
+
+    return forward_stress_probability(panel or {}, cfg=cfg)
+
+
+def _attach_forward_stress(result: dict, panel) -> dict:
+    """R5's PRINTED block, attached only while its gate is on.
+
+    With the gate off (the default) the dict is returned untouched, so a gate-off
+    run prints exactly the keys it printed before this read existed.
+    """
+    if _forward_stress_gate():
+        result["printed"] = {FORWARD_STRESS_KEY: _forward_stress_printed(panel)}
+    return result
+
+
 # --- The two regime paths --------------------------------------------------
 
 PATH_A_NAME = "get_regime_read"
@@ -737,6 +793,7 @@ __all__ = [
     "SPECTRAL_CHANGE_COMPONENT",
     "SPECTRAL_CHANGE_KEY",
     "SPECTRAL_CHANGE_RAMP",
+    "FORWARD_STRESS_KEY",
     "PATH_A_NAME",
     "PATH_B_NAME",
     "AXIS_KEYS",

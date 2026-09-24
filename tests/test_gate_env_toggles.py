@@ -82,6 +82,7 @@ REGISTRY: dict[str, str] = {
     "enable_hmm_heavy_tails": "wired",
     "enable_tail_risk_layer": "wired",
     "enable_factor_availability_gate": "wired",
+    "enable_forward_stress_probability": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
     # debate-integrity gates
