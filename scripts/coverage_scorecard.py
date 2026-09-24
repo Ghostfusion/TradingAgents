@@ -45,7 +45,7 @@ import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.score_panel import engine_registry  # noqa: E402
+from scripts.score_panel import claim_interval, engine_registry  # noqa: E402
 from tradingagents.strategies.coverage_window import coverage_window  # noqa: E402
 from tradingagents.strategies.data_quality import panel_statistic  # noqa: E402
 
@@ -738,6 +738,61 @@ def _label(value) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The interval beside the fill rate
+# ---------------------------------------------------------------------------
+#
+# A fill rate is a mean over trees, and trees are runs in TIME: successive runs
+# are not exchangeable, because a field's availability changes in stretches (a
+# vendor outage, a gate switched on, a new producer wired) rather than run to
+# run. So the interval over the per-tree presence sequence resamples blocks
+# whose length that sequence's own ACF decay earned - checked against an ADF
+# stationarity test - and reports the length and the draw count beside the
+# bounds, with the IID interval riding beside it as the baseline. The fill rate
+# itself is never replaced: the interval travels beside it. Below the floor the
+# record is ``unavailable`` with the reason, never a zero-width interval.
+
+
+def _bootstrap_gate() -> bool:
+    """Is the H11 interval axis switched on? (``enable_bootstrap_intervals``)
+
+    Off by default, so a gate-off scorecard prints exactly the rows it printed
+    before the axis existed. A config read must never break the report it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_bootstrap_intervals", False))
+
+
+def _presence_window(n: int) -> str:
+    """The window a fill-rate interval was computed over (rule 4)."""
+    return (f"per-tree presence sequence: {int(n)} tree(s) in scorecard order "
+            "(newest name first)")
+
+
+def _interval_text(record: dict) -> str:
+    """One interval record as a rendered line, with its dependence assumption."""
+    if record.get("unavailable"):
+        return (f"       interval: unavailable - {record['unavailable']} "
+                f"(over {record.get('window')})")
+    iid = record.get("iid") or {}
+    iid_txt = (
+        f"; iid baseline [{iid['low']:.4g}, {iid['high']:.4g}]"
+        if isinstance(iid.get("low"), (int, float))
+        and isinstance(iid.get("high"), (int, float)) else ""
+    )
+    return (
+        f"       interval: [{record['low']:.4g}, {record['high']:.4g}] "
+        f"point={record['point']:.4g} n={record['n']} block={record['block']} "
+        f"draws={record['draws']} ({record['method']}{iid_txt}) "
+        f"over {record.get('window')}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # The scorecard
 # ---------------------------------------------------------------------------
 
@@ -755,6 +810,9 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
     wanted = tuple(engines) if engines else tuple(
         name for name, ent in registry.items() if ent.get("available")
     )
+    # One gate read for the whole scorecard: the interval axis is either on for
+    # every field's row or absent from the report entirely.
+    bootstrap = _bootstrap_gate()
 
     engines_out: dict[str, dict] = {}
     for engine in wanted:
@@ -765,6 +823,10 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
         counts: dict[str, int] = dict.fromkeys(declared, 0)
         zeros: dict[str, int] = dict.fromkeys(declared, 0)
         stated: dict[str, int] = dict.fromkeys(declared, 0)
+        # The per-tree presence indicator (1.0 present, 0.0 absent) in tree
+        # order - the sequence whose mean IS the fill rate, kept so the rate can
+        # be published with the interval it earned.
+        presence: dict[str, list[float]] = {field: [] for field in declared}
         trees_measured = 0
         for _name, card in cards:
             block = card.get(engine)
@@ -778,6 +840,7 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
                 if field not in counts:
                     continue
                 stated[field] += 1
+                presence[field].append(1.0 if state == "present" else 0.0)
                 if state == "present":
                     counts[field] += 1
                     if abs(values.get(field, 1.0)) <= ZERO_EPS and field in values:
@@ -805,6 +868,12 @@ def build_scorecard(reports_dir: str = DEFAULT_REPORTS_DIR, *, limit: int | None
                 "gap": gap_reason(engine, field, klass, absent=absent_reasons),
                 "flat_zero": (zeros[field] if zeros[field] else 0),
             }
+            if bootstrap:
+                # The interval travels BESIDE `fill_rate`, never in place of it.
+                sequence = presence[field]
+                fields[field]["interval"] = claim_interval(
+                    sequence, window=_presence_window(len(sequence)),
+                )
         engines_out[engine] = {
             "module": ent.get("module", ""),
             "trees_measured": trees_measured,
@@ -888,6 +957,8 @@ def render_text(report: dict) -> str:
             if f["flat_zero"]:
                 lines.append(f"       flat_zero: measured {f['flat_zero']} time(s), "
                              f"always 0.0 - check for a placeholder")
+            if isinstance(f.get("interval"), dict):
+                lines.append(_interval_text(f["interval"]))
 
     lines.append("")
     symbols = report.get("symbols") or []

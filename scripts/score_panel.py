@@ -1249,6 +1249,89 @@ def multiple_testing(series: dict, *, n_trials: int, train_frac: float = OOS_TRA
     return out
 
 
+# ---------------------------------------------------------------------------
+# H11 - the interval that travels beside every claimed statistic
+# ---------------------------------------------------------------------------
+#
+# A claim printed without an interval hides its own uncertainty, and an interval
+# whose dependence assumption is invisible is worse than none: the width alone
+# cannot tell a reader whether the observations were exchangeable. So the
+# moving-block arm's block length - chosen from the series' own ACF decay,
+# checked against an ADF stationarity test - and its draw count travel with the
+# bounds, and the IID interval rides beside it as the baseline the block arm has
+# to beat. Below the floor the record is ``unavailable`` with the reason, never a
+# zero-width interval.
+
+def _bootstrap_gate() -> bool:
+    """Is the H11 interval axis switched on? (``enable_bootstrap_intervals``)
+
+    Off by default, so a gate-off panel publishes exactly the rows it published
+    before the axis existed. A config read must never break the report it guards.
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_bootstrap_intervals", False))
+
+
+def claim_interval(series, *, window: str) -> dict:
+    """A block-bootstrap interval for ONE claimed statistic, over its own series.
+
+    The record travels BESIDE the number it qualifies, never in place of it: the
+    block length the series' own ACF decay earned and the draw count travel with
+    the bounds, because the dependence assumption is the one thing a reader
+    cannot recover from the width. ``iid`` rides beside it as the baseline.
+    Below the floor, on a series the resampler cannot use, or on one with no
+    dispersion to resample, the record is ``unavailable`` with the reason -
+    never a zero-width interval.
+    """
+    from tradingagents.strategies.conformal import (
+        INTERVAL_MIN_N,
+        block_bootstrap_interval,
+        iid_interval,
+    )
+
+    values = [float(v) for v in (series or []) if _num(v) is not None]
+    n = len(values)
+    if n < INTERVAL_MIN_N:
+        return {
+            "window": window,
+            "n": n,
+            "unavailable": (
+                f"{n} observation(s) below the interval floor ({INTERVAL_MIN_N}); "
+                "no interval is computed"
+            ),
+        }
+    block = block_bootstrap_interval(values)
+    if block is None:
+        return {
+            "window": window,
+            "n": n,
+            "unavailable": (
+                "the moving-block resampler could not use this series "
+                "(degenerate, or too short for a block)"
+            ),
+        }
+    if block["low"] >= block["high"]:
+        # A zero-width interval is not a measurement of uncertainty: the series
+        # has no dispersion to resample, so it is refused with the reason rather
+        # than published as perfect precision.
+        return {
+            "window": window,
+            "n": n,
+            "unavailable": (
+                "the series has no dispersion (every observation identical), so "
+                "the resampled interval is zero-width - refused rather than read "
+                "as precision"
+            ),
+        }
+    return {**block, "window": window, "iid": iid_interval(values),
+            "unavailable": None}
+
+
 def factor_statistics(scores: dict, prices: dict, *, holding: int, n_buckets: int,
                       n_trials: int, min_names: int = 4, min_obs: int = 5,
                       train_frac: float = OOS_TRAIN_FRAC, cpcv_splits: int = 5,
@@ -1260,7 +1343,7 @@ def factor_statistics(scores: dict, prices: dict, *, holding: int, n_buckets: in
     )
     series = period_series(scores, prices, holding=holding, n_buckets=n_buckets,
                            min_names=min_names)
-    return {
+    out = {
         "rows": rows,
         "series": series,
         "multiple_testing": multiple_testing(
@@ -1274,6 +1357,23 @@ def factor_statistics(scores: dict, prices: dict, *, holding: int, n_buckets: in
             (rows.get("ic") or {}).get("mean_rank_ic")
         ),
     }
+    if _bootstrap_gate():
+        # The interval sits INSIDE the row that carries the number, so it can
+        # never be read without it: `rows["ic"]["mean_rank_ic"]` and
+        # `rows["deciles"]["spread"]` each gain an `interval` over the same
+        # factor's per-period series.
+        for stat, row_key, label in (("rank_ic", "ic", "rank IC"),
+                                     ("spread", "deciles", "decile spread")):
+            values = series.get(stat) or []
+            record = claim_interval(
+                values,
+                window=(f"per-period {label} series: {len(values)} period(s), "
+                        f"holding={int(holding)}"),
+            )
+            row = rows.get(row_key)
+            if isinstance(row, dict):
+                row["interval"] = record
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1603,6 +1703,21 @@ def evaluate_panel(
             f"zero benchmark, stationary bootstrap n_boot={int(n_boot)} seed={seed}"
         )
 
+    if _bootstrap_gate():
+        # The family's own claim is the per-period mean spread across the
+        # measured factors - the series the reality check and SPA consume - so
+        # its interval is computed over that same pooled series, not over a
+        # number picked from it.
+        k = len(spread_series)
+        n_pool = min((len(v) for v in spread_series.values()), default=0)
+        pooled = ([sum(v[i] for v in spread_series.values()) / k
+                   for i in range(n_pool)] if k else [])
+        family["interval"] = claim_interval(
+            pooled,
+            window=(f"family per-period mean spread series: {len(pooled)} "
+                    f"period(s) across {k} factor(s)"),
+        )
+
     # --- per-engine findings and the weight vector ------------------------
     per_engine: dict[str, dict] = {}
     allowed = True
@@ -1725,6 +1840,30 @@ def _pbo(factors: dict, n_trials: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _interval_text(record: dict, indent: str = "    ") -> str:
+    """One interval record as a line: the bounds, then the dependence assumption.
+
+    The block length and the draw count are the point - the width alone does not
+    say what the interval was computed *as if*, and a reader cannot recover that
+    from the bounds. The IID baseline rides beside the block arm.
+    """
+    if record.get("unavailable"):
+        return (f"{indent}interval: unavailable - {record['unavailable']} "
+                f"(over {record.get('window')})")
+    iid = record.get("iid") or {}
+    iid_txt = (
+        f"; iid baseline [{iid['low']:.4g}, {iid['high']:.4g}]"
+        if isinstance(iid.get("low"), (int, float))
+        and isinstance(iid.get("high"), (int, float)) else ""
+    )
+    return (
+        f"{indent}interval: [{record['low']:.4g}, {record['high']:.4g}] "
+        f"point={record['point']:.4g} n={record['n']} block={record['block']} "
+        f"draws={record['draws']} ({record['method']}{iid_txt}) "
+        f"over {record.get('window')}"
+    )
+
+
 def render_text(report: dict, build: dict | None = None) -> str:
     """The human-readable block: cost, coverage, label, factors, blocks."""
     lines: list[str] = ["# Score panel (WP-10)", ""]
@@ -1807,6 +1946,10 @@ def render_text(report: dict, build: dict | None = None) -> str:
             + (f" redundant_with={','.join(row.get('redundant_with') or [])}"
                if row.get("redundant_with") else "")
         )
+        for key, label in (("ic", "rank_ic"), ("deciles", "spread")):
+            rec = (rows.get(key) or {}).get("interval")
+            if isinstance(rec, dict):
+                lines.append(_interval_text(rec, indent=f"    {label} "))
     blocks = (report.get("redundancy") or {}).get("blocks") or {}
     lines.append("")
     lines.append("## Redundancy blocks")
@@ -1827,6 +1970,8 @@ def render_text(report: dict, build: dict | None = None) -> str:
     lines.append(f"- pbo: {fam.get('pbo')}")
     lines.append(f"- reality_check: {fam.get('reality_check')}")
     lines.append(f"- spa: {fam.get('spa')}")
+    if isinstance(fam.get("interval"), dict):
+        lines.append(_interval_text(fam["interval"], indent="- family "))
     lines.append("")
     lines.append("## Engines")
     for engine, row in sorted((report.get("engines") or {}).items()):
@@ -2002,6 +2147,7 @@ __all__ = [
     "REDUNDANT_ABS_CORR",
     "STATUS_ADVISORY",
     "STATUS_RESEARCH_ONLY",
+    "claim_interval",
     "evaluate_panel",
     "factor_statistics",
     "multiple_testing",
