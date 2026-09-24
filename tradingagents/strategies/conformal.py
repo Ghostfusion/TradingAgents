@@ -378,7 +378,6 @@ def _interval(values, *, alpha: float, draws: int, seed: int, block: int,
         return None
     low = _quantile(means, a / 2.0)
     high = _quantile(means, 1.0 - a / 2.0)
-    covered = sum(1 for m in means if low <= m <= high)
     return {
         "low": low,
         "high": high,
@@ -433,7 +432,7 @@ def _scores(resid: list[float], scales: list[float]) -> float:
     """Mean Gaussian log-score of ``resid`` under the per-point ``scales``."""
     return sum(
         -0.5 * math.log(2.0 * math.pi) - math.log(s) - (r * r) / (2.0 * s * s)
-        for r, s in zip(resid, scales)
+        for r, s in zip(resid, scales, strict=True)
     ) / len(resid)
 
 
