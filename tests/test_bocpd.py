@@ -16,6 +16,22 @@ def _gauss(n, seed=101, scale=1.0):
     return [rnd.gauss(0.0, scale) for _ in range(n)]
 
 
+def _with_long_regime(n_pre=140, n_regime=120, n_post=60, seed=202, jump=10.0):
+    """Unit noise carrying one manufactured long regime (a +jump stretch)."""
+    base = _gauss(n_pre + n_regime + n_post, seed=seed)
+    return (
+        base[:n_pre]
+        + [v + jump for v in base[n_pre:n_pre + n_regime]]
+        + base[n_pre + n_regime:]
+    )
+
+
+def _equal_regimes(block=80, seed=202, jump=10.0):
+    """Three manufactured regimes of exactly the same length."""
+    return _with_long_regime(n_pre=block, n_regime=block, n_post=block,
+                             seed=seed, jump=jump)
+
+
 # --------------------------------------------------------------------------
 # Degenerate input -> None
 # --------------------------------------------------------------------------
@@ -95,6 +111,85 @@ def test_bocpd_flags_shift_at_the_manufactured_index():
 
     # ... and nothing alarms on any earlier prefix
     assert not any(regime.bocpd(shifted[:k])["shift"] for k in range(20, idx))
+
+
+# --------------------------------------------------------------------------
+# R1: a duration-law hazard instead of the constant hazard
+# --------------------------------------------------------------------------
+
+
+def test_bocpd_constant_hazard_mode_is_unchanged():
+    # the duration-law addition must not move the constant-hazard read: exact
+    # values for fixed series, in the style of the cusum/ewma pins below
+    out = regime.bocpd(_gauss(240))
+    assert out["zero_run_prob"] == 0.01465
+    assert out["expected_run_length"] == 160.0563
+    assert out["map_run_length"] == 240
+    assert out["hazard"] == 1 / 60
+    assert regime.bocpd(_gauss(60), hazard=1 / 20)["zero_run_prob"] == 0.031843
+
+
+def test_hazard_mode_lognormal_is_run_length_dependent():
+    series = _with_long_regime()
+
+    constant = regime.bocpd(series)
+    lognormal = regime.bocpd(series, hazard_mode="lognormal")
+    assert constant["hazard_mode"] == "constant"
+    assert lognormal["hazard_mode"] == "lognormal"
+
+    # the hazard varies with the run length instead of being one scalar: a
+    # regime is no longer as likely to end on its first day as on its longest
+    curve = lognormal["hazard_curve"]
+    assert len(set(curve.values())) > 1
+    assert curve[0] < curve[max(curve)]
+
+    # ... because the law was compiled from the run lengths observed so far
+    law = lognormal["duration_params"]
+    assert law["law"] == "lognormal"
+    assert law["n_runs"] >= 2
+
+    # the different hazard moves the read off the constant-hazard one
+    assert lognormal["zero_run_prob"] != constant["zero_run_prob"]
+
+    # the covering metric travels beside zero_run_prob, against the read the
+    # duration law replaces
+    covering = lognormal["covering"]
+    assert covering["metric"] == "length_weighted_jaccard"
+    assert covering["reference"] == "constant_hazard"
+    assert 0.0 <= covering["value"] <= 1.0
+
+
+def test_bocpd_duration_law_is_inert_until_two_runs_are_observed():
+    series = _gauss(240)  # stationary: one open run, no completed one
+    out = regime.bocpd(series, hazard_mode="lognormal")
+    assert out["duration_params"] is None  # nothing observed -> nothing fitted
+    assert len(set(out["hazard_curve"].values())) == 1
+    # the declared scalar hazard governs, so the read matches the constant one
+    assert out["zero_run_prob"] == regime.bocpd(series)["zero_run_prob"]
+
+
+def test_bocpd_hazard_mode_degenerate_fit_is_none():
+    # three manufactured regimes of exactly equal length: every observed run
+    # length is then the same, so the fitted log-normal and Pareto have zero
+    # spread and the read refuses rather than substituting the constant hazard
+    # - the same None path an out-of-range hazard takes
+    equal = _equal_regimes()
+    assert regime.bocpd(equal, hazard_mode="lognormal") is None
+    assert regime.bocpd(equal, hazard_mode="pareto") is None
+
+    # the same series under a law with no spread parameter: identified, and the
+    # hazard applied is the fitted one, not the scalar prior
+    geometric = regime.bocpd(equal, hazard_mode="geometric")
+    assert geometric is not None
+    assert geometric["duration_params"]["law"] == "geometric"
+    assert len(set(geometric["hazard_curve"].values())) == 1
+    assert geometric["hazard_curve"][0] == geometric["duration_params"]["p"]
+    assert geometric["hazard_curve"][0] != geometric["hazard"]
+
+
+def test_bocpd_unknown_hazard_mode_is_none():
+    # a mode the module cannot compile is refused, never read as constant
+    assert regime.bocpd(_gauss(60), hazard_mode="geometrico") is None
 
 
 # --------------------------------------------------------------------------

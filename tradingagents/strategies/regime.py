@@ -761,6 +761,226 @@ def _student_t_pdf(x: float, df: float, loc: float, scale: float) -> float:
     return math.exp(log_pdf)
 
 
+#: Duration laws ``bocpd`` compiles a run-length-dependent hazard from.
+#: ``constant`` is today's behaviour (a geometric run-length prior); the other
+#: three are fitted to the segment lengths observed so far and re-estimated on
+#: the expanding window. Anything else is refused (``None``), never guessed.
+_HAZARD_MODES = ("constant", "lognormal", "pareto", "geometric")
+
+
+def _fit_duration_law(mode: str, durations: list[int]) -> dict | None:
+    """MLE duration-law parameters from observed segment lengths.
+
+    ``durations`` must hold at least two observed lengths (the recursion only
+    compiles once two runs exist). Returns ``None`` for a **degenerate** fit: a
+    non-finite parameter, a zero-spread log-normal or Pareto (every observed run
+    the same length, so the fit is a point mass rather than a duration
+    distribution), or a geometric success probability outside ``(0, 1)``. The
+    caller refuses the whole read on ``None``; the constant hazard is never
+    substituted for it.
+    """
+    n = len(durations)
+    d = [float(v) for v in durations]
+    if mode == "lognormal":
+        logs = [math.log(v) for v in d]
+        mu = sum(logs) / n
+        sigma = math.sqrt(sum((v - mu) ** 2 for v in logs) / n)
+        if not (math.isfinite(mu) and math.isfinite(sigma)) or sigma <= 0.0:
+            return None
+        return {"law": "lognormal", "n_runs": n, "mu": mu, "sigma": sigma}
+    if mode == "pareto":
+        x_m = min(d)
+        spread = sum(math.log(v / x_m) for v in d)
+        if not (x_m > 0.0 and spread > 0.0):
+            return None
+        alpha = n / spread
+        if not math.isfinite(alpha) or alpha <= 0.0:
+            return None
+        return {"law": "pareto", "n_runs": n, "x_m": x_m, "alpha": alpha}
+    if mode == "geometric":
+        p = n / sum(d)
+        if not math.isfinite(p) or not (0.0 < p < 1.0):
+            return None
+        return {"law": "geometric", "n_runs": n, "p": p}
+    return None
+
+
+def _law_survival(fit: dict, x: float) -> float:
+    """``P(D > x)`` of a fitted duration law (integer durations ``D >= 1``)."""
+    if fit["law"] == "lognormal":
+        if x <= 0.0:
+            return 1.0
+        z = (math.log(x) - fit["mu"]) / (fit["sigma"] * math.sqrt(2.0))
+        return 0.5 * math.erfc(z)
+    if fit["law"] == "pareto":
+        if x <= fit["x_m"]:
+            return 1.0
+        return (fit["x_m"] / x) ** fit["alpha"]
+    return (1.0 - fit["p"]) ** x
+
+
+def _law_hazard(fit: dict, run_length: int) -> float:
+    """Discrete hazard of a fitted duration law at a run length.
+
+    ``P(D = r + 1 | D >= r + 1)`` - the probability that a segment which has
+    reached ``r`` steps ends on the next one. ``0`` means the law forbids ending
+    yet and ``1`` that it certainly ends, so the run-length prior stops
+    asserting one constant chance of ending whatever the age. The ``1.0`` at a
+    zero survival is the limit, not a floor; the clamp only absorbs rounding.
+    """
+    if fit["law"] == "geometric":
+        return fit["p"]
+    surv = _law_survival(fit, float(run_length))
+    if surv <= 0.0:
+        return 1.0
+    h = 1.0 - _law_survival(fit, float(run_length) + 1.0) / surv
+    return min(1.0, max(0.0, h))
+
+
+def _segment_lengths(map_trace: list[int]) -> list[int]:
+    """Segment lengths read off a MAP run-length trajectory.
+
+    ``map_trace[t]`` is the posterior mode of the run length after point ``t``;
+    a ``0`` means point ``t`` opened a fresh segment, so the zeros are the
+    boundaries. A series that never restarts yields one segment of the full
+    sample.
+    """
+    bounds = [i for i, r in enumerate(map_trace) if r == 0]
+    if not bounds or bounds[0] != 0:
+        bounds = [0, *bounds]
+    return [
+        (bounds[i + 1] if i + 1 < len(bounds) else len(map_trace)) - start
+        for i, start in enumerate(bounds)
+    ]
+
+
+def _covering_metric(predicted: list[int], reference: list[int]) -> float | None:
+    """Length-weighted Jaccard covering of two segmentations of one sample.
+
+    Arbelaez-style covering, the metric the duration-law paper assesses with:
+    every reference segment is weighted by its length and scored by its best
+    per-pair Jaccard overlap against the predicted segmentation, and the score
+    is the symmetric mean of both directions. ``1.0`` = the two segmentations
+    agree everywhere, ``0.0`` = no segment pair overlaps; ``None`` when a side
+    is empty and there is nothing to cover.
+    """
+    def _bounds(lengths: list[int]) -> list[tuple[int, int]]:
+        out = []
+        start = 0
+        for length in lengths:
+            out.append((start, start + length))
+            start += length
+        return out
+
+    def _one_way(cover: list, target: list) -> float | None:
+        total = sum(e - s for s, e in target)
+        if total <= 0:
+            return None
+        acc = 0.0
+        for s, e in target:
+            span = e - s
+            best = 0.0
+            for s2, e2 in cover:
+                overlap = min(e, e2) - max(s, s2)
+                if overlap <= 0:
+                    continue
+                best = max(best, overlap / (span + (e2 - s2) - overlap))
+            acc += span * best
+        return acc / total
+
+    forward = _one_way(_bounds(predicted), _bounds(reference))
+    reverse = _one_way(_bounds(reference), _bounds(predicted))
+    if forward is None or reverse is None:
+        return None
+    return 0.5 * (forward + reverse)
+
+
+def _bocpd_recursion(
+    z: list[float],
+    prior: tuple,
+    hazard: float,
+    mu_prior: float,
+    prior_df: float,
+    prior_scale: float,
+    law_mode: str | None,
+    track: bool,
+) -> tuple[dict, list[int], dict | None] | None:
+    """One Adams-MacKay run-length pass over the standardised series ``z``.
+
+    ``law_mode`` is ``None`` for the constant hazard ``hazard``. Otherwise the
+    duration law is re-fitted at every step from the segment lengths observed so
+    far - the completed runs plus the open run's age, a right-censored
+    observation that extends as the window grows - and its compiled hazard
+    drives the same recursion: an ``O(#runs)`` compile per step, an ``O(t)``
+    step, and no sampling. Returns ``(posterior, map_trace, fit)``, or ``None``
+    when a duration-law fit is degenerate, which the caller refuses on.
+    ``map_trace`` is empty unless ``track`` is set; ``fit`` is the law in force
+    at the last step, ``None`` while it is unidentified.
+    """
+    probs = {0: 1.0}
+    params = {0: prior}
+    trace: list[int] = []
+    completed: list[int] = []
+    prev_map: int | None = None
+    fit: dict | None = None
+    for x in z:
+        active: dict | None = None
+        if law_mode is not None and len(completed) + (prev_map is not None) >= 2:
+            active = _fit_duration_law(law_mode, completed + [prev_map + 1])
+            if active is None:
+                return None
+            fit = active
+        if active is None:
+            change_mass = hazard * _student_t_pdf(x, prior_df, mu_prior, prior_scale)
+        else:
+            change_mass = sum(
+                p * _law_hazard(active, r) for r, p in probs.items()
+            ) * _student_t_pdf(x, prior_df, mu_prior, prior_scale)
+        grown_probs: dict[int, float] = {}
+        grown_params: dict[int, tuple[float, float, float, float]] = {}
+        for r, p in probs.items():
+            hr = hazard if active is None else _law_hazard(active, r)
+            mu, kap, alpha, beta = params[r]
+            df = 2.0 * alpha
+            scale = math.sqrt(beta * (kap + 1.0) / (alpha * kap))
+            pred = _student_t_pdf(x, df, mu, scale)
+            if pred <= 0.0:
+                continue
+            growth = p * pred * (1.0 - hr)
+            new_kappa = kap + 1.0
+            new_mu = (kap * mu + x) / new_kappa
+            new_beta = beta + kap * (x - mu) ** 2 / (2.0 * new_kappa)
+            grown_probs[r + 1] = grown_probs.get(r + 1, 0.0) + growth
+            grown_params[r + 1] = (new_mu, new_kappa, alpha + 0.5, new_beta)
+        grown_probs[0] = change_mass
+        grown_params[0] = prior
+        total = sum(grown_probs.values())
+        if total <= 0.0:
+            probs = {0: 1.0}
+            params = {0: prior}
+            continue
+        probs = {r: p / total for r, p in grown_probs.items()}
+        params = grown_params
+        if track:
+            current = max(probs, key=probs.get)
+            if current == 0 and prev_map is not None:
+                completed.append(prev_map + 1)
+            prev_map = current
+            trace.append(current)
+    return probs, trace, fit
+
+
+def _rounded_law(fit: dict | None) -> dict | None:
+    """The duration-law parameters as reported (6dp), ``None`` if unidentified."""
+    if fit is None:
+        return None
+    out: dict = {"law": fit["law"], "n_runs": fit["n_runs"]}
+    for key in ("mu", "sigma", "x_m", "alpha", "p"):
+        if key in fit:
+            out[key] = round(float(fit[key]), 6)
+    return out
+
+
 def bocpd(
     series: list,
     hazard: float = 1.0 / 60.0,
@@ -769,6 +989,7 @@ def bocpd(
     alpha_prior: float = 1.0,
     beta_prior: float = 1.0,
     warmup: int = 20,
+    hazard_mode: str = "constant",
 ) -> dict | None:
     """Bayesian online change-point detection (Adams & MacKay 2007, arXiv:0710.3742).
 
@@ -792,14 +1013,37 @@ def bocpd(
     the break, so recompute them after the segment restarts (this function does
     not touch them).
 
+    ``hazard_mode`` selects the run-length prior's hazard. ``constant`` (the
+    default) is the constant hazard above, unchanged. ``lognormal``, ``pareto``
+    or ``geometric`` compile it from an explicit duration law whose parameters
+    are re-estimated on an expanding window from the segment lengths observed so
+    far - the completed runs plus the open run's age - so a regime stops being
+    as likely to end on its first day as on its hundredth. The law is
+    unidentified until two run lengths have been observed and the declared
+    scalar ``hazard`` (its geometric prior) governs until then; a **degenerate**
+    fit - zero spread, a non-finite parameter, a geometric ``p`` outside
+    ``(0, 1)`` - returns ``None`` exactly as an out-of-range ``hazard`` does,
+    never the constant hazard. A duration-law mode also reports the
+    ``duration_params`` in force, the compiled ``hazard_curve`` per run length
+    that was actually applied, and ``covering``: the length-weighted Jaccard
+    covering of this read's segmentation against the constant-hazard
+    segmentation of the same series - no labelled segmentation exists in-run,
+    so the reference is the read this one replaces, and the metric is what lets
+    a change in hazard be judged rather than assumed.
+
     Returns ``{zero_run_prob, map_run_length, expected_run_length, shift, n,
-    hazard, basis}`` or ``None`` for degenerate input (fewer than ``warmup``
-    points, non-positive hazard, or a zero-variance warmup baseline).
+    hazard, basis, hazard_mode}`` - plus ``duration_params``, ``hazard_curve``
+    and ``covering`` for a duration-law mode - or ``None`` for degenerate input
+    (fewer than ``warmup`` points, non-positive hazard, an unknown
+    ``hazard_mode``, a degenerate duration-law fit, or a zero-variance warmup
+    baseline).
     """
     vals = [float(v) for v in series if v is not None]
     n = len(vals)
     h = float(hazard)
     if int(warmup) < 2 or n < int(warmup) or not (0.0 < h < 1.0):
+        return None
+    if hazard_mode not in _HAZARD_MODES:
         return None
     base = vals[: int(warmup)]
     b_mean = sum(base) / len(base)
@@ -812,34 +1056,13 @@ def bocpd(
     # prior predictive of the first point of a fresh segment (no data yet)
     prior_df = 2.0 * alpha_prior
     prior_scale = math.sqrt(beta_prior * (kappa + 1.0) / (alpha_prior * kappa))
-    probs = {0: 1.0}
-    params = {0: prior}
-    for x in z:
-        grown_probs: dict[int, float] = {}
-        grown_params: dict[int, tuple[float, float, float, float]] = {}
-        change_mass = h * _student_t_pdf(x, prior_df, mu_prior, prior_scale)
-        for r, p in probs.items():
-            mu, kap, alpha, beta = params[r]
-            df = 2.0 * alpha
-            scale = math.sqrt(beta * (kap + 1.0) / (alpha * kap))
-            pred = _student_t_pdf(x, df, mu, scale)
-            if pred <= 0.0:
-                continue
-            growth = p * pred * (1.0 - h)
-            new_kappa = kap + 1.0
-            new_mu = (kap * mu + x) / new_kappa
-            new_beta = beta + kap * (x - mu) ** 2 / (2.0 * new_kappa)
-            grown_probs[r + 1] = grown_probs.get(r + 1, 0.0) + growth
-            grown_params[r + 1] = (new_mu, new_kappa, alpha + 0.5, new_beta)
-        grown_probs[0] = change_mass
-        grown_params[0] = prior
-        total = sum(grown_probs.values())
-        if total <= 0.0:
-            probs = {0: 1.0}
-            params = {0: prior}
-            continue
-        probs = {r: p / total for r, p in grown_probs.items()}
-        params = grown_params
+    law_mode = None if hazard_mode == "constant" else hazard_mode
+    run = _bocpd_recursion(
+        z, prior, h, mu_prior, prior_df, prior_scale, law_mode, law_mode is not None
+    )
+    if run is None:
+        return None
+    probs, map_trace, fit = run
 
     zero_run_prob = float(probs.get(0, 0.0))
     map_run_length = max(probs, key=probs.get)
@@ -849,7 +1072,7 @@ def bocpd(
         f"alpha={alpha_prior},beta={beta_prior}, hazard={h:.6g}; "
         f"{n} standardized returns (baseline mean/std from first {int(warmup)} obs)"
     )
-    return {
+    out = {
         "zero_run_prob": round(zero_run_prob, 6),
         "map_run_length": int(map_run_length),
         "expected_run_length": round(float(expected_run_length), 4),
@@ -857,7 +1080,35 @@ def bocpd(
         "n": n,
         "hazard": h,
         "basis": basis,
+        "hazard_mode": hazard_mode,
     }
+    if law_mode is not None:
+        runs = fit["n_runs"] if fit else 0
+        out["basis"] = basis + (
+            f"; hazard_mode={law_mode} (duration law from {runs} observed run"
+            f"{'s' if runs != 1 else ''}; the scalar hazard is its prior until "
+            f"two run lengths are observed)"
+        )
+        out["duration_params"] = _rounded_law(fit)
+        out["hazard_curve"] = {
+            int(r): round(h if fit is None else _law_hazard(fit, r), 6)
+            for r in sorted(probs)
+        }
+        # No labelled segmentation exists in-run, so the covering metric is
+        # taken against the constant-hazard segmentation of the same series -
+        # the read this one replaces.
+        reference = _bocpd_recursion(
+            z, prior, h, mu_prior, prior_df, prior_scale, None, True
+        )
+        covered = _covering_metric(
+            _segment_lengths(map_trace), _segment_lengths(reference[1])
+        )
+        out["covering"] = {
+            "metric": "length_weighted_jaccard",
+            "reference": "constant_hazard",
+            "value": None if covered is None else round(covered, 6),
+        }
+    return out
 
 
 __all__ = [

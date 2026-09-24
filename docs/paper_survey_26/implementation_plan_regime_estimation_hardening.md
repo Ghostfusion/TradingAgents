@@ -1,6 +1,6 @@
 # Implementation Plan - Regime and State
 
-Status: **PLAN - not started.** Implements items R1-R9 of the regime-and-state theme: the adoption
+Status: **IN PROGRESS** - wave 0+1 build started: R1 landed (2026-09-23), its duration-law modes dormant in-run pending the tool selector. The rest of this plan is not started.
 path for the detectors, panel reads and constraints specified in
 [`design_regime_estimation_hardening.md`](design_regime_estimation_hardening.md), one of the six
 themed design docs derived from [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).
