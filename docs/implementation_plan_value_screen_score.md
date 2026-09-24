@@ -125,6 +125,17 @@ therefore takes ROE and the 5-day change in percent and converts: `--roe-min 15`
 `compute_ratios` **never fabricates**: a ratio whose input is missing returns `None`. A `None`
 bound **fails closed** here — the name is dropped and counted, never treated as a pass.
 
+**P/CF needs a leg nothing else on this path supplies.** `fetch_ticker` pulls fundamentals, the
+balance sheet and the income statement — it never calls `get_cashflow` — so the canonical items
+arrive **without** `operating_cashflow` and `price_to_cash_flow` is `None` for every name. Measured
+on 2026-09-24 over the deepest 30 decliners: market cap, P/E and P/B present 30/30, P/S 22/30,
+**P/CF 0/30**. That single missing leg was emptying the whole funnel, because the gate fails
+closed. The tool therefore fetches the annual cash-flow statement once per name — cached for the
+run through the screener's own `_CASHFLOW_CACHE`, parsed by `statement_parsing._canonicalize`,
+whose alias for the key is `"operating cash flow"` / `"cash flow from operating"` — and injects it
+as `fin["operating_cashflow"]`. The basis is the latest **annual** period, the same limitation the
+panel path carries (§7).
+
 `market_cap` enters `compute_ratios` via `fin["market_cap"]`; when the parsed value is absent the
 screener's own convention applies — inject the day-of cap and, client-side, drop only when a cap
 **is** present and below the floor (`scripts/value_screener.py:2084-2092`).
@@ -152,6 +163,18 @@ scores = scored["scores"]        # {name: composite or None}; None is "withheld"
 **The whole panel must be passed.** Passing only the candidates would re-create the defect this
 change exists to fix: the composite is a tie-aware percentile **over the panel it is given**, so a
 candidates-only panel ranks the candidates against each other again.
+
+**The panel must be WIDER than the survivors, and that is a hard constraint.** `factors.category_scores`
+refuses a peer set below `min_peers` — *"a z over a handful of names is noise, not a score"* — and the
+four sub-score wrappers pass **`min_peers = 8`**. Measured on 2026-09-24 with the five names that
+survived the ratio gates: at the engine default **nothing** is scored and every sub-score reports
+`floor: None`; at `min_peers=5` FQS/VS/FRS score all five; at `min_peers=2` the composite appears
+(FSLR 83.3, KGC 83.3, GEN 41.7, XYL 25.0, SNX 16.7). **The floor is not lowered** — it is the engine's
+own guard against a percentile computed over a handful of names — so the panel is the whole **fetched
+cross-section** (every name stage 2 pulled financials for, typically tens), and the survivors are read
+out of it. A panel built from only the survivors cannot produce a composite at all, and a panel below
+the floor now reports the engine's own reason per name (`peer set below the floor (5 < 8 names)`)
+instead of rendering as "no reason recorded".
 
 Cost: `fundamental_score` measured at **0.600 ms** for a 10-peer panel and 1.9 ms at 60 peers
 (synthetic fixture, no I/O); a few thousand rows is sub-second. The panel itself is where the money
@@ -243,6 +266,8 @@ Printed in every report, because each line changes what the number means:
 | risk | mitigation |
 | --- | --- |
 | The six anchors are jointly too tight and the funnel returns empty | that is a finding, not a bug. Loosen in the order RSI, P/S, ROE — **not** the day filter, which is what makes the list interesting |
+| OpenD is not running, so the server-side screen is unavailable | `--no-moomoo` runs the EODHD-only path: the candidate set becomes the deepest `--limit` decliners and every ratio is gated client-side. The report labels it a **partial scan**; it is not the full screen |
+| The fallback's candidate set is **size-biased** | measured 2026-09-24: of the deepest 30 decliners only about 5 cleared the $10B floor (SCTX $0.4B, ACAD $3.8B, BXC $0.6B were typical), so the fallback spends its per-name fetch budget on names the market-cap gate will reject. This is the strongest argument for the SEC panel: its derived market cap makes a **cheap client-side size filter** possible before any statement fetch |
 | `chg5d_max` sign read the other way (§4.3.1) | printed in the report header; one flag flips it |
 | Rate limits at 4 workers are real, not theoretical | measured on 2026-09-24: `fmp profile: status 429` repeatedly, Reddit RSS 429 on `r/stocks` and `r/investing`, Massive `403` entitlement on four snapshots and three `gainers` calls. Stage 2 is capped and the run is serial |
 | Panel build is a multi-minute keyless SEC job | `--cost-only` first; run it outside report paths; per-date cache makes it once-only |
