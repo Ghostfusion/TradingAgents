@@ -298,7 +298,7 @@ _ENV_OVERRIDES = {
     # pareto | geometric). A MODE, not a gate: it changes what the gated read
     # computes, so it stays "constant" unless someone sets it deliberately.
     "TRADINGAGENTS_BOCPD_HAZARD_MODE": "bocpd_hazard_mode",
-    # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each MUST be mapped here:
+    # --- Paper-survey adoption, waves 0-1 and the T1 batch (docs/paper_survey_26/). Each MUST be mapped here:
     "TRADINGAGENTS_ENABLE_RN_SKEW_PROXY": "enable_rn_skew_proxy",
     "TRADINGAGENTS_ENABLE_TREND_SPECTRAL": "enable_trend_spectral",
     "TRADINGAGENTS_ENABLE_TRIAL_LEDGER": "enable_trial_ledger",
@@ -1126,7 +1126,7 @@ DEFAULT_CONFIG = _apply_env_overrides(
         # by literal key in `strategies/evaluate.py`, and neither is a gate.
         "materiality_delta_s": 0.20,
         "materiality_delta_r": 0.01,
-        # --- Paper-survey adoption, waves 0-1 (docs/paper_survey_26/). Each gates
+        # --- Paper-survey adoption, waves 0-1 and the T1 batch (docs/paper_survey_26/). Each gates
         "enable_rn_skew_proxy": False,
         "enable_trend_spectral": False,
         "enable_trial_ledger": False,
