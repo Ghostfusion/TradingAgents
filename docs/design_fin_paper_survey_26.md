@@ -8,9 +8,9 @@ against this engine's actual surfaces, and route the ones that carry a usable pr
 per-theme design docs. Nothing here authorises a change: every adoption is proposed, gated and
 default-off, per the house pattern.
 **Method:** `.state/metadata.jsonl` supplied title/abstract for all 309; full text was extracted
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
 from all 309 PDFs and read directly for the shortlist. Every claim of the form "the repo already
 does this" was checked against the tree by grep, not recalled.
+**Plans:** [`docs/paper_survey_26/`](paper_survey_26/README.md) - six per-theme implementation plans, one beside each themed design doc (v1.0, PLAN set).
 
 ---
 
@@ -160,13 +160,13 @@ to it - but a large fraction describe machinery that already has a home.
 
 | Theme | high | medium | Design doc |
 |---|---:|---:|---|
-| Honest evaluation | 12 | 30 | `docs/design_research_honesty_gates.md` |
-| Cross-section and allocation | 7 | 18 | `docs/design_cross_section_and_allocation.md` |
-| Regime and state | 3 | 21 | `docs/design_regime_estimation_hardening.md` |
-| Risk and tails | 5 | 11 | `docs/design_risk_tail_and_coverage.md` |
-| Text, news, disclosure | 3 | 9 | `docs/design_news_and_filing_signals.md` |
-| Volatility and options | 0 | 18 | `docs/design_vol_surface_and_vrp.md` |
-| Fundamentals and filings | 1 | 4 | `docs/design_news_and_filing_signals.md` (partly) |
+| Honest evaluation | 12 | 30 | `docs/paper_survey_26/design_research_honesty_gates.md` |
+| Cross-section and allocation | 7 | 18 | `docs/paper_survey_26/design_cross_section_and_allocation.md` |
+| Regime and state | 3 | 21 | `docs/paper_survey_26/design_regime_estimation_hardening.md` |
+| Risk and tails | 5 | 11 | `docs/paper_survey_26/design_risk_tail_and_coverage.md` |
+| Text, news, disclosure | 3 | 9 | `docs/paper_survey_26/design_news_and_filing_signals.md` |
+| Volatility and options | 0 | 18 | `docs/paper_survey_26/design_vol_surface_and_vrp.md` |
+| Fundamentals and filings | 1 | 4 | `docs/paper_survey_26/design_news_and_filing_signals.md` (partly) |
 
 ---
 
@@ -561,7 +561,7 @@ corpus survey that lists only what it liked is a wish list, not a survey.
    into each proposal for exactly this reason; none of them propose a gate.
 4. **Nothing here was backtested against this engine.** Every proposal is untested against this
    engine's data until the harness in
-   `docs/design_research_honesty_gates.md` says otherwise.
+   `docs/paper_survey_26/design_research_honesty_gates.md` says otherwise.
 5. **The corpus is not representative of arXiv.** It is a bulk `q-fin` scrape with a long tail
    (crypto launchpads, sports models, hydrology, EU elections, insurance reserving). 43 papers
    have no equity object at all; they are counted and dismissed rather than silently dropped.

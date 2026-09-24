@@ -7,7 +7,7 @@
 expectations, covariance under short panels, and position sizing. Takes the 5 high- and 11
 medium-relevance risk papers plus the covariance items from the 2026 `q-fin` corpus survey.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
+**Plan:** [`implementation_plan_risk_tail_and_coverage.md`](implementation_plan_risk_tail_and_coverage.md) - the item-level implementation plan for the items this doc owns (v1.0, PLAN); the set index is [`README.md`](README.md).
 **Rule-4 impact:** none. Risk reads are internal.
 
 ---

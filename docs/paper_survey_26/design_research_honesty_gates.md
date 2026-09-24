@@ -9,7 +9,7 @@ survey (`docs/design_fin_paper_survey_26.md`), which found honest evaluation to 
 most transferable theme in the corpus - 12 high- and 30 medium-relevance papers - and the theme
 this engine is least equipped for, because the engine's own output is the thing being judged.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
+**Plan:** [`implementation_plan_research_honesty_gates.md`](implementation_plan_research_honesty_gates.md) - the item-level implementation plan for the items this doc owns (v1.0, PLAN); the set index is [`README.md`](README.md).
 **Rule-4 impact:** none. Nothing here touches the engine's externally visible surface; the app
 reads reports and scores, and no schema changes.
 

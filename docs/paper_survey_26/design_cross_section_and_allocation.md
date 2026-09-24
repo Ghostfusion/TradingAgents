@@ -7,7 +7,7 @@
 covariance and allocation stack, and the rank/selection machinery. Takes the 7 high- and 18
 medium-relevance cross-section papers from the 2026 `q-fin` corpus survey.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
+**Plan:** [`implementation_plan_cross_section_and_allocation.md`](implementation_plan_cross_section_and_allocation.md) - the item-level implementation plan for the items this doc owns (v1.0, PLAN); the set index is [`README.md`](README.md).
 **Rule-4 impact:** none. Allocation stays in the execution repo; nothing here changes the app surface.
 
 ---

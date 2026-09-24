@@ -7,7 +7,7 @@
 `sentiment_research`, `dataflows/sec_edgar.py`, and the disclosure reads the analysts consume. Takes
 the 3 high- and 9 medium-relevance text/news papers from the 2026 `q-fin` corpus survey.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
+**Plan:** [`implementation_plan_news_and_filing_signals.md`](implementation_plan_news_and_filing_signals.md) - the item-level implementation plan for the items this doc owns (v1.0, PLAN); the set index is [`README.md`](README.md).
 **Rule-4 impact:** none. The app renders the news/sentiment blocks generically; no schema changes.
 
 ---

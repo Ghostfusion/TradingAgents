@@ -9,7 +9,7 @@ underneath them. This doc takes the 3 high- and 21 medium-relevance regime paper
 corpus's regime papers are mostly about **evidence discipline**, not about better detectors: two of
 the three most load-bearing results are negative.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Plan:** [`docs/implementation_plan_paper_survey_26.md`](implementation_plan_paper_survey_26.md) - the phased, gated adoption plan for these items (v1.0, PLAN).
+**Plan:** [`implementation_plan_regime_estimation_hardening.md`](implementation_plan_regime_estimation_hardening.md) - the item-level implementation plan for the items this doc owns (v1.0, PLAN); the set index is [`README.md`](README.md).
 **Rule-4 impact:** none. Regime reads are internal; no report schema changes.
 
 ---
