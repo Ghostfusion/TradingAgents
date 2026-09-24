@@ -195,6 +195,13 @@ COMPONENTS: dict[str, Component] = {
         _c("book_correlated_stress", "correlation", "lower_better",
            "book_risk.book_correlated_stress:128", "loss fraction of book equity",
            note="producer already returns a POSITIVE magnitude"),
+        _c("triadic_stress_index", "correlation", "lower_better",
+           "triadic_stress.triadic_stress:193",
+           "index (C*D/M*Coex over the |rho| correlation network)", kind=PRINTED,
+           note="a COINCIDENT cross-sectional read (R7): the epicentre names the "
+                "block the triadic load runs through. PRINTED beside the score "
+                "and never scored by it - a network read, not a book share, and "
+                "never a second breadth authority (rule 2)"),
         # --- concentration risk (10) --------------------------------------
         _c("portfolio_hhi", "concentration", "lower_better",
            "liquidity_risk.ownership_hhi:130 (the HHI formula, over POSITION weights)",
