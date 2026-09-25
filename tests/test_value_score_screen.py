@@ -18,6 +18,10 @@ import pytest
 import scripts.score_panel as sp
 import scripts.value_score_screen as vss
 
+# Every test file carries a deadline (AGENT_ONBOARDING rule 5); 120s is what the
+# sibling script tests use.
+pytestmark = pytest.mark.timeout(120)
+
 
 def _fixture(n: int) -> dict:
     """The suite's rising cross-section (the same fixture ``offline_demo`` uses).

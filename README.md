@@ -1367,6 +1367,28 @@ many ADRs) are refused by the USD-only metrics (EV/EY/Acquirer/Z/net-net
 render `n/a` instead of mixing currencies), and the day's % change is
 normalized to a fraction regardless of the market session. `0` disables any gate.
 
+### The broker-panel value screen (`scripts/value_score_screen.py`)
+
+A second, narrower screen applies one broker app's filter panel verbatim — market
+cap ≥ $10B, 0 < P/E (TTM) ≤ 33, P/B ≤ 9, P/S (TTM) ≤ 8, Price-to-Cash-Flow (TTM) ≤ 25 —
+keeps only the names **down ≥ 2% on the day**, adds optional anchors (`--roe-min`,
+`--chg5d-max`, `--rsi-max`, and the NYSE/Nasdaq common-stock gate), then ranks the
+survivors by the engine's own `fundamental_score` composite and prints only the names
+clearing `--score-min` (default 64):
+
+```
+py -3.12 scripts/value_score_screen.py --roe-min 15 --chg5d-max 3 --rsi-max 55 --limit 60
+```
+
+`--panel <date>` scores those names against the built SEC EDGAR XBRL panel for that
+date (`data_cache_dir/panels/<date>.json`, one file per date, cached forever) instead
+of the run's own cross-section, so the percentile is market-relative; the report prints
+which denominator it used, and a candidate the panel does not carry is refused by name
+rather than scored as 0. The composite is `RESEARCH_ONLY` — a tie-aware percentile with
+no band table — and reaches no executor gate. OpenD supplies the server-side Screening
+V2 stage; `--no-moomoo` falls back to the deepest decliners and labels the run a
+partial scan. See `docs/implementation_plan_value_screen_score.md`.
+
 </td></tr>
 </table>
 
