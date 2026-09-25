@@ -1,7 +1,9 @@
 # Implementation plan — value screen → FundamentalScore filter
 
-**Status:** the screen tool is written and its offline path is verified; the live path and the panel
-mode are pending. No engine gate, config key or web surface is added by this plan.
+**Status:** the tool is written and committed; the **designed** live path has run end to end with OpenD
+up (so the server-side Screening V2 stage is in play), and `--panel` is implemented and verified - on
+disk offline, by two failing-first proofs, and against a real panel. No engine gate, config key or web
+surface is added by this plan.
 **Date:** 2026-09-24.
 **Owner:** vince.
 **Scope:** `scripts/value_score_screen.py` (new), plus a panel-mode addition to its scoring stage.
@@ -263,15 +265,20 @@ Printed in every report, because each line changes what the number means:
 
 1. **Offline, already green:** `--offline-demo` — 40 synthetic names, 40 scored, 15 kept at `>= 64`,
    `status: RESEARCH_ONLY`, sub-score bands printed, **zero vendor calls**.
-2. **New offline proof for the panel mode:** a small panel file on disk plus `--panel <date>`;
-   asserts that the full-panel denominator is used and that a candidate missing from the panel lands
-   in `withheld` with a reason. Zero vendor calls, so it runs during any batch.
+2. **Offline proof for the panel mode — done.** A panel file on disk plus `--panel <date>`; the
+   full-panel denominator is used and a candidate missing from it lands in `withheld` with the panel
+   date in the reason. Zero vendor calls. Locked by four tests in `tests/test_value_score_screen.py`,
+   the sharpest of which measures the mode's actual claim: the same candidate scores **17.95 over a
+   40-name panel and 77.78 over a 10-name one**.
 3. **Golden-path proof of the render path:** a synthetic `render()` call (already exercised once)
    so a column or format defect is caught before it costs a live run.
-4. **Live:** `--roe-min 15 --chg5d-max 3 --rsi-max 55 --limit 30 --top 20`, reporting the funnel
-   count at each stage and the vendor-call ledger.
-5. **Failing-first discipline:** the panel-mode assertion must fail on the *pre-change* source
-   (scoring the candidates-only panel) by name, with the source restored byte-identical.
+4. **Live — done 2026-09-24 on the designed path**, OpenD up, so Screening V2 supplies the candidate
+   set: `decliners 287 -> candidates 16 -> passed the ratio gates 12`, three names clearing the cut
+   (UHS 77.78, LOGI 77.78, THC 71.11) over **26 vendor calls** (1 bulk feed, 1 cached symbol list,
+   1 paginated screen, 16 per-name financials, 6 cash-flow fallbacks, 1 peer-universe build).
+5. **Failing-first discipline — done.** Forcing the panel branch off fails the ranking test with
+   `KeyError: 'N07'`; removing the by-name refusal fails the withheld test with `KeyError: 'AAA'`.
+   Both restorations byte-identical (sha256 `441d388cb723a706`).
 
 ## 10. Risks and unknowns
 
@@ -289,9 +296,9 @@ Printed in every report, because each line changes what the number means:
 
 | item | state |
 | --- | --- |
-| `scripts/value_score_screen.py` | written, ruff-clean, offline path verified, anchors parameterized |
+| `scripts/value_score_screen.py` | written, ruff-clean, anchors parameterized, committed (`3a0e49f`, `cbc9f3b`) |
 | render path with the owner's anchors | verified with synthetic data |
-| live run | pending (queued behind a running batch; it must not stack on the same vendors) |
-| `--panel` mode + offline panel proof | next |
-| SEC panel build | not started; needs the owner's go, and it is the same object as the pending P0-2 wide panel build |
-| commit and push | the tool is committed only after the live run verifies it; this document and any docs-only follow-up can land immediately |
+| live run, designed path (OpenD up) | **done 2026-09-24** — 287 decliners → 16 candidates → 12 past the ratio gates, 3 clearing 64, 26 vendor calls |
+| `--panel` mode | **done** — loads the built panel via `load_panel_series`, scores the whole file, prints the denominator in the header, refuses absent names by name, labels a missing file; 4 tests + 2 failing-first proofs |
+| SEC panel build | building the 287-name decliner population for 2026-09-24 — 0.5 min of SEC calls at 10 req/s, plus the prices leg |
+| commit and push | pending for the `--panel` pass |

@@ -338,29 +338,60 @@ def stage_ratios(args, rows: list, change: dict) -> tuple[list, dict, dict]:
 # --------------------------------------------------------------------------
 
 
-def stage_score(args, fin_by_ticker: dict) -> tuple[dict, dict, str, dict]:
-    """``({name: score}, {name: withheld reason}, basis, subscores)``.
+def stage_score(args, fin_by_ticker: dict) -> tuple[dict, dict, str, dict, str]:
+    """``({name: score}, {name: withheld reason}, basis, subscores, panel_note)``.
 
-    One ``resolve_peer_universe`` pass over the financials already in hand (it
-    skips its own 51k-row symbol fetch whenever ``tickers`` is supplied) and one
-    ``fundamental_score`` pass over the resulting panel. No vendor calls.
+    Two panel sources, in order of preference.
+
+    ``--panel <date>`` reads the BUILT panel for that date
+    (``data_cache_dir/panels/<date>.json``, one file per date, never re-fetched)
+    and scores the whole of it, so the percentile is relative to that panel -
+    the market-relative reading the plan's §6 exists for. A candidate the panel
+    does not carry (a non-US filer, a pre-XBRL filer, a 20-F whose market cap was
+    withheld) is refused BY NAME, never scored as 0.
+
+    Without ``--panel`` the panel is this run's own fetched cross-section, which
+    must be WIDER than the survivors: ``factors.category_scores`` refuses a peer
+    set below its ``min_peers`` floor, and it costs no vendor calls because every
+    name in it was already fetched. A missing or empty panel FILE falls back to
+    that cross-section and says so in the report rather than silently changing
+    the denominator.
     """
     from tradingagents.strategies.fundamental_score import fundamental_score
     from tradingagents.strategies.peer_universe import resolve_peer_universe
 
-    names = sorted(fin_by_ticker)
-    if len(names) < 2:
-        logger.warning("fewer than 2 names survived; the composite is a "
-                       "cross-sectional read and cannot be computed")
-        return {}, dict.fromkeys(names, "cross-section too small (needs >= 2 names)"), "", {}
-    panel_res = resolve_peer_universe(
-        tickers=names,
-        financials=fin_by_ticker,
-        current_date=args.date,
-        include_score_metrics=True,
-    )
-    _bump("peer-universe build (0 extra vendor calls: financials reused)")
-    panel = {str(k).upper(): dict(v) for k, v in (panel_res.get("metrics") or {}).items()}
+    panel: dict = {}
+    note = ""
+    if getattr(args, "panel", None):
+        from scripts.score_panel import load_panel_series
+
+        loaded = load_panel_series([args.panel], None) or {}
+        panel = {str(k).upper(): dict(v)
+                 for k, v in (loaded.get(args.panel) or {}).items()
+                 if isinstance(v, dict)}
+        if panel:
+            note = f"{len(panel)} names from the built panel for {args.panel}"
+        else:
+            note = (f"NO built panel for {args.panel} - fell back to this run's "
+                    f"fetched cross-section")
+            logger.warning("no panel file for %s; falling back to the run's "
+                           "cross-section", args.panel)
+    if not panel:
+        names = sorted(fin_by_ticker)
+        if len(names) < 2:
+            logger.warning("fewer than 2 names survived; the composite is a "
+                           "cross-sectional read and cannot be computed")
+            return ({}, dict.fromkeys(names, "cross-section too small (needs >= 2 names)"),
+                    "", {}, note or "this run's fetched cross-section (too small)")
+        panel_res = resolve_peer_universe(
+            tickers=names,
+            financials=fin_by_ticker,
+            current_date=args.date,
+            include_score_metrics=True,
+        )
+        _bump("peer-universe build (0 extra vendor calls: financials reused)")
+        panel = {str(k).upper(): dict(v) for k, v in (panel_res.get("metrics") or {}).items()}
+        note = note or f"{len(panel)} names from this run's fetched cross-section"
     scored = fundamental_score(panel)
     withheld = dict(scored.get("withheld") or {})
     # The engine refuses a peer set below its floor and says why at the SUB-SCORE
@@ -376,11 +407,19 @@ def stage_score(args, fin_by_ticker: dict) -> tuple[dict, dict, str, dict]:
         why = "; ".join(reasons) or str(scored.get("unavailable"))
         for name in sorted(panel):
             withheld.setdefault(name, why)
+    # A candidate the panel does not carry is refused BY NAME - the honest gap
+    # the SEC leg records (no 10-K/20-F/40-F filed, or a withheld 20-F market cap).
+    for name in sorted(fin_by_ticker):
+        if name not in panel and name not in scored.get("scores", {}):
+            withheld.setdefault(
+                name, f"not in the panel ({args.panel or 'run cross-section'})"
+            )
     return (
         dict(scored.get("scores") or {}),
         withheld,
         str(scored.get("basis") or ""),
         dict(scored.get("subscores") or {}),
+        note,
     )
 
 
@@ -425,7 +464,7 @@ def _row_cells(row: dict, scores: dict, subs: dict) -> list:
 
 
 def render(kept: list, scores: dict, withheld: dict, subs: dict,
-           args, basis: str) -> str:
+           args, basis: str, panel_note: str = "") -> str:
     """The markdown report: the screen's own columns, then the engine's reads."""
     rows = sorted(kept, key=lambda r: -(scores.get(r["symbol"]) or -1.0))
     # These counts are over the CANDIDATES. The panel is wider than they are -
@@ -449,6 +488,7 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         + (f" · ROE >= {args.roe_min:g}%" if args.roe_min else "")
         + (f" · 5-day change <= {args.chg5d_max:g}%" if args.chg5d_max else "")
         + (f" · RSI(14) <= {args.rsi_max:g}" if args.rsi_max else ""),
+        f"- Panel: {panel_note}",
         f"- Scoring pass: {scored_n} of {len(rows)} candidates scored against a "
         f"{panel_n}-name panel, {len(miss)} withheld, {len(qual)} clear the "
         f"{args.score_min:g} cut",
@@ -457,7 +497,7 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
           if args.no_moomoo else []),
         "",
         "**The `score` column is `RESEARCH_ONLY`** - a tie-aware percentile x100 "
-        "over this run's screened cross-section, with no band table "
+        "over the panel named above, with no band table "
         f"(nearest published sub-score edges: {NEAREST_PUBLISHED_EDGES[0]:g} and "
         f"{NEAREST_PUBLISHED_EDGES[1]:g}). The four sub-score columns are the "
         "`ADVISORY` output that does carry band tables. Neither the composite "
@@ -505,8 +545,9 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         "includes, so a surviving name is pre-selected on part of what the "
         "composite then ranks. Read the sub-score columns, not only the "
         "composite.",
-        "- **Panel dependence.** The percentile is relative to the screened "
-        "cross-section, not the market. A wider panel changes every score.",
+        "- **Panel dependence.** The percentile is relative to the panel named "
+        "above, not to the market as a whole: a different panel changes every "
+        "score.",
         "- **Liquidity/execution are not checked here.** Nothing in this list "
         "has been reviewed for spread, depth or a session window; the "
         "pre-market and risk gates are separate reads.",
@@ -613,6 +654,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="listing exchanges to keep ('' disables)")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved markdown (default 'screener')")
+    parser.add_argument("--panel", default=None, metavar="DATE",
+                        help="score against the BUILT panel for DATE "
+                             "(data_cache_dir/panels/<DATE>.json): the whole panel "
+                             "is the peer set, so the percentile is relative to it "
+                             "rather than to this run's screened names. Falls back "
+                             "to the run's cross-section, labelled, if no file exists")
     parser.add_argument("--show-excluded", action="store_true",
                         help="also list candidates scored below the cut and every "
                              "withheld name (default: qualifying names only)")
@@ -654,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
               "or a ratio could not be computed at all, which fails closed. "
               "Raise --limit, or run with OpenD up for the full screen.")
         return 0
-    scores, withheld, basis, subs = stage_score(args, fin_by_ticker)
+    scores, withheld, basis, subs, panel_note = stage_score(args, fin_by_ticker)
     if kept and not any(s is not None for s in scores.values()):
         print(f"[score] the engine produced NO composite for {len(kept)} "
               f"candidate(s) over a {len(fin_by_ticker)}-name panel; the "
@@ -662,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
               f"cross-sectional percentile is not computed over a handful of "
               f"names, so a peer set below the floor yields nothing rather than "
               f"noise (factors.category_scores, min_peers=8).")
-    report = render(kept, scores, withheld, subs, args, basis)
+    report = render(kept, scores, withheld, subs, args, basis, panel_note)
     print(report)
     if not args.no_save:
         try:
