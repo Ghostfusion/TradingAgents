@@ -55,6 +55,7 @@ REGISTRY: dict[str, str] = {
     "enable_sector_industry": "wired",
     "enable_sector_breadth": "wired",
     "enable_sector_eodhd_constituents": "wired",
+    "enable_mechanical_volume_discount": "wired",
     "enable_spread_estimator": "wired",
     "enable_book_risk_sizing": "wired",
     "enable_conformal_bands": "wired",

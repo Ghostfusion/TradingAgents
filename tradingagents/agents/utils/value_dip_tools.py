@@ -1068,17 +1068,41 @@ def get_vdu_entry_setup(
     vols = ohlcv.get("volumes") or []
     if len(closes) < 30 or not vols:
         return f"vdu entry setup unavailable for {ticker}: insufficient data."
-    vd = vdu_entry_setup(closes, highs, lows, vols)
+    # Mechanical-volume discount (OPEX week / witching): OFF unless the operator
+    # turns `enable_mechanical_volume_discount` on, so the trigger's RVOL keeps
+    # its shipped meaning by default. Both ratios are rendered either way.
+    discount = False
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        discount = bool(get_config().get("enable_mechanical_volume_discount", False))
+    except Exception:  # noqa: BLE001 - advisory: the default stays off
+        discount = False
+    vd = vdu_entry_setup(
+        closes,
+        highs,
+        lows,
+        vols,
+        dates=ohlcv.get("dates") or None,
+        discount_mechanical=discount,
+    )
     dry = vd.get("volume_dry_up") or {}
     trig = vd.get("trigger_candle") or {}
     hl = vd.get("higher_low") or {}
     mom = vd.get("momentum") or {}
     comp = vd.get("compression") or {}
     crange = vd.get("closing_range") or {}
+    mech_txt = ""
+    if trig.get("mechanical_discount_measured"):
+        mech_txt = (
+            f" rvol_gate={_txt_round(trig.get('rvol_gate'))} "
+            f"(mechanical sessions excluded={trig.get('mechanical_excluded')})"
+        )
     return (
         f"vdu entry setup {ticker}: candidate={vd['candidate']} "
         f"dry_up={dry.get('dry_up')} (ratio={_txt_round(dry.get('vdu_ratio'))}) "
-        f"trigger={trig.get('trigger')} (rvol(20d)={_txt_round(trig.get('rvol'))}) "
+        f"trigger={trig.get('trigger')} (rvol(20d)={_txt_round(trig.get('rvol'))})"
+        f"{mech_txt} "
         f"higher_low={hl.get('higher_low')} momentum={mom.get('verdict')} "
         f"compression={comp.get('compressed')} "
         f"(atr_pct={_txt_pct(comp.get('atr_pct'))}, "

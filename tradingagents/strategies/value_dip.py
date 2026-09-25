@@ -605,12 +605,21 @@ def volume_dry_up(
     window: int = 20,
     lookback: int = 5,
     ratio: float = 0.7,
+    dates: list | None = None,
+    discount_mechanical: bool = False,
 ) -> dict:
     """Volume dry-up (VDU): selling volume drops below 70% of the ``window``
     -day average near support (§2). The ``lookback`` bars before the trigger
     day are compared against the ``window`` bars ending immediately before
     them, so the trigger candle's own volume does not count against the
     dry-up.
+
+    ``discount_mechanical`` (opt-in, gate ``enable_mechanical_volume_discount``)
+    drops the OPEX-week / witching sessions from BOTH windows before averaging,
+    so an expiration spike cannot deepen an apparent dry-up. It needs ``dates``
+    and at least two unflagged sessions in each window; otherwise the discount
+    is unmeasured and the raw ratio decides, exactly as before. Both ratios are
+    reported.
     """
     if not volumes or len(volumes) < window + lookback + 1:
         return {"dry_up": None, "vdu_ratio": None}
@@ -621,7 +630,32 @@ def volume_dry_up(
         return {"dry_up": None, "vdu_ratio": None}
     rm = sum(recent) / len(recent) if recent else 0.0
     r = rm / pm
-    return {"dry_up": bool(r <= ratio), "vdu_ratio": round(r, 4)}
+    out = {"dry_up": bool(r <= ratio), "vdu_ratio": round(r, 4)}
+    if discount_mechanical and dates:
+        try:
+            from .volume_flags import mechanical_volume_flags
+
+            flags = mechanical_volume_flags(dates)
+        except Exception:  # noqa: BLE001 - the discount degrades to unmeasured
+            flags = None
+        if flags is not None and len(flags) == len(volumes):
+            def _keep(seg: list, start: int) -> list:
+                return [v for i, v in enumerate(seg, start=start) if not flags[i]]
+
+            kept_prior = _keep(prior, len(volumes) - window - lookback - 1)
+            kept_recent = _keep(recent, len(volumes) - lookback - 1)
+            if len(kept_prior) >= 2 and len(kept_recent) >= 2:
+                pm2 = sum(kept_prior) / len(kept_prior)
+                rm2 = sum(kept_recent) / len(kept_recent)
+                if pm2 > 0:
+                    r2 = rm2 / pm2
+                    out["vdu_ratio_ex_mechanical"] = round(r2, 4)
+                    out["mechanical_excluded"] = len(prior) - len(kept_prior)
+                    out["mechanical_discount_measured"] = True
+                    out["dry_up"] = bool(r2 <= ratio)
+                    return out
+    out["mechanical_discount_measured"] = False
+    return out
 
 
 def trigger_candle(
@@ -631,24 +665,59 @@ def trigger_candle(
     volumes: list,
     window: int = 20,
     rvol_min: float = 1.3,
+    dates: list | None = None,
+    discount_mechanical: bool = False,
 ) -> dict:
     """Trigger candle (§2): daily close above the prior day's high (or a
     bullish engulfing candle) on above-average volume (RVOL >= 1.3x).
+
+    ``discount_mechanical`` (opt-in, gate ``enable_mechanical_volume_discount``)
+    recomputes the ratio over the prior ``window`` sessions MINUS the ones that
+    print mechanically huge turnover - the OPEX week into expiration and
+    quadruple witching - so an expiration spike cannot manufacture a trigger on
+    its own. It needs ``dates``; without them the discount is UNMEASURED and the
+    raw ratio gates, exactly as before. Both ratios are always reported, and
+    ``rvol_gate`` says which one decided.
     """
     if not closes or len(closes) < window + 2 or len(highs) < 2 or not volumes:
         return {"trigger": None, "rvol": None}
     avg = sum(volumes[-window - 1 : -1]) / window if window else 0.0
     rvol = volumes[-1] / avg if avg > 0 else None
+    mech = None
+    if discount_mechanical and dates:
+        try:
+            from .volume_flags import rvol_ex_mechanical
+
+            mech = rvol_ex_mechanical(volumes, dates, window=window)
+        except Exception:  # noqa: BLE001 - the discount degrades to unmeasured
+            mech = None
+    rvol_gate = rvol
+    if mech is not None and mech.get("rvol_ex_mechanical") is not None:
+        rvol_gate = mech["rvol_ex_mechanical"]
+    # A session that is ITSELF mechanically huge cannot confirm a breakout: its
+    # volume is the options market's, not the stock's. The discount therefore
+    # suppresses the trigger on such a day (reported, never silent).
+    mechanical_today = bool(mech is not None and mech.get("measured") and mech.get("flagged_today"))
     prev_high = float(highs[-2])
     close = float(closes[-1])
     close_above_prev_high = close > prev_high
     # Bullish engulfing approximation (no opens): close > prior high and
     # the prior bar closed down vs the bar before it.
     engulfing = close > prev_high and len(closes) >= 3 and float(closes[-2]) <= float(closes[-3])
-    trig = bool(rvol is not None and rvol >= rvol_min and (close_above_prev_high or engulfing))
+    trig = bool(
+        rvol_gate is not None
+        and rvol_gate >= rvol_min
+        and (close_above_prev_high or engulfing)
+        and not mechanical_today
+    )
     return {
         "trigger": trig,
         "rvol": round(rvol, 3) if rvol is not None else None,
+        "rvol_gate": round(rvol_gate, 3) if rvol_gate is not None else None,
+        "rvol_ex_mechanical": (mech or {}).get("rvol_ex_mechanical"),
+        "mechanical_excluded": (mech or {}).get("excluded"),
+        "mechanical_discount_measured": bool(mech is not None and mech.get("measured")),
+        "mechanical_today": mechanical_today,
         "close_above_prior_high": close_above_prev_high,
         "engulfing": engulfing,
         "rvol_min": rvol_min,
@@ -679,6 +748,8 @@ def vdu_entry_setup(
     k: int = 3,
     support_window: int = 60,
     div_window: int = 120,
+    dates: list | None = None,
+    discount_mechanical: bool = False,
 ) -> dict:
     """The full Step-2 entry ladder: VDU near support -> momentum divergence /\
     higher-low -> trigger candle with volume expansion (§2 diagram).
@@ -686,11 +757,26 @@ def vdu_entry_setup(
     ``candidate`` = trigger-candle AND momentum confirmation AND (dry-up is not
     False when measured). Each sub-signal is reported; a missing sub-signal is
     ignored (never fails) per the repo convention.
+
+    ``discount_mechanical`` is forwarded to the trigger candle: with ``dates``
+    the RVOL that decides the trigger is recomputed without the OPEX-week
+    sessions, so expiration turnover cannot manufacture a breakout.
     """
     if not closes or len(closes) < 30 or not volumes:
         return {"candidate": False, "reasons": ["insufficient data"]}
-    dry = volume_dry_up(volumes, window=window)
-    trig = trigger_candle(closes, highs, lows, volumes, window=window, rvol_min=rvol_min)
+    dry = volume_dry_up(
+        volumes, window=window, dates=dates, discount_mechanical=discount_mechanical
+    )
+    trig = trigger_candle(
+        closes,
+        highs,
+        lows,
+        volumes,
+        window=window,
+        rvol_min=rvol_min,
+        dates=dates,
+        discount_mechanical=discount_mechanical,
+    )
     hl = higher_low_structure(lows, k=k, window=support_window)
     mom = macd_divergence(closes, lows, window=div_window, k=k)
     reasons = []

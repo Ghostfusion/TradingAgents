@@ -371,6 +371,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY": "enable_sector_industry",
     "TRADINGAGENTS_ENABLE_SECTOR_BREADTH": "enable_sector_breadth",
     "TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS": "enable_sector_eodhd_constituents",
+    "TRADINGAGENTS_ENABLE_MECHANICAL_VOLUME_DISCOUNT": "enable_mechanical_volume_discount",
     "TRADINGAGENTS_ENABLE_SECURITY_CONTEXT": "enable_security_context",
     "TRADINGAGENTS_RISK_AUDIT_ENABLED": "risk_audit_enabled",
     # The limits the governor reads. These were config-only: the per-name cap,
@@ -1174,6 +1175,11 @@ DEFAULT_CONFIG = _apply_env_overrides(
         "enable_sector_industry": False,
         "enable_sector_breadth": False,
         "enable_sector_eodhd_constituents": False,  # EODHD full-US universe for the breadth layer (sector_screener)
+        # Mechanical-volume discount (strategies/volume_flags.py): with dates
+        # available, the VDU trigger's RVOL is recomputed without the OPEX-week
+        # / witching sessions, so expiration turnover cannot manufacture a
+        # breakout. Off by default: turning it on CHANGES which triggers fire.
+        "enable_mechanical_volume_discount": False,
         # SecurityContext (docs/design_security_context.md SC-1..SC-8): the
         # deterministic classification front end the conditional research
         # overlays were missing - sector/industry verbatim WITH their source,

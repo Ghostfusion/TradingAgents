@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **63 of the 111 `enable_*` keys** in
+policy, data-surface and context gates: **64 of the 112 `enable_*` keys** in
 `DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
@@ -96,6 +96,7 @@ same way rather than being stored as a truthy string.
 | `enable_sector_industry` | `TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY` | parent-gated industry-group ranking | `agents/utils/analysis_tools.py` | `test_analysis_tools.py` | wired |
 | `enable_sector_breadth` | `TRADINGAGENTS_ENABLE_SECTOR_BREADTH` | constituent breadth / leadership ratio | `agents/utils/analysis_tools.py` | `test_analysis_tools.py` | wired |
 | `enable_sector_eodhd_constituents` | `TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS` | vendor constituents for the sector table | `agents/utils/analysis_tools.py` | `test_analysis_tools.py` | wired |
+| `enable_mechanical_volume_discount` | `TRADINGAGENTS_ENABLE_MECHANICAL_VOLUME_DISCOUNT` | the VDU trigger's RVOL is recomputed over the prior window MINUS the OPEX-week / witching sessions, so expiration turnover cannot manufacture a breakout (needs bar dates; unmeasured without them) | `strategies/value_dip.py::trigger_candle` (via `agents/utils/value_dip_tools.py`) | `test_volume_flags.py` | wired |
 | `enable_spread_estimator` | `TRADINGAGENTS_ENABLE_SPREAD_ESTIMATOR` | quote-free spread floor line + `get_spread_estimate` | `agents/utils/quant_formula_tools.py`, `agents/utils/market_position_tools.py` | `test_quant_formula_tools.py`, `test_liquidity_spread.py` | wired |
 | `enable_book_risk_sizing` | `TRADINGAGENTS_ENABLE_BOOK_RISK_SIZING` | minimum-CVaR book sizing under the existing budget | `agents/utils/quant_formula_tools.py`, `strategies/book_risk.py` | `test_quant_formula_tools.py`, `test_book_risk_sizing.py` | wired |
 | `enable_conformal_bands` | `TRADINGAGENTS_ENABLE_CONFORMAL_BANDS` | calibrated valuation band with realized coverage | `agents/utils/quant_formula_tools.py`, `strategies/conformal.py` | `test_quant_formula_tools.py`, `test_conformal_bands.py` | wired |
