@@ -160,7 +160,12 @@ py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/wor
 2. **Default `python` is the hermes agent venv** — never use it (see above).
 3. **Port 11111 quirk:** OpenD (moomoo gateway) at `127.0.0.1:11111`. When it
    is DOWN the TCP probe **times out** (not refuses), so tests must mock the
-   probe to stay fast; the vendor caches the negative probe 20s.
+   probe to stay fast; the vendor caches the negative probe 20s. **A successful
+   autostart clears that cache** - `_autostart_opend` proves reachability, which
+   invalidates the cached failure - so the call that triggered the launch works
+   too; without the clear it raised `MoomooNotConfiguredError` about a gateway
+   the autostart had just brought up, and only the *next* call in the process
+   worked (fixed 2026-09-25; see `CHANGELOG.md`).
 4. **OpenD threads and interpreter exit.** The SDK's `CallbackExecutor` threads
    are non-daemon by default, and `open_context_base._close_callback_executor`
    installs a *fresh* executor while closing one, so a closed context can leave
