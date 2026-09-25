@@ -1092,6 +1092,7 @@ def get_vdu_entry_setup(
     mom = vd.get("momentum") or {}
     comp = vd.get("compression") or {}
     crange = vd.get("closing_range") or {}
+    priming = vd.get("base_priming") or {}
     mech_txt = ""
     if trig.get("mechanical_discount_measured"):
         mech_txt = (
@@ -1108,7 +1109,12 @@ def get_vdu_entry_setup(
         f"(atr_pct={_txt_pct(comp.get('atr_pct'))}, "
         f"rank={_txt_round(comp.get('percentile'), 3)}) "
         f"range_tight={crange.get('tight')} "
-        f"(mean_range={_txt_pct(crange.get('mean_range_pct'))}); "
+        f"(mean_range={_txt_pct(crange.get('mean_range_pct'))}) "
+        f"base_priming={priming.get('primed')} "
+        f"(prev_tight={priming.get('prev_tight')} "
+        f"expansion={priming.get('expansion')}, "
+        f"x{_txt_round(priming.get('expansion_ratio'), 2)} range, "
+        f"rvol={_txt_round(priming.get('rvol'), 2)}); "
         + ("; ".join(vd.get("reasons") or []) or "ok")
     )
 

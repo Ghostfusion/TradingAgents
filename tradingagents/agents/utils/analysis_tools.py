@@ -389,15 +389,39 @@ def _market_breadth_read() -> dict | None:
         return _RUN_BREADTH_CACHE["read"] or None
     read: dict | None = None
     try:
+        from tradingagents.dataflows.config import get_config
         from tradingagents.dataflows.market_panel import market_closes
         from tradingagents.strategies.market_breadth import market_breadth
 
         panel = market_closes(lambda t: _ohlcv(t).get("closes") or [])
-        read = market_breadth(panel) if panel else None
+        # The panel is cached BESIDE the read: the gated panel-wide extras
+        # (X3's Marchenko-Pastur spectrum, printed by RegimeScore) read the same
+        # cross-section, and a second build would be a second panel. The run's
+        # config travels into the producer too - it was called with ``cfg=None``,
+        # which made every cfg-driven producer behaviour unreachable from a run
+        # (X3's switch could not be on).
+        _RUN_BREADTH_CACHE["panel"] = panel or {}
+        try:
+            cfg = get_config() or {}
+        except Exception:  # noqa: BLE001 - a config read must never break the read
+            cfg = {}
+        read = market_breadth(panel, cfg=cfg) if panel else None
     except Exception:  # noqa: BLE001 - an advisory leg degrades, never blocks
         read = None
     _RUN_BREADTH_CACHE["read"] = read or {}
     return read
+
+
+def _market_panel() -> dict:
+    """The run's shared S&P 500 close panel (P0-2), or ``{}``.
+
+    ONE panel per process: ``_market_breadth_read`` assembles it and caches it,
+    so a consumer that needs the panel itself (RegimeScore's gated printed
+    reads) shares that panel instead of building a second one from a second set
+    of fetches.
+    """
+    _market_breadth_read()
+    return _RUN_BREADTH_CACHE.get("panel") or {}
 
 
 def _txt_round(v, nd: int = 4) -> str:
@@ -531,9 +555,16 @@ def get_swing_set(
                 f"near_breakout={vcp.get('near_breakout')}"
             )
         if rs:
+            bd = rs.get("breakdown") or {}
             lines.append(
                 f"  relative_strength: {rs.get('verdict')} rs={_txt(rs.get('rs'))} "
                 f"slope%={_txt(rs.get('slope_pct'))} near_high={rs.get('near_high')}"
+            )
+            lines.append(
+                f"  rs_breakdown: {bd.get('label')} new_low={bd.get('new_low')} "
+                f"lower_high={bd.get('lower_high')} near_low={bd.get('near_low')} "
+                f"vs_63d_low={_fmt_pct(bd.get('dist_from_low'))} "
+                f"(lookback={bd.get('lookback')} bars; advisory, never a gate)"
             )
         return chr(10).join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
@@ -605,11 +636,15 @@ def get_relative_strength(
         from tradingagents.strategies.relative_strength import relative_strength_report
 
         r = relative_strength_report(closes, bench)
+        bd = r.get("breakdown") or {}
         return (
             f"relative_strength {ticker}: verdict={r.get('verdict')} "
             f"rs={_txt(r.get('rs'))} slope_63d_pct={_txt(r.get('slope_pct'))} "
             f"uptrend={r.get('uptrend')} near_high={r.get('near_high')} "
             f"new_high={r.get('new_high')} divergence={r.get('divergence')} "
+            f"breakdown={bd.get('label')} new_low={bd.get('new_low')} "
+            f"lower_high={bd.get('lower_high')} "
+            f"rs_vs_63d_low={_fmt_pct(bd.get('dist_from_low'))} "
             f"context: {r.get('context')}"
         )
     except Exception as exc:  # noqa: BLE001
@@ -6137,6 +6172,19 @@ def _render_regime_score(res: dict, paths: dict | None) -> str:
         )
     if res.get("withheld"):
         lines.append(f"  withheld: {res['withheld']}")
+    # The gated PRINTED reads (R5's forward-stress probability, X3's panel
+    # spectrum). They are printed BESIDE the score and never scored - an
+    # environment band is not a probability and a panel-wide eigen-count is not
+    # a 0-100 leg - so they render here, outside the component table. Nothing
+    # renders when their gates are off, which is the default.
+    for key, block in (res.get("printed") or {}).items():
+        if isinstance(block, dict):
+            flat = ", ".join(
+                f"{k}={v}" for k, v in block.items() if not isinstance(v, (dict, list))
+            )
+            lines.append(f"  printed {key}: {flat or '(nested - see the score payload)'}")
+        else:
+            lines.append(f"  printed {key}: {block}")
     if paths:
         lines.append(
             f"  two paths: disagree={paths.get('disagree')} "
@@ -6185,7 +6233,7 @@ def get_regime_score() -> str:
                 "regime score unavailable: no market data (the benchmark series "
                 "could not be read)"
             )
-        res = regime_score(vals)
+        res = regime_score(vals, panel=_market_panel())
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"regime score unavailable: {type(exc).__name__}: {exc}"
     try:

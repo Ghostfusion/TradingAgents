@@ -308,7 +308,7 @@ def regime_score(components: dict, *, weights: dict | None = None, panel: dict |
             "advisory environment read: never a gate, never a size, never a direction",
         ]
     )
-    return _attach_forward_stress({
+    return _attach_printed_reads({
         "score": combined.get("score"),
         "coverage": combined.get("coverage"),
         "floor": combined.get("floor"),
@@ -584,6 +584,9 @@ def _spectral_change_values(
 #: The key R5's read is printed under.
 FORWARD_STRESS_KEY = "forward_stress_probability"
 
+#: The key X3's panel spectrum is printed under.
+MP_SPECTRUM_KEY = "mp_lower_spectrum"
+
 
 def _forward_stress_gate() -> bool:
     """Is R5's forward-stress read switched on?
@@ -615,14 +618,52 @@ def _forward_stress_printed(panel, *, cfg: dict | None = None) -> dict:
     return forward_stress_probability(panel or {}, cfg=cfg)
 
 
-def _attach_forward_stress(result: dict, panel) -> dict:
-    """R5's PRINTED block, attached only while its gate is on.
+def _spectrum_gate() -> bool:
+    """Is X3's panel-spectrum read switched on? (``enable_mp_lower_spectrum``)
 
-    With the gate off (the default) the dict is returned untouched, so a gate-off
-    run prints exactly the keys it printed before this read existed.
+    Same discipline as R5's: the key is read by its literal name so the gate
+    registry's read-site scan finds it, and an unreadable config leaves it OFF
+    rather than breaking the score it is printed beside.
     """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() or {}
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        cfg = {}
+    return bool(cfg.get("enable_mp_lower_spectrum", False))
+
+
+def _spectrum_printed(panel, *, cfg: dict | None = None) -> dict | None:
+    """X3's read for the PRINTED block - the ONE producer, never a second one.
+
+    ``sector_breadth.mp_lower_spectrum`` reads its own gate and returns ``None``
+    when it is off, so this returns ``None`` in exactly that case rather than an
+    empty block. The read is per PANEL (one correlation matrix for the whole
+    cross-section), which is why it is printed here and never scored: a collapse
+    in the effective number of independent bets is a backdrop, not a 0-100 leg.
+    """
+    from .sector_breadth import mp_lower_spectrum
+
+    return mp_lower_spectrum(panel or {}, cfg=cfg)
+
+
+def _attach_printed_reads(result: dict, panel) -> dict:
+    """The gated PRINTED blocks, attached only while their own gate is on.
+
+    With every gate off (the default) the dict is returned untouched, so a
+    gate-off run prints exactly the keys it printed before these reads existed.
+    Each read attaches under its own key: X3's arrival must not displace R5's.
+    """
+    printed: dict = {}
     if _forward_stress_gate():
-        result["printed"] = {FORWARD_STRESS_KEY: _forward_stress_printed(panel)}
+        printed[FORWARD_STRESS_KEY] = _forward_stress_printed(panel)
+    if _spectrum_gate():
+        spectrum = _spectrum_printed(panel)
+        if spectrum is not None:
+            printed[MP_SPECTRUM_KEY] = spectrum
+    if printed:
+        result["printed"] = printed
     return result
 
 
@@ -794,6 +835,7 @@ __all__ = [
     "SPECTRAL_CHANGE_KEY",
     "SPECTRAL_CHANGE_RAMP",
     "FORWARD_STRESS_KEY",
+    "MP_SPECTRUM_KEY",
     "PATH_A_NAME",
     "PATH_B_NAME",
     "AXIS_KEYS",

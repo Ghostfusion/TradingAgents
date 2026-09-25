@@ -45,6 +45,42 @@ def _swing_fixture():
     return closes, highs, lows, vols
 
 
+def test_a_freefall_rs_breakdown_never_moves_the_swing_candidate(monkeypatch):
+    """The breakdown is REPORTED, not a silent second veto.
+
+    ``candidate`` is built from the architecture, the RSI band, the pullback and
+    the RS verdict; the lower-side read travels beside them. A freefall label
+    must therefore leave the verdict exactly as it was (the owner asked for a
+    reported row only - gating on it is a separate, measured decision).
+    """
+    from tradingagents.strategies import relative_strength as RS
+    from tradingagents.strategies.swing import swing_report
+
+    closes, highs, lows, vols = _swing_fixture()
+    bench = [100.0 + 0.3 * i for i in range(len(closes))]
+    plain = swing_report(
+        closes, highs=highs, lows=lows, volumes=vols, atr_value=2.0,
+        benchmark_closes=bench,
+    )
+    assert plain["relative_strength"]["breakdown"]["label"] is not None
+
+    monkeypatch.setattr(
+        RS,
+        "rs_breakdown",
+        lambda rs, lookback=63: {
+            "new_low": True, "near_low": True, "lower_high": True,
+            "dist_from_low": -0.1, "prior_low": 1.0, "earlier_peak": 2.0,
+            "recent_peak": 1.0, "lookback": 63, "label": "freefall",
+        },
+    )
+    forced = swing_report(
+        closes, highs=highs, lows=lows, volumes=vols, atr_value=2.0,
+        benchmark_closes=bench,
+    )
+    assert forced["relative_strength"]["breakdown"]["label"] == "freefall"
+    assert forced["candidate"] == plain["candidate"]
+
+
 def test_rsi_band_labels():
     assert rsi_band(50.0)["label"] == "strong"
     assert rsi_band(42.0)["label"] == "reset"

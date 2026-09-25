@@ -503,6 +503,23 @@ def swing_report(
 
     rs_ok = rs is None or rs.get("verdict") in ("leading", "uptrend")
     band_ok = band.get("label") in ("strong", "reset")
+    # The RS line's lower side, REPORTED only. The composite verdict cannot see
+    # it: a falling RS line makes no new high either way, so "lagging" reads the
+    # same for a name quietly consolidating relative to the market and one whose
+    # leadership is gone. Nothing here gates - `candidate` is untouched - because
+    # the premise ("a former leader's dip keeps falling") is the one the momentum
+    # literature's skip-month rule exists to avoid until it is measured here.
+    rs_breakdown_read: dict = {}
+    if benchmark_closes:
+        try:
+            from .relative_strength import rs_breakdown, rs_series
+
+            line = rs_series(closes, benchmark_closes)
+            rs_breakdown_read = rs_breakdown(line) if line else {}
+        except Exception:  # noqa: BLE001 - an advisory leg degrades, never blocks
+            rs_breakdown_read = {}
+    if rs is not None:
+        rs["breakdown"] = rs_breakdown_read
     candidate = bool(
         arch.get("stacked") is True and band_ok and pull.get("candidate") is True and rs_ok
     )
@@ -511,6 +528,8 @@ def swing_report(
         ctx_parts.append(
             "rs: " + rs.get("verdict", "?") if rs.get("verdict") != "unknown" else "rs: n/a"
         )
+        if rs_breakdown_read.get("label"):
+            ctx_parts.append("rs_breakdown=" + str(rs_breakdown_read.get("label")))
     ctx_parts.append("rsi=" + band.get("label", "?"))
     out = {
         "architecture": arch,

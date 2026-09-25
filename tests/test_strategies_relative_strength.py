@@ -6,6 +6,7 @@ from tradingagents.strategies.relative_strength import (
     align_tail,
     divergence,
     relative_strength_report,
+    rs_breakdown,
     rs_position,
     rs_series,
     rs_trend,
@@ -146,3 +147,51 @@ def test_math_sin_noise_never_crashes():
     mkt = [200.0 + 0.05 * i for i in range(260)]
     r = relative_strength_report(closes, mkt)
     assert r["verdict"] in ("leading", "uptrend", "lagging", "diverging", "unknown")
+
+
+# --- rs_breakdown: the lower-side twin --------------------------------------
+
+
+def test_rs_breakdown_is_the_lower_side_twin_of_rs_position():
+    """A falling RS line over the 63-bar window reads new_low AND lower_high.
+
+    `rs_position` only asks about the HIGH side, so a name whose relative
+    strength is in freefall reads exactly like a quiet consolidator.
+    """
+    bd = rs_breakdown([100.0 - 0.5 * i for i in range(80)])
+    assert bd["new_low"] is True and bd["near_low"] is True
+    assert bd["lower_high"] is True  # the recent half's peak is the lower one
+    assert bd["recent_peak"] < bd["earlier_peak"]
+    assert bd["label"] == "freefall"
+    assert bd["dist_from_low"] < 0  # below the window's prior low
+
+    up = rs_breakdown([100.0 + 0.5 * i for i in range(80)])
+    assert up["new_low"] is False and up["near_low"] is False
+    assert up["lower_high"] is False and up["label"] == "holding"
+
+
+def test_rs_breakdown_separates_lower_highs_from_a_new_low():
+    """The two diagnostics are independent, and the pair is the point.
+
+    A weak bounce inside a broken range makes no new low but is still printing
+    lower highs - the 'leadership is gone, the price is not' case neither
+    ``rs_position`` nor the divergence flag can name.
+    """
+    rs = [100.0 + i for i in range(31)]  # 100 .. 130 (the peak)
+    rs += [130.0 - 1.2 * i for i in range(1, 31)]  # the fall, trough 95.2
+    rs += [95.2 + 0.9 * i for i in range(1, 6)]  # a weak bounce: no new low
+    bd = rs_breakdown(rs)
+    assert bd["new_low"] is False and bd["near_low"] is False
+    assert bd["lower_high"] is True
+    assert bd["label"] == "lower-highs"
+
+
+def test_rs_breakdown_reads_unmeasured_legs_as_none_not_false():
+    """Officially unmeasured is None: an unmeasured breakdown is not an absent one."""
+    for bad in (None, [], [1.0]):
+        out = rs_breakdown(bad)
+        assert out["new_low"] is None and out["lower_high"] is None
+        assert out["label"] is None
+    short = rs_breakdown([1.0, 2.0])  # a single prior observation
+    assert short["new_low"] is False  # measured: above the only prior bar
+    assert short["lower_high"] is None  # unmeasured: one bar has no two halves

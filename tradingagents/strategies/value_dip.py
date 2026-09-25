@@ -800,14 +800,23 @@ def vdu_entry_setup(
     # were. Reported only - neither value enters ``candidate``.
     compression = None
     closing_range = None
+    base_priming = None
     try:
-        from .compression import atr_compression_read, closing_range_read
+        from .compression import (
+            atr_compression_read,
+            base_priming_read,
+            closing_range_read,
+        )
 
         compression = atr_compression_read(highs, lows, closes)
         closing_range = closing_range_read(closes, highs, lows)
+        # The two-bar state the other two cannot express: yesterday quiet,
+        # today expanding out of it. Reported only, like the others.
+        base_priming = base_priming_read(closes, highs, lows, volumes)
     except Exception:  # noqa: BLE001 - the ladder degrades, it never fails
         compression = None
         closing_range = None
+        base_priming = None
     return {
         "candidate": candidate,
         "volume_dry_up": dry,
@@ -816,6 +825,7 @@ def vdu_entry_setup(
         "momentum": mom,
         "compression": compression,
         "closing_range": closing_range,
+        "base_priming": base_priming,
         "reasons": reasons,
     }
 
@@ -1425,14 +1435,24 @@ def value_dip_setup(
     # too short to measure returns None rather than a fabricated reading.
     compression_row = None
     closing_range_row = None
+    base_priming_row = None
     try:
-        from .compression import atr_compression_read, closing_range_read
+        from .compression import (
+            atr_compression_read,
+            base_priming_read,
+            closing_range_read,
+        )
 
         compression_row = atr_compression_read(highs, lows, closes)
         closing_range_row = closing_range_read(closes, highs, lows)
+        # T-1 base priming (spec §2): the two-bar state the two reads above
+        # cannot express - yesterday quiet, today expanding out of it. Reported
+        # only, never a row inside ``measured_gates``.
+        base_priming_row = base_priming_read(closes, highs, lows, volumes)
     except Exception:  # noqa: BLE001 - measured rows degrade to n/a
         compression_row = None
         closing_range_row = None
+        base_priming_row = None
 
     rows = {
         "value_floor": {
@@ -1470,6 +1490,7 @@ def value_dip_setup(
         "vdu": vdu,
         "compression": compression_row,
         "closing_range": closing_range_row,
+        "base_priming": base_priming_row,
         "support": support,
         "trend": trend,
         "regime_gate": regime_row,

@@ -19,7 +19,11 @@ from tradingagents.strategies.market_breadth import (
     FS_MIN_NAMES,
     forward_stress_probability,
 )
-from tradingagents.strategies.regime_score import FORWARD_STRESS_KEY, regime_score
+from tradingagents.strategies.regime_score import (
+    FORWARD_STRESS_KEY,
+    MP_SPECTRUM_KEY,
+    regime_score,
+)
 
 #: The gate dict the producer takes directly (its own read, by its literal name).
 ON = {"enable_forward_stress_probability": True}
@@ -111,3 +115,94 @@ def test_the_read_is_printed_beside_the_score_and_never_scored() -> None:
 
     assert on["printed"][FORWARD_STRESS_KEY]["status"] == "ok"
     assert {k: v for k, v in on.items() if k != "printed"} == off
+
+
+# --- X3's panel spectrum, printed through the same block --------------------
+
+
+def test_the_panel_spectrum_prints_beside_the_score_without_displacing_r5() -> None:
+    """X3 attaches under its OWN key, and only while its own gate is on.
+
+    The gate registry row for ``enable_mp_lower_spectrum`` used to promise a
+    count the engine never rendered (the read was computed into the breadth
+    dict and dropped, and the run's call site did not even pass ``cfg``). It is
+    PRINTED now, never scored - a panel-wide eigen-count is a backdrop, not a
+    0-100 leg - and turning it on must not disturb R5's block.
+    """
+    panel = _panel()
+
+    off = regime_score(_MID_VALUES, panel=panel)
+    assert "printed" not in off
+
+    set_config({"enable_mp_lower_spectrum": True})
+    on = regime_score(_MID_VALUES, panel=panel)
+    block = on["printed"][MP_SPECTRUM_KEY]
+    assert block["status"] == "ok" and block["count"] is not None
+    assert block["n_names"] == FS_MIN_NAMES  # one read for the whole panel
+    assert {k: v for k, v in on.items() if k != "printed"} == off
+
+    set_config(
+        {"enable_mp_lower_spectrum": True, "enable_forward_stress_probability": True}
+    )
+    both = regime_score(_MID_VALUES, panel=panel)
+    assert set(both["printed"]) == {MP_SPECTRUM_KEY, FORWARD_STRESS_KEY}
+
+
+def test_the_printed_blocks_reach_the_report_text() -> None:
+    """A printed block that only exists in the dict is not printed.
+
+    ``RegimeScore`` renders its component table; the gated reads sit BESIDE it,
+    so they render as their own lines rather than as a component.
+    """
+    from tradingagents.agents.utils.analysis_tools import _render_regime_score
+
+    res = {
+        "score": 50.0,
+        "band": "neutral",
+        "status": "RESEARCH_ONLY",
+        "coverage": 1.0,
+        "components": {},
+        "basis": "basis",
+        "printed": {
+            MP_SPECTRUM_KEY: {
+                "count": 9, "mp_lower": 0.25, "status": "ok",
+                "window": 44, "n_names": 11, "panel_n": 11, "unavailable": None,
+            }
+        },
+    }
+    text = _render_regime_score(res, None)
+    assert "printed mp_lower_spectrum:" in text
+    assert "count=9" in text and "n_names=11" in text
+    # gate off -> the key is absent -> nothing is rendered for it
+    assert "printed" not in _render_regime_score({**res, "printed": {}}, None)
+
+
+def test_the_run_read_passes_its_config_into_the_breadth_producer(monkeypatch) -> None:
+    """The engine's own call site must pass the run's config.
+
+    ``_market_breadth_read`` called ``market_breadth(panel)`` with ``cfg=None``,
+    so no ``cfg``-driven producer behaviour (X3's switch among them) was
+    reachable from a run; and the panel it builds is now cached for the printed
+    reads so they share ONE cross-section.
+    """
+    from tradingagents.agents.utils import analysis_tools as A
+    from tradingagents.dataflows import market_panel
+    from tradingagents.strategies import market_breadth as MB
+
+    panel = _panel()
+    monkeypatch.setattr(market_panel, "market_closes", lambda fetch: dict(panel))
+    monkeypatch.setattr(A, "_RUN_BREADTH_CACHE", {})
+    seen: dict = {}
+    real = MB.market_breadth
+
+    def spy(closes_by_name, **kw):
+        seen["cfg"] = kw.get("cfg")
+        return real(closes_by_name, **kw)
+
+    monkeypatch.setattr(MB, "market_breadth", spy)
+    set_config({"enable_mp_lower_spectrum": True})
+
+    read = A._market_breadth_read() or {}
+    assert (seen.get("cfg") or {}).get("enable_mp_lower_spectrum") is True
+    assert (read.get("mp_lower_spectrum") or {}).get("status") == "ok"
+    assert set(A._market_panel()) == set(panel)  # one panel, shared

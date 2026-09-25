@@ -110,6 +110,88 @@ def rs_position(rs: list, lookback: int = 252) -> dict:
     }
 
 
+#: The RS-breakdown lookback: one quarter. The rotation literature measures a
+#: former leader over 3-12 months and warns that the most recent MONTH is
+#: dominated by short-term reversal, so 63 sessions is the shortest window that
+#: asks "is the leadership broken?" rather than "was yesterday noisy?".
+RS_BREAKDOWN_LOOKBACK = 63
+
+
+def rs_breakdown(rs: list, lookback: int = RS_BREAKDOWN_LOOKBACK) -> dict:
+    """Lower-side twin of :func:`rs_position`: is the RS line breaking DOWN?
+
+    ``rs_position`` only asks whether the RS line is making new highs, so a name
+    whose relative strength is in freefall reads the same as one that is merely
+    quiet. This asks the opposite three questions over ``lookback`` sessions
+    (63 = one quarter):
+
+    * ``new_low`` - the RS line is below every prior observation in the window
+      (strict, mirroring ``new_high``).
+    * ``near_low`` - within 3% of the prior window low (mirroring ``near_high``,
+      which is within 3% of the prior window high).
+    * ``lower_high`` - the RECENT half's peak is below the EARLIER half's peak,
+      i.e. the line is making lower highs rather than being quiet. Both peaks
+      travel with the flag so the reading can be checked by eye; ``None`` when
+      the window is too short to have two halves (never ``False``).
+
+    Every leg is ``None`` rather than ``False`` when the series is unusable: an
+    unmeasured breakdown is not an absent one. REPORTED only - nothing gates on
+    this, and nothing should until it has been measured against the unfiltered
+    baseline (the RS-breakdown premise is the one the momentum literature's
+    skip-month rule exists to avoid).
+    """
+    empty = {
+        "new_low": None,
+        "near_low": None,
+        "lower_high": None,
+        "dist_from_low": None,
+        "prior_low": None,
+        "earlier_peak": None,
+        "recent_peak": None,
+        "lookback": lookback,
+        "label": None,
+    }
+    if not rs or not lookback or len(rs) < 2:
+        return empty
+    n = min(int(lookback), len(rs) - 1)
+    prior = rs[-(n + 1) : -1]
+    if not prior:
+        return empty
+    prior_low = min(prior)
+    if prior_low <= 0:
+        return empty
+    last = rs[-1]
+    new_low = bool(last < prior_low)
+    near_low = bool(last <= 1.03 * prior_low)
+    half = n // 2
+    recent_peak = earlier_peak = lower_high = None
+    if half >= 2:
+        recent_peak = max(rs[-half:])
+        earlier_peak = max(prior[:-half] or prior)
+        lower_high = bool(recent_peak < earlier_peak)
+    if new_low and lower_high:
+        label = "freefall"
+    elif new_low:
+        label = "new-relative-low"
+    elif lower_high:
+        label = "lower-highs"
+    elif near_low:
+        label = "near-relative-low"
+    else:
+        label = "holding"
+    return {
+        "new_low": new_low,
+        "near_low": near_low,
+        "lower_high": lower_high,
+        "dist_from_low": last / prior_low - 1.0,
+        "prior_low": prior_low,
+        "earlier_peak": earlier_peak,
+        "recent_peak": recent_peak,
+        "lookback": n,
+        "label": label,
+    }
+
+
 def divergence(stock: list, benchmark: list, lookback: int = 252) -> dict:
     """Negative divergence: price makes a new high while RS does not."""
     rs = rs_series(stock, benchmark)
@@ -158,9 +240,11 @@ def relative_strength_report(
     else:
         verdict = "lagging"
     sl = trend.get("slope_pct")
+    bd = rs_breakdown(rs)
     ctx = (
         f"RS={trend['rs']} slope={sl:+.2f}%/d uptrend={trend['uptrend']} "
-        f"near_high={pos.get('near_high')} divergence={div}"
+        f"near_high={pos.get('near_high')} divergence={div} "
+        f"breakdown={bd.get('label')}"
     )
     return {
         "rs": trend["rs"],
@@ -172,6 +256,10 @@ def relative_strength_report(
         "divergence": div,
         "verdict": verdict,
         "context": ctx,
+        # The lower-side twin, carried as its own block (reported, never scored):
+        # a former leader going into freefall is what the divergence flag cannot
+        # see, because a falling RS line makes no new high either way.
+        "breakdown": bd,
     }
 
 
@@ -181,6 +269,8 @@ __all__ = [
     "slope_pct",
     "rs_trend",
     "rs_position",
+    "rs_breakdown",
+    "RS_BREAKDOWN_LOOKBACK",
     "divergence",
     "relative_strength_report",
 ]
