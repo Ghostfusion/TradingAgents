@@ -18,8 +18,10 @@ from tradingagents.strategies.sector_screener import (
     constituent_screens,
     constituent_universe,
     dispersion_trend,
+    etf_volume_provenance,
     grade_for,
     pullback_divergence,
+    sector_dip_reads,
     sector_screen,
     setup_a,
     setup_b,
@@ -371,3 +373,54 @@ def test_eodhd_breadth_composition(monkeypatch):
     assert "XLK" in cs
     assert cs["XLK"]["members"] == 1
     assert isinstance(cs["XLK"]["breadth"]["pct"], float)
+
+
+# --- the VDU ladder per sector ETF (item 2 of the playbook survey) ----------
+
+
+def test_sector_dip_reads_composes_the_single_name_producers():
+    """Same producers, one call each - never a second implementation.
+
+    The rotation screen could rank a sector and read its relative strength while
+    being unable to say whether its dip was quiet or violent, because none of the
+    VDU/compression producers were reachable from it.
+    """
+    closes, highs, lows, vols, _ = _ohlcv_gen(seed=9)
+    reads = sector_dip_reads(closes, highs, lows, vols)
+    assert set(reads) == {"atr_compression", "closing_range", "base_priming",
+                          "volume_dry_up", "trigger_candle"}
+    assert reads["atr_compression"]["percentile"] is not None
+    assert reads["closing_range"]["tight"] in (True, False)
+    assert reads["base_priming"]["primed"] in (True, False, None)
+    assert reads["volume_dry_up"]["vdu_ratio"] is not None
+    assert reads["trigger_candle"]["trigger"] in (True, False, None)
+
+
+def test_sector_dip_reads_are_none_safe_on_every_leg():
+    """A read that could not be taken is absent, never a zero."""
+    reads = sector_dip_reads([], [], [], [])
+    assert reads["atr_compression"] is None
+    assert reads["closing_range"] is None
+    # the three producers that carry their own refusal shape return it, with the
+    # reason inside, rather than None
+    assert reads["base_priming"]["primed"] is None
+    assert reads["base_priming"]["reasons"]
+    assert reads["volume_dry_up"]["dry_up"] is None
+    assert reads["trigger_candle"]["trigger"] is None
+
+
+def test_etf_volume_provenance_labels_and_never_adjusts():
+    """Index/sector ETFs are named, with the flow caveat; a stock is not."""
+    xlk = etf_volume_provenance("xlk")
+    assert xlk["symbol"] == "XLK" and xlk["is_etf"] is True
+    assert xlk["universe"] == "spdr_sector"
+    assert xlk["adjusted"] is False  # no vendor here publishes creations/redemptions
+    assert "creation/redemption" in xlk["note"]
+
+    assert etf_volume_provenance("RSPT")["universe"] == "spdr_equal_weight"
+    assert etf_volume_provenance("SOXX")["universe"] == "industry"
+    assert etf_volume_provenance("SPY")["universe"] == "broad_benchmark"
+
+    aapl = etf_volume_provenance("AAPL")
+    assert aapl["is_etf"] is False and aapl["universe"] is None
+    assert aapl["note"] == ""  # not known to be an ETF here, so no caveat applies

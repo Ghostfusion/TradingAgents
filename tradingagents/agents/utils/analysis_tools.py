@@ -3926,6 +3926,18 @@ def get_sector_rotation_screen(
                 else "no follow-through day in the window"
             )
         )
+        # The count is measured on the BENCHMARK's volume. When that benchmark is
+        # an ETF its headline volume also carries creation/redemption baskets and
+        # market-maker hedging, which no holder decided on - so the read says
+        # what its volume contains instead of pretending it is pure supply.
+        try:
+            from tradingagents.strategies.sector_screener import etf_volume_provenance
+
+            _prov = etf_volume_provenance(dist.get("label") or "")
+            if _prov.get("is_etf"):
+                lines.append(f"  volume provenance: {_prov['note']}")
+        except Exception:  # noqa: BLE001 - a label must never sink the screen
+            pass
     if use_brd:
         use_eodhd = str(constituent_universe or "curated").strip().lower() == "eodhd" \
             or bool(cfg.get("enable_sector_eodhd_constituents", False))
@@ -4081,6 +4093,113 @@ def get_sector_rotation_screen(
                     if b_state == "fired":
                         hits.append("B:fired")
                     lines.append(f"  {row['ticker']}: " + (", ".join(hits) if hits else "no setup"))
+
+    # --- the VDU ladder per SECTOR ETF (reported; item 2 of the playbook survey)
+    # The screen ranked sectors and read their relative strength; it never asked
+    # whether a leader's dip is quiet (supply exhausted) or violent. These are
+    # the SAME producers the single-name dip path uses, one call per ETF, and
+    # every one is reported - nothing here enters a rank, a candidate or a gate.
+    try:
+        from tradingagents.strategies.sector_screener import (
+            etf_volume_provenance,
+            sector_dip_reads,
+        )
+
+        etfs = [r.get("etf") for r in rows if r.get("etf")]
+        if etfs:
+            lines.append("")
+            lines.append("## Sector dip reads (per-ETF VDU ladder, advisory)")
+            lines.append(
+                "| sector | atr rank | compressed | range tight | dry-up | trigger | base primed |"
+            )
+            lines.append("|---|---|---|---|---|---|---|")
+            for etf in etfs:
+                o = _ohlcv(etf)
+                reads = sector_dip_reads(
+                    o.get("closes") or [], o.get("highs") or [],
+                    o.get("lows") or [], o.get("volumes") or [],
+                )
+                comp = reads.get("atr_compression") or {}
+                crange = reads.get("closing_range") or {}
+                dry = reads.get("volume_dry_up") or {}
+                trig = reads.get("trigger_candle") or {}
+                prim = reads.get("base_priming") or {}
+
+                def _cell(v, *, pct: bool = False, nd: int = 2) -> str:
+                    if v is None:
+                        return "n/a"
+                    return f"{v:.1%}" if pct else (
+                        f"{v:.{nd}f}" if isinstance(v, float) else str(v)
+                    )
+
+                lines.append(
+                    f"| {etf} | {_cell(comp.get('percentile'))} | {_cell(comp.get('compressed'))} | "
+                    f"{_cell(crange.get('tight'))} | {_cell(dry.get('vdu_ratio'))} | "
+                    f"{_cell(trig.get('trigger'))} | {_cell(prim.get('primed'))} |"
+                )
+            prov = etf_volume_provenance(etfs[0])
+            if prov.get("is_etf"):
+                lines.append("")
+                lines.append(f"- volume provenance ({prov.get('universe')}): {prov.get('note')}")
+            lines.append("- reported rows only: no dip read here gates a rank, a candidate or a size.")
+    except Exception:  # noqa: BLE001 - an advisory block degrades, never blocks the screen
+        pass
+
+    # --- the sector -> macro-driver mapping (reported; item 5 of the survey)
+    # The playbook's third check is "has the catalyst that drove this sector
+    # changed?". Every input is already live; the binding was what was missing.
+    try:
+        import datetime as _dt
+
+        from tradingagents.dataflows.fred import get_series_values
+        from tradingagents.strategies.sector_drivers import (
+            driver_aliases,
+            sector_driver_read,
+        )
+
+        _today = _dt.date.today().isoformat()
+        series: dict = {}
+        for alias in driver_aliases():
+            try:
+                obs = get_series_values(alias, _today, look_back_days=400) or []
+            except Exception:  # noqa: BLE001 - one series must not sink the block
+                obs = []
+            series[alias] = [v for _, v in obs if v is not None]
+        etfs = [r.get("etf") for r in rows if r.get("etf")]
+        if etfs:
+            lines.append("")
+            lines.append("## Sector macro drivers (mapped, advisory - never a gate)")
+            lines.append("| sector | driver | level | 1m change | 3m change | helps 1m | helps 3m | n |")
+            lines.append("|---|---|---|---|---|---|---|---|")
+            for etf in etfs:
+                d = sector_driver_read(etf, series)
+                if not d.get("mapped"):
+                    lines.append(f"| {etf} | n/a | | | | | | |")
+                    continue
+
+                def _num(v) -> str:
+                    return "n/a" if v is None else f"{v:+.4f}"
+
+                def _flag(v) -> str:
+                    return "n/a" if v is None else ("yes" if v else "no")
+
+                lines.append(
+                    f"| {etf} | {d.get('driver')} | {_num(d.get('level'))} | "
+                    f"{_num(d.get('change_1m'))} | {_num(d.get('change_3m'))} | "
+                    f"{_flag(d.get('favourable_1m'))} | {_flag(d.get('favourable_3m'))} | "
+                    f"{d.get('observations')} |"
+                )
+            lines.append("")
+            lines.append(
+                "- windows are OBSERVATIONS, not days (FRED frequency varies: the "
+                "daily series fill both windows, the monthly ones (copper, industrial "
+                "production) read n/a at 21/63 observations); the "
+                "mapping is conventional, never a fitted coefficient - a mapped driver "
+                "and a favourable sign are context, not a signal."
+            )
+    except Exception:  # noqa: BLE001 - an advisory block degrades, never blocks the screen
+        pass
+
     lines.append("")
     lines.append("Advisory — sector rotation screen, not a gate. Everything "
                  "None-safe (n/a = data unavailable, never fabricated); "

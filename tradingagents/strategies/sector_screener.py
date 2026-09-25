@@ -21,6 +21,8 @@ from __future__ import annotations
 import statistics
 
 from .sector_rank import (
+    INDUSTRY_ETFS,
+    SPDR_SECTORS,
     constituent_breadth,
     leadership_ratio,
     rank_sectors_multifactor,
@@ -788,6 +790,131 @@ def backtest_rotation(
     return out
 
 
+# --- the single-name VDU ladder, applied per SECTOR ETF ---------------------
+#
+# The rotation screen used the relative-strength machinery only: the VDU /
+# compression reads that decide a single-name dip entry (volume dry-up, the
+# trigger candle, ATR compression, closing-range tightness, T-1 base priming)
+# were unreachable from it, so a sector could rank first with no answer to "is
+# this a dip with supply exhausted, or a falling knife?". These are the SAME
+# producers, one call each per ETF - never a second implementation - and every
+# one of them is REPORTED: no read here enters a candidate, a rank or a gate.
+
+#: The read keys ``sector_dip_reads`` composes, in the order they print.
+DIP_READ_KEYS: tuple = (
+    "atr_compression",
+    "closing_range",
+    "base_priming",
+    "volume_dry_up",
+    "trigger_candle",
+)
+
+
+def sector_dip_reads(
+    closes: list,
+    highs: list,
+    lows: list,
+    volumes: list,
+    *,
+    dates: list | None = None,
+    discount_mechanical: bool = False,
+) -> dict:
+    """The single-name VDU ladder's reads, for one SECTOR ETF (reported only).
+
+    Each key is that producer's own dict, or ``None`` when the series is too
+    short to measure it - a read that could not be taken is absent here, never
+    a zero. ``dates`` enables ``enable_mechanical_volume_discount``'s OPEX-week
+    discount inside the dry-up and trigger reads exactly as it does on the
+    single-name path (it is that producer's own gate, not a second one).
+
+    Nothing here gates: the caller renders the reads beside the sector's rank so
+    a reader can see whether a leader's dip is quiet (supply exhausted) or
+    violent, which is the distinction the playbook's VDU leg exists for.
+    """
+    out: dict = dict.fromkeys(DIP_READ_KEYS)
+    try:
+        from .compression import (
+            atr_compression_read,
+            base_priming_read,
+            closing_range_read,
+        )
+
+        out["atr_compression"] = atr_compression_read(highs, lows, closes)
+        out["closing_range"] = closing_range_read(closes, highs, lows)
+        out["base_priming"] = base_priming_read(closes, highs, lows, volumes)
+    except Exception:  # noqa: BLE001 - an advisory read degrades, never blocks
+        pass
+    try:
+        from .value_dip import trigger_candle, volume_dry_up
+
+        out["volume_dry_up"] = volume_dry_up(
+            volumes, dates=dates, discount_mechanical=discount_mechanical
+        )
+        out["trigger_candle"] = trigger_candle(
+            closes, highs, lows, volumes,
+            dates=dates, discount_mechanical=discount_mechanical,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+# --- ETF volume provenance --------------------------------------------------
+#
+# A sector ETF's headline volume is NOT a clean measure of holder supply and
+# demand the way a single stock's is: creation/redemption baskets and
+# market-maker hedging print volume that no holder decided on (Ben-David,
+# Franzoni & Moussawi 2018 measure a ~16% rise in daily stock volatility per
+# one standard deviation of ETF ownership, from non-fundamental flow shocks that
+# partly mean-revert). No vendor this engine carries publishes creations or
+# redemptions, so the honest treatment is a LABEL rather than an adjustment:
+# the read says what the volume contains and that it was not netted.
+#
+# The one adjustment that IS possible - dropping the mechanically huge
+# expiration sessions - is a different thing and lives in
+# ``enable_mechanical_volume_discount`` (``strategies/volume_flags.py``).
+
+#: The ETF universes this engine knows, for the provenance label.
+ETF_UNIVERSES: dict[str, tuple[str, ...]] = {
+    "spdr_sector": tuple(SPDR_SECTORS),
+    "spdr_equal_weight": tuple(EW_CW_ETFS.values()),
+    "industry": tuple(INDUSTRY_ETFS),
+    # The benchmarks the engine's own reads measure on (the O'Neil distribution
+    # day count reads SPY's volume by default): they are ETFs too, and their
+    # volume carries the same creation/redemption flow.
+    "broad_benchmark": ("SPY", "QQQ", "IWM", "DIA", "VTI", "RSP", "VOO", "IVV"),
+}
+
+ETF_VOLUME_NOTE = (
+    "headline ETF volume includes creation/redemption and market-maker flow; "
+    "no vendor here publishes either, so the ratio is labelled, not netted"
+)
+
+
+def etf_volume_provenance(symbol: str) -> dict:
+    """Which ETF universe ``symbol`` belongs to, and what its volume contains.
+
+    Returns ``{"symbol", "is_etf", "universe", "adjusted", "note"}``. ``is_etf``
+    is a membership test against the engine's own ETF tables (the 11 SPDR
+    sectors, their RSP* equal-weight twins, and ``INDUSTRY_ETFS``), not a vendor
+    lookup: a symbol outside them reads ``is_etf=False``, which means "not known
+    to be an ETF here", never "is a stock". ``adjusted`` is always ``False`` -
+    no creation/redemption data exists in this engine - and the note says so, so
+    a volume ratio quoted from an ETF can never be read as pure supply.
+    """
+    sym = str(symbol or "").strip().upper()
+    universe = next(
+        (name for name, members in ETF_UNIVERSES.items() if sym in members), None
+    )
+    return {
+        "symbol": sym,
+        "is_etf": universe is not None,
+        "universe": universe,
+        "adjusted": False,
+        "note": ETF_VOLUME_NOTE if universe is not None else "",
+    }
+
+
 __all__ = [
     "_sma_last",
     "_ema",
@@ -809,5 +936,7 @@ __all__ = [
     "breadth_with_gate",
     "leadership_ratio_ewcw",
     "backtest_rotation",
+    "sector_dip_reads",
+    "etf_volume_provenance",
 ]
 
