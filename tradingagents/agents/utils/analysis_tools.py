@@ -341,6 +341,37 @@ def _benchmark_bars() -> dict:
     return _ohlcv(bench)
 
 
+def _market_distribution_read() -> dict | None:
+    """The benchmark's O'Neil distribution-day count (strategies/distribution_days).
+
+    A distribution day is a higher-volume close down >= 0.2%; the count drops
+    days after 25 sessions, cancels them once the index closes 5% above that
+    day's own close, and resets to zero on a confirmed follow-through day.
+
+    The volume source is the BENCHMARK the run is configured with (SPY by
+    default) - an ETF's volume is not the cash index's, so the label is
+    carried through and rendered. ``None`` when the bars are missing or the
+    read cannot be measured - never a count from noise.
+    """
+    bars = _benchmark_bars()
+    closes = bars.get("closes") or []
+    volumes = bars.get("volumes") or []
+    if not closes or not volumes:
+        return None
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        label = get_config().get("benchmark_ticker") or "SPY"
+    except Exception:  # noqa: BLE001 - advisory
+        label = "SPY"
+    try:
+        from tradingagents.strategies.distribution_days import distribution_days
+
+        return distribution_days(closes, volumes, dates=bars.get("dates") or None, label=label)
+    except Exception:  # noqa: BLE001 - an advisory read must not break the tool
+        return None
+
+
 def _market_breadth_read() -> dict | None:
     """The market-wide breadth read over the run's shared S&P 500 panel.
 
@@ -3769,8 +3800,10 @@ def get_sector_rotation_screen(
     normalized to its own 50d SMA (broadening/narrowing + spread), and the
     Setup-A (high-tight shelf) / Setup-B (first pullback to a rising 20d EMA)
     states. Use instead of raw rank reads before any 'sector is rotating /
-    leadership shifting / early rotation' claim. None-safe: a missing series
-    renders n/a, never fabricated; advisory, never a gate.
+    leadership shifting / early rotation' claim. Also reports the benchmark's
+    O'Neil distribution-day count (higher-volume down days, 25-session expiry,
+    +5% rally cancel, follow-through reset) as the market backdrop. None-safe: a
+    missing series renders n/a, never fabricated; advisory, never a gate.
     """
     from tradingagents.strategies.sector_rank import (
         INDUSTRY_ETFS,
@@ -3832,6 +3865,25 @@ def get_sector_rotation_screen(
     else:
         lines.append("")
         lines.append("pullback divergence: none (benchmark not in a 2-down / swing-low undercut)")
+    # Market distribution (O'Neil): the benchmark's own count of higher-volume
+    # down days, with both expiries and the follow-through reset. A market-level
+    # backdrop read - it never gates the sector ranks.
+    dist = _market_distribution_read()
+    if dist is not None:
+        ftd = dist.get("ftd") or {}
+        lines.append("")
+        lines.append(
+            f"market distribution ({dist['label']}): {dist['count']} active day(s) "
+            f"({'under distribution' if dist['under_distribution'] else 'no top signal'}; "
+            f"{dist['thresholds']['pressure_count']}+ = under distribution) | "
+            f"expired={dist['expired']} cancelled(+5% rally)={dist['cancelled_rally']} "
+            f"reset by FTD={dist['reset_by_ftd']} | "
+            + (
+                f"last FTD {ftd['sessions_ago']} sessions ago (+{ftd['gain_pct']:.1%})"
+                if ftd
+                else "no follow-through day in the window"
+            )
+        )
     if use_brd:
         use_eodhd = str(constituent_universe or "curated").strip().lower() == "eodhd" \
             or bool(cfg.get("enable_sector_eodhd_constituents", False))
