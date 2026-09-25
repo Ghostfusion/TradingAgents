@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 import time
@@ -148,6 +149,108 @@ def _needs_same_day_refresh(data_file, curr_date_dt, today_date) -> bool:
     return time.time() - os.path.getmtime(data_file) > OHLCV_CACHE_TTL_SECONDS
 
 
+# The cache file name embeds the request window, so yesterday's file is a
+# DIFFERENT name today. Re-fetching all five years to add one session threw away
+# a perfectly good history: these helpers let a miss tail off the newest file
+# already on disk for the same symbol.
+_TAIL_OVERLAP_DAYS = 5
+
+
+def _newest_same_symbol_cache(cache_dir: str, safe_symbol: str, exclude: str) -> str | None:
+    """The most recently written cache file for this symbol, or None.
+
+    ``exclude`` (the canonical path for today's window) is skipped: the caller
+    only reaches this when that file is missing or unusable. The symbol is
+    escaped before globbing so a ticker can never expand into a pattern.
+    """
+    try:
+        candidates = [
+            p
+            for p in glob.glob(os.path.join(cache_dir, f"{glob.escape(safe_symbol)}-YFin-data-*.csv"))
+            if os.path.abspath(p) != os.path.abspath(exclude)
+        ]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: os.path.getmtime(p))
+
+
+def _seed_frame(path: str) -> pd.DataFrame | None:
+    """A usable cached frame from ``path``, or None (empty/columnless/poisoned)."""
+    try:
+        cached = pd.read_csv(path, on_bad_lines="skip", encoding="utf-8")
+    except (OSError, ValueError, pd.errors.ParserError):
+        return None
+    if cached.empty or "Close" not in cached.columns:
+        return None
+    cleaned = _clean_dataframe(cached)
+    if cleaned.empty:
+        return None
+    return cleaned
+
+
+def _tail_fetch(
+    *,
+    canonical: str,
+    safe_symbol: str,
+    data_file: str,
+    cache_dir: str,
+    start_date: pd.Timestamp,
+    end_str: str,
+) -> pd.DataFrame | None:
+    """Fetch only the sessions missing from the newest same-symbol cache file.
+
+    Returns the seed MERGED with the freshly downloaded tail (one row per
+    session, ascending), writing the merged frame under the canonical name, or
+    ``None`` when there is no usable seed - in which case the caller does the
+    full-window download. The download window starts a few days before the
+    seed's last session so a vendor revision of a recent bar still lands, and
+    the fresh row wins the de-duplication.
+
+    An empty tail (a weekend, a holiday, a vendor gap) leaves the seed as the
+    answer rather than throwing the history away; the caller's own staleness
+    check still decides whether that is acceptable.
+    """
+    seed_path = _newest_same_symbol_cache(cache_dir, safe_symbol, data_file)
+    if not seed_path:
+        return None
+    seed = _seed_frame(seed_path)
+    if seed is None:
+        return None
+    seed_last = pd.to_datetime(seed["Date"], errors="coerce").max()
+    if pd.isna(seed_last):
+        return None
+    tail_start = max(seed_last - pd.Timedelta(days=_TAIL_OVERLAP_DAYS), start_date)
+    downloaded = yf_retry(lambda: yf.download(
+        canonical,
+        start=tail_start.strftime("%Y-%m-%d"),
+        end=end_str,
+        multi_level_index=False,
+        progress=False,
+        auto_adjust=True,
+    ))
+    tail = _ensure_date_column(downloaded.reset_index()) if downloaded is not None else None
+    if tail is None or tail.empty or "Close" not in tail.columns:
+        merged = seed
+    else:
+        merged = pd.concat([seed, _clean_dataframe(tail)], ignore_index=True)
+        merged = (
+            merged.drop_duplicates(subset=["Date"], keep="last")
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+    merged.to_csv(data_file, index=False, encoding="utf-8")
+    logger.info(
+        "OHLCV incremental fetch for %s: seed %s -> %d rows, tail window from %s",
+        canonical,
+        seed_path,
+        len(merged),
+        tail_start.date(),
+    )
+    return merged
+
+
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
@@ -193,6 +296,21 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
             and not _needs_same_day_refresh(data_file, curr_date_dt, today_date)
         ):
             data = cached
+
+    if data is None:
+        # Tail off the newest same-symbol cache file when one exists: the
+        # history it holds is still valid, so only the sessions since its last
+        # row need fetching (with a small overlap, and de-duplicated keeping the
+        # fresh row). Falls through to the full window when there is no seed or
+        # the seed cannot be read.
+        data = _tail_fetch(
+            canonical=canonical,
+            safe_symbol=safe_symbol,
+            data_file=data_file,
+            cache_dir=config["data_cache_dir"],
+            start_date=start_date,
+            end_str=end_str,
+        )
 
     if data is None:
         downloaded = yf_retry(lambda: yf.download(
