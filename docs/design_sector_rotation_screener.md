@@ -10,9 +10,14 @@ the screen itself - `sector_screen`, `constituent_screens`, `backtest_rotation`,
 (`multi_breadth`, `mcclellan_read`, `msi_zone`) in `strategies/sector_breadth.py`,
 reachable as the `get_sector_rotation_screen` tool behind `enable_sector_multifactor`
 / `enable_sector_industry` / `enable_sector_breadth`.
-§5.4's distribution-day kill-switch rule is **not** built (no distribution-day
-count exists in the engine: grep `distribution|dist_day` finds prose only), and
-§5.5's market-wide breadth gap stands as that section records it.
+§5.4's per-sector kill-switch overlay is **not** built (there is no sector-level
+distribution-day cluster rule and no 20d-EMA / 125%-volume leg), but the engine
+now counts the BENCHMARK's own distribution days as a market-backdrop reading -
+`strategies/distribution_days.py` (25-session expiry, +5% rally cancel,
+follow-through reset), rendered by `get_sector_rotation_screen` and by
+`strategies/compression.py`'s readings on the VDU ladder. That is §5.4's concept
+applied to the INDEX, not the per-sector overlay this section specifies. §5.5's
+market-wide breadth gap stands as that section records it.
 Source: `Strategies/sector_rotation.md` (731-line swing-rotation playbook) +
 the adopted `Strategies/formulas/sector_rotation.md` (P1-P3/A1-A3 live in
 `sector_rank.py` / `cycle_tilt.py`) + fresh deep web research (2026-09-06,
@@ -125,6 +130,11 @@ flags), not buy signals.
   or a 4+ distribution-days cluster → advisory kill-switch note for that
   sector ("tighten / no new entries here") — **note only**; the repo never
   auto-sells.
+- **What ships today:** the INDEX-level distribution-day count
+  (`strategies/distribution_days.py::distribution_days`, rendered as the
+  `market distribution (…)` line of `get_sector_rotation_screen`) and the
+  VDU ladder's compression readings. Neither is the per-sector overlay above:
+  the count is the benchmark's, and nothing maps a cluster onto a sector yet.
 
 ### 5.5 Market-wide breadth — a named, deliberate gap (R1)
 

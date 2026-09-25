@@ -306,6 +306,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_SECTOR_INDUSTRY` | `enable_sector_industry` | default `false` |
 | `TRADINGAGENTS_ENABLE_SECTOR_BREADTH` | `enable_sector_breadth` | default `false` |
 | `TRADINGAGENTS_ENABLE_SECTOR_EODHD_CONSTITUENTS` | `enable_sector_eodhd_constituents` | default `false` |
+| `TRADINGAGENTS_ENABLE_MECHANICAL_VOLUME_DISCOUNT` | `enable_mechanical_volume_discount` | default `false` |
 | `TRADINGAGENTS_ENABLE_SECURITY_CONTEXT` | `enable_security_context` | default `false` |
 | `TRADINGAGENTS_RISK_AUDIT_ENABLED` | `risk_audit_enabled` | hash-chained risk audit ledger |
 | `TRADINGAGENTS_MAX_POSITION_PCT` | `max_position_pct` | single-name position cap (governor) |
@@ -919,7 +920,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_value_dip_setup(ticker, date)` | `strategies.value_dip.value_dip_setup` | fundamentals | the hybrid allocation matrix (value floor + technical entry + trade risk + exit target) as one computed candidate verdict |
 | `get_balance_sheet_health(ticker, date)` | `strategies.value_dip.balance_sheet_health` | fundamentals | D/E < 1.0 OR current ratio > 1.5 (Step-1 balance-sheet gate) |
 | `get_macd_divergence(ticker)` | `strategies.value_dip.macd_divergence` | market | Daily RSI(14) / MACD-histogram momentum divergence (bullish-divergence / higher-low / lower-low-confirmation) |
-| `get_vdu_entry_setup(ticker)` | `strategies.value_dip.vdu_entry_setup` | market | Step-2 entry ladder: volume dry-up near support -> divergence/higher-low -> trigger candle (close above prior high, RVOL >= 1.3x) |
+| `get_vdu_entry_setup(ticker)` | `strategies.value_dip.vdu_entry_setup` | market | Step-2 entry ladder: volume dry-up near support -> divergence/higher-low -> trigger candle (close above prior high, RVOL >= 1.3x), plus the reported volatility-compression reads (`compression` / `range_tight`) and, when `enable_mechanical_volume_discount` is on, the OPEX-week-discounted `rvol_gate` |
 | `get_support_structure(ticker)` | `strategies.value_dip.support_structure` | market | major weekly / multi-month base support + 200-day SMA proximity |
 | `get_decline_driver_check(ticker, date)` | `strategies.value_dip.decline_driver_check` | fundamentals | negative-force screen (clean/caution/structural): trap-HIGH, accruals>6%, negative 12-1m momentum, non-positive FCF/ROE, severe EPS decline |
 
