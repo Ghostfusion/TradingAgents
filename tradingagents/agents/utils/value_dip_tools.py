@@ -1047,6 +1047,12 @@ def get_vdu_entry_setup(
     above the prior day's high, RVOL >= 1.3x). ``candidate`` = trigger AND
     momentum confirmation AND (dry-up not absent).
 
+    Also reports the volatility-compression context: where today's ATR/close
+    sits in its own trailing ~6-month distribution (``compression`` +
+    percentile rank) and how tight the last few daily ranges were
+    (``range_tight`` + mean range). Both are READINGS, not gates - they do not
+    change ``candidate``.
+
     Use before proposing an active swing entry out of an oversold dip - it is
     the technical confirmation ladder, distinct from the fundamental value
     gates.
@@ -1067,11 +1073,18 @@ def get_vdu_entry_setup(
     trig = vd.get("trigger_candle") or {}
     hl = vd.get("higher_low") or {}
     mom = vd.get("momentum") or {}
+    comp = vd.get("compression") or {}
+    crange = vd.get("closing_range") or {}
     return (
         f"vdu entry setup {ticker}: candidate={vd['candidate']} "
         f"dry_up={dry.get('dry_up')} (ratio={_txt_round(dry.get('vdu_ratio'))}) "
         f"trigger={trig.get('trigger')} (rvol(20d)={_txt_round(trig.get('rvol'))}) "
-        f"higher_low={hl.get('higher_low')} momentum={mom.get('verdict')}; "
+        f"higher_low={hl.get('higher_low')} momentum={mom.get('verdict')} "
+        f"compression={comp.get('compressed')} "
+        f"(atr_pct={_txt_pct(comp.get('atr_pct'))}, "
+        f"rank={_txt_round(comp.get('percentile'), 3)}) "
+        f"range_tight={crange.get('tight')} "
+        f"(mean_range={_txt_pct(crange.get('mean_range_pct'))}); "
         + ("; ".join(vd.get("reasons") or []) or "ok")
     )
 

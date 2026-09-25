@@ -703,12 +703,27 @@ def vdu_entry_setup(
         reasons.append("no momentum confirmation (divergence / higher-low)")
     dry_ok = dry.get("dry_up") is not False  # None (no data) is ignored
     candidate = bool(trig.get("trigger") and confirmation and dry_ok)
+    # Volatility-compression context (spec §2): how quiet the ATR/close is in
+    # its own 6-month distribution and how tight the last sessions' ranges
+    # were. Reported only - neither value enters ``candidate``.
+    compression = None
+    closing_range = None
+    try:
+        from .compression import atr_compression_read, closing_range_read
+
+        compression = atr_compression_read(highs, lows, closes)
+        closing_range = closing_range_read(closes, highs, lows)
+    except Exception:  # noqa: BLE001 - the ladder degrades, it never fails
+        compression = None
+        closing_range = None
     return {
         "candidate": candidate,
         "volume_dry_up": dry,
         "trigger_candle": trig,
         "higher_low": hl,
         "momentum": mom,
+        "compression": compression,
+        "closing_range": closing_range,
         "reasons": reasons,
     }
 
@@ -1312,6 +1327,21 @@ def value_dip_setup(
         except Exception:  # noqa: BLE001 - advisory row degrades
             knife_composite = None
 
+    # Volatility-compression rows (spec §2): where today's ATR/close sits in
+    # its own trailing distribution, and how tight the last sessions' ranges
+    # were. REPORTED ONLY - neither row enters ``measured_gates``, and a series
+    # too short to measure returns None rather than a fabricated reading.
+    compression_row = None
+    closing_range_row = None
+    try:
+        from .compression import atr_compression_read, closing_range_read
+
+        compression_row = atr_compression_read(highs, lows, closes)
+        closing_range_row = closing_range_read(closes, highs, lows)
+    except Exception:  # noqa: BLE001 - measured rows degrade to n/a
+        compression_row = None
+        closing_range_row = None
+
     rows = {
         "value_floor": {
             "pass": value_floor,
@@ -1346,6 +1376,8 @@ def value_dip_setup(
         "profitability": prof,
         "momentum_divergence": mom,
         "vdu": vdu,
+        "compression": compression_row,
+        "closing_range": closing_range_row,
         "support": support,
         "trend": trend,
         "regime_gate": regime_row,
