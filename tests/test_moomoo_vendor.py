@@ -845,6 +845,94 @@ class MoomooQualityFixTests(unittest.TestCase):
 
 
 
+class MoomooKlinePagingTests(unittest.TestCase):
+    """A window longer than one SDK page must arrive whole.
+
+    ``request_history_kline`` returns at most ``max_count`` bars per call plus a
+    ``page_req_key`` for the remainder, and the SDK caps that count at 1000
+    (measured against moomoo 10.10.7008). The fetch path discarded the key, so a
+    5-year daily request (~1,250 bars) was silently cut to its first page.
+    """
+
+    def setUp(self):
+        _reset()
+
+    @staticmethod
+    def _page(first_day, n_days):
+        dates = pd.date_range(first_day, periods=n_days, freq="B")
+        return pd.DataFrame(
+            {
+                "time_key": dates.strftime("%Y-%m-%d"),
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 1000.0,
+            }
+        )
+
+    @staticmethod
+    def _rows(csv_text):
+        lines = [ln for ln in csv_text.splitlines() if ln and not ln.startswith("#")]
+        return lines[1:]  # drop pandas' own header row
+
+    def _fetch(self, ctx, symbol="SPY"):
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value=f"US.{symbol}"),
+        ):
+            return moomoo.get_stock_data_moomoo(symbol, "2020-01-01", "2028-12-31")
+
+    def test_page_key_is_followed_until_exhausted(self):
+        page1 = self._page("2025-01-01", 1000)
+        next_day = pd.Timestamp(page1["time_key"].iloc[-1]) + pd.tseries.offsets.BDay(1)
+        page2 = self._page(next_day, 250)
+        ctx = mock.Mock()
+        ctx.request_history_kline.side_effect = [
+            (RET_OK, page1, "KEY-1"),
+            (RET_OK, page2, None),
+        ]
+
+        out = self._fetch(ctx)
+
+        rows = self._rows(out)
+        self.assertEqual(len(rows), 1250)  # every bar, not only the first page
+        self.assertIn("# Total records: 1250", out)
+        self.assertEqual(ctx.request_history_kline.call_count, 2)
+        first_kw, second_kw = (call[1] for call in ctx.request_history_kline.call_args_list)
+        self.assertIsNone(first_kw["page_req_key"])
+        self.assertEqual(second_kw["page_req_key"], "KEY-1")
+        dates = [ln.split(",")[0] for ln in rows]
+        self.assertEqual(dates, sorted(dates))  # ascending across the boundary
+        self.assertEqual(set(dates), set(page1["time_key"]) | set(page2["time_key"]))
+
+    def test_a_repeated_boundary_session_keeps_one_row(self):
+        page1 = self._page("2025-01-01", 5)
+        # page two repeats page one's last session (the SDK may do this)
+        page2 = self._page(page1["time_key"].iloc[-1], 3)
+        ctx = mock.Mock()
+        ctx.request_history_kline.side_effect = [
+            (RET_OK, page1, "KEY-1"),
+            (RET_OK, page2, None),
+        ]
+
+        rows = self._rows(self._fetch(ctx))
+
+        self.assertEqual(len(rows), 7)  # 5 + 3 - the repeated session
+        dates = [ln.split(",")[0] for ln in rows]
+        self.assertEqual(len(set(dates)), len(dates))
+
+    def test_one_page_is_unchanged(self):
+        ctx = mock.Mock()
+        ctx.request_history_kline.return_value = (RET_OK, self._page("2025-01-01", 15), None)
+
+        out = self._fetch(ctx, symbol="AAPL")
+
+        self.assertEqual(len(self._rows(out)), 15)
+        self.assertIn("# Total records: 15", out)
+        self.assertEqual(ctx.request_history_kline.call_count, 1)
+
+
 class MoomooTopMoversTests(unittest.TestCase):
     """Top-movers rank: symbol conversion, field mapping, error taxonomy."""
 

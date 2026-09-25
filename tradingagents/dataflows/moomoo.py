@@ -741,22 +741,69 @@ def _moomoo_code(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: One ``request_history_kline`` page carries at most this many daily bars.
+_KLINE_PAGE_MAX = 1000
+
+#: Hard ceiling on pages per request: a gateway that keeps handing back a page
+#: key must not make the paging loop unbounded (50 pages = 50k daily bars).
+_KLINE_MAX_PAGES = 50
+
+
+def _fetch_kline_pages(
+    ctx,
+    code: str,
+    *,
+    symbol: str,
+    start: str,
+    end: str,
+    ktype: str = "K_DAY",
+    autype: str = "qfq",
+    max_count: int = _KLINE_PAGE_MAX,
+) -> pd.DataFrame | None:
+    """Every page of one kline range, oldest first (``None`` when it is empty).
+
+    ``request_history_kline`` returns ONE page of at most ``max_count`` bars plus
+    a ``page_req_key`` for the remainder, and the SDK caps ``max_count`` at 1000.
+    Discarding that key truncates the window **silently** - a 5-year daily request
+    is ~1,250 bars - so a caller would compute indicators over a shorter history
+    than it asked for without saying so. Measured 2026-09-25: a page is ASCENDING
+    by ``time_key``, so pages are concatenated and re-sorted, never reversed.
+    """
+    frames: list[pd.DataFrame] = []
+    page_key = None
+    for _ in range(_KLINE_MAX_PAGES):
+        ret, data, page_key = _sdk_call(
+            ctx.request_history_kline,
+            code,
+            start=start,
+            end=end,
+            ktype=ktype,
+            autype=autype,
+            max_count=max_count,
+            page_req_key=page_key,
+        )
+        _check_ret(ret, data, symbol, code, "request_history_kline")
+        if data is not None and not data.empty:
+            frames.append(data)
+        if not page_key:
+            break
+    if not frames:
+        return None
+    df = pd.concat(frames, ignore_index=True)
+    if "time_key" in df.columns:
+        # A page boundary can repeat one session; keep exactly one row per session.
+        df = df.drop_duplicates(subset="time_key", keep="first").sort_values("time_key")
+    return df.reset_index(drop=True)
+
+
 def get_stock_data_moomoo(symbol: str, start_date: str, end_date: str) -> str:
     """OHLCV via ``request_history_kline``, formatted as CSV (matching yfinance shape)."""
     code = _moomoo_code(symbol)
     ctx = _ensure_ctx()
-    ret, data, _page_key = _sdk_call(
-        ctx.request_history_kline,
-        code,
-        start=start_date,
-        end=end_date,
-        ktype="K_DAY",
-        autype="qfq",
-        max_count=1000,
+    df = _fetch_kline_pages(
+        ctx, code, symbol=symbol, start=start_date, end=end_date, max_count=_KLINE_PAGE_MAX
     )
-    _check_ret(ret, data, symbol, code, "request_history_kline")
-    df: pd.DataFrame = data
-    if df.empty:
+    if df is None or df.empty:
         # NB: request_history_kline returns an empty DataFrame when there are
         # no trading days in the range (e.g. a future date).  Raise a typed
         # error so the router falls through cleanly.
@@ -817,18 +864,15 @@ def get_indicators_moomoo(
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     warmup_days = max(look_back_days * 2 + 100, 300)
     start_dt = end_dt - timedelta(days=warmup_days)
-    ret, data, _page_key = _sdk_call(
-        ctx.request_history_kline,
+    df = _fetch_kline_pages(
+        ctx,
         code,
+        symbol=symbol,
         start=start_dt.strftime("%Y-%m-%d"),
         end=curr_date,
-        ktype="K_DAY",
-        autype="qfq",
-        max_count=1000,
+        max_count=_KLINE_PAGE_MAX,
     )
-    _check_ret(ret, data, symbol, code, "request_history_kline")
-    df: pd.DataFrame = data
-    if df.empty:
+    if df is None or df.empty:
         raise NoMarketDataError(symbol, code, detail="no kline data for indicator calculation")
     # Build a stockstats-compatible DataFrame
     ss_df = pd.DataFrame(
