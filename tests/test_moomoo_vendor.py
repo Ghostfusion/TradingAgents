@@ -132,6 +132,36 @@ class MoomooUnreachableTests(unittest.TestCase):
         ):
             moomoo._ensure_ctx()
 
+    def test_autostart_success_clears_the_failure_it_was_triggered_by(self):
+        """A successful autostart must not leave the cached "down" verdict standing.
+
+        Measured live 2026-09-25: OpenD was stopped, the engine launched it and
+        logged "OpenD is now reachable on 127.0.0.1:11111", and the call that
+        triggered the autostart STILL raised MoomooNotConfiguredError - because
+        _ensure_ctx re-checks with _probe_or_use_cache, which sat inside the
+        _PROBE_FAIL_TTL window the first failed probe had armed. Only the NEXT
+        call in the process worked, so a headless run lost the call it made
+        during recovery.
+        """
+        set_config({"moomoo_autostart": True, "moomoo_account": "100000"})
+        with mock.patch.object(moomoo, "_opend_reachable", return_value=False):
+            # The probe that arms the negative cache: the gateway is down.
+            self.assertFalse(moomoo._probe_or_use_cache("127.0.0.1", 11111))
+        with (
+            mock.patch.object(
+                moomoo, "_find_opend_executable", return_value="C:/fake/moomoo_OpenD.exe"
+            ),
+            mock.patch("subprocess.Popen"),
+            mock.patch.object(moomoo, "_opend_reachable", return_value=True),
+        ):
+            self.assertTrue(moomoo._autostart_opend())
+            # The gateway is provably up, so the caller's re-check must agree.
+            self.assertTrue(
+                moomoo._probe_or_use_cache("127.0.0.1", 11111),
+                "the cached failure still reports the gateway down after a "
+                "successful autostart - the triggering call would raise",
+            )
+
     def test_ticker_mapping_rejects_unsupported_before_sdk(self):
         # A symbol moomoo can't serve raises before any SDK interaction.
         with (

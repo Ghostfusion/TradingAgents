@@ -215,7 +215,7 @@ def _autostart_opend() -> bool:
     Attempts at most once per process (``_autostart_attempted`` flag).  Returns
     True when the port becomes reachable, False otherwise.
     """
-    global _autostart_attempted
+    global _autostart_attempted, _last_probe_fail
     if _autostart_attempted:
         return False
     _autostart_attempted = True
@@ -255,6 +255,15 @@ def _autostart_opend() -> bool:
         time.sleep(0.75)
         if _opend_reachable(host, port, timeout=0.5):
             logger.info("Moomoo autostart: OpenD is now reachable on %s:%s", host, port)
+            # Invalidate the negative probe cache this autostart was triggered
+            # by. The caller re-checks with _probe_or_use_cache, which is only
+            # *not* inside the _PROBE_FAIL_TTL window the first failed probe
+            # armed if this line clears it - otherwise the call that triggered
+            # the autostart raised MoomooNotConfiguredError about a gateway this
+            # probe just proved is up, and only the NEXT call worked. Measured
+            # live 2026-09-25 (OpenD stopped; launch and reachability logged, the
+            # call still failed).
+            _last_probe_fail = 0.0
             return True
     logger.warning(
         "Moomoo autostart: OpenD did not become reachable on %s:%s within 45 s", host, port
