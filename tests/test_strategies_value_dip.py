@@ -817,3 +817,53 @@ def test_get_value_dip_setup_measures_the_forward_peg_through_the_real_caller(mo
     monkeypatch.setattr(ys, "fetch_estimate_trend", _must_not_be_read)
     gated_off = V.get_value_dip_setup.invoke({"ticker": "AAPL", "current_date": "2026-08-19"})
     assert "forward_peg=" not in gated_off
+
+
+# ---------------------------------------------------------------------------
+# The regime row must read the CALLER's config, not the function defaults
+# ---------------------------------------------------------------------------
+
+
+def _regime_closes(n=260):
+    """A long, gently rising series: enough history for a measured regime read."""
+    return [100.0 + (i % 9) * 0.35 for i in range(n)]
+
+
+def test_regime_row_defaults_when_no_config_is_supplied():
+    closes = _regime_closes()
+    setup = value_dip_setup(
+        closes,
+        [c + 0.5 for c in closes],
+        [c - 0.5 for c in closes],
+        [1_000_000] * len(closes),
+        margin_of_safety=0.30,
+        fcf_yield=0.08,
+        roe=0.20,
+        fcf=100.0,
+    )
+    row = setup["rows"]["regime_gate"]
+    assert row is not None
+    assert row["thresholds"] == {"vol_cap": 0.8, "downtrend_band": 0.08}
+
+
+def test_configured_regime_thresholds_reach_the_measured_row():
+    """A configured cap must reach the row - both sites used to pass ``cfg=None``.
+
+    So ``value_dip_regime_vol_cap`` / ``_downtrend_band`` were ignored, and
+    ``require_regime`` hard-gated on that row using the function defaults.
+    """
+    closes = _regime_closes()
+    setup = value_dip_setup(
+        closes,
+        [c + 0.5 for c in closes],
+        [c - 0.5 for c in closes],
+        [1_000_000] * len(closes),
+        margin_of_safety=0.30,
+        fcf_yield=0.08,
+        roe=0.20,
+        fcf=100.0,
+        cfg={"value_dip_regime_vol_cap": 0.01, "value_dip_regime_downtrend_band": 0.5},
+    )
+    row = setup["rows"]["regime_gate"]
+    assert row is not None
+    assert row["thresholds"] == {"vol_cap": 0.01, "downtrend_band": 0.5}

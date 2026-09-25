@@ -800,8 +800,14 @@ def get_value_dip_setup(
         # UNSupplied and the gate reports it unmeasured. It used to pass an
         # explicit `False`, asserting a measurement nobody made. The veto is not
         # reinstated here - event authority is `EventScore`'s.
+        try:
+            from tradingagents.dataflows.config import get_config as _regime_gc
+
+            _regime_cfg = _regime_gc() or {}
+        except Exception:  # noqa: BLE001 - advisory: fall back to the defaults
+            _regime_cfg = None
         regime_row = regime_gate_read(
-            closes, cfg=None,
+            closes, cfg=_regime_cfg,
             index_closes=_idx_closes or None,
         ) or None
     except Exception:  # noqa: BLE001 - advisory row degrades to None
@@ -838,6 +844,7 @@ def get_value_dip_setup(
         roe=roe,
         fcf=fcf,
         regime_gate=regime_row,
+        cfg=_regime_cfg,
         eps_surprise=eps_surprise,
         forward_peg=forward_peg,
         require_knife=bool(

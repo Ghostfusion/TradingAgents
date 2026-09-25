@@ -1004,6 +1004,13 @@ def value_dip_setup(
     loose_technical: bool = False,
     min_closes_trend: int = 200,
     regime_gate: dict | None = None,
+    # The config the regime row is MEASURED with when the caller supplies no row.
+    # This branch hard-coded ``cfg=None``, so the row read the FUNCTION defaults
+    # (vol cap 0.8 / downtrend band 8%) instead of the configured
+    # ``value_dip_regime_vol_cap`` / ``value_dip_regime_downtrend_band`` - and
+    # ``require_regime`` gated on that row, so an operator's tighter cap did
+    # nothing on this path.
+    cfg: dict | None = None,
     # Tri-state, forwarded unchanged to ``regime_gate_read``: ``None`` = the
     # caller supplied NO event fact, so the regime read reports the catalyst
     # axis UNMEASURED. A ``False`` DEFAULT was the D-11 defect - it asserted a
@@ -1156,7 +1163,7 @@ def value_dip_setup(
             # D-11: forwarded UNCHANGED, tri-state. An omitted
             # ``catalyst_window`` stays ``None`` -> the read reports the axis
             # unmeasured; it is never coerced to a measured-looking ``False``.
-            regime_row = regime_gate_read(closes, cfg=None, catalyst_window=catalyst_window)
+            regime_row = regime_gate_read(closes, cfg=cfg, catalyst_window=catalyst_window)
         except Exception:  # noqa: BLE001 - degrade to unknown, never fail
             regime_row = None
     if regime_row is not None:
