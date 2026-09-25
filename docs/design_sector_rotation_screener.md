@@ -1,6 +1,18 @@
 # Sector Rotation Screen — Design
 
-Status: **design doc (proposal — no code changed)**.
+Status: **built (status line corrected 2026-09-25).** It previously read
+"proposal - no code changed", which this file's own §3 header already
+contradicted. The sector layer described in §4 and §5.1-§5.3 ships: the
+multi-factor SPDR rank and the 11-ETF universe in `strategies/sector_rank.py`,
+the screen itself - `sector_screen`, `constituent_screens`, `backtest_rotation`,
+`classify_regime`/`cap_grade`, `EW_CW_ETFS`, `pullback_divergence`,
+`dispersion_trend` - in `strategies/sector_screener.py`, and the breadth legs
+(`multi_breadth`, `mcclellan_read`, `msi_zone`) in `strategies/sector_breadth.py`,
+reachable as the `get_sector_rotation_screen` tool behind `enable_sector_multifactor`
+/ `enable_sector_industry` / `enable_sector_breadth`.
+§5.4's distribution-day kill-switch rule is **not** built (no distribution-day
+count exists in the engine: grep `distribution|dist_day` finds prose only), and
+§5.5's market-wide breadth gap stands as that section records it.
 Source: `Strategies/sector_rotation.md` (731-line swing-rotation playbook) +
 the adopted `Strategies/formulas/sector_rotation.md` (P1-P3/A1-A3 live in
 `sector_rank.py` / `cycle_tilt.py`) + fresh deep web research (2026-09-06,
