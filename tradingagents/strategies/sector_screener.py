@@ -267,17 +267,23 @@ def _no_chase(closes: list, *, tol: float = 0.05) -> bool | None:
 
 def setup_a(closes: list, highs: list | None = None, volumes: list | None = None, *,
             shelf_w: int = _SHELF_W, hi_w: int = _HI_W, vol_w: int = _VOL_W) -> dict:
-    """High-tight shelf (3-6% of the 52-week high) + volume contraction.
+    """High-tight shelf (shelf high within 6% of the running high) + volume
+    contraction.
 
     Returns ``{'state': 'fire'|'ready'|'none', 'dist', 'reasons'}``:
     ``fire`` = shelf high cleared on >= 1.5x avg volume; ``ready`` =
     consolidating in the zone and not yet cleared; ``none`` otherwise.
+
+    A series too short to carry the shelf window plus today's bar is refused
+    rather than read: on two bars the "running high" is just whatever those two
+    bars printed, and the state that follows is not a shelf read.
     """
     hi = list(highs or [])
     vols = list(volumes or [])
     out = {"state": "none", "dist": None, "reasons": []}
-    if not closes or len(closes) < 2:
-        out["reasons"].append("< 2 bars")
+    bars = len(hi) if hi else len(closes or [])
+    if not closes or bars < shelf_w + 2:
+        out["reasons"].append(f"< {shelf_w + 2} bars for a {shelf_w}-bar shelf")
         return out
     hi52 = max(hi[-hi_w:]) if hi else max(closes)
     shelf = hi[-(shelf_w + 1):-1] if len(hi) > shelf_w else (hi[-shelf_w:] if hi else [])

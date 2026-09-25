@@ -138,6 +138,34 @@ def test_regime_market_stress_blocks_on_high_index_vol():
     assert rg["market_stress"] is True
     assert rg["pass"] is False
     assert any("market stress" in r for r in rg["reasons"])
+    # the verdict names every leg that can block: with only the index leg
+    # blocking, this used to read "tradable" beside pass=False
+    assert rg["verdict"] == "market-stress"
+
+
+def test_the_short_series_return_carries_the_same_keys_as_the_main_one():
+    """A caller reading ``thresholds`` must not have to branch on the length."""
+    from tradingagents.strategies.regime import regime_gate_read
+    short = regime_gate_read([100.0 + i for i in range(40)], cfg={})
+    long_ = regime_gate_read(_trend_closes(), cfg={})
+    assert set(short) == set(long_)
+    assert short["thresholds"]["vol_cap"] == long_["thresholds"]["vol_cap"]
+
+
+def test_the_200sma_legs_read_unmeasured_below_200_bars_not_false():
+    """60-199 bars cannot carry a 200-SMA, so ``above_sma200`` and
+    ``fast_downtrend`` are UNMEASURED (None) - never False, which claims a
+    knife-guard measurement nobody made."""
+    from tradingagents.strategies.regime import regime_gate_read
+    mid = regime_gate_read([100.0 + 0.05 * i for i in range(120)], cfg={})
+    assert mid["above_sma200"] is None
+    assert mid["fast_downtrend"] is None
+    assert any("not measured" in r for r in mid["reasons"])
+    assert not any("no fast downtrend" in r for r in mid["reasons"])
+    # at 200+ bars it is measured again, and the tail reason says so
+    full = regime_gate_read(_trend_closes(), cfg={})
+    assert full["above_sma200"] is True and full["fast_downtrend"] is False
+    assert any("no fast downtrend" in r for r in full["reasons"])
 
 
 def test_regime_market_stress_off_without_index():

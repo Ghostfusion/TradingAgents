@@ -47,8 +47,10 @@ def _atr_series(
 
     ``out[j]`` is the ATR as of bar index ``window + j`` (0-based, over the
     common prefix of the three series), so the caller can align it with the
-    bars. Bars whose close is non-positive are skipped rather than coerced:
-    a zero close would make the percentage reading meaningless.
+    bars. A bar whose PRIOR close is non-positive refuses the whole series (an
+    empty list) rather than being coerced or skipped: a zero close would make
+    every percentage reading downstream meaningless, and skipping one bar
+    would silently misalign ``out[j]`` against the bar it describes.
     """
     n = min(len(highs or []), len(lows or []), len(closes or []))
     if n < window + 1:

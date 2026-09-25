@@ -164,41 +164,49 @@ def mp_lower_spectrum(closes_by_name: dict, *, window: int = SPECTRUM_WINDOW,
 
 def multi_breadth(closes_map: dict, *, windows: tuple = (20, 50, 200),
                   min_n: int = 20) -> dict:
-    """Sector breadth matrix: {etf: {'n', 'pct_20d', 'pct_50d', 'pct_200d',
-    'small_sample': bool}}.
+    """Sector breadth matrix: {etf: {'n', 'n_20d', 'n_50d', 'n_200d',
+    'pct_20d', 'pct_50d', 'pct_200d', 'small_sample': bool}}.
 
-    Each column = % of members whose last close > SMA_w. A sector with n <
-    ``min_n`` gets ``small_sample=True`` (breadth not meaningful) but keeps
-    the raw n so the display is honest instead of a fake percentage.
+    Each column = % of the members that CARRY that window whose last close >
+    SMA_w. A member with fewer bars than a window is left out of THAT column's
+    denominator and reported in ``n_<w>d`` - it is never counted as not-above,
+    because a name with no 200d SMA is no evidence about the 200d line and
+    counting it as one depresses the column by construction. A column with no
+    eligible member reads ``None``, never a fabricated ``0.0``: a count over an
+    empty denominator is not a breadth read (the rule ``market_breadth`` states
+    for its 52-week pair). The columns reported are the 20/50/200 trio whatever
+    ``windows`` says, so a caller asking for another window reads ``None``
+    rather than a number from a different window.
+
+    A sector with n < ``min_n`` gets ``small_sample=True`` (breadth not
+    meaningful) but keeps the raw n so the display is honest instead of a fake
+    percentage.
     """
     out = {}
+    columns = (20, 50, 200)
     for etf, members in (closes_map or {}).items():
         n = 0
-        above = dict.fromkeys(windows, 0)
-        per = {}
+        above = dict.fromkeys(columns, 0)
+        eligible = dict.fromkeys(columns, 0)
         for c in (members or {}).values() if isinstance(members, dict) else (members or []):
             if not c:
                 continue
-            for w in windows:
-                sma = _sma(c, w)
-                if sma is not None:
-                    per.setdefault(w, 0)
-                    above[w] = above.get(w, 0)
-                    if c[-1] > sma:
-                        above[w] += 1
             n += 1
-        if not n:
-            out[etf] = {"n": 0, "pct_20d": None, "pct_50d": None, "pct_200d": None,
-                        "small_sample": True, "min_n": min_n}
-            continue
-        out[etf] = {
-            "n": n,
-            "pct_20d": round(100.0 * above.get(20, 0) / n, 1) if above.get(20) is not None else None,
-            "pct_50d": round(100.0 * above.get(50, 0) / n, 1),
-            "pct_200d": round(100.0 * above.get(200, 0) / n, 1),
-            "small_sample": n < min_n,
-            "min_n": min_n,
-        }
+            for w in windows:
+                if w not in eligible:
+                    continue
+                sma = _sma(c, w)
+                if sma is None:
+                    continue
+                eligible[w] += 1
+                if c[-1] > sma:
+                    above[w] += 1
+        row: dict = {"n": n, "small_sample": (not n) or n < min_n, "min_n": min_n}
+        for w in columns:
+            den = eligible.get(w) or 0
+            row[f"n_{w}d"] = den
+            row[f"pct_{w}d"] = round(100.0 * above.get(w, 0) / den, 1) if den else None
+        out[etf] = row
     return out
 
 

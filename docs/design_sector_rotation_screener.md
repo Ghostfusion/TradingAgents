@@ -89,10 +89,15 @@ REGIME (SPY trend + dispersion) ─gate→ SECTOR RANK (RS/momentum, multifactor
   ≥125% of its 50d volume; note-only, never auto-sell)
 ```
 
-**Tool**: `get_sector_rotation_screen(...)` → market analyst, advisory,
-default-off behind `enable_sector_rotation_screen` (matching
-`enable_sector_multifactor` convention). Renders **screens** (ranked rows +
-flags), not buy signals.
+**Tool**: `get_sector_rotation_screen(...)` → market analyst, advisory. It is NOT
+gated today: no `enable_sector_rotation_screen` key exists in
+`default_config.DEFAULT_CONFIG` and no gate row registers one, so the tool
+registers unconditionally (the archived `reports/*/tool_evidence.json` files show
+it running in every run). This paragraph used to claim it was "default-off behind
+`enable_sector_rotation_screen`" - a key that was never written. Making it
+default-off means adding the gate; the only switch it has now is the
+`enable_breadth` argument / `enable_sector_breadth` config for its constituent
+block. Renders **screens** (ranked rows + flags), not buy signals.
 
 ## 5. Signals and thresholds (screener spec)
 

@@ -66,6 +66,45 @@ def test_multi_breadth_none_safe():
     assert mb["XLK"]["n"] == 0 and mb["XLK"]["pct_50d"] is None
 
 
+def test_a_member_without_the_window_is_out_of_that_columns_denominator():
+    """A name with no 200d SMA is no evidence about the 200d line.
+
+    Counting it as "not above" depresses the column by construction, so the
+    eligible count travels with it (``n_200d``). The long member is above its
+    200d SMA, so the column must read 100%, not 50%.
+    """
+    mb = multi_breadth(
+        {"XLK": {"LONG": _mono(n=260, drift=0.006), "SHORT": _mono(n=30, drift=0.006)}},
+        min_n=1,
+    )
+    b = mb["XLK"]
+    assert b["n"] == 2  # the sector has two members
+    assert b["pct_20d"] == 100.0  # both carry a 20d SMA
+    assert b["pct_50d"] == 100.0  # the short one carries no 50d SMA
+    assert b["pct_200d"] == 100.0  # nor a 200d SMA - so it cannot be "not above"
+    assert b["n_20d"] == 2 and b["n_50d"] == 1 and b["n_200d"] == 1
+
+
+def test_a_column_with_no_eligible_member_reads_none_never_a_fabricated_zero():
+    """Master rule 1: a count over an empty denominator is not a breadth read.
+
+    Ten bars is not a 50d or 200d read, so those columns read ``None`` (which
+    the renderers print as ``n/a``) - never ``0.0``, which would claim every
+    member sits below a line none of them was measured against.
+    """
+    mb = multi_breadth(
+        {"XLK": {"A": _mono(n=10), "B": _mono(n=10, drift=-0.002)}}, min_n=1
+    )
+    b = mb["XLK"]
+    assert b["pct_50d"] is None and b["pct_200d"] is None and b["pct_20d"] is None
+    assert b["n_50d"] == 0 and b["n_200d"] == 0 and b["n_20d"] == 0
+    # a 20-bar panel is the first length that carries a 20d SMA
+    b20 = multi_breadth({"XLK": {"A": _mono(n=20), "B": _mono(n=20, drift=-0.002)}},
+                        min_n=1)["XLK"]
+    assert b20["n_20d"] == 2 and b20["pct_20d"] == 50.0
+    assert b20["pct_50d"] is None
+
+
 # ---------------------------------------------------------------------------
 # mcclellan
 # ---------------------------------------------------------------------------

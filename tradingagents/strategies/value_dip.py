@@ -681,7 +681,13 @@ def trigger_candle(
     """
     if not closes or len(closes) < window + 2 or len(highs) < 2 or not volumes:
         return {"trigger": None, "rvol": None}
-    avg = sum(volumes[-window - 1 : -1]) / window if window else 0.0
+    # The denominator is the number of bars the prior-window slice ACTUALLY
+    # holds, never the window size: a volume series shorter than the price
+    # series (a vendor handing back fewer volume rows, a fresh listing, a
+    # merged cache tail) would otherwise divide a short sum by ``window`` and
+    # inflate RVOL into a trigger. Same rule as ``volume_dry_up``'s ratio.
+    prior_vol = [v for v in volumes[-window - 1 : -1] if v is not None] if window else []
+    avg = (sum(prior_vol) / len(prior_vol)) if prior_vol else 0.0
     rvol = volumes[-1] / avg if avg > 0 else None
     mech = None
     if discount_mechanical and dates:

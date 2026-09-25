@@ -539,6 +539,23 @@ def test_trigger_candle_and_higher_low():
     assert hl["higher_low"] is True
 
 
+def test_the_rvol_denominator_is_the_bars_the_slice_holds_not_the_window():
+    """A volume series shorter than the price series must not inflate RVOL.
+
+    The old formula divided the prior-volume slice by ``window`` (20) whatever
+    the slice held, so two prior bars at 1e6 averaged 1e5 and an ordinary 1.2x
+    day read 24x - a trigger manufactured out of a short volume series.
+    """
+    closes = [100.0 + 0.1 * i for i in range(30)]
+    closes[-1] = closes[-2] * 1.02
+    highs = [c * 1.001 for c in closes]
+    highs[-2] = closes[-2] * 0.999  # the prior high is below today's close
+    lows = [c * 0.999 for c in closes]
+    tc = trigger_candle(closes, highs, lows, [1e6, 1e6, 1.2e6])  # three bars
+    assert tc["rvol"] == pytest.approx(1.2, abs=0.01)
+    assert tc["trigger"] is False  # 1.2x is under the 1.3x gate
+
+
 def test_vdu_entry_setup_candidate():
     closes, highs, lows, vols = _dip_trigger_series()
     vd = vdu_entry_setup(closes, highs, lows, vols, support_window=80)

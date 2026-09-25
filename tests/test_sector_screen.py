@@ -172,6 +172,18 @@ def test_setup_a_fires_on_volume_breakout():
     assert a["state"] == "fire", a
 
 
+def test_setup_a_refuses_a_series_too_short_to_carry_a_shelf():
+    """Two bars are not a high-tight shelf.
+
+    The running high would just be whatever those two bars printed, and the
+    state that follows from it is not a shelf read - so the read is refused
+    rather than reported as ``ready``/``fire``.
+    """
+    a = setup_a([100.0, 101.0], [100.5, 101.5], [1e6, 1e6])
+    assert a["state"] == "none"
+    assert a["reasons"] and "shelf" in a["reasons"][0]
+
+
 def test_setup_b_pullback_rising_ema():
     # strong uptrend -> last bar dips to touch the rising EMA20 and closes
     # green (reversal). EMA20 must be rising (contrast with the tail).

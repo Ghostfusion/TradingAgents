@@ -862,9 +862,10 @@ def regime_gate_read(
 
     * ``vol_pct`` - percentile rank of the latest 21d realized vol vs its own
       trailing history (the volatility-regime-first rule).
-    * ``fast_downtrend`` - price >= ``value_dip_regime_downtrend_band`` (default
-      8%) below the 200-SMA while the 50-SMA is under the 200-SMA (falling
-      knife guard).
+    * ``fast_downtrend`` - price < ``value_dip_regime_downtrend_band`` (default
+      8%) below a 200-SMA that the 50-SMA sits under (falling knife guard).
+      ``None`` (unmeasured) when the series is too short to carry both SMAs -
+      never ``False``, which would assert a knife-guard measurement nobody made.
     * ``catalyst_window`` - the caller's **explicit event fact**, tri-state.
       ``True``/``False`` are the caller's measured answer; ``None`` means the
       caller supplied none, and the axis is then reported **unmeasured** rather
@@ -872,7 +873,8 @@ def regime_gate_read(
       It is never coerced to ``False``, because that asserts a measurement
       nobody made (D-11: the pre-graph context holds no event fact).
     * ``pass`` - False when high-vol (``value_dip_regime_vol_cap``, default
-      0.8) OR fast_downtrend OR catalyst_window. ADVISORY: this function never
+      0.8) OR fast_downtrend OR market stress (``market_stress_vol_cap``,
+      default 0.85) OR catalyst_window. ADVISORY: this function never
       blocks anything; hard-gating is opt-in at the caller via ``require_regime``
       so existing scans keep their behaviour.
     """
@@ -881,24 +883,34 @@ def regime_gate_read(
     cat_flag: bool | None = None if catalyst_window is None else bool(catalyst_window)
     vol_cap = float(cfg.get("value_dip_regime_vol_cap", 0.8))
     band = float(cfg.get("value_dip_regime_downtrend_band", 0.08))
+    market_vol_cap = float(cfg.get("market_stress_vol_cap", 0.85))
     if not closes or len(closes) < 60:
+        # Same keys as the main return below, so a caller reading any of them
+        # (``thresholds`` in particular) never has to branch on the length.
         return {
             "pass": None, "verdict": "unknown", "vol_pct": None,
             "fast_downtrend": None, "above_sma200": None, "sma50_rising": None,
-            "index_vol_pct": None, "market_stress": None,
-            "catalyst_window": cat_flag, "reasons": ["insufficient history"],
+            "index_vol_pct": None, "index_fast_downtrend": None,
+            "market_stress": None,
+            "catalyst_window": cat_flag,
+            "thresholds": {"vol_cap": vol_cap, "downtrend_band": band},
+            "reasons": ["insufficient history"],
         }
     price = float(closes[-1])
     sma200 = _sma(closes, 200)
     sma50 = _sma(closes, 50)
     sma50_prev = _sma(closes[:-5], 50) if len(closes) > 55 else None
-    above_200 = sma200 is not None and price >= sma200
+    # The 200-SMA needs 200 bars while the guard above only needs 60, so a
+    # 60-199-bar series must report these two axes as UNMEASURED rather than
+    # False: "not below the 200-SMA" is a claim about a line that does not
+    # exist yet.
+    knife_measurable = sma200 is not None and sma50 is not None
+    above_200 = (price >= sma200) if sma200 is not None else None
     sma50_rising = sma50_prev is not None and sma50 is not None and sma50 >= sma50_prev
-    fast_downtrend = bool(
-        sma200 is not None
-        and sma50 is not None
-        and price < sma200 * (1.0 - band)
-        and sma50 < sma200
+    fast_downtrend = (
+        bool(price < sma200 * (1.0 - band) and sma50 < sma200)
+        if knife_measurable
+        else None
     )
 
     # Market-level stress leg (mean-reversion value-trap defense): when an
@@ -938,10 +950,22 @@ def regime_gate_read(
         vol_pct = round(sum(1 for v in hist if v <= recent) / len(hist), 4)
     high_vol = bool(vol_pct is not None and vol_pct > vol_cap)
     blocked = bool(high_vol or fast_downtrend or market_stress or cat_flag)
+    # Every leg that can block must be nameable in the verdict: the market-stress
+    # leg was counted in ``blocked`` but absent here, so a tape that only the
+    # index leg blocked read verdict="tradable" with pass=False - the row
+    # contradicted itself.
     verdict = (
         "high-vol"
         if high_vol
-        else ("fast-downtrend" if fast_downtrend else ("catalyst-window" if cat_flag else "tradable"))
+        else (
+            "fast-downtrend"
+            if fast_downtrend
+            else (
+                "market-stress"
+                if market_stress
+                else ("catalyst-window" if cat_flag else "tradable")
+            )
+        )
     )
     reasons = []
     if high_vol:
@@ -956,11 +980,18 @@ def regime_gate_read(
         # D-11: "no catalyst" is a CLAIM, and it may only be made when the caller
         # actually supplied the fact. With no fact the axis is named as
         # unmeasured instead - this false trailer is what the model repeated back
-        # as measured ("...no catalyst", AMKR 2026-09-17).
+        # as measured ("...no catalyst", AMKR 2026-09-17). The knife-guard clause
+        # follows the same rule: a series that cannot carry a 200-SMA has not
+        # measured "no fast downtrend" either.
+        knife = (
+            "no fast downtrend"
+            if fast_downtrend is not None
+            else "fast-downtrend axis not measured (<200 bars)"
+        )
         reasons.append(
-            "volatility contained + no fast downtrend (catalyst window not measured)"
+            f"volatility contained + {knife} (catalyst window not measured)"
             if cat_flag is None
-            else "volatility contained + no fast downtrend + no catalyst"
+            else f"volatility contained + {knife} + no catalyst"
         )
     return {
         "pass": not blocked,

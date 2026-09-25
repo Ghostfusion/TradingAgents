@@ -3750,6 +3750,7 @@ def get_sector_rank(
                 constituent_breadth,
                 leadership_ratio,
             )
+            from tradingagents.strategies.sector_screener import breadth_with_gate
 
             parent = (standing or {}).get("etf")
             for fam, members in SECTOR_CONSTITUENTS.items():
@@ -3760,13 +3761,19 @@ def get_sector_rank(
                     mc = _ohlcv(m).get("closes") or []
                     if len(mc) >= 60:
                         cmap[m] = mc
-                b = constituent_breadth(cmap)
+                # A curated ~10-name list is below the denominator floor, so the
+                # same n-gate the rotation screen applies to this computation
+                # applies here: the percentage renders n/a with its reason
+                # instead of a noisy number from a handful of names.
+                b = breadth_with_gate(constituent_breadth(cmap), min_n=20)
                 fam_closes = _ohlcv(fam).get("closes") or []
                 lr = leadership_ratio(cmap, fam_closes) if fam_closes else None
-                if b.get("pct") is not None or lr is not None:
+                if b.get("n") or lr is not None:
+                    pct = b.get("pct")
                     lines.append(
-                        f"  breadth {fam}: {b.get('pct') if b.get('pct') is not None else 'n/a'}% "
-                        f"above MA{b['window']} (n={b['n']})"
+                        f"  breadth {fam}: {f'{pct}%' if pct is not None else 'n/a'} "
+                        f"above MA{b.get('window')} (n={b.get('n')})"
+                        + (f" - {b['reason']}" if b.get("small_sample") and b.get("n") else "")
                     )
                     lines.append(f"  leadership {fam}: EW/CW={lr if lr is not None else 'n/a'}")
         except Exception:  # noqa: BLE001 - advisory
@@ -3936,19 +3943,42 @@ def get_sector_rotation_screen(
                 lines.append("## Sector breadth matrix (multi-timeframe, advisory)")
                 lines.append("| sector | n | % > 20d | % > 50d | % > 200d | MO | MO slope | MSI | RRG |")
                 lines.append("|---|---|---|---|---|---|---|---|---|")
+
+                def _pct_cell(row: dict, key: str) -> str:
+                    """One matrix cell: n/a (not '0.0%') when the sample or the
+                    window's own denominator is empty - a percentage over no
+                    eligible member is not a breadth read."""
+                    v = None if row.get("small_sample") else row.get(key)
+                    return f"{v}%" if v is not None else "n/a"
+
                 for p in sorted(cons):
                     b = mb.get(p) or {}
                     m = mc.get(p) or {}
                     rank_row = next((r for r in rows if r.get("etf") == p), None)
                     q = (rank_row or {}).get("quadrant") or "n/a"
-                    bd, mo, msi = b.get("pct_20d"), m.get("mo"), m.get("msi")
+                    mo, msi = m.get("mo"), m.get("msi")
                     mo_l = m.get("mo_slope") or ""
                     lines.append(
-                        f"| {p} | {b.get('n', 0)} | {bd if bd is not None else 'n/a'}% | "
-                        f"{b.get('pct_50d') if b.get('pct_50d') is not None else 'n/a'}% | "
-                        f"{b.get('pct_200d') if b.get('pct_200d') is not None else 'n/a'}% | "
+                        f"| {p} | {b.get('n', 0)} | {_pct_cell(b, 'pct_20d')} | "
+                        f"{_pct_cell(b, 'pct_50d')} | {_pct_cell(b, 'pct_200d')} | "
                         f"{mo if mo is not None else 'n/a'} | {mo_l} | "
                         f"{msi if msi is not None else 'n/a'} | {q} |"
+                    )
+                # A column is measured over the members that CARRY its window,
+                # so say so whenever that is fewer than the sector's member
+                # count: otherwise "62% > 200d" hides that 240 of 250 names
+                # were the denominator rather than 250.
+                short = [
+                    f"{p} {w}d {mb[p].get(f'n_{w}d')}/{mb[p].get('n')}"
+                    for p in sorted(mb)
+                    for w in (20, 50, 200)
+                    if (mb[p].get(f"n_{w}d") or 0) < (mb[p].get("n") or 0)
+                ]
+                if short:
+                    lines.append("")
+                    lines.append(
+                        "- columns measured over fewer names than the sector holds "
+                        "(that column's denominator): " + ", ".join(short)
                     )
             except Exception as exc:  # noqa: BLE001 - advisory; degrade to curated
                 _line_note = f" (universe unavailable: {exc})"

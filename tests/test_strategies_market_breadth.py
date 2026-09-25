@@ -226,15 +226,19 @@ def test_mp_below_count_unavailable_when_window_not_longer_than_names():
     assert read["count"] == int((np.linalg.eigvalsh(corr) < read["mp_lower"]).sum())
     assert read["window"] == 44 and read["n_names"] == 11  # the window travels
 
-    # The gate off leaves the existing breadth output exactly as it was: the
-    # shared producer's shape and values, and no spectrum key.
+    # The gate off leaves the shared producer's output exactly as it was - same
+    # shape, same numbers, no spectrum key. A 30-bar panel carries no 50d or
+    # 200d SMA, so those columns are None (no eligible member) rather than a
+    # fabricated 0.0; the 20d column is the one this panel can measure.
     snapshot = multi_breadth(
         {"XLK": {"A": [100.0 + j for j in range(30)],
                  "B": [100.0 - j for j in range(30)]}},
         min_n=1,
     )
-    assert snapshot == {"XLK": {"n": 2, "pct_20d": 50.0, "pct_50d": 0.0,
-                                "pct_200d": 0.0, "small_sample": False, "min_n": 1}}
+    assert snapshot == {"XLK": {"n": 2, "small_sample": False, "min_n": 1,
+                                "n_20d": 2, "n_50d": 0, "n_200d": 0,
+                                "pct_20d": 50.0, "pct_50d": None,
+                                "pct_200d": None}}
     assert "mp_lower_spectrum" not in market_breadth(panel, min_n=1, cfg={})
 
 
