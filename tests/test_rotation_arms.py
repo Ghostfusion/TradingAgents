@@ -136,3 +136,44 @@ def test_an_unmeasurable_hurdle_never_gates():
     assert arm["gated_rebalances"] == 0
     assert arm["cash_weight_avg"] == 0.0
     assert arm["strategy"] == bt["strategy"]
+
+
+@pytest.mark.unit
+def test_the_buffer_is_absent_unless_asked_for():
+    bt = backtest_rotation(_rotating_pool(), BENCH, min_bars=MIN_BARS)
+    assert bt["hysteresis"] is None
+
+
+@pytest.mark.unit
+def test_hysteresis_holds_a_name_just_outside_the_cut_and_cuts_turnover():
+    pool = _rotating_pool()
+    bt = backtest_rotation(pool, BENCH, min_bars=MIN_BARS, hysteresis_ranks=3)
+    arm = bt["hysteresis"]
+    assert arm is not None
+    assert bt["turns"] > 0, "the fixture must actually rotate the top-3"
+    assert arm["held_over"] >= 1
+    assert arm["turns"] < bt["turns"]
+    assert arm["cash_weight_avg"] == 0.0
+
+
+@pytest.mark.unit
+def test_hysteresis_still_drops_a_name_that_fails_the_hurdle():
+    """The buffer is not a licence to hold a sector losing to cash."""
+    pool = {f"E{i}": _series(rate=0.0002) for i in range(4)}
+    cash = _series(rate=0.002)
+    bt = backtest_rotation(
+        pool,
+        BENCH,
+        min_bars=MIN_BARS,
+        cost_bps=0.0,
+        hysteresis_ranks=3,
+        cash_closes=cash,
+    )
+    arm = bt["hysteresis"]
+    assert arm is not None
+    assert arm["abs_gated"] is True
+    assert arm["held_over"] == 0
+    # Every name fails the hurdle, so the arm is entirely in the proxy.
+    assert arm["cash_weight_avg"] == 1.0
+    expected = [cash[i + 1] / cash[i] - 1.0 for i in range(MIN_BARS, N - 1)]
+    assert arm["strategy"] == pytest.approx(expected)

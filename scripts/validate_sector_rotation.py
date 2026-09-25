@@ -39,6 +39,9 @@ def main() -> int:
                     help="risk-off proxy for the absolute-momentum arm (default BIL; empty disables it)")
     ap.add_argument("--abs-window", type=int, default=63,
                     help="absolute-momentum lookback in sessions (default 63 ~ 3 months)")
+    ap.add_argument("--hysteresis", type=int, default=0,
+                    help="rank-hysteresis buffer in ranks (default 0 = off): a held name is kept "
+                         "while it ranks inside top_n + this")
     args = ap.parse_args()
 
     try:
@@ -75,7 +78,7 @@ def main() -> int:
 
     bt = backtest_rotation(closes_map, bench, hold_bars=args.hold, top_n=args.top,
                            cost_bps=args.cost_bps, abs_momentum_window=args.abs_window,
-                           cash_closes=cash_closes)
+                           cash_closes=cash_closes, hysteresis_ranks=args.hysteresis)
     if not bt["strategy"] or len(bt["strategy"]) < 30:
         print(f"unavailable: backtest too short ({len(bt['strategy'])} bars).")
         return 1
@@ -107,6 +110,17 @@ def main() -> int:
         print(f"  cash gate: {arm['gated_rebalances']} rebalance(s) with a slot in "
               f"{args.cash_symbol.upper()}, avg proxy weight {arm['cash_weight_avg']:.2%}, "
               f"turnover {arm['turns']:.2f} (shipped arm {bt['turns']:.2f})")
+    hyst = bt.get("hysteresis")
+    if hyst and hyst["strategy"]:
+        rw, r0 = hyst["strategy"], bt["bench"]
+        sharpe = evaluate.sharpe(rw)
+        mdd = evaluate.max_drawdown(evaluate.equity_curve(rw))
+        calmar = evaluate.cagr(rw) / mdd if mdd and mdd > 0 else float("nan")
+        ir = evaluate.information_ratio(rw, r0) if len(r0) == len(rw) else float("nan")
+        print(f"{'rotation + hysteresis':<28}{sharpe:>8.3f}{calmar:>8.3f}{mdd:>9.2%}{ir:>10.3f}")
+        print(f"  hysteresis: buffer {hyst['hysteresis_ranks']} rank(s), "
+              f"{hyst['held_over']} buffer hold(s), turnover {hyst['turns']:.2f} "
+              f"(shipped arm {bt['turns']:.2f})")
     # no-cost rotation line (the optimistic ceiling)
     bt0 = backtest_rotation(closes_map, bench, hold_bars=args.hold, top_n=args.top, cost_bps=0.0)
     sharpe0 = evaluate.sharpe(bt0["strategy"])

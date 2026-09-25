@@ -571,6 +571,7 @@ def backtest_rotation(
     min_bars: int = _REQUIRE_BARS,
     abs_momentum_window: int = 63,
     cash_closes: list | None = None,
+    hysteresis_ranks: int = 0,
 ) -> dict:
     """Monthly-rebalance top-3 rotation vs equal-weight basket vs benchmark.
 
@@ -590,6 +591,16 @@ def backtest_rotation(
     nothing, and ``cash_weight_avg`` / ``gated_rebalances`` report how much of
     the arm was actually in cash. The arm charges cost with the same formula as
     the shipped one, so the two series are comparable.
+
+    With ``hysteresis_ranks`` > 0 a THIRD arm is reported under ``hysteresis``:
+    a name already held is kept while it still ranks inside ``top_n +
+    hysteresis_ranks`` (a buffer against a one-place rank wobble re-shorting the
+    book every month), and - when ``cash_closes`` is given - a name failing the
+    absolute hurdle is dropped from the target even if it is inside the buffer.
+    The target set is equal-weighted; when nothing qualifies the arm is entirely
+    in the proxy. ``held_over`` counts the rebalances where a name was kept
+    purely by the buffer, and the arm's own turnover is reported so the
+    turnover it saves is visible next to the return it gives up.
     """
     etfs = sorted((closes_map or {}).keys())
     empty = {
@@ -616,6 +627,11 @@ def backtest_rotation(
     abs_cash_weight = 0.0
     cash_weights: list[float] = []
     gated_rebalances = 0
+    hyst_strat: list[float] = []
+    hyst_positions: dict[str, float] = {}
+    hyst_turns = 0.0
+    hyst_cash_weights: list[float] = []
+    held_over = 0
 
     def _abs_beats_cash(etf: str, i: int) -> bool | None:
         """Sector's own return over the window vs the risk-off proxy's, or None
@@ -672,6 +688,38 @@ def backtest_rotation(
                 abs_cash_weight = weight
                 cash_weights.append(weight)
 
+            if hysteresis_ranks > 0:
+                ordered = [
+                    r["etf"] for r in (rank.get("ranked") or []) if r.get("rank") is not None
+                ]
+                cut = top_n + hysteresis_ranks
+                base = [
+                    e
+                    for e in top3
+                    if not cash_closes or _abs_beats_cash(e, i) is not False
+                ]
+                keep = [
+                    e
+                    for e in hyst_positions
+                    if hyst_positions.get(e, 0.0) > 0
+                    and e in ordered
+                    and ordered.index(e) < cut
+                    and (not cash_closes or _abs_beats_cash(e, i) is not False)
+                ]
+                target = list(dict.fromkeys([*base, *keep]))
+                held_over += sum(1 for e in keep if e not in base)
+                if target:
+                    hyst_new = {e: (1.0 / len(target) if e in target else 0.0) for e in etfs}
+                    hyst_weight = 0.0
+                else:
+                    hyst_new = dict.fromkeys(etfs, 0.0)
+                    hyst_weight = 1.0
+                hyst_turns += sum(
+                    abs(hyst_new.get(e, 0.0) - hyst_positions.get(e, 0.0)) for e in etfs
+                )
+                hyst_positions = hyst_new
+                hyst_cash_weights.append(hyst_weight)
+
         def ret_of(e: str, idx: int = i) -> float:
             c = closes_map[e]
             return c[idx + 1] / c[idx] - 1.0 if c[idx] else 0.0
@@ -693,6 +741,14 @@ def backtest_rotation(
             ar -= (abs_turns * cost_bps * 1e-4) / hold_bars
             abs_strat.append(ar)
 
+        if hysteresis_ranks > 0:
+            hr = sum(hyst_positions.get(e, 0.0) * ret_of(e) for e in etfs)
+            hw = hyst_cash_weights[-1] if hyst_cash_weights else 0.0
+            if hw and i + 1 < len(cash_closes or []) and cash_closes[i] > 0:
+                hr += hw * (cash_closes[i + 1] / cash_closes[i] - 1.0)
+            hr -= (hyst_turns * cost_bps * 1e-4) / hold_bars
+            hyst_strat.append(hr)
+
     out = {"strategy": strat, "equal": equal, "bench": bench, "turns": round(turns, 4)}
     out["abs_gate"] = (
         {
@@ -707,7 +763,22 @@ def backtest_rotation(
         if cash_closes
         else None
     )
-    out["hysteresis"] = None
+    out["hysteresis"] = (
+        {
+            "strategy": hyst_strat,
+            "turns": round(hyst_turns, 4),
+            "held_over": held_over,
+            "hysteresis_ranks": hysteresis_ranks,
+            "cash_weight_avg": (
+                round(sum(hyst_cash_weights) / len(hyst_cash_weights), 4)
+                if hyst_cash_weights
+                else None
+            ),
+            "abs_gated": bool(cash_closes),
+        }
+        if hysteresis_ranks > 0
+        else None
+    )
     return out
 
 
