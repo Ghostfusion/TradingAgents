@@ -12,6 +12,13 @@ is the honest one.
 Usage:
     py -3.12 scripts/validate_sector_rotation.py [--hold 21] [--top 3]
         [--cost-bps 5] [--etfs XLK,XLC,...]
+        [--cash-symbol BIL] [--abs-window 63]
+
+The `--cash-symbol` line adds the ABSOLUTE-momentum arm beside the shipped
+relative one: a top-N slot whose sector has not beaten the risk-off proxy over
+`--abs-window` sessions is held in the proxy instead. The shipped arm is
+unchanged by it, so the two lines are directly comparable; pass
+`--cash-symbol ""` to skip the arm.
 """
 
 from __future__ import annotations
@@ -28,6 +35,10 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=3, help="number of top sectors held (default 3)")
     ap.add_argument("--cost-bps", type=float, default=5.0, help="per-rebalance cost in bps (default 5)")
     ap.add_argument("--etfs", type=str, default="", help="comma list of SPDR ETFs (default: all 11)")
+    ap.add_argument("--cash-symbol", type=str, default="BIL",
+                    help="risk-off proxy for the absolute-momentum arm (default BIL; empty disables it)")
+    ap.add_argument("--abs-window", type=int, default=63,
+                    help="absolute-momentum lookback in sessions (default 63 ~ 3 months)")
     args = ap.parse_args()
 
     try:
@@ -51,8 +62,20 @@ def main() -> int:
         print("unavailable: no SPDR/benchmark history from the vendor chain.")
         return 1
 
+    # Risk-off proxy for the absolute-momentum arm: a sector that has not
+    # beaten T-bills has no business being held on a relative ranking alone.
+    cash_closes = None
+    if args.cash_symbol.strip():
+        c = _ohlcv(args.cash_symbol.strip().upper())
+        if len(c.get("closes") or []) >= 65:
+            cash_closes = c["closes"]
+        else:
+            print(f"note: no history for the cash proxy {args.cash_symbol!r} — "
+                  "the absolute-momentum arm is skipped.\n")
+
     bt = backtest_rotation(closes_map, bench, hold_bars=args.hold, top_n=args.top,
-                           cost_bps=args.cost_bps)
+                           cost_bps=args.cost_bps, abs_momentum_window=args.abs_window,
+                           cash_closes=cash_closes)
     if not bt["strategy"] or len(bt["strategy"]) < 30:
         print(f"unavailable: backtest too short ({len(bt['strategy'])} bars).")
         return 1
@@ -73,6 +96,17 @@ def main() -> int:
         calmar = evaluate.cagr(rw) / mdd if mdd and mdd > 0 else float("nan")
         ir = evaluate.information_ratio(rw, r0) if len(r0) == len(rw) else float("nan")
         print(f"{label:<28}{sharpe:>8.3f}{calmar:>8.3f}{mdd:>9.2%}{ir:>10.3f}")
+    arm = bt.get("abs_gate")
+    if arm and arm["strategy"]:
+        rw, r0 = arm["strategy"], bt["bench"]
+        sharpe = evaluate.sharpe(rw)
+        mdd = evaluate.max_drawdown(evaluate.equity_curve(rw))
+        calmar = evaluate.cagr(rw) / mdd if mdd and mdd > 0 else float("nan")
+        ir = evaluate.information_ratio(rw, r0) if len(r0) == len(rw) else float("nan")
+        print(f"{'rotation + cash gate':<28}{sharpe:>8.3f}{calmar:>8.3f}{mdd:>9.2%}{ir:>10.3f}")
+        print(f"  cash gate: {arm['gated_rebalances']} rebalance(s) with a slot in "
+              f"{args.cash_symbol.upper()}, avg proxy weight {arm['cash_weight_avg']:.2%}, "
+              f"turnover {arm['turns']:.2f} (shipped arm {bt['turns']:.2f})")
     # no-cost rotation line (the optimistic ceiling)
     bt0 = backtest_rotation(closes_map, bench, hold_bars=args.hold, top_n=args.top, cost_bps=0.0)
     sharpe0 = evaluate.sharpe(bt0["strategy"])

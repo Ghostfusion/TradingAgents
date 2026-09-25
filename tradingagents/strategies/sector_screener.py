@@ -569,6 +569,8 @@ def backtest_rotation(
     top_n: int = 3,
     cost_bps: float = 5.0,
     min_bars: int = _REQUIRE_BARS,
+    abs_momentum_window: int = 63,
+    cash_closes: list | None = None,
 ) -> dict:
     """Monthly-rebalance top-3 rotation vs equal-weight basket vs benchmark.
 
@@ -577,18 +579,57 @@ def backtest_rotation(
     aligned simple-return lists (strategy / equal-weight basket / benchmark)
     + the total turnover in units. This is the after-cost trust gate (P4) —
     downstream evaluate.py stats decide whether any claim is safe to make.
+
+    The relative arm above is the SHIPPED one and never moves. When
+    ``cash_closes`` (a risk-off proxy: BIL/SGOV/SHY) is supplied, a SECOND arm
+    is reported beside it under ``abs_gate``: at each rebalance a slot whose
+    sector has not beaten that proxy over ``abs_momentum_window`` sessions goes
+    to the proxy instead of the sector - the absolute-momentum / cash gate a
+    purely relative ranking lacks (it holds falling sectors when everything
+    falls). An unmeasured hurdle (not enough history on either series) gates
+    nothing, and ``cash_weight_avg`` / ``gated_rebalances`` report how much of
+    the arm was actually in cash. The arm charges cost with the same formula as
+    the shipped one, so the two series are comparable.
     """
     etfs = sorted((closes_map or {}).keys())
+    empty = {
+        "strategy": [],
+        "equal": [],
+        "bench": [],
+        "turns": 0.0,
+        "abs_gate": None,
+        "hysteresis": None,
+    }
     if not etfs or not bench_closes:
-        return {"strategy": [], "equal": [], "bench": [], "turns": 0.0}
+        return dict(empty)
     n = min(len(bench_closes), min(len(closes_map[e]) for e in etfs))
     if n < min_bars + 1:
-        return {"strategy": [], "equal": [], "bench": [], "turns": 0.0}
+        return dict(empty)
     strat: list[float] = []
     equal: list[float] = []
     bench: list[float] = []
     positions: dict[str, float] = {}
     turns = 0.0
+    abs_strat: list[float] = []
+    abs_positions: dict[str, float] = {}
+    abs_turns = 0.0
+    abs_cash_weight = 0.0
+    cash_weights: list[float] = []
+    gated_rebalances = 0
+
+    def _abs_beats_cash(etf: str, i: int) -> bool | None:
+        """Sector's own return over the window vs the risk-off proxy's, or None
+        when the hurdle cannot be measured (never gates)."""
+        if not cash_closes or abs_momentum_window < 1 or i < abs_momentum_window:
+            return None
+        if i >= len(cash_closes):
+            return None
+        j = i - abs_momentum_window
+        c = closes_map.get(etf) or []
+        if j < 0 or len(c) <= i or c[j] <= 0 or cash_closes[j] <= 0:
+            return None
+        return (c[i] / c[j]) > (cash_closes[i] / cash_closes[j])
+
     for i in range(min_bars, n - 1):
         elapsed = i - min_bars
         if elapsed % hold_bars == 0:
@@ -603,6 +644,34 @@ def backtest_rotation(
             turns += sum(abs(new_pos.get(e, 0.0) - positions.get(e, 0.0)) for e in etfs)
             positions = new_pos
 
+            if cash_closes:
+                gated = [e for e in top3 if _abs_beats_cash(e, i) is False]
+                if top3:
+                    per = 1.0 / len(top3)
+                    weight = len(gated) / len(top3)
+                    # Only a TOP-N sector may carry weight; a slot that fails the
+                    # hurdle is the proxy's, and every other name is flat. (A
+                    # name outside the top-N must never be handed a weight -
+                    # that would smuggle the relative book back in.)
+                    abs_new = {
+                        e: (per if (e in top3 and e not in gated) else 0.0) for e in etfs
+                    }
+                else:
+                    # Nothing qualifies relatively: the whole book is the
+                    # risk-off leg, which is the point of the gate.
+                    weight = 1.0
+                    abs_new = dict.fromkeys(etfs, 0.0)
+                if gated:
+                    gated_rebalances += 1
+                # The proxy leg is a position too: its own weight change is
+                # turnover, exactly as a sector swap is on the shipped arm.
+                abs_turns += abs(weight - abs_cash_weight) + sum(
+                    abs(abs_new.get(e, 0.0) - abs_positions.get(e, 0.0)) for e in etfs
+                )
+                abs_positions = abs_new
+                abs_cash_weight = weight
+                cash_weights.append(weight)
+
         def ret_of(e: str, idx: int = i) -> float:
             c = closes_map[e]
             return c[idx + 1] / c[idx] - 1.0 if c[idx] else 0.0
@@ -615,7 +684,31 @@ def backtest_rotation(
         strat.append(sr)
         equal.append(er if er is not None else 0.0)
         bench.append(br)
-    return {"strategy": strat, "equal": equal, "bench": bench, "turns": round(turns, 4)}
+
+        if cash_closes:
+            ar = sum(abs_positions.get(e, 0.0) * ret_of(e) for e in etfs)
+            w = cash_weights[-1] if cash_weights else 0.0
+            if w and i + 1 < len(cash_closes) and cash_closes[i] > 0:
+                ar += w * (cash_closes[i + 1] / cash_closes[i] - 1.0)
+            ar -= (abs_turns * cost_bps * 1e-4) / hold_bars
+            abs_strat.append(ar)
+
+    out = {"strategy": strat, "equal": equal, "bench": bench, "turns": round(turns, 4)}
+    out["abs_gate"] = (
+        {
+            "strategy": abs_strat,
+            "turns": round(abs_turns, 4),
+            "cash_weight_avg": (
+                round(sum(cash_weights) / len(cash_weights), 4) if cash_weights else None
+            ),
+            "gated_rebalances": gated_rebalances,
+            "abs_momentum_window": abs_momentum_window,
+        }
+        if cash_closes
+        else None
+    )
+    out["hysteresis"] = None
+    return out
 
 
 __all__ = [
