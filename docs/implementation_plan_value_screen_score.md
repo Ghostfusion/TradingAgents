@@ -238,6 +238,16 @@ py -3.12 scripts/score_panel.py --dates 2026-09-24 --symbols-file <us_common_sto
 | cost | N per-name fetches (N is tens after six server-side anchors) | free |
 | market cap | parsed and cross-checked | `close × ` the EDGAR cover-page share count, withheld for 20-F/40-F |
 
+**Measured on the first build (2026-09-24).** 287 decliner symbols → **286 tickers** in
+`panels/2026-09-24.json` (409 KB): 287 SEC requests at 10 req/s plus one prices leg, ~6.5 min
+running detached, with `_meta` recording the cost, the date, the basis and the per-name gaps
+(AAPG: no us-gaap annual facts). Re-running the *identical* screen invocation against it moved every
+score and changed the qualifying set - over the run's own 16-name cross-section the cut gave
+{UHS 77.78, LOGI 77.78, THC 71.11}; over the panel it gave **{PTC 70.62, UHS 68.84, ERIE 66.19,
+LOGI 64.58}**. THC fell out and PTC and ERIE came in. That divergence is the argument for this
+decision and the reason `--panel` prints the denominator it used. A second invocation made **zero**
+network calls (the per-date cache), and the run took 41 s.
+
 **Recommendation: keep the vendor TTM path for the screen's ratios and use the panel only for the
 scores.** The funnel keeps N small, and it leaves the market-cap logic where it already works.
 `--ratio-source panel` remains available for a zero-call screen, in which case the report must
@@ -300,5 +310,6 @@ Printed in every report, because each line changes what the number means:
 | render path with the owner's anchors | verified with synthetic data |
 | live run, designed path (OpenD up) | **done 2026-09-24** — 287 decliners → 16 candidates → 12 past the ratio gates, 3 clearing 64, 26 vendor calls |
 | `--panel` mode | **done** — loads the built panel via `load_panel_series`, scores the whole file, prints the denominator in the header, refuses absent names by name, labels a missing file; 4 tests + 2 failing-first proofs |
-| SEC panel build | building the 287-name decliner population for 2026-09-24 — 0.5 min of SEC calls at 10 req/s, plus the prices leg |
-| commit and push | pending for the `--panel` pass |
+| SEC panel build | **done** — 286 tickers for `panels/2026-09-24.json`, 287 SEC requests + one prices leg, ~6.5 min detached; `_meta` records cost, date, basis and the per-name gaps |
+| `--panel` live run | **done** — header reads "286 names from the built panel for 2026-09-24"; the cut moved from {UHS, LOGI, THC} over the 16-name cross-section to {PTC, UHS, ERIE, LOGI} over the panel, in 41 s with zero network calls |
+| commit and push | `6dc0e99` (the `--panel` pass); the docs and the measurement above follow in the same round |

@@ -489,9 +489,9 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         + (f" · 5-day change <= {args.chg5d_max:g}%" if args.chg5d_max else "")
         + (f" · RSI(14) <= {args.rsi_max:g}" if args.rsi_max else ""),
         f"- Panel: {panel_note}",
-        f"- Scoring pass: {scored_n} of {len(rows)} candidates scored against a "
-        f"{panel_n}-name panel, {len(miss)} withheld, {len(qual)} clear the "
-        f"{args.score_min:g} cut",
+        f"- Scoring pass: {scored_n} of {len(rows)} candidates scored, {panel_n} "
+        f"panel name(s) carrying a composite, {len(miss)} withheld, "
+        f"{len(qual)} clear the {args.score_min:g} cut",
         *(["- Candidate set: the deepest decliners with --no-moomoo, so this is "
            "a PARTIAL scan - the server-side screen needs OpenD and was skipped."]
           if args.no_moomoo else []),
