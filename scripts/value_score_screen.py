@@ -439,7 +439,7 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
              and scores[r["symbol"]] < args.score_min]
     panel_n = len([s for s in scores.values() if s is not None])
     lines = [
-        f"# Value + dip screen with FundamentalScore >= {args.score_min:g}",
+        f"# Value screen: candidates clearing FundamentalScore >= {args.score_min:g}",
         "",
         f"- Run: {datetime.now():%Y-%m-%d %H:%M} · date {args.date} · "
         f"universe: {args.exchanges or 'any'} common stocks",
@@ -464,19 +464,28 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         "nor the sub-scores reaches `opportunity_score`, and neither may gate a "
         "trade.",
         "",
-        *([f"### Clear the {args.score_min:g} cut"] if (below or miss) else []),
+        f"### Clear the {args.score_min:g} cut",
         "| " + " | ".join(_HEAD) + " |",
         "| " + " | ".join("---" for _ in _HEAD) + " |",
     ]
     for row in qual:
         lines.append("| " + " | ".join(_row_cells(row, scores, subs)) + " |")
-    if below:
+    if not qual:
+        # The cut is the owner's criterion, so an empty result must say so and
+        # name the best few rather than printing an empty table in silence.
+        best = ", ".join(f"{r['symbol']} {scores[r['symbol']]:.2f}" for r in below[:3])
+        lines += ["", f"**None of the {len(rows)} scored candidate(s) cleared "
+                  f"{args.score_min:g}.**"
+                  + (f" Highest: {best}." if best else "")
+                  + (f" {len(miss)} withheld." if miss else "")
+                  + " Re-run with --show-excluded to list them."]
+    if below and args.show_excluded:
         lines += ["", f"### Scored, below the {args.score_min:g} cut", "",
                   "| " + " | ".join(_HEAD) + " |",
                   "| " + " | ".join("---" for _ in _HEAD) + " |"]
         for row in below:
             lines.append("| " + " | ".join(_row_cells(row, scores, subs)) + " |")
-    if miss:
+    if miss and args.show_excluded:
         lines += ["", "### Withheld - no composite", "",
                   "| ticker | reason |", "| --- | --- |"]
         for row in miss:
@@ -604,6 +613,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="listing exchanges to keep ('' disables)")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved markdown (default 'screener')")
+    parser.add_argument("--show-excluded", action="store_true",
+                        help="also list candidates scored below the cut and every "
+                             "withheld name (default: qualifying names only)")
     parser.add_argument("--no-moomoo", action="store_true",
                         help="skip the server-side screen (needs no OpenD); the "
                              "candidate set becomes the deepest --limit decliners "

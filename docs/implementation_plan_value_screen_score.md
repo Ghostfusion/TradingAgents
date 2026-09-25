@@ -186,6 +186,12 @@ Ranked markdown via `value_screener.save_watchlist` into `screener/<timestamp>.m
 is gitignored at `.gitignore:225`). Columns: ticker, 1-day %, market cap, P/E, P/B, P/S, P/CF, the
 four sub-scores **with their band labels**, and the composite.
 
+**The default output is the qualifying set alone.** The `--score-min` cut is the owner's criterion, so
+a name that scores below it is not listed at all; `--show-excluded` adds the below-cut table and the
+withheld table for inspection. An empty result always states that nothing cleared the cut and names the
+best few, so a threshold never returns silence — the failure mode that made the first three runs of this
+tool unreadable.
+
 ## 5. Code changes required
 
 1. **`stage_score` gains a panel mode** (`--panel <date>`), per §4.5.
