@@ -125,16 +125,22 @@ therefore takes ROE and the 5-day change in percent and converts: `--roe-min 15`
 `compute_ratios` **never fabricates**: a ratio whose input is missing returns `None`. A `None`
 bound **fails closed** here — the name is dropped and counted, never treated as a pass.
 
-**P/CF needs a leg nothing else on this path supplies.** `fetch_ticker` pulls fundamentals, the
-balance sheet and the income statement — it never calls `get_cashflow` — so the canonical items
-arrive **without** `operating_cashflow` and `price_to_cash_flow` is `None` for every name. Measured
-on 2026-09-24 over the deepest 30 decliners: market cap, P/E and P/B present 30/30, P/S 22/30,
-**P/CF 0/30**. That single missing leg was emptying the whole funnel, because the gate fails
-closed. The tool therefore fetches the annual cash-flow statement once per name — cached for the
-run through the screener's own `_CASHFLOW_CACHE`, parsed by `statement_parsing._canonicalize`,
-whose alias for the key is `"operating cash flow"` / `"cash flow from operating"` — and injects it
-as `fin["operating_cashflow"]`. The basis is the latest **annual** period, the same limitation the
-panel path carries (§7).
+**P/CF needed a leg this path did not supply — fixed at the source on 2026-09-24.** `fetch_ticker`
+pulled fundamentals, the balance sheet and the income statement but never called `get_cashflow`, so the
+canonical items arrived **without** `operating_cashflow` and `price_to_cash_flow` was `None` for every
+name. Measured that day over the deepest 30 decliners: market cap, P/E and P/B present 30/30, P/S 22/30,
+**P/CF 0/30**. Because the gate fails closed, that one missing leg emptied the whole funnel.
+
+The producer now fills two keys — `operating_cashflow` and `capex` — from the cash-flow statement, from a
+**whitelist, only where a key is missing**, with provenance recorded as `get_cashflow`. That is narrower
+than it first was: absorbing the payload into the merge like the other statements (even ordered first, so
+`net_income`'s pinned provenance could not flip) moved AAPL's `total_debt`/`cash`, because `absorb` matches
+rows by loose label aliases and a cash-flow statement also carries "Long-term debt" and "Cash" rows — it
+reported *equity value is not positive: debt exceeds enterprise value* and failed six screens. Two keys
+in, nothing else on the payload can reach the canonical dict and no pre-existing value can move. The
+tool's own belt-and-braces fetch — cached for the run through the screener's `_CASHFLOW_CACHE`, parsed by
+`statement_parsing._canonicalize` — stays, so the screen is correct against either engine revision. The
+basis is the latest **annual** period, the same limitation the panel path carries (§7).
 
 `market_cap` enters `compute_ratios` via `fin["market_cap"]`; when the parsed value is absent the
 screener's own convention applies — inject the day-of cap and, client-side, drop only when a cap

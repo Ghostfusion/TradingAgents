@@ -1386,6 +1386,28 @@ def fetch_ticker(
         absorb(fund, "get_fundamentals", "info")
     except Exception as exc:  # noqa: BLE001 - vendor chain already degrades
         logger.warning("%s fundamentals: %s", ticker, exc)
+    # The cash-flow statement owns ``operating_cashflow`` (P/CF) and ``capex``
+    # (P/FCF), the two canonical inputs ``ratios.compute_ratios`` declares but
+    # which no other payload on this path carries: without them both ratios are
+    # None for every name (measured 2026-09-24: P/CF present 0/30 on the deepest
+    # decliners, while market cap, P/E and P/B were 30/30).
+    #
+    # Filled from a WHITELIST, and only where the key is missing - not a blanket
+    # absorb(). absorb() is last-writer-wins over loosely-matched row labels, and
+    # this payload also carries net income, D&A, cash and debt legs: absorbing it
+    # moved AAPL's EV until "equity value is not positive: debt exceeds enterprise
+    # value" and failed six screens (test_analysis_tools, test_growth_screens,
+    # test_v2_v5_wiring, 2026-09-24). Two keys in, nothing else can move.
+    try:
+        cf = route_to_vendor("get_cashflow", ticker, "annual", curr_date)
+        cf_canon = _canonicalize(cf)
+        cf_entry = _basis_entry("get_cashflow", "annual", cf)
+        for key in ("operating_cashflow", "capex"):
+            if key not in canonical and cf_canon.get(key) is not None:
+                canonical[key] = cf_canon.get(key)
+                provenance[key] = dict(cf_entry)
+    except Exception as exc:  # noqa: BLE001 - vendor chain already degrades
+        logger.warning("%s get_cashflow: %s", ticker, exc)
     for method in ("get_balance_sheet", "get_income_statement"):
         try:
             stmt = route_to_vendor(method, ticker, "annual", curr_date)

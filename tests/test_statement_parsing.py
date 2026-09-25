@@ -288,6 +288,67 @@ def test_fetch_ticker_provenance_records_source_basis_and_period(monkeypatch):
 
 
 @pytest.mark.unit
+def test_fetch_ticker_carries_the_cash_flow_leg(monkeypatch):
+    """The cash-flow statement is part of the canonical pull (2026-09-24).
+
+    Without it ``operating_cashflow`` and ``capex`` are absent, so
+    ``ratios.compute_ratios`` - whose docstring declares both as canonical line
+    items - returns ``price_to_cash_flow`` and ``price_to_free_cash_flow`` as None
+    for EVERY name and each consumer degrades silently. Measured that day over
+    the deepest 30 US decliners: P/CF present 0/30 while market cap, P/E and P/B
+    were 30/30.
+
+    The payload is absorbed BEFORE the balance sheet and the income statement:
+    ``absorb`` is last-writer-wins and a cash-flow statement also carries net
+    income and D&A, so appending it would flip ``net_income``'s recorded source
+    away from ``get_income_statement``.
+    """
+    cashflow = (
+        "# Cash Flow Statement data for TST (annual)\n"
+        "# Data retrieved on: 2026-09-12 00:00:00\n\n"
+        ",2026-01-31,2025-01-31\n"
+        "Operating Cash Flow,168000000000.0,110000000000.0\n"
+        "Capital Expenditure,-30000000000.0,-25000000000.0\n"
+    )
+    annual_income = (
+        ",2026-01-31,2025-01-31\n"
+        "Total Revenue,215940000000.0,130500000000.0\n"
+        "Net Income,120070000000.0,72880000000.0\n"
+    )
+    balance = (
+        ",2026-01-31,2025-01-31\n"
+        "Total Assets,206800000000.0,140740000000.0\n"
+        "Stockholders Equity,157290000000.0,100130000000.0\n"
+    )
+
+    def _fake(method, *args, **kwargs):
+        if method == "get_cashflow":
+            return cashflow
+        if method == "get_income_statement":
+            return annual_income
+        if method == "get_balance_sheet":
+            return balance
+        raise RuntimeError("no vendor for " + method)
+
+    monkeypatch.setattr(sp, "route_to_vendor", _fake)
+    fin, prov = sp.fetch_ticker("TST", "2026-09-12", with_provenance=True)
+
+    assert fin["operating_cashflow"] == pytest.approx(168000000000.0)
+    assert prov["operating_cashflow"]["source"] == "get_cashflow"
+    # The ordering guarantee: a key another payload owns keeps its own source.
+    assert prov["net_income"]["source"] == "get_income_statement"
+
+    # The point of the leg: both ratios become computable, and the sign of a
+    # filed capex cannot corrupt FCF (compute_ratios takes abs()).
+    from tradingagents.strategies.ratios import compute_ratios
+
+    fin["market_cap"] = 1.0e12
+    caps = compute_ratios(fin)
+    assert caps["price_to_cash_flow"] == pytest.approx(1.0e12 / 168e9)
+    assert caps["price_to_free_cash_flow"] == pytest.approx(1.0e12 / (168e9 - 30e9))
+
+
+@pytest.mark.unit
 def test_fetch_ticker_flags_a_quarterly_payload_under_an_annual_request(monkeypatch):
     """AMZN 2026-09-14: the merge asked the statement vendors for ``annual``
     and stamped a flat ``annual`` on whatever came back, so FY-annual rows were

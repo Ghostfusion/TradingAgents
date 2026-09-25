@@ -1187,7 +1187,11 @@ def test_normalized_fcf_dcf_names_a_missing_capex_leg(monkeypatch):
 
     def side(method, *a, **k):
         payload = _fade_side(method, *a, **k)
-        if method == "get_fundamentals":
+        # The capex leg must be withheld from EVERY payload that can supply it.
+        # fetch_ticker now fills operating_cashflow and capex from the cash-flow
+        # statement, so stripping the row from get_fundamentals alone would let
+        # the very leg this test withholds arrive through get_cashflow.
+        if method in ("get_fundamentals", "get_cashflow"):
             return "\n".join(
                 line for line in payload.splitlines()
                 if not line.startswith("Capital Expenditure")
