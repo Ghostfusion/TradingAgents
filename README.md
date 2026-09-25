@@ -1387,7 +1387,12 @@ which denominator it used, and a candidate the panel does not carry is refused b
 rather than scored as 0. The composite is `RESEARCH_ONLY` — a tie-aware percentile with
 no band table — and reaches no executor gate. OpenD supplies the server-side Screening
 V2 stage; `--no-moomoo` falls back to the deepest decliners and labels the run a
-partial scan. See `docs/implementation_plan_value_screen_score.md`.
+partial scan. Runnable from the `trading_web` app as its **Value score** screen
+(`/value-score`) - every flag above is a field, blank keeps this script's own
+default and `0` disables that gate - and the app lists what it writes under
+Reports → **Screen reports** (the `screener/` markdown is a file, not a run
+folder, so it has its own list there). See
+`docs/implementation_plan_value_screen_score.md`.
 
 </td></tr>
 </table>
