@@ -230,8 +230,13 @@ from tradingagents.agents.utils.momentum_tools import (
 def market_tools() -> list:
     """Tools bound by the market analyst and executed by its ToolNode.
 
-    Gated engine tools are appended only when their own gate is on, so a
-    gate-off toolset is byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6).
+    No score-engine leaf is bound here, gate or no gate. An engine's number
+    reaches an analyst as supplied text (`report_hygiene.scorecard_context_block`
+    under `enable_quant_scorecard`), never as a tool the model may choose to
+    call, so this list is byte-identical to what it was before the engines
+    existed (docs/scores/IMPLEMENTATION_PLAN.md §6; the no-binding rule is
+    asserted in `tests/test_event_state.py::test_the_event_leaf_is_in_no_toolset_whatever_the_gate`
+    and `tests/test_regime_score.py`).
     """
     tools =   [
                 get_stock_data,
@@ -363,8 +368,12 @@ def market_tools() -> list:
 def news_tools() -> list:
     """Tools bound by the news analyst and executed by its ToolNode.
 
-    Gated engine tools are appended only when their own gate is on, so a
-    gate-off toolset is byte-identical (docs/scores/IMPLEMENTATION_PLAN.md §6).
+    No score-engine leaf is bound here, gate or no gate - `get_event_state`
+    included. The news analyst owns EventScore (`ENGINE_SECTIONS['event']`), and
+    its result reaches the analyst as supplied text plus the authoritative
+    `## EventState (engine score)` section in its report, never as a bound tool
+    (docs/scores/IMPLEMENTATION_PLAN.md §6; asserted in
+    `tests/test_event_state.py::test_the_event_leaf_is_in_no_toolset_whatever_the_gate`).
     """
     tools =   [
                 get_news,
@@ -411,9 +420,10 @@ def news_tools() -> list:
 def fundamentals_company_tools() -> list:
     """Company-path tools for the fundamentals analyst (statements, DCF, ...).
 
-    Score-engine tools are appended only when their own gate is on
-    (docs/scores/IMPLEMENTATION_PLAN.md §9); with every engine gate off this
-    list is exactly what it was before the engines existed.
+    No score-engine leaf is appended, gate or no gate
+    (docs/scores/IMPLEMENTATION_PLAN.md §9): the engines' numbers are supplied to
+    the analyst's prompt by `report_hygiene.scorecard_context_block`, so this list
+    is exactly what it was before the engines existed.
     """
     tools = [
                 get_fundamentals,

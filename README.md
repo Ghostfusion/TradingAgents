@@ -30,6 +30,25 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-26] **The six engine findings from the score trace are fixed - and two of the six were a claim
+  problem, not a code problem** — a read-only trace of how RegimeScore, EventScore and RiskScore reach a report
+  turned up six things worth fixing. The one that mattered most: the quant scorecard's `event` row read
+  `EVENT_NO_SNAPSHOT` on **every** run (the snapshot is built before the graph, and the row never received the
+  forward-calendar answers), so one `run_card.json` carried a measured `event_state` block beside a scorecard
+  block that said the engine was never measured. `quant_scorecard` now takes `calendars=` and honors
+  `enable_event_calendars`, and the new `with_event_entry` fills the row from the run's own catalyst overlay -
+  returning a copy, so the debate's pre-graph snapshot keeps the reason it was read with and the composite
+  cannot move (`event` is not a composite input). R3's `spectral_change` leg, declared under
+  `enable_spectral_null_band` and fed by nothing, now reads its two rolling windows off the run's shared S&P 500
+  panel; `events.expected_drift_after`, exported, unit-tested and called by nothing, now prints the post-event
+  drift over the play's own window in the news analyst's earnings read. The remaining findings were claims: the
+  VIX term-structure leg has been live since P0-5 (Cboe's own VIX9D/VIX3M index history) while `regime_score.py`
+  called its data source absent, and `toolsets.py`'s docstrings promised that gated engine tools are bound to
+  analysts when their gate is on - **no engine leaf is bound to any toolset at any gate setting**; the numbers
+  arrive as supplied scorecard text, and tests assert the absence. One real defect fell out of the last of those:
+  `DEFAULT_CONFIG` is the shipped dict *with* the ambient `.env` applied **in place**, so on a machine whose
+  `.env` enables the engines the two tests asserting "ships off" failed - `SHIPPED_DEFAULTS` now separates what
+  ships from what the machine runs. Details, tests and web impact in `CHANGELOG.md`.
 - [2026-09-24] **The survey's T1 batch landed - nine items, all default-off, and the risk lane now refuses what
   it cannot identify** — the T1 tier of `docs/paper_survey_26/README.md` section 2.1, in six pushes. **The
   refusals are the point.** A risk-neutral density is recovered only when the covered strikes can identify one:

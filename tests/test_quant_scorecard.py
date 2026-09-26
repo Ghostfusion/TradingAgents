@@ -37,6 +37,10 @@ DATE = "2026-07-22"
 #: Every engine gate on — the fully-gated case.
 ALL_ON = dict.fromkeys(qs.ENGINE_GATES.values(), True)
 
+#: The engine gates plus the master surface gate: what a run needs for the card
+#: to carry a scorecard key at all.
+_CARD_ON = {**ALL_ON, "enable_quant_scorecard": True}
+
 #: Distinctive literals so a swapped value cannot pass: each is unique to its
 #: engine, and none is reachable by arithmetic over the others.
 SCORES = {
@@ -193,9 +197,13 @@ def wired(monkeypatch):
         "tradingagents.strategies.event_state.event_state",
         lambda vals: dict(EVENT_RESULT),
     )
+    def _event_components(snap, opex=None, calendars=None):
+        calls.record("event_components", snap, opex, calendars)
+        return {"earnings": 1}
+
     monkeypatch.setattr(
         "tradingagents.strategies.event_state.event_components",
-        lambda snap, opex=None: {"earnings": 1},
+        _event_components,
     )
     monkeypatch.setattr(
         "tradingagents.strategies.derivatives_gamma.opex_status", lambda d: "opex"
@@ -430,18 +438,176 @@ def test_the_event_engine_measures_when_the_snapshot_is_passed(wired):
     assert snap["engines"]["event"]["hard_block"] is None
 
 
+def test_the_event_engine_is_handed_the_calendars_the_caller_has(wired):
+    """The calendar-backed families are measured when the caller asked for them.
+
+    Without the answers `event_components` cannot see `product_clinical` / `court`
+    / `investor_day` at all, so a caller that fetched them and did not pass them
+    left the engine permanently short of a family it had paid for.
+    """
+    calendars = {"product": [{"date": "2026-08-01"}], "court": None}
+    _snapshot(catalyst_snapshot={"earnings": {"days_until": 3}}, calendars=calendars)
+    assert wired.calls["event_components"][0][2] == calendars
+    _snapshot(catalyst_snapshot={"earnings": {"days_until": 3}})
+    assert wired.calls["event_components"][1][2] is None
+
+
+def test_the_post_run_fill_measures_the_event_row_without_rewriting_the_input(wired):
+    """The post-run reader measures the row; the debate's snapshot stays its own.
+
+    The pre-graph snapshot is the one the debate read, so it must keep the reason
+    it was read with. The copy the card renders carries the measured row - and
+    nothing else about it moves, the composite included (`event` is not a
+    composite input).
+    """
+    snap = _snapshot()
+    assert snap["engines"]["event"]["reason"] == qs.EVENT_NO_SNAPSHOT
+
+    filled = qs.with_event_entry(
+        snap,
+        catalyst_snapshot={"earnings": {"days_until": 3}},
+        calendars={"court": []},
+    )
+    assert filled["engines"]["event"]["score"] == SCORES["event"]
+    assert "event" in filled["present"]
+    assert "event" not in filled["absent"]
+    for name in qs.ENGINE_GATES:
+        if name != "event":
+            assert filled["engines"][name] == snap["engines"][name], name
+    assert filled["composite"] == snap["composite"]
+    assert filled["gates"] == snap["gates"]
+    # the caller's snapshot - the one the debate read - is not the copy
+    assert snap["engines"]["event"]["score"] is None
+    assert snap["engines"]["event"]["reason"] == qs.EVENT_NO_SNAPSHOT
+    assert "event" in snap["absent"]
+
+
+def test_the_post_run_fill_leaves_a_gated_off_event_row_disabled(wired):
+    """A gate is a membership switch: a reader measures an engine, never joins one."""
+    cfg = {**ALL_ON, "enable_event_state": False}
+    snap = _snapshot(cfg)
+    assert snap["engines"]["event"]["enabled"] is False
+
+    filled = qs.with_event_entry(
+        snap, catalyst_snapshot={"earnings": {"days_until": 3}}
+    )
+    assert filled["engines"]["event"]["enabled"] is False
+    assert filled["engines"]["event"]["score"] is None
+    assert filled["engines"]["event"]["reason"] == "enable_event_state is off"
+
+
+def test_the_card_measures_the_event_row_from_the_runs_own_overlay(wired):
+    """One card, one EventScore - the scorecard row and the engine block agree.
+
+    Before the fill, one card carried a measured `event_state` block beside a
+    scorecard block that said the engine was never measured. Both blocks now come
+    from the same producer over the same overlay and the same calendars.
+    """
+    from tradingagents.reporting import (
+        _run_card_event_state,
+        _run_card_quant_scorecard,
+        _scorecard_snapshot_for_report,
+    )
+
+    snap = _snapshot()
+    state = {
+        "quant_scorecard": snap,
+        "trade_date": DATE,
+        "company_of_interest": TICKER,
+        "strategy_overlays": {"catalyst": {"earnings": {"days_until": 3}}},
+    }
+    card = _run_card_quant_scorecard(state, _CARD_ON)
+    event = _run_card_event_state(state, _CARD_ON)
+
+    assert card["engines"]["event"]["score"] == SCORES["event"]
+    assert card["engines"]["event"]["score"] == event["score"]
+    assert "event" in card["present"]
+    # section V renders the same measured row, not the debate's NA
+    view = _scorecard_snapshot_for_report(state, _CARD_ON)
+    assert view["engines"]["event"]["score"] == SCORES["event"]
+    assert "### EventScore — 41/100" in qs.format_engine_detail(view)
+    # and the gate-off card still gains nothing
+    assert _run_card_quant_scorecard(state, {"enable_quant_scorecard": False}) is None
+
+
+def test_the_card_fetches_the_forward_calendars_once_for_both_readers(
+    tmp_path, monkeypatch
+):
+    """One run, one calendar fetch, one EventScore.
+
+    The adapter has no cache of its own, so the card's event block and the
+    scorecard's event row reading it twice would be two vendor round trips for one
+    run - and two chances to print different numbers for one vector.
+    """
+    import json
+
+    from tradingagents.reporting import write_report_tree
+
+    calls: list = []
+
+    def _calendars(ticker, trade_date=None, **kw):
+        calls.append((str(ticker), str(trade_date)))
+        return {"product": [], "clinical": [], "court": None, "investor_day": None}
+
+    monkeypatch.setattr(
+        "tradingagents.dataflows.event_calendars.company_event_calendars", _calendars
+    )
+    snap = _render(
+        scores={"fundamental": 92.0},
+        enabled=set(qs.ENGINE_GATES),
+        status="RESEARCH_ONLY",
+    )
+    state = {
+        "quant_scorecard": snap,
+        "trade_date": DATE,
+        "company_of_interest": TICKER,
+        "strategy_overlays": {
+            "catalyst": {
+                "earnings": {"days_until": 3},
+                "macro": {"min_days": 5, "count_high": 1},
+                "fed": {"days_until": 9, "modal_prob": 0.7},
+                "verdict": "no-imminent-catalyst",
+            }
+        },
+    }
+    write_report_tree(
+        state,
+        TICKER,
+        tmp_path,
+        config={
+            "enable_quant_scorecard": True,
+            "enable_event_state": True,
+            "enable_event_calendars": True,
+        },
+    )
+    assert len(calls) == 1
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["event_state"]["score"] is not None
+    assert (
+        card["quant_scorecard"]["engines"]["event"]["score"]
+        == card["event_state"]["score"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # the gate map is the one rule all three readers share
 # ---------------------------------------------------------------------------
 
 
 def test_the_gate_map_names_a_real_config_default_for_every_engine():
-    """A gate name that exists nowhere would silently never be on."""
-    from tradingagents.default_config import DEFAULT_CONFIG
+    """A gate name that exists nowhere would silently never be on.
+
+    The **shipped** default is what this pins: `DEFAULT_CONFIG` has the ambient
+    environment folded in (`tradingagents/__init__.py` loads a developer's `.env`
+    into `os.environ`), so asserting on it would assert the developer's machine
+    rather than the release.
+    """
+    from tradingagents.default_config import DEFAULT_CONFIG, SHIPPED_DEFAULTS
 
     for engine, gate in qs.ENGINE_GATES.items():
+        assert gate in SHIPPED_DEFAULTS, f"{engine} -> {gate}"
+        assert SHIPPED_DEFAULTS[gate] is False, f"{gate} must ship off"
         assert gate in DEFAULT_CONFIG, f"{engine} -> {gate}"
-        assert DEFAULT_CONFIG[gate] is False, f"{gate} must default off"
 
 
 def test_only_the_four_composite_engines_are_allowed_into_the_composite():
@@ -497,14 +663,16 @@ def test_the_snapshot_channel_is_declared_on_agent_state():
 
 
 def test_the_scorecard_gate_exists_and_defaults_off():
-    """The master gate is `enable_quant_scorecard`, and it defaults off.
+    """The master gate is `enable_quant_scorecard`, and it ships off.
 
     §9 D1: this gate governs the scorecard **surface**; the eight engine gates
-    above decide which engines populate it. It must never imply them.
+    above decide which engines populate it. It must never imply them. Read from
+    `SHIPPED_DEFAULTS`, because `DEFAULT_CONFIG` carries the ambient `.env`.
     """
-    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.default_config import DEFAULT_CONFIG, SHIPPED_DEFAULTS
 
-    assert DEFAULT_CONFIG["enable_quant_scorecard"] is False
+    assert SHIPPED_DEFAULTS["enable_quant_scorecard"] is False
+    assert "enable_quant_scorecard" in DEFAULT_CONFIG
     assert "enable_quant_scorecard" not in qs.ENGINE_GATES.values()
 
 

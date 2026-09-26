@@ -497,8 +497,14 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides(
-    {
+#: The defaults exactly as **shipped**, before any ``TRADINGAGENTS_*``
+#: environment variable is applied. It is its own object because
+#: `DEFAULT_CONFIG` below is this dict *with* the ambient environment folded in:
+#: `tradingagents/__init__.py` loads a developer's `.env` into `os.environ` at
+#: package import, so "what this release ships" and "what this machine runs" are
+#: two different questions and only this one is stable. A test that asserts a
+#: gate ships off reads this, never `DEFAULT_CONFIG`.
+SHIPPED_DEFAULTS = {
         "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "results_dir": os.getenv(
             "TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")
@@ -1320,7 +1326,12 @@ DEFAULT_CONFIG = _apply_env_overrides(
             "": "SPY",  # default for US-listed tickers (no suffix)
         },
     }
-)
+
+#: The shipped defaults **with** the ambient ``TRADINGAGENTS_*`` environment
+#: applied - what the process actually runs with. `_apply_env_overrides` mutates
+#: its argument in place, so it is handed a copy and `SHIPPED_DEFAULTS` stays
+#: readable as shipped.
+DEFAULT_CONFIG = _apply_env_overrides(dict(SHIPPED_DEFAULTS))
 
 
 def validate_config(config: dict) -> list[str]:

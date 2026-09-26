@@ -1254,18 +1254,66 @@ def _run_card_risk_disagreement(final_state: dict, cfg: dict) -> dict | None:
         return {"flag": False, "unavailable": f"{type(exc).__name__}: {exc}"}
 
 
-def _run_card_quant_scorecard(final_state: dict, cfg: dict) -> dict | None:
+def _scorecard_snapshot_for_report(
+    final_state: dict, cfg: dict, *, calendars: dict | None = None
+) -> dict | None:
+    """The run's score snapshot, with its event row measured where the run can.
+
+    The stored snapshot is built **before** the graph, so its event row is
+    `absent` with ``EVENT_NO_SNAPSHOT`` on that path. A post-run reader holds what
+    that path could not: the catalyst overlay the run stamped
+    (``strategy_overlays.catalyst``) and, under ``enable_event_calendars``, the
+    forward-calendar answers. Filling the row is what keeps one card from carrying
+    a measured `event_state` block beside a scorecard block that says the engine
+    was never measured - and it is the same producer over the same inputs as
+    `_run_card_event_state`, so the two blocks cannot print different numbers.
+
+    ``calendars=None`` means "fetch them" (the run fetches the answers once and
+    hands the same dict to every reader); ``{}`` means the calendar gate is off and
+    no fetch is made. Returns the stored snapshot **unchanged** - never ``None``
+    for a run that has one - when the scorecard gate is off, when the event
+    engine's own gate is off, or when the run stamped no catalyst overlay.
+    """
+    snapshot = (final_state or {}).get("quant_scorecard")
+    if not snapshot or not (cfg or {}).get("enable_quant_scorecard"):
+        return None
+    if not (cfg or {}).get("enable_event_state"):
+        return snapshot
+    snap = ((final_state or {}).get("strategy_overlays") or {}).get("catalyst")
+    if not isinstance(snap, dict):
+        return snapshot
+    try:
+        from tradingagents.strategies.quant_scorecard import with_event_entry
+
+        if calendars is None:
+            calendars = _card_event_calendars(
+                final_state, cfg, (final_state or {}).get("trade_date")
+            )
+        return with_event_entry(
+            snapshot, catalyst_snapshot=snap, calendars=calendars
+        )
+    except Exception:  # noqa: BLE001 - an advisory block must never cost the card
+        return snapshot
+
+
+def _run_card_quant_scorecard(
+    final_state: dict, cfg: dict, *, calendars: dict | None = None
+) -> dict | None:
     """The run's score snapshot for run_card.json (WP-12 `P12-6`).
 
     One additive key carrying **the same block the debate read**, so a reader can
     check that the number in the prompt is the number in the card without
-    recomputing anything, plus the three status axes of §4.6. Returns ``None``
+    recomputing anything, plus the three status axes of §4.6. One row is the
+    exception and it is stated here: the **event** row is measured from the run's
+    own catalyst overlay (`_scorecard_snapshot_for_report`), because the debate's
+    path cannot hold that overlay - so the card's `event` row is the number
+    `event_state` carries, not the `absent` the prompt read. Returns ``None``
     when the gate is off, which is what keeps a gate-off card byte-identical to a
     pre-scorecard tree (the release-level invariant, §9.3).
     """
     if not (cfg or {}).get("enable_quant_scorecard"):
         return None
-    snapshot = (final_state or {}).get("quant_scorecard")
+    snapshot = _scorecard_snapshot_for_report(final_state, cfg, calendars=calendars)
     if not snapshot:
         return None
     try:
@@ -1341,7 +1389,9 @@ def _card_event_calendars(final_state: dict, cfg: dict, trade_date) -> dict:
         return {}
 
 
-def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
+def _run_card_event_state(
+    final_state: dict, cfg: dict, *, calendars: dict | None = None
+) -> dict | None:
     """EventScore block for run_card.json (WP-8 / WP-9).
 
     The seven families with their imminence, availability and reason, the
@@ -1356,6 +1406,9 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
     re-fetched": they have no earlier producer in the run, so they are fetched
     here under their own gate (``enable_event_calendars``). That gate being off
     leaves every family at the answer it had before the adapters existed.
+    ``calendars=None`` means "fetch them"; a caller that already has the run's
+    answers (the card assembly fetches them once for the scorecard's event row
+    too) passes them in, and ``{}`` means the gate is off.
     """
     if not (cfg or {}).get("enable_event_state"):
         return None
@@ -1385,7 +1438,11 @@ def _run_card_event_state(final_state: dict, cfg: dict) -> dict | None:
                 )
             except Exception:  # noqa: BLE001 - OPEX is one extra family
                 opex = None
-        calendars = _card_event_calendars(final_state, cfg, trade_date)
+        calendars = (
+            _card_event_calendars(final_state, cfg, trade_date)
+            if calendars is None
+            else calendars
+        )
         res = event_state(event_components(snap, opex=opex, calendars=calendars))
     except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
         return {
@@ -1811,6 +1868,21 @@ def write_report_tree(
     save_path.mkdir(parents=True, exist_ok=True)
     cfg = _config(config)
     compact = bool(cfg.get("risk_compact_report", False))
+    # The run's forward-calendar answers, fetched ONCE and shared by every reader
+    # that needs them: the card's `event_state` block and the scorecard's event
+    # row read the same dict, and the adapter has no cache of its own, so a second
+    # call would be a second vendor round trip for one run. `{}` when the calendar
+    # gate is off (no fetch); None when the event engine itself is off, because
+    # then nothing reads it.
+    event_calendars = (
+        _card_event_calendars(
+            final_state,
+            cfg,
+            (final_state or {}).get("trade_date"),
+        )
+        if (cfg or {}).get("enable_event_state")
+        else None
+    )
     sections = []
     gate_block = _risk_gate_block(final_state)
 
@@ -2105,8 +2177,10 @@ def write_report_tree(
                     format_engine_detail,
                 )
 
-                snapshot = final_state.get("quant_scorecard")
-                if snapshot and cfg.get("enable_quant_scorecard"):
+                snapshot = _scorecard_snapshot_for_report(
+                    final_state, cfg, calendars=event_calendars
+                )
+                if snapshot:
                     detail = format_engine_detail(snapshot)
                     if detail:
                         sections.append(
@@ -2360,7 +2434,7 @@ def write_report_tree(
             card["trade_score"] = _trade
         # WP-8/WP-9: the event state (the earnings hard block travels through as
         # the run's own snapshot carries it). Present only when its gate is on.
-        _event = _run_card_event_state(final_state, cfg)
+        _event = _run_card_event_state(final_state, cfg, calendars=event_calendars)
         if _event is not None:
             card["event_state"] = _event
         # docs/design_security_context.md: the classification block. Present
@@ -2381,7 +2455,7 @@ def write_report_tree(
             ("news_score", _run_card_news_score(ticker, cfg, final_state)),
             # WP-12/P12-6: the run's own score snapshot - the block the debate
             # read, plus §4.6's status axes. Present only when its gate is on.
-            ("quant_scorecard", _run_card_quant_scorecard(final_state, cfg)),
+            ("quant_scorecard", _run_card_quant_scorecard(final_state, cfg, calendars=event_calendars)),
             # WP-12/P12-9: the quant/LLM risk-disagreement flag (§5's weak form).
             ("risk_disagreement", _run_card_risk_disagreement(final_state, cfg)),
         ):

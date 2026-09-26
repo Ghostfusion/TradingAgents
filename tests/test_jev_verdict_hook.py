@@ -24,33 +24,23 @@ import pytest
 import batch
 import tradingagents.jev as jev
 
-REPO = Path(__file__).resolve().parents[1]
 ANALYST_STEMS = ("fundamentals", "market", "news", "sentiment")
 
 
 def _shipped_default(key: str):
-    """The value in the ``DEFAULT_CONFIG`` literal, before any env override.
+    """The value in `SHIPPED_DEFAULTS`, before any env override is applied.
 
-    Read structurally (AST), so it is the shipped default and not a copy of the
-    source line. This is the only way to assert a default honestly on a machine
-    whose ``.env`` flips gates: ``DEFAULT_CONFIG`` is post-override.
+    `DEFAULT_CONFIG` is post-override - `tradingagents/__init__.py` loads a
+    developer's `.env` into `os.environ` and `_apply_env_overrides` folds it in -
+    so asserting it would assert the developer's machine. `SHIPPED_DEFAULTS` is
+    the literal those overrides are applied to, kept as its own object for
+    exactly this, so the value is read rather than parsed out of the source.
     """
-    import ast
+    from tradingagents.default_config import SHIPPED_DEFAULTS
 
-    tree = ast.parse((REPO / "tradingagents" / "default_config.py").read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign) or not any(
-            getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets
-        ):
-            continue
-        call = node.value
-        assert isinstance(call, ast.Call)
-        literal = call.args[0]
-        assert isinstance(literal, ast.Dict)
-        for k, v in zip(literal.keys, literal.values, strict=True):
-            if isinstance(k, ast.Constant) and k.value == key:
-                return ast.literal_eval(v)
-    raise AssertionError(f"{key!r} is not in the DEFAULT_CONFIG literal")
+    if key not in SHIPPED_DEFAULTS:
+        raise AssertionError(f"{key!r} is not in SHIPPED_DEFAULTS")
+    return SHIPPED_DEFAULTS[key]
 
 
 def _tree(tmp_path: Path) -> Path:

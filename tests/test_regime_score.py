@@ -384,7 +384,7 @@ def test_the_component_order_is_the_plans_prerequisite_order() -> None:
         "realized_vol_percentile",
     )
     assert COMPONENTS["market_trend"].producer.endswith(
-        "strategies/regime_score.py::market_trend:344"
+        "strategies/regime_score.py::market_trend:351"
     )
 
 
@@ -556,9 +556,14 @@ def test_vix_term_structure_is_none_when_a_level_is_missing_never_zero() -> None
     assert vix_term_structure(12.0, 15.0)["withheld"] is None
 
 
-def test_the_vix_term_component_is_absent_until_a_series_is_verified() -> None:
-    """P0-5 is ABSENT in this tree: no fabricated series id, so the leg is NA and
-    printed rather than proxied."""
+def test_the_vix_term_component_is_absent_without_its_levels_never_proxied() -> None:
+    """No fabricated series id, and no proxy when the levels are missing.
+
+    The leg's source is Cboe's own index history, fed by
+    `analysis_tools._regime_components`; what this pins is that the FRED id is not
+    asserted and that a component dict without the levels leaves the leg **absent
+    with its reason** rather than falling back to the equity-IV slope.
+    """
     from tradingagents.strategies.regime_score import VIX9D_SERIES, VIX_TERM_UNAVAILABLE
 
     assert VIX9D_SERIES is None

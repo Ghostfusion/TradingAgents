@@ -35,7 +35,14 @@ catalyst overlay is stamped **after** the graph
 (``trading_graph._apply_strategy_overlays``). Callers that have it - the post-run
 readers - pass it in and the event engine is measured; callers that do not get
 the event engine **absent with that reason**, which is the honest read and never
-a zero.
+a zero. ``calendars`` is its sibling: the forward-calendar answers a caller may
+fetch under ``enable_event_calendars``, without which the three calendar-backed
+families stay ABSENT with their own reason.
+
+`with_event_entry` is the post-run fill for the one reader that holds both: it
+returns a copy of the snapshot with the event row measured, so the card's
+scorecard block and the card's own `event_state` block cannot disagree about an
+engine the run measured.
 """
 
 from __future__ import annotations
@@ -62,6 +69,7 @@ __all__ = [
     "quant_scorecard",
     "scorecard_status",
     "split_scorecard_block",
+    "with_event_entry",
 ]
 
 #: The eight engine gates, in the order the surfaces print them. An entry is
@@ -368,8 +376,21 @@ def _read_news(ticker: str, date: str | None) -> dict:
     )
 
 
-def _read_event(date: str | None, catalyst_snapshot: dict | None) -> dict:
-    """The event engine, when the caller holds the catalyst snapshot."""
+def _read_event(
+    date: str | None,
+    catalyst_snapshot: dict | None,
+    calendars: dict | None = None,
+) -> dict:
+    """The event engine, when the caller holds the catalyst snapshot.
+
+    ``calendars`` are the forward-calendar answers
+    (`event_state.calendar_answers` over `dataflows.event_calendars`), which the
+    leaves and the card fetch under their own gate (`enable_event_calendars`).
+    A caller that has them passes them, and the three calendar-backed families
+    (`product_clinical`, `court`, `investor_day`) are then measured like any
+    other; a caller that does not leaves them ABSENT with their own reason, which
+    is the honest read for a run that never asked.
+    """
     if not isinstance(catalyst_snapshot, dict):
         return _entry("event", reason=EVENT_NO_SNAPSHOT)
     try:
@@ -391,7 +412,9 @@ def _read_event(date: str | None, catalyst_snapshot: dict | None) -> dict:
                 opex = None
         # No snapshot in the run is a reason, not a crash: the card block treats
         # a missing snapshot the same way.
-        res = event_state(event_components(catalyst_snapshot, opex=opex))
+        res = event_state(
+            event_components(catalyst_snapshot, opex=opex, calendars=calendars)
+        )
     except Exception as exc:  # noqa: BLE001
         return _entry("event", reason=f"{type(exc).__name__}: {exc}")
     return _entry(
@@ -439,6 +462,7 @@ def quant_scorecard(
     cfg: dict | None = None,
     *,
     catalyst_snapshot: dict | None = None,
+    calendars: dict | None = None,
 ) -> dict:
     """Every engine's result for one ticker on one run date, computed once.
 
@@ -454,6 +478,13 @@ def quant_scorecard(
       This is what keeps a partly-gated scorecard from reading as a complete one
       (master rule 3).
     * ``composite`` - the `trade_score` entry, or ``None`` when its gate is off.
+
+    Two keyword arguments exist because the event engine needs inputs no earlier
+    producer leaves behind: ``catalyst_snapshot`` (the run's own
+    `catalyst.build_catalyst_snapshot` output - stamped *after* the graph, so only
+    a post-run reader has it) and ``calendars`` (the forward-calendar answers,
+    fetched by the caller under `enable_event_calendars`). A caller that passes
+    neither gets the event engine absent **with its reason**, never a zero.
 
     Nothing is computed here. The caller decides what to render; this function
     never decides what anything means.
@@ -485,7 +516,7 @@ def quant_scorecard(
         elif name == "news":
             engines[name] = _read_news(ticker, date)
         else:  # event
-            engines[name] = _read_event(date, catalyst_snapshot)
+            engines[name] = _read_event(date, catalyst_snapshot, calendars)
 
     present = [n for n, e in engines.items() if e.get("score") is not None]
     absent = {
@@ -502,6 +533,53 @@ def quant_scorecard(
         "composite": engines.get("trade", {}).get("result"),
         "gates": {name: ENGINE_GATES[name] for name in ENGINE_GATES},
     }
+
+
+def with_event_entry(
+    snapshot: dict,
+    *,
+    catalyst_snapshot: dict,
+    calendars: dict | None = None,
+) -> dict:
+    """The same snapshot with its event row measured from the run's own inputs.
+
+    The snapshot is built **before** the graph, where the catalyst overlay does
+    not exist yet, so its event row is `absent` with :data:`EVENT_NO_SNAPSHOT` on
+    that path (the debate's read, and the honest one for it). A post-run reader
+    holds what that path could not: the overlay the run stamped and, under
+    `enable_event_calendars`, the calendar answers. Filling the row is what keeps
+    one card from carrying a measured `event_state` block beside a scorecard
+    block that says the engine was never measured - and it is the same producer
+    over the same inputs as `reporting._run_card_event_state`, so the two cannot
+    print different numbers for one vector.
+
+    Returns a **copy**: the caller's snapshot - the one the debate already read -
+    is never rewritten, and every other row, the gate map and the composite are
+    carried over untouched. The composite is deliberately not recomputed:
+    ``event`` is not one of `COMPOSITE_ENGINES`, so a measured event row cannot
+    move it.
+
+    A **disabled** event entry (its own gate off) is left exactly as it is: a gate
+    is a membership switch, and this reader measures an engine, it never joins one.
+    """
+    out = dict(snapshot or {})
+    engines = dict(out.get("engines") or {})
+    entry = engines.get("event")
+    if not isinstance(catalyst_snapshot, dict) or not entry:
+        return out
+    if engine_state(entry) == STATE_DISABLED:
+        return out
+    engines["event"] = _read_event(
+        out.get("trade_date"), catalyst_snapshot, calendars=calendars
+    )
+    out["engines"] = engines
+    out["present"] = [n for n, e in engines.items() if e.get("score") is not None]
+    out["absent"] = {
+        n: (e.get("reason") or "no score produced")
+        for n, e in engines.items()
+        if e.get("score") is None
+    }
+    return out
 
 
 # ---------------------------------------------------------------------------

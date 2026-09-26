@@ -333,6 +333,41 @@ def test_earnings_event_read_no_surprise():
     assert "no reported earnings surprise" in out
 
 
+def test_earnings_event_read_prints_the_drift_over_the_play_window():
+    """`expected_drift_after` was exported, unit-tested and called by nothing.
+
+    The read now prints it over the same window `post_earnings_play` reads, so the
+    number behind the verdict is in the text the analyst is handed - and the value
+    is the producer's own, recomputed here from the same bars.
+    """
+    fake = {
+        "earnings_calendar": [
+            {"date": "2026-07-25", "eps_estimate": 1.0, "eps_actual": 1.15},
+        ],
+        "move_history": [],
+        "economic_calendar": [],
+        "fed_watch": [],
+    }
+    closes = [100.0 + 0.5 * i for i in range(120)]
+    with (
+        mock.patch(
+            "tradingagents.strategies.catalyst.fetch_catalyst_data", return_value=fake
+        ),
+        mock.patch(
+            "tradingagents.dataflows.interface.route_to_vendor",
+            side_effect=_route({"AAPL": closes}),
+        ),
+    ):
+        out = T.get_earnings_event_read.invoke(
+            {"ticker": "AAPL", "current_date": "2026-08-19"}
+        )
+        data = T._ohlcv("AAPL")
+    idx = T._find_bar_on_or_after(data["dates"], "2026-07-25")
+    assert idx is not None
+    expected = data["closes"][idx + 4] / data["closes"][idx] - 1.0
+    assert f"post_event_drift={expected:+.1%} over 4d" in out
+
+
 # ---------------------------------------------------------------------------
 # get_regime_read
 # ---------------------------------------------------------------------------

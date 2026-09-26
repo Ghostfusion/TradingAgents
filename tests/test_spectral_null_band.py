@@ -316,3 +316,85 @@ def test_the_scalars_are_shares_of_the_same_spectrum() -> None:
     assert scalars["absorption_ratio"]["value"] >= scalars["leading_share"]["value"]
     assert scalars["absorption_ratio"]["k"] >= 1
     assert scalars["leading_share"]["k"] == 1
+
+
+# --------------------------------------------------------------------------
+# the in-run caller: the run's own panel IS the cross-section R3 reads
+# --------------------------------------------------------------------------
+
+
+def _closes_panel(returns: dict) -> dict:
+    """`{name: [return, ...]}` -> `{name: [close, ...]}`: the run's panel shape."""
+    out = {}
+    for name, rets in returns.items():
+        level = 100.0
+        series = [level]
+        for r in rets:
+            level *= 1.0 + r
+            series.append(level)
+        out[name] = series
+    return out
+
+
+def _run_panel() -> dict:
+    """The run's shared close panel, long enough to fill both of R3's windows."""
+    matrix = _draw(_cov_market(len(NAMES)), 2 * SPECTRAL_MIN_OBS + 1, seed=11)
+    return _closes_panel(_window(matrix, 0, 2 * SPECTRAL_MIN_OBS))
+
+
+def _wire_run(monkeypatch, gate: bool) -> None:
+    """Patch the run's market sources, so `_regime_components` stays offline."""
+    import tradingagents.agents.utils.analysis_tools as T
+    import tradingagents.dataflows.cboe as cboe
+
+    monkeypatch.setattr(cfgmod, "get_config", lambda: (dict(GATE) if gate else {}))
+    monkeypatch.setattr(T, "_market_breadth_read", lambda: {})
+    monkeypatch.setattr(T, "_market_panel", _run_panel)
+    monkeypatch.setattr(
+        T, "_benchmark_closes", lambda: [100.0 + 0.4 * i for i in range(260)]
+    )
+    monkeypatch.setattr(T, "_benchmark_bars", lambda: {})
+    monkeypatch.setattr(T, "_vix_percentile_read", lambda day: {})
+    monkeypatch.setattr(cboe, "vix_term_structure", lambda **kw: {})
+
+
+def test_the_window_builder_takes_two_full_windows_of_the_reads_own_floor() -> None:
+    """Two successive windows over ONE name set, or no read at all.
+
+    The read refuses a panel whose membership moved between the windows, so the
+    builder never assembles one; a name without the history for both windows is
+    dropped, and a single name is not a cross-section.
+    """
+    import tradingagents.agents.utils.analysis_tools as T
+
+    panel = _run_panel()
+    prev, curr = T._spectral_windows(panel)
+    assert set(prev) == set(curr) == set(NAMES)
+    assert {len(w) for w in (*prev.values(), *curr.values())} == {SPECTRAL_MIN_OBS}
+    # the windows are successive and disjoint: `curr` is the tail of the series
+    name = NAMES[0]
+    expected = [
+        panel[name][i] / panel[name][i - 1] - 1.0
+        for i in range(len(panel[name]) - SPECTRAL_MIN_OBS, len(panel[name]))
+    ]
+    assert curr[name] == pytest.approx(expected)
+    assert T._spectral_windows({name: panel[name][: 2 * SPECTRAL_MIN_OBS]}) is None
+    assert T._spectral_windows({name: panel[name]}) is None
+
+
+def test_the_run_feeds_the_spectral_leg_from_its_own_panel(monkeypatch) -> None:
+    """R3's leg was declared and fed by nothing in-run; the run now feeds it.
+
+    The gate is what decides, and this is the falsifiable pair: the same panel,
+    the same run, one flag.
+    """
+    import tradingagents.agents.utils.analysis_tools as T
+
+    _wire_run(monkeypatch, gate=True)
+    on = T._regime_components()
+    assert SPECTRAL_CHANGE_KEY in on
+    assert on[SPECTRAL_CHANGE_KEY] in (0.0, 1.0)
+
+    _wire_run(monkeypatch, gate=False)
+    off = T._regime_components()
+    assert SPECTRAL_CHANGE_KEY not in off

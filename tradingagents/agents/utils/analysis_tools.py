@@ -683,7 +683,10 @@ def get_earnings_event_read(
             fetch_catalyst_data,
             last_earnings_surprise,
         )
-        from tradingagents.strategies.events import post_earnings_play
+        from tradingagents.strategies.events import (
+            expected_drift_after,
+            post_earnings_play,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"earnings event read unavailable for {ticker}: {exc}"
     cat = fetch_catalyst_data(ticker, current_date) or {}
@@ -710,7 +713,10 @@ def get_earnings_event_read(
             )
             post_h = data["highs"][idx + 1 : idx + 5]
             post_c = data["closes"][idx + 1 : idx + 5]
-            play = post_earnings_play(day0_ret, vol_ratio, post_h, post_c, hold_days=4)
+            hold_days = 4
+            play = post_earnings_play(
+                day0_ret, vol_ratio, post_h, post_c, hold_days=hold_days
+            )
             lines.append(
                 f"  print_day: return={_txt(day0_ret)} volume_ratio={_txt(vol_ratio)} (2.5x gate)"
             )
@@ -719,6 +725,18 @@ def get_earnings_event_read(
                     f"  pead: {play.get('verdict')} "
                     f"consolidation_high={_txt(play.get('range_high'))} "
                     f"breakout={play.get('breakout')}"
+                )
+            # `expected_drift_after` over the play's OWN holding window, so the
+            # read states the observed post-event drift beside the verdict it
+            # drove. The window is the same `hold_days` bars `post_earnings_play`
+            # reads; one that has not elapsed yet is left out, never defaulted.
+            if idx + hold_days < len(data["closes"]) and data["closes"][idx]:
+                drift = expected_drift_after(
+                    data["closes"][idx], data["closes"][idx + hold_days]
+                )
+                lines.append(
+                    f"  post_event_drift={_fmt_pct(drift)} over {hold_days}d "
+                    "(print day -> window close)"
                 )
         else:
             lines.append("  pead: print-day bar not in history (entry part skipped)")
@@ -6001,13 +6019,28 @@ def _trade_score_engines(ticker: str, current_date: str | None = None) -> dict:
     scores **as of a date**: ``fundamental_score_for_ticker`` builds its peer
     panel as-of the date it is handed and falls back to the wall clock when
     handed none. Without it the leaf scored a backdated run against *today's*
-    panel - measured on MSFT, a `--date 2026-07-22` run gave the leaf `66.25`
+    panel - measured on MSFT, a ``--date 2026-07-22`` run gave the leaf `66.25`
     where the card, which passes ``pm_decision.trade_date``, gave `62.50`.
+
+    The event engine needs two inputs no earlier producer leaves behind, and the
+    leaf fetches them exactly as `get_event_state` does: the catalyst snapshot
+    (`_catalyst_snapshot`) and, under ``enable_event_calendars``, the
+    forward-calendar answers (`_event_calendar_answers`). Without them the row
+    read `absent` on **every** call, so the leaf's vector could never carry the
+    engine the card and the report carried.
     """
     from tradingagents.dataflows.config import get_config
     from tradingagents.strategies.quant_scorecard import engine_scores, quant_scorecard
 
-    return engine_scores(quant_scorecard(ticker, current_date, get_config()))
+    return engine_scores(
+        quant_scorecard(
+            ticker,
+            current_date,
+            get_config(),
+            catalyst_snapshot=_catalyst_snapshot(ticker, current_date),
+            calendars=_event_calendar_answers(ticker, current_date),
+        )
+    )
 
 
 @tool
@@ -6181,6 +6214,46 @@ def get_event_state(
     return _render_event_state(ticker, res)
 
 
+def _spectral_windows(panel: dict) -> tuple[dict, dict] | None:
+    """R3's two rolling windows over the run's panel, or ``None``.
+
+    ``{name: [return, ...]}`` per window, built from the **same** name set on
+    both sides: `regime.spectral_change_read` refuses a panel whose membership
+    changed between the two windows, so a read that could only be refused is
+    never assembled. Each window is ``SPECTRAL_MIN_OBS`` observations - the read's
+    own floor, and the length its null band is calibrated at - and a name without
+    enough history to fill both is dropped rather than padded. A panel left with
+    fewer than two names returns ``None``: the read needs a cross-section, and a
+    one-name "panel" is a per-symbol read wearing a panel's name.
+    """
+    try:
+        from tradingagents.strategies.covariance_models import SPECTRAL_MIN_OBS
+
+        width = int(SPECTRAL_MIN_OBS)
+    except Exception:  # noqa: BLE001 - no floor, no read
+        return None
+    if width < 1:
+        return None
+    prev: dict = {}
+    curr: dict = {}
+    for name, closes in (panel or {}).items():
+        series = [float(c) for c in (closes or []) if c is not None]
+        if len(series) < 2 * width + 1:
+            continue
+        rets = [
+            series[i] / series[i - 1] - 1.0
+            for i in range(1, len(series))
+            if series[i - 1]
+        ]
+        if len(rets) < 2 * width:
+            continue
+        prev[str(name)] = rets[-2 * width : -width]
+        curr[str(name)] = rets[-width:]
+    if len(prev) < 2:
+        return None
+    return prev, curr
+
+
 def _regime_components() -> dict:
     """Assemble the RegimeScore components from MARKET-level sources (WP-4).
 
@@ -6263,6 +6336,22 @@ def _regime_components() -> dict:
         ratio = _vts(ts.get("vix9d"), ts.get("vix3m")).get("ratio")
         if ratio is not None:
             vals["vix_term_structure"] = ratio
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # R3's flagged per-PANEL read (`enable_spectral_null_band`, off by
+        # default). The cross-section is the run's shared S&P 500 panel (P0-2,
+        # already built by `_market_breadth_read` above), so the leg costs two
+        # eigendecompositions and no fetch. With the gate off
+        # `_spectral_change_values` returns {} and the component is not declared,
+        # which is what keeps a gate-off score the six market-level legs it was
+        # before R3 existed.
+        if _r3_flag("enable_spectral_null_band"):
+            from tradingagents.strategies.regime_score import _spectral_change_values
+
+            windows = _spectral_windows(_market_panel())
+            if windows:
+                vals.update(_spectral_change_values(*windows))
     except Exception:  # noqa: BLE001
         pass
     return vals

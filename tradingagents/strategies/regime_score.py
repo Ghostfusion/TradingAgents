@@ -164,7 +164,7 @@ COMPONENTS: dict[str, Component] = {
             "market_trend",
             "market_trend",
             "higher_better",
-            "strategies/regime_score.py::market_trend:344",
+            "strategies/regime_score.py::market_trend:351",
             "P/SMA - 1 (signed)",
             "prerequisite 1; over the benchmark's closes, not the name's",
         ),
@@ -180,7 +180,7 @@ COMPONENTS: dict[str, Component] = {
             "vix_percentile",
             "volatility",
             "lower_better",
-            "agents/utils/analysis_tools.py::_vix_percentile_read:7976",
+            "agents/utils/analysis_tools.py::_vix_percentile_read:8850",
             "0-1 rank of VIXCLS",
             "prerequisite 3 (P0-4); a level is not a regime input, the rank is",
         ),
@@ -188,9 +188,11 @@ COMPONENTS: dict[str, Component] = {
             "vix_term_structure",
             "volatility",
             "lower_better",
-            "strategies/regime_score.py::vix_term_structure:401",
+            "strategies/regime_score.py::vix_term_structure:408",
             "VIX9D / VIX3M ratio",
-            "prerequisite 4 (P0-5); ABSENT data source - see VIX9D_SERIES",
+            "prerequisite 4 (P0-5); the Cboe index-history levels, wired in "
+            "agents/utils/analysis_tools.py::_regime_components (VIX9D_SERIES is "
+            "the FRED id, and FRED is not the source)",
         ),
         _c(
             "choppiness",
@@ -213,16 +215,21 @@ COMPONENTS: dict[str, Component] = {
 
 COMPONENT_ORDER: tuple = tuple(COMPONENTS)
 
-#: The VIX9D FRED series id is NOT asserted here: `dataflows/fred.py` passes an
-#: unknown alias through as a raw series id and returns None when the id does not
-#: resolve, so the run-time id must be verified against FRED before it is wired
-#: (see `local://wiring_regime.md`). Until then the leg is `NA` and printed,
-#: never substituted with the equity-IV slope (`RegimeScore.md` §4).
+#: The VIX9D **FRED** series id is NOT asserted here: `dataflows/fred.py` passes
+#: an unknown alias through as a raw series id and returns None when the id does
+#: not resolve, so a FRED id would have to be verified before it is wired (see
+#: `local://wiring_regime.md`). It is not this leg's source either way: the run
+#: reads both levels from Cboe's own index history
+#: (`dataflows/cboe.py::vix_term_structure`, wired in
+#: `agents/utils/analysis_tools.py::_regime_components`), so the leg is measured
+#: whenever those files resolve. The equity-IV slope is never substituted for it
+#: (`RegimeScore.md` §4).
 VIX9D_SERIES = None
 VIX3M_SERIES = "VXVCLS"
 VIX_TERM_UNAVAILABLE = (
-    "VIX9D/VIX3M term structure has no verified series source in this tree "
-    "(RegimeScore.md §4: P0-5 ABSENT); the equity-IV slope is not a substitute"
+    "VIX9D/VIX3M term structure unmeasurable for this run: the Cboe index-history "
+    "levels (dataflows/cboe.py) did not resolve; the equity-IV slope is not a "
+    "substitute (RegimeScore.md §4)"
 )
 
 
@@ -465,7 +472,7 @@ SPECTRAL_CHANGE_COMPONENT = Component(
     name="spectral_change",
     category="breadth",
     direction="lower_better",
-    producer="strategies/regime.py::spectral_change_read:1159",
+    producer="strategies/regime.py::spectral_change_read:1494",
     unit="flag: 1 = a spectral move beyond the calibrated null band",
     note=(
         "R3 (2607.06373); the FLAG enters, never the absorption ratio or the "
