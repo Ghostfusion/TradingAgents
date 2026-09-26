@@ -5,12 +5,12 @@
 | Engine | Document | Owner's weight table | Readiness |
 | --- | --- | --- | --- |
 | FundamentalScore | [`FundamentalScore.md`](FundamentalScore.md) | 106 factors, 10 categories | largely computable; the ledger names the third that is not |
-| TechnicalScore | [`TechnicalScore.md`](TechnicalScore.md) | 9 categories | **no composite exists**; components do |
-| RegimeScore | [`RegimeScore.md`](RegimeScore.md) | 8 categories | **two independent paths**, no score |
-| NewsScore | [`NewsScore.md`](NewsScore.md) | 9 categories | **5 of 9 ABSENT** |
-| SentimentScore | [`SentimentScore.md`](SentimentScore.md) | 10 categories | mostly buildable, four holes |
-| EventScore | [`EventScore.md`](EventScore.md) | *(none given)* | occurrence producers exist for 4 of 7 families |
-| RiskScore | [`RiskScore.md`](RiskScore.md) | 8 categories | **no 0-100 risk score exists anywhere** |
+| TechnicalScore | [`TechnicalScore.md`](TechnicalScore.md) | 9 categories | **[CORRECTED 2026-09-26]** the composite now exists (`strategies/technical_score.py::technical_score`); this cell read "**no composite exists**; components do" |
+| RegimeScore | [`RegimeScore.md`](RegimeScore.md) | 8 categories | **[CORRECTED 2026-09-26]** the composite now exists (`strategies/regime_score.py::regime_score`); this cell read "**two independent paths**, no score" |
+| NewsScore | [`NewsScore.md`](NewsScore.md) | 9 categories | **5 of 9 ABSENT**; **[CORRECTED 2026-09-26]** the composite exists (`strategies/news_score.py::news_score`) |
+| SentimentScore | [`SentimentScore.md`](SentimentScore.md) | 10 categories | mostly buildable, four holes; **[CORRECTED 2026-09-26]** the composite exists (`strategies/sentiment_score.py::sentiment_score`) |
+| EventScore | [`EventScore.md`](EventScore.md) | *(none given)* | occurrence producers exist for 4 of 7 families; **no composite — still true, re-checked 2026-09-26** (plan §13 Q7 makes the structured state the deliverable) |
+| RiskScore | [`RiskScore.md`](RiskScore.md) | 8 categories | **[CORRECTED 2026-09-26]** the 0-100 composite exists (`strategies/risk_score.py::risk_score`, 100 = low risk); this cell read "**no 0-100 risk score exists anywhere**" |
 
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
@@ -95,21 +95,15 @@ aligned score would silently pick one of them. Printing both ends the ambiguity.
 
 | Engine | What it answers | Components with a real producer | Components ABSENT | Composite today |
 | --- | --- | --: | --: | --- |
-| FundamentalScore | *Is this a good business at a good price?* | see [`FundamentalScore.md`](FundamentalScore.md) §2 — the ledger marks all 106 | 0-100, advisory only |
-| TechnicalScore | *What is this stock doing?* | 9 categories largely populated | the composite itself | **none** |
-| RegimeScore | *What environment is this stock trading in?* | two independent paths | market-wide breadth, VIX percentile/term structure, credit | **none** |
-| NewsScore | *What new information arrived, and how material is it?* | 4 of 9 categories | novelty, materiality, fundamental impact, guidance change, corporate events, persistence | **none** |
-| SentimentScore | *How is the market positioned around it?* | 6 of 10 categories | 20-day momentum, acceleration, per-source breadth, institutional on this surface | **none** |
-| EventScore | *Is a high-impact event happening now?* | 4 of 7 families | product/clinical, court, investor day | **none** |
-| RiskScore | *How much can this hurt?* | all 8 categories as components | the aggregation | **none** |
+| FundamentalScore | *Is this a good business at a good price?* | see [`FundamentalScore.md`](FundamentalScore.md) §2 — the ledger marks all 106 | 0-100, advisory only (`fundamental_score.py::fundamental_score`) |
+| TechnicalScore | *What is this stock doing?* | 9 categories largely populated | the composite itself | **[CORRECTED 2026-09-26]** 0-100, advisory only (`technical_score.py::technical_score`) |
+| RegimeScore | *What environment is this stock trading in?* | two independent paths | market-wide breadth, VIX percentile/term structure, credit | **[CORRECTED 2026-09-26]** 0-100, advisory only (`regime_score.py::regime_score`) |
+| NewsScore | *What new information arrived, and how material is it?* | 4 of 9 categories | novelty, materiality, fundamental impact, guidance change, corporate events, persistence | **[CORRECTED 2026-09-26]** 0-100, advisory only (`news_score.py::news_score`) |
+| SentimentScore | *How is the market positioned around it?* | 6 of 10 categories | 20-day momentum, acceleration, per-source breadth, institutional on this surface | **[CORRECTED 2026-09-26]** 0-100, advisory only (`sentiment_score.py::sentiment_score`) |
+| EventScore | *Is a high-impact event happening now?* | 4 of 7 families | product/clinical, court, investor day | **none** — still true, re-checked 2026-09-26 |
+| RiskScore | *How much can this hurt?* | all 8 categories as components | the aggregation | **[CORRECTED 2026-09-26]** 0-100, advisory only, 100 = low risk (`risk_score.py::risk_score`) |
 
-**"Composite today: none" is a grep result, not an impression.** No 0-100
-technical score, no market-level regime score and no 0-100 risk score exists
-anywhere in `TradingAgents` or `TradingExecution`; the only existing composites
-in this space are the LLM-produced analyst scores (`SentimentReport.overall_score`
-0-10, `agents/schemas.py:463`) and the deterministic per-factor libraries. A
-score that does not exist cannot be quoted, and no document in this set may
-imply one does.
+**"Composite today: none" was a grep result, not an impression - and it was run before the workstreams landed. [CORRECTED 2026-09-26]: re-run, six of the seven engines now have one.** `fundamental_score.py::fundamental_score`, `technical_score.py::technical_score`, `regime_score.py::regime_score`, `news_score.py::news_score`, `sentiment_score.py::sentiment_score`, `risk_score.py::risk_score`. `EventScore` still has none: `event_state.py`/`events.py` produce family occurrences and readouts, no aggregate (plan §13 Q7). The LLM-produced analyst scores (`SentimentReport.overall_score` 0-10, `agents/schemas.py:463`) and the deterministic per-factor libraries remain separate surfaces, and every composite above is **advisory** under §2 - none may be quoted as a forecast, and none reaches `opportunity_score`.
 
 
 ### 1.4 The composite — research allocation, and the gate-order conflict
