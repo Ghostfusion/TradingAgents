@@ -115,12 +115,12 @@ the tool binding and the prompt fragment **derived** from it rather than restate
 
 | Symbol | Site | Role |
 |---|---|---|
-| `ENGINE_GATES` | `quant_scorecard.py:70` | the eight per-engine gates |
-| `COMPOSITE_ENGINES` | `quant_scorecard.py:86` | the four that feed `TradeScore` |
-| `ENGINE_TOOLS` | `quant_scorecard.py:89` | engine -> its `@tool` leaf name |
-| `ENGINE_SECTIONS` | `quant_scorecard.py:119` | engine -> its report section (`None` = report-level) |
-| `ANALYST_SECTIONS` | `quant_scorecard.py:131` | the four analyst sections |
-| `engines_for_analyst` | `quant_scorecard.py:134` | the derived ownership query |
+| `ENGINE_GATES` | `quant_scorecard.py:78` | the eight per-engine gates |
+| `COMPOSITE_ENGINES` | `quant_scorecard.py:94` | the four that feed `TradeScore` |
+| `ENGINE_TOOLS` | `quant_scorecard.py:97` | engine -> its `@tool` leaf name |
+| `ENGINE_SECTIONS` | `quant_scorecard.py:127` | engine -> its report section (`None` = report-level) |
+| `ANALYST_SECTIONS` | `quant_scorecard.py:139` | the four analyst sections |
+| `engines_for_analyst` | `quant_scorecard.py:142` | the derived ownership query |
 | `engine_score_tools` | `tradingagents/agents/toolsets.py:450` | the derived **tool binding** |
 | `engine_score_block` | `tradingagents/agents/utils/report_hygiene.py:77` | the derived **prompt fragment** |
 
@@ -135,7 +135,7 @@ Enumerated against the tree, not assumed.
 
 ### 3.1 The engine result is also a callable tool
 
-`engine_score_tools(analyst_key)` (`toolsets.py:450`) binds each owned engine as a
+`engine_score_tools(analyst_key)` (`toolsets.py:460`) binds each owned engine as a
 **tool the model may or may not call**:
 
 ```text
@@ -153,7 +153,7 @@ precisely the discretion this design removes.
 
 `analyst_forced_tools` (`tradingagents/default_config.py:199`, consumed at
 `tradingagents/agents/utils/evidence_gather.py:553`) makes the *raw tool* set
-deterministic when it is set. It is **not set by default** (`default_config.py:643`
+deterministic when it is set. It is **not set by default** (`default_config.py:649`
 ships `[]`). The owner's `.env` currently sets it to `ALL`, so today's production
 runs gather deterministically — but that is a configuration state, not a
 guaranteed contract, and it constrains *raw tools*, not *engines*.
@@ -203,7 +203,7 @@ off'}` rather than omitting the key.
 
 **The manifest is the eight engines, not the four composite engines.** All eight
 are evaluated and delivered for interpretation. Only the four in
-`COMPOSITE_ENGINES` (`quant_scorecard.py:86`) contribute to `TradeScore` — see §9.
+`COMPOSITE_ENGINES` (`quant_scorecard.py:94`) contribute to `TradeScore` — see §9.
 
 **The manifest is delivered to all four analysts** (§13.1), each also receiving
 its normal owned research and evidence. The engine evidence comes first and
@@ -343,7 +343,7 @@ ROC20 = 2.62%  -> 63.1
 last, labelled downstream and non-instructional — so the composite is a reference
 point rather than an anchor.
 
-`format_engine_detail` (`quant_scorecard.py:696`) already renders the
+`format_engine_detail` (`quant_scorecard.py:774`) already renders the
 per-category weights, scores, bands and coverage for a snapshot; the live market
 block measured 2026-09-19 is 4207 characters and carries the full
 `## TechnicalScore - QCOM (advisory; 35 of 40 components measured)` body. The
@@ -397,7 +397,7 @@ This design adds a delivery contract. It does not reopen settled architecture.
 
 1. **Master rule 17 — no engine enters the composite by adjacency.** All eight
    engines are *delivered for interpretation*; only `COMPOSITE_ENGINES`
-   (`quant_scorecard.py:86`) feed `TradeScore`. Supplying `NewsScore` and
+   (`quant_scorecard.py:94`) feed `TradeScore`. Supplying `NewsScore` and
    `SentimentScore` to the model is **display by adjacency, which is permitted**;
    feeding them into the composite is not.
 2. **Master rule 18 — `RiskScore` is a `TradeScore` engine, not a risk gate.** The
@@ -416,7 +416,7 @@ This design adds a delivery contract. It does not reopen settled architecture.
    section. Widening the reading does not move a section.
 6. **Gate names are new, never reused.** This design needs no new gate: the
    manifest is filtered by the existing eight `ENGINE_GATES`
-   (`quant_scorecard.py:70`) under the master gate.
+   (`quant_scorecard.py:78`) under the master gate.
 7. **`NA != 0`, and `None` is never `[]`.** `None` = not answered (`missing`);
    `[]` = answered and empty (`not_applicable`).
 
@@ -429,7 +429,7 @@ This design adds a delivery contract. It does not reopen settled architecture.
 Verified 2026-09-19: for each of the four analysts, the owned engine is *both*
 supplied by `engine_score_block` **and** bound as a callable tool by
 `engine_score_tools` — and both derive from the same `engines_for_analyst`
-(`quant_scorecard.py:134`).
+(`quant_scorecard.py:142`).
 
 ```text
 market        owned=('technical',)     supplied by block AND bound as ['get_technical_score']
@@ -486,8 +486,8 @@ Make the manifest explicit in code (a derived tuple, not a literal list) and
 > mechanisms, not LLM-facing analytical tools*, so **all eight** bindings go. The
 > earlier scope is retained here as the record; the wider rule supersedes it.
 
-- **Touches:** `toolsets.engine_score_tools` (`toolsets.py:450`),
-  `quant_scorecard.engines_for_analyst` (`quant_scorecard.py:134`).
+- **Touches:** `toolsets.engine_score_tools` (`toolsets.py:460`),
+  `quant_scorecard.engines_for_analyst` (`quant_scorecard.py:142`).
 - **Scope:** all eight — `get_fundamental_score`, `get_technical_score`,
   `get_regime_score`, `get_risk_score`, `get_sentiment_score`, `get_news_score`,
   `get_event_state`, `get_trade_score`. The underlying **exploratory** tools stay
@@ -506,7 +506,7 @@ Add the supporting-measurement rows (§7) to the delivered block, including the
 explicit mapping where the producer's band table is non-monotonic, and the
 coverage floor with its status (§13.4).
 
-- **Touches:** `quant_scorecard.format_engine_detail` (`quant_scorecard.py:696`)
+- **Touches:** `quant_scorecard.format_engine_detail` (`quant_scorecard.py:774`)
   and the block builder; and `score_engine.combine`
   (`tradingagents/strategies/score_engine.py:134`) to expose the floor it already
   computes at `:190` as a structured field beside `coverage`.

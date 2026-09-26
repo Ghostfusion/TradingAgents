@@ -839,6 +839,48 @@ def test_regime_components_short_history_degrades(monkeypatch):
     assert "not enough price history" in out
 
 
+def test_the_realized_vol_leg_ranks_the_window_that_ends_today(monkeypatch):
+    """A stride that stops at the last whole window must not drop the newest bars.
+
+    `range(window, len(bench) + 1, window)` ends at the last multiple of 21, so a
+    320-bar benchmark history ranked `bench[294:315]` and printed a percentile up
+    to 20 bars stale. The leg appends the current window instead of relying on the
+    stride.
+    """
+    from tradingagents.strategies import regime as regime_mod
+
+    closes = [100.0 + 0.1 * i for i in range(320)]
+    monkeypatch.setattr(T, "_benchmark_closes", lambda: list(closes))
+    monkeypatch.setattr(T, "_benchmark_bars", lambda: {})
+    monkeypatch.setattr(T, "_market_breadth_read", lambda: {})
+    monkeypatch.setattr(T, "_vix_percentile_read", lambda *a, **k: {"percentile": None})
+
+    seen: dict = {}
+
+    def _capture(history, current_window=21):
+        seen["windows"] = list(history)
+        return {
+            "percentile": 0.5,
+            "windows": len(history),
+            "reason": None,
+            "basis": "captured",
+        }
+
+    monkeypatch.setattr(regime_mod, "vol_percentile_read", _capture)
+
+    vals = T._regime_components()
+    assert vals.get("realized_vol_percentile") == 0.5
+    windows = seen["windows"]
+    assert len(windows[-1]) == 21
+    assert windows[-1][-1] == closes[-1], (
+        "the window ranked as 'latest' does not end at the newest bar: "
+        f"{windows[-1][-1]} != {closes[-1]}"
+    )
+    assert len(windows) == 320 // 21 + 1, (
+        "the stride's windows plus the current one are expected, nothing else"
+    )
+
+
 def test_momentum_detail_uses_ohlcv(monkeypatch):
     n = 70
     closes = [100.0 + i for i in range(n)]

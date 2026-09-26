@@ -45,7 +45,7 @@ The eight engines reach exactly two places, both verified:
 | **The eight LangChain tool leaves** | `agents/utils/analysis_tools.py::get_*_score`, appended to a toolset in `agents/toolsets.py` | one per engine, all default `False` | an analyst's LLM, if the ToolNode carries it |
 | **`run_card.json`** | `reporting.py::_run_card_*` (eight builders, `859-1246`), assembled `1858-1891`, written `1893` | one per engine, all default `False` | a human reading the JSON |
 
-All eight gates default `False` at `default_config.py:1062/1064/1070/1073/1074/1078/1082/1085`.
+All eight gates default `False` at `default_config.py:1234/1236/1242/1245/1246/1250/1263/1266`.
 
 **The consequence for the research layer is stark: the engine scores reach
 `run_card.json` — and `run_card.json` has no reader in the research layer at
@@ -53,9 +53,9 @@ all.** Verified across all three repositories:
 
 - `../TradingExecution/signald/watch.py:6-8` **explicitly ignores** `run_card.json`
   and reads only `research_decision.json`.
-- `../trading_web/backend/capabilities.py::read_report_tree:1699` serves every
+- `../trading_web/backend/capabilities.py::read_report_tree:1906` serves every
   `*.md` of a report tree and reads no `run_card.json`.
-- `complete_report.md` is built at `reporting.py:1788` from **state keys only**;
+- `complete_report.md` is built at `reporting.py:1845` from **state keys only**;
   within `reporting.py` the engine modules are referenced only inside the
   `_run_card_*` builders.
 
@@ -98,7 +98,7 @@ debate agent can cite a number and have it deterministically verified.**
 
 > **This is why the seam is one string and not ten prompts.** A block appended to
 > `computed_decision_context` reaches all ten prompt sites *and* the verification
-> registry *and* — because `reporting.py:1644-1646` renders the same string as
+> registry *and* — because `reporting.py:1701-1703` renders the same string as
 > report section `IVa` — the human report. One producer, three readers.
 
 ### 1.3 The gap, per engine
@@ -119,7 +119,7 @@ debate agent can cite a number and have it deterministically verified.**
 resolves to it (`:587-588`), but **no ToolNode is built for the sentiment key**:
 `trading_graph.py:343-345` builds nodes for `("market", "news", "fundamentals")`
 only, and `tests/test_tool_binding_single_source.py:50` **asserts** exactly that
-set. `toolsets.py:533-538` records it as deliberate — the sentiment analyst binds
+set. `toolsets.py:543-548` records it as deliberate — the sentiment analyst binds
 no tools because its data is pre-fetched into the prompt from turn 0.
 
 So with `enable_sentiment_score` on, the score is **computed but unreachable by
@@ -344,7 +344,7 @@ returns `{raw, aligned, direction, category, producer}` per component), so the
 work is **rendering only**; it is `P12-12`. That is why this table's level-3 row
 is worded *"needs no new producer"* rather than *"needs no work"*. Level 2 is where
 the owner's "research evidence → score → interpretation" chain becomes visible; it
-is an addition to `write_report_tree` (`reporting.py:1392`) that renders each
+is an addition to `write_report_tree` (`reporting.py:1449`) that renders each
 engine's already-computed result, and adds no producer.
 
 **Status (2026-09-19): Level 2 is BUILT, in two surfaces.** An earlier revision of
@@ -565,7 +565,7 @@ Found by executing the path, not by reading the set. Recorded in the master's
 | --: | --- | --- | --- |
 | **D-7** | **The leaf scores the wall clock, the card scores the run date.** `_trade_score_engines` called `fundamental_score_for_ticker(ticker)` — no date, so `fundamental_score_for_ticker` falls back to `datetime.now()` (`strategies/fundamental_score.py:550`) — while `_run_card_fundamental_score:881-882` passes `pm_decision.trade_date`. On the documented `batch.py --date 2026-07-22` invocation (batch.py:5) that is one vector printed as two numbers | measured on MSFT: leaf `66.25`, card `62.50`, same basis string, same `panel_n=9`. The leaf is the wrong one — it scored a July decision against September's peer panel | **FIXED** |
 | **D-8** | **The D-6 class is not closed.** `_trade_score_engines` computes all four engines unconditionally; `_run_card_trade_score:996-1004` reads each engine from the sibling card block, which exists only when that engine's own gate is on. With `enable_trade_score` on and any sub-gate off, the leaf and the card print **different composites** | `agents/utils/analysis_tools.py::_trade_score_engines` vs `reporting.py::_run_card_trade_score`; executed against the pre-`P12-5` assembly from git: leaf **`84.55`**, card **`87.19`**, both **`87.19`** after | **FIXED (`P12-5`)** — §3.4's rule is now applied by both readers, which take their four values from the run's snapshot through `quant_scorecard.engine_scores` |
-| **D-9** | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `trading_graph.py:343-345` builds `market, news, fundamentals`; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `toolsets.py:533-538` records it as deliberate | **deliberate, not a defect — but it bounds the design (§1.3)** |
+| **D-9** | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `trading_graph.py:343-345` builds `market, news, fundamentals`; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `toolsets.py:543-548` records it as deliberate | **deliberate, not a defect — but it bounds the design (§1.3)** |
 | **D-10** | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books: `docs/implementation_plan_defect_audit.md:51` (its line references, `:605` and `:2208`, have drifted) | **pre-existing, open, not this workstream's** |
 | **D-11** | **The compiled context's `catalyst_window` can never be `True`.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None` | 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader says the window is **active**; all 19 printed `catalyst_window=` occurrences read `False`; executed on NFLX 2026-09-15 the context printed `verdict=tradable ... reasons=['...no catalyst']` where the snapshot implies `verdict=catalyst-window pass=False` | **open** — and the `2c05701` "FIXED" claim for master defect 16 is **wrong**. Bounds this design: the event engine cannot enter the pre-graph snapshot |
 
@@ -927,7 +927,7 @@ rather than abstract:
   (technical), `:5261` (risk), `:5849` (sentiment), `:6008` (news), plus the
   fundamental / regime / event renderers
 - **the engines' own `basis` tails** — `event_state.py:581`, `news_score.py:382`,
-  `regime_score.py:308`, `risk_score.py:560`, `sentiment_score.py:534`,
+  `regime_score.py:315`, `risk_score.py:560`, `sentiment_score.py:534`,
   `technical_score.py:312`
 
 ### 9.3 `Gate OFF => byte-identical` is a release-level invariant
@@ -963,10 +963,10 @@ tightenings in §9.1–§9.4.
 | The context is the only quantitative channel into the debate | `trading_graph.py::_compiled_decision_context:1243-1509`, set `:649`; imported by no other builder |
 | It is consumed at ten sites, one bounded | §1.2 table; `structured_debate.py:216` is the bound |
 | The scores reach only a tool and the card | `agents/toolsets.py`; `reporting.py:859-1246`, `1893` |
-| The card has no research-layer reader | `signald/watch.py:6-8`; `capabilities.py:1699`; `reporting.py:1788` |
-| All eight gates default off | `default_config.py:1062/1064/1070/1073/1074/1078/1082/1085` |
-| The context becomes verifiable ground truth | `structured_debate.py::ground_truth_from_state:298`, `_parse_key_value_lines:280` |
-| The context becomes report section IVa | `reporting.py:1644-1646` |
+| The card has no research-layer reader | `signald/watch.py:6-8`; `capabilities.py:1906`; `reporting.py:1845` |
+| All eight gates default off | `default_config.py:1234/1236/1242/1245/1246/1250/1263/1266` |
+| The context becomes verifiable ground truth | `structured_debate.py::ground_truth_from_state:330`, `_parse_key_value_lines:312` |
+| The context becomes report section IVa | `reporting.py:1701-1703` |
 | D-7 | measured: leaf `66.25` vs card `62.50`, MSFT, `--date 2026-07-22`; `fundamental_score.py:550` |
 | D-9 | `trading_graph.py:343-345`; `tests/test_tool_binding_single_source.py:50` |
 | D-10 | `structured_debate.py:644`; `trading_graph.py:1770-1788`; `docs/implementation_plan_defect_audit.md:51` |

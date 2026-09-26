@@ -6312,6 +6312,13 @@ def _regime_components() -> dict:
         # `regime.vol_percentile` defect fix: None, never a fabricated 0.5)
         window = 21
         windows = [bench[i - window : i] for i in range(window, len(bench) + 1, window)]
+        # `range(..., len(bench) + 1, window)` stops at the last whole stride, so a
+        # series that is not a multiple of `window` loses its newest bars and the
+        # window ranked as "latest" is not the current one - a 320-bar history
+        # ranked `bench[294:315]`, up to 20 bars stale. Append the current window
+        # when the stride missed it.
+        if windows and windows[-1][-1] != bench[-1]:
+            windows.append(list(bench[-window:]))
         vp = vol_percentile_read(windows)
         if vp.get("percentile") is not None:
             vals["realized_vol_percentile"] = vp["percentile"]

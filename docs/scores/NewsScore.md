@@ -4,7 +4,8 @@
 Siblings: [`FundamentalScore.md`](FundamentalScore.md),
 [`TechnicalScore.md`](TechnicalScore.md), [`RegimeScore.md`](RegimeScore.md),
 [`SentimentScore.md`](SentimentScore.md), [`EventScore.md`](EventScore.md),
-[`RiskScore.md`](RiskScore.md).
+[`RiskScore.md`](RiskScore.md), [`MarketScore.md`](MarketScore.md),
+[`ValuationScore.md`](ValuationScore.md).
 
 **Scope: the news engine only.** It designs `NewsScore` — *"what new information
 has arrived, and how materially could it affect the company?"* — from the owner's
@@ -184,8 +185,8 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 1. **Relevance score is computed but not surfaced automatically.** `get_news_relevance_read:57` returns `Relevance score: X/100`, and `news_analyst.py:46` instructs the analyst to cite it — but there is no report-disclosure/attribution block emitting it. A reader sees the score only when the model volunteers it; every grep for `relevance` outside the tool/strategy found no report-side consumer. (Disagreement pair: `news_data_tools.py:80` vs the absence of any report renderer.)
 2. **`mention_volume:43` and `sentiment_velocity:25` are exported with no caller.** `sentiment.py:824-825` lists them in `__all__`; repo-wide grep finds only the definitions and the docstring mention. The "news volume acceleration" component has a producer that nothing reads → UNWIRED.
 3. **`estimate_change_index:176` can never return a value.** Its own docstring/basis says the engine holds "current consensus and price targets only, not a 3-4 quarter estimate history"; `get_analyst_revision_index:43` therefore always prints the estimate-change leg as `unavailable`. The price-target-revision component has a producer shape with no data behind it.
-4. **Revision index mis-homed.** `get_analyst_revision_index` (the only analyst-change score) is bound in `fundamentals_company_tools` (`toolsets.py:393`), not `news_tools()` — the NewsScore engine cannot reach it through the news analyst.
-5. **Flag-gated producers.** `aggregate_weighted_sentiment` (novelty dedupe + decay) is reachable only via `_sentiment_agg_rows:6734` behind `enable_weighted_sentiment_agg=False` (`default_config.py:1044`); `enable_weighted_sentiment_window=False` (`:1049`); `enable_news_relevance=False` (`:903`). Default runs emit none of the novelty/persistence math.
+4. **Revision index mis-homed.** `get_analyst_revision_index` (the only analyst-change score) is bound in `fundamentals_company_tools` (`toolsets.py:402`), not `news_tools()` — the NewsScore engine cannot reach it through the news analyst.
+5. **Flag-gated producers.** `aggregate_weighted_sentiment` (novelty dedupe + decay) is reachable only via `_sentiment_agg_rows:6734` behind `enable_weighted_sentiment_agg=False` (`default_config.py:1050`); `enable_weighted_sentiment_window=False` (`:1049`); `enable_news_relevance=False` (`:903`). Default runs emit none of the novelty/persistence math.
 6. **Materiality is not scored, only relevance.** `score_news_article:55` docstring: "Deterministic relevance score (0-100) + <=5 explainable reasons." The return is `{"score": round(score,1), "reasons": reasons[:5]}` built solely from lexical match flags (code/name presence, official host, macro term). There is no magnitude, dollar, %move, or event-severity term — so the owner's "materiality" half of the 20-point component is unimplemented, and a reader today would see a high relevance score for a trivial press mention and (wrongly) read it as material.
 
 ---
@@ -206,7 +207,7 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 | industry shock | sector-wide event/peer-move read | `get_market_breadth:98` (breadth), `sector_rotation_screen` | Sector-relative abnormal move over the news window |
 | news volume acceleration | per-day article counts | YES: `daily_sentiment_sma` carries `n` per day; `mention_volume:43` already computes the ratio | Wire `sentiment.mention_volume` to the `n` series from `get_news_sentiment_series` |
 
-**Relevance-vs-materiality, quoted:** the function's docstring (`news_relevance.py:56`) reads "Deterministic relevance score (0-100) + <=5 explainable reasons", and it returns `{"score": round(score, 1), "reasons": reasons[:5]}` (`:93`). Every point is a lexical/membership flag (code-in-title +55, company-name +45, official +8, macro -12). It measures *whether the article is about this ticker from a credible source*, not *how much it moves the fundamental*. `is_official:48`, `admit_article:97` and `degrade_triple:108` are all in the same module (`news_relevance.py`). The analyst leaf is `get_news_relevance_read` (`news_data_tools.py:57`, bound in `news_tools()` at `toolsets.py:350`); the score is printed by the leaf and the prompt asks the analyst to cite it (`news_analyst.py:46`), but nothing in the report assembly prints it — so today it is in the report only when the LLM includes it.
+**Relevance-vs-materiality, quoted:** the function's docstring (`news_relevance.py:56`) reads "Deterministic relevance score (0-100) + <=5 explainable reasons", and it returns `{"score": round(score, 1), "reasons": reasons[:5]}` (`:93`). Every point is a lexical/membership flag (code-in-title +55, company-name +45, official +8, macro -12). It measures *whether the article is about this ticker from a credible source*, not *how much it moves the fundamental*. `is_official:48`, `admit_article:97` and `degrade_triple:108` are all in the same module (`news_relevance.py`). The analyst leaf is `get_news_relevance_read` (`news_data_tools.py:57`, bound in `news_tools()` at `toolsets.py:355`); the score is printed by the leaf and the prompt asks the analyst to cite it (`news_analyst.py:46`), but nothing in the report assembly prints it — so today it is in the report only when the LLM includes it.
 
 ---
 
@@ -280,7 +281,7 @@ answers are here.
    is arguably `EventScore`'s (it owns the expected move). If so, this category
    should read EventScore's number rather than build a second one — which is exactly the "one number, one producer" rule. **CLOSED 2026-09-17 (plan §13 Q6): `EventScore` owns it; this engine consumes that number.**
 3. **Where does the analyst-revision index live?** It is currently bound to the
-   fundamentals toolset (`toolsets.py:393`) while this engine's 5% category needs
+   fundamentals toolset (`toolsets.py:402`) while this engine's 5% category needs
    it. Either the news surface gains the leaf, or the category is dropped and the weight redistributed. **CLOSED 2026-09-17 (plan §13 Q4): the binding moves; the category keeps its weight.**
 4. **Should `NewsScore` be per-name at all**, or is it a market-level flow
    measure? Most of the owner's categories are name-level; the macro/industry ones are not.
@@ -293,6 +294,269 @@ news environment implies *for this security*. Market-wide news belongs to
 sentiment, novelty, the materiality reference, timestamp) and make the **aggregate
 the primary report output**, with a concise evidence section naming the
 highest-impact articles. Auditability without an unreadable report.
+
+---
+
+## 8. The owner's formula library (`Strategies/scores/news_score.md`, 2026-09-26)
+
+**2,670 lines, 119 headings, 213 display formulas.** The headings are 115 numbered
+`# N.` sections, three lettered subsections (`### A/B/C` under §114) and one
+unnumbered `## Recommended engine decomposition`. The formulas are the `$$…$$`
+display blocks (a `$$` pair = one formula); 12 of them are `\boxed`, 2 use
+`\begin{cases}`, and 4 headings carry none (`§1`, `§113`, `§114`, the
+decomposition) because they are architecture prose or a rendered output sample.
+Counted by script over the raw file, not by hand.
+
+**What it is, and what it is not.** It is a *formula catalogue* — an exhaustive
+menu of 115 candidate computations, several of which are alternative recipes for
+the same quantity — not a spec of what is built and not the source of this
+engine's weights. The nine categories and their weights come from
+[`../ScoreWeight/news_sentiment.md`](../ScoreWeight/news_sentiment.md) (§0.1);
+the library is the later, wider artefact and the delta between the two is the
+whole point of this section. §1's inventory is the *engine-side* cut (9 categories
+→ 24 producer rows); §8.1 is the same problem cut the *library-side* way (one row
+per formula section), so the two are crosswalks of each other, not duplicates.
+
+**Ledger: 6 `built`, 43 `PARTIAL`, 52 `ABSENT`, 18 `elsewhere`** (119 rows).
+`built` = a producer exists and the news path can read it today; `PARTIAL` = a
+producer exists but computes a materially narrower thing; `elsewhere` = a producer
+exists in the tree but belongs to another engine (sentiment, portfolio, alpha or
+event layer); `ABSENT` = no producer anywhere, with the smallest honest producer
+named in the status cell. Every symbol below was read, not grepped for.
+
+### 8.1 The library's sections against the engine
+
+| § | Library section | Formulas | Status — producer (`module.symbol:line`) |
+| --: | --- | --: | --- |
+| 1 | NewsScore architecture | 0 | PARTIAL — `news_score.news_score:336` (one composite; 0-100 favourable, coverage emitted, confidence/regime/shock outputs absent) |
+| 2 | Basic sentiment transformation | 4 | elsewhere — `sentiment_score.normalise_sentiment:80` (scale table → -1..1, refuses an unknown source; not on the news path) |
+| 3 | Sentiment magnitude | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:626` (`neutral_share` uses `abs(s) < eps`; no magnitude is emitted) |
+| 4 | Sentiment confidence | 4 | ABSENT — nearest `sentiment.sentiment_dispersion:209` (dispersion, not a confidence) |
+| 5 | Relevance score | 3 | built — `news_relevance.score_news_article:56` (the 5-term weighted sum reduced to lexical flags), wired at `analysis_tools._news_components:6698` |
+| 6 | Entity prominence | 4 | PARTIAL — `news_relevance.score_news_article:56` (title +45 vs snippet +28 is a prominence proxy; no mentions/words ratio) |
+| 7 | News novelty | 4 | built — `news_score.news_novelty:215` (first-seen share over exact normalised keys; no embedding cosine) |
+| 8 | Duplicate suppression | 3 | PARTIAL — `news_score.news_novelty:215` (counts repeats) + `sentiment.aggregate_weighted_sentiment:626` (drops dupes outright; no `W_dup` weight) |
+| 9 | Source quality score | 2 | PARTIAL — `news_relevance.is_official:51` + `OFFICIAL_HOSTS:24` (binary official flag, +8); no `Q_i` 0-1 composite |
+| 10 | Primary-source multiplier | 1 | PARTIAL — `news_relevance.is_official:51`; the sentiment path's `official_boost` (`sentiment.aggregate_weighted_sentiment:626`) is gated and off the news path |
+| 11 | News age / exponential decay | 3 | elsewhere — `sentiment.decayed_weight:91` (`2^(-age/HL)`, HL default 7d), used by `weighted_sentiment:109` and `aggregate_weighted_sentiment:626`; the news engine has no decay component (`news_score.RAMPS:110`) |
+| 12 | Multiple news half-lives | 1 | ABSENT — nearest `sentiment.decayed_weight:91` (one half-life) |
+| 13 | Event-type decay | 1 | ABSENT — nearest `sentiment.decayed_weight:91` |
+| 14 | Event importance | 2 | ABSENT — nearest `event_state.event_state:586` (event imminence by family, not importance) |
+| 15 | Event materiality | 3 | PARTIAL — `catalyst.implied_move_from_history:111` (`abs(expected move)`, the magnitude half); the ratio to market cap is absent and the engine's slot is caller-supplied (`news_score.ABSENT_REASONS:85`) |
+| 16 | Earnings surprise | 4 | built — `events.surprise_score:17` via `catalyst.last_earnings_surprise:70`, wired at `analysis_tools._news_components:6698`; the σ-standardised `Z`/`tanh` legs are absent |
+| 17 | Guidance surprise | 2 | ABSENT — `news_score.ABSENT_REASONS:85`; `analyst_data_tools.get_earnings_calendar:30` returns an EPS/revenue estimate, never guidance |
+| 18 | Revenue growth surprise | 2 | ABSENT — nearest `catalyst.last_earnings_surprise:70` (EPS only) |
+| 19 | Margin surprise | 1 | ABSENT — no producer (grep `margin_surprise` = 0) |
+| 20 | Multi-metric earnings surprise | 2 | ABSENT — nearest `analysis_tools.get_earnings_surprise:1645` (EPS leg only) |
+| 21 | Event polarity | 2 | PARTIAL — `news_data_tools.get_massive_news:167` (vendor per-article positive/negative/neutral) + `text_factors.lm_tone:121`; no event-class `P_k` table |
+| 22 | Event probability | 3 | elsewhere — `catalyst.fed_imminence:142` (`modal_prob`, the market-implied FOMC probability): one family, event layer not news |
+| 23 | Event uncertainty penalty | 3 | PARTIAL — `text_factors.lm_tone:121` returns an `uncertainty` word count; nothing multiplies a score by `C` |
+| 24 | Article-level news score | 1 | PARTIAL — `news_score.news_score:336` + `score_engine.combine:134` (weight-renormalised mean over components, not a per-article product) |
+| 25 | Weighted news average | 2 | elsewhere — `sentiment.aggregate_weighted_sentiment:626` (`Σws/Σw`, `w` = relevance × decay × official), gated by `enable_weighted_sentiment_agg=False` |
+| 26 | Positive news intensity | 1 | ABSENT — nearest `sentiment.score_from_counts:149` (signed share, not a weighted positive sum) |
+| 27 | Negative news intensity | 1 | ABSENT — nearest `sentiment.score_from_counts:149` |
+| 28 | News balance | 1 | PARTIAL — `sentiment.score_from_counts:149` (`(bullish - bearish)/labelled`) |
+| 29 | Positive/negative ratio | 2 | PARTIAL — `sentiment.crowd_ratio:163` (`B/(B+BE)`, display-only bands) |
+| 30 | Weighted positive count | 1 | ABSENT — nearest `sentiment._weighted_modal_share:197` (a weighted share, not a count) |
+| 31 | Weighted negative count | 1 | ABSENT — nearest `sentiment._weighted_modal_share:197` |
+| 32 | Weighted neutral count | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:626` (`neutral_share`, an unweighted share of `abs(s) < eps`) |
+| 33 | News breadth | 2 | PARTIAL — `sentiment.score_from_counts:149` (the same normalised difference as §28) |
+| 34 | News volume | 3 | PARTIAL — `sentiment.mention_volume:43` + `sentiment.daily_sentiment_sma:511` (`n` per day), wired at `analysis_tools._news_components:6698` |
+| 35 | Abnormal news volume | 2 | PARTIAL — `sentiment.mention_volume:43` (recent/baseline ratio = the section's second form; no z-score) |
+| 36 | News volume z-score | 1 | ABSENT — nearest `sentiment.surprise_velocity:131` (a z-score of sentiment, not volume) |
+| 37 | News intensity | 1 | ABSENT — nearest `sentiment.sentiment_dispersion:209` |
+| 38 | News disagreement | 2 | elsewhere — `sentiment.sentiment_dispersion:209` (weighted population σ of per-item polarity = the section's `σ_s`) |
+| 39 | News entropy | 3 | ABSENT — nearest `complexity.permutation_entropy:19` (price-series entropy) / `portfolio.weight_entropy:431` (weights) |
+| 40 | News confidence | 2 | ABSENT — nearest `sentiment.aggregate_weighted_sentiment:626` (`min_n` withholding: a floor, not a confidence) |
+| 41 | Sample-size confidence | 2 | ABSENT — nearest `sentiment.aggregate_weighted_sentiment:626` (`min_n`) |
+| 42 | Bayesian news confidence | 3 | ABSENT — nearest `analyst_revisions.revision_ratio:79` (coverage guard, no Beta posterior) |
+| 43 | Wilson confidence interval | 2 | ABSENT — grep `wilson` = 0 |
+| 44 | News acceleration | 2 | ABSENT — nearest `sentiment.mention_volume:43` (a level ratio, no first difference) |
+| 45 | News momentum | 2 | PARTIAL — `sentiment.sentiment_velocity:25` (OLS slope of sentiment, not a NewsScore difference) |
+| 46 | Sentiment momentum | 1 | PARTIAL — `sentiment.sentiment_velocity:25` + `sentiment.weighted_rolling_sentiment:739` |
+| 47 | News trend | 2 | PARTIAL — `sentiment.sentiment_velocity:25` (the β of S on t; on the sentiment series) |
+| 48 | Exponentially weighted news trend | 2 | elsewhere — `sentiment.weighted_rolling_sentiment:739` (exp-weighted rolling sentiment); it emits a momentum, not a trend |
+| 49 | News persistence | 2 | PARTIAL — the engine's `persistence` = `sentiment.mention_volume:43` inverted (`news_score.COMPONENTS:139`), wired at `analysis_tools._news_components:6698`; "share of positive periods" is absent |
+| 50 | News reversal | 2 | ABSENT — nearest `momentum.momentum_12_1:358` (price short-term reversal) |
+| 51 | Event clustering | 4 | ABSENT — nearest `sentiment.mention_volume:43` |
+| 52 | Hawkes-process news intensity | 1 | ABSENT — grep `hawkes` = 0 |
+| 53 | Event surprise | 2 | PARTIAL — `events.surprise_score:17` (the standardised ratio, no σ-`Z`) |
+| 54 | Historical event-class surprise | 2 | ABSENT — nearest `analysis_tools.get_earnings_event_read:660` (print-day move + PEAD, earnings class only) |
+| 55 | Event-class Bayesian prior | 2 | ABSENT — no `P(R>0 given k)` producer |
+| 56 | Market reaction score | 3 | PARTIAL — `analysis_tools.get_earnings_event_read:660` (print-day return/volume/PEAD; earnings class only) |
+| 57 | Abnormal return | 1 | elsewhere — `cross_section.residualize_returns:201` |
+| 58 | CAPM abnormal return | 1 | elsewhere — `cross_section.residualize_returns:201` |
+| 59 | Market-model abnormal return | 2 | elsewhere — `cross_section.residualize_returns:201` |
+| 60 | Sector-adjusted return | 1 | ABSENT — nearest `cross_section.industry_neutral_z:89` (industry-neutral factor z, not a return) |
+| 61 | Multi-factor abnormal return | 1 | elsewhere — `factors.fama_french_5_factor:518` |
+| 62 | Cumulative abnormal return | 2 | ABSENT — grep `cumulative_abnormal` = 0; nearest `analysis_tools.get_earnings_event_read:660` |
+| 63 | Volume confirmation | 2 | PARTIAL — `analysis_tools.get_earnings_event_read:660` (print-day `volume_ratio` with a 2.5× gate) |
+| 64 | Price/news agreement | 1 | PARTIAL — `sentiment_score.confirmation_quadrant:330` (price × second read 2×2; the second read is sentiment, not news) |
+| 65 | News-market confirmation | 1 | PARTIAL — `sentiment_score.confirmation_quadrant:330` |
+| 66 | News-price divergence | 1 | PARTIAL — `sentiment_score.confirmation_quadrant:330` (`diverge-up`/`diverge-down`) + `text_factors.divergence:198` |
+| 67 | Market surprise reaction | 2 | ABSENT — nearest `catalyst.implied_move_from_history:111` |
+| 68 | Reaction persistence | 1 | PARTIAL — `events.expected_drift_after:56` + `events.drift_side:26` + `analysis_tools.get_earnings_event_read:660` (PEAD verdict) |
+| 69 | News-to-price elasticity | 2 | elsewhere — `sentiment_research.multi_horizon_sentiment_regression:157` (`sent_coef` = ΔReturn/ΔSentiment) |
+| 70 | Rolling news-return correlation | 1 | elsewhere — `sentiment_research.sentiment_lead_lag:65` + `rolling_information_coefficient:337` |
+| 71 | Stock-specific news sensitivity | 2 | elsewhere — `sentiment_research.multi_horizon_sentiment_regression:157` |
+| 72 | News-to-volatility effect | 2 | ABSENT — nearest `sentiment_research.multi_horizon_sentiment_regression:157` (volume is a control there, not the dependent) |
+| 73 | News volatility shock | 1 | ABSENT — nearest `analysis_tools.get_garch_volatility:9499` (a vol level/regime, not a news vol shock) |
+| 74 | News impact score | 1 | ABSENT — nearest `news_score.news_score:336` |
+| 75 | Source disagreement | 1 | elsewhere — `sentiment.sentiment_dispersion:209` (σ across items, weights optional) |
+| 76 | Cross-source consensus | 1 | PARTIAL — `sentiment.consensus_overlap:55` (share in the majority bucket, not `abs(Σws)/Σw`) |
+| 77 | Cross-source contradiction | 1 | ABSENT — nearest `sentiment.consensus_overlap:55` |
+| 78 | Headline/body disagreement | 1 | PARTIAL — `text_factors.divergence:198` (tone gap between two documents; no headline/body split) |
+| 79 | Fact/opinion separation | 2 | ABSENT — no classifier (grep `factual` finds none) |
+| 80 | Rumor probability | 2 | ABSENT — grep `rumor` = 0 |
+| 81 | Information novelty × sentiment | 1 | ABSENT — nearest `news_score.news_novelty:215` (novelty alone) |
+| 82 | Surprise × sentiment | 1 | ABSENT — nearest `events.surprise_score:17` |
+| 83 | Novelty × importance | 1 | ABSENT — nearest `news_score.news_novelty:215` |
+| 84 | Complete article weighting formula | 2 | PARTIAL — `news_score.news_score:336` (component weights, not the per-article product) |
+| 85 | Event-type weighted score | 3 | ABSENT — nearest `news_score.COMPONENTS:139` (`corporate_events` is declared with `sec_edgar._FORM_LABELS:39` as producer but is never supplied by `_news_components:6698`) |
+| 86 | Event-type weights | 1 | PARTIAL — `news_score.COMPONENT_WEIGHTS:49` (hard-coded owner weights; the IC-derived form is elsewhere) |
+| 87 | Information coefficient weighting | 3 | PARTIAL — `alpha_health.rank_information_coefficient:173` + `sentiment_research.rolling_information_coefficient:337` produce IC; nothing weights news factors by it |
+| 88 | ICIR weighting | 2 | PARTIAL — `alpha_health.per_period_ic:200` (returns `icir` = mean/std) + `signal_analysis.icir:77` |
+| 89 | Rank-based normalization | 2 | elsewhere — `cross_section.centered_rank:140` + `alpha_health._rank_avg:143` |
+| 90 | Cross-sectional z-score | 2 | elsewhere — `cross_section.cross_sectional_z:70` + `sentiment_research.sector_neutral_z:239` |
+| 91 | Robust z-score | 2 | PARTIAL — `analyst_revisions.winsor_z:253` (winsorised z; the MAD form is absent, grep `median_absolute` = 0) |
+| 92 | Winsorization | 1 | elsewhere — `cross_section.winsorize:31` |
+| 93 | Logistic normalization | 2 | elsewhere — `normalized.ohlson_o_score:157` (the logistic link `p = 1/(1+e^-o)` for distress probability, not a score normaliser) |
+| 94 | Hyperbolic tangent normalization | 1 | ABSENT — grep `tanh` = 0; nearest `score_engine.align:61` (linear ramp + clamp) |
+| 95 | Final 0–100 mapping | 2 | built — `score_engine.align:61` + `news_score.align_components:312` (a ramp `lo→0`/`hi→100`, not `50(x+1)`) |
+| 96 | Multi-horizon NewsScore | 6 | PARTIAL — `sentiment_research.multi_horizon_sentiment_regression:157` + `ic_term_structure:394`; the engine is a single 30-day window (`analysis_tools._news_components:6698`) |
+| 97 | Short-term news score | 1 | PARTIAL — `sentiment.daily_sentiment_sma:511` (7d SMA) + `weighted_rolling_sentiment:739` |
+| 98 | Medium-term news score | 1 | PARTIAL — same producers; only one window exists |
+| 99 | Long-term news score | 2 | PARTIAL — same producers |
+| 100 | News regime | 1 | ABSENT — nearest `analysis_tools.get_macro_regime_read:8939` (market regime, not news) |
+| 101 | News shock score | 2 | PARTIAL — `sentiment.daily_sentiment_sma:511` (`innovation` = the daily sentiment shock), surfaced by `analysis_tools.get_news_sentiment_series:9297` |
+| 102 | News pressure | 2 | ABSENT — nearest `sentiment.score_from_counts:149` (the identical normalised difference, unweighted) |
+| 103 | News flow imbalance | 1 | ABSENT — nearest `sentiment.score_from_counts:149` |
+| 104 | News breadth × intensity | 1 | ABSENT — no producer |
+| 105 | News consensus × intensity | 1 | ABSENT — nearest `sentiment.consensus_overlap:55` |
+| 106 | News confidence × conviction | 1 | ABSENT — no producer |
+| 107 | News score with coverage | 1 | built — `score_engine.coverage_floor:45` + `combine:134`; `news_score.news_score:336` returns `coverage`, printed by `analysis_tools._render_news_score:6797` |
+| 108 | Effective sample size | 1 | ABSENT — nearest `sentiment.mention_volume:43` |
+| 109 | News coverage score | 1 | PARTIAL — `score_engine.combine:134` (a weight-share coverage, not `1-e^{-Neff/k}`) |
+| 110 | Effective information score | 1 | ABSENT — nearest `news_score.news_novelty:215` |
+| 111 | Final NewsScore candidate | 3 | built — `news_score.news_score:336` (weight-renormalised mean, 0-100; no `tanh`, no per-article product) |
+| 112 | Recommended confidence formula | 3 | ABSENT — nearest `news_score.news_score:336` (coverage only) |
+| 113 | Recommended NewsScore output | 0 | PARTIAL — `analysis_tools._render_news_score:6797` + `reporting._run_card_news_score:1604` (score/coverage/absent reasons; no Confidence/Materiality/Effective-Articles lines) |
+| 114 | The most important distinction (Direction / Information / Reaction) | 0 | ABSENT — nearest `news_score.news_score:336` (one composite) |
+| A | News Direction | 1 | ABSENT — same |
+| B | News Information | 1 | ABSENT — same |
+| C | News Market Confirmation | 2 | ABSENT — nearest `sentiment_score.confirmation_quadrant:330` (a sign quadrant, not a scored leg) |
+| 115 | Recommended production formula | 5 | PARTIAL — `news_score.news_score:336` + `news_score.COMPONENT_WEIGHTS:49` (owner weights, not the learned α/β/γ blend) |
+| — | Recommended engine decomposition | 0 | PARTIAL — `news_score.COMPONENTS:139` covers items 1-4 and 7-10 partly; item 5 (event classification), 6 (source quality), 9 (market reaction) and the OUTPUT block (NewsConfidence / NewsShock / NewsRegime) are absent |
+
+### 8.2 Not built — the backlog the library names
+
+The five gaps §0.1 already names, each checked against the library, with the
+library sections that would close it. `regulatory/legal` and `industry shock` are
+deliberately absent from this table: the library **cannot** close them — §13's
+event list names "regulatory / legal" and "geopolitical" only as *decay classes*,
+and no section gives a classifier or a producer recipe for either, so the two
+gaps stay open with the library in hand.
+
+| Backlog item (§0.1 / §1) | Library sections that would close it | What exists today | What is missing |
+| --- | --- | --- | --- |
+| **novelty** (15%) | §7 (4 recipes), §8 (`W_dup`), §81 (Novelty × Sentiment), §83 (Novelty × Importance), §110 (`Neff × Novelty × Importance`) | `news_score.news_novelty:215` — first-seen share over exact normalised keys, wired at `analysis_tools._news_components:6698` | the embedding forms (§7's `1 - max_j CosSim`, §7's `e^{-λD_i}`), the suppression *weight* (§8), and every product that consumes novelty |
+| **materiality** (half of 20%) | §15 (the definition), §14 (importance inputs), §22 (event probability), §53 (standardised surprise), §84/§111 (`I_i` in the weight product) | `catalyst.implied_move_from_history:111` (`abs(expected move)`); the engine's slot is caller-supplied (`news_score.ABSENT_REASONS:85`, owner Q6) | the ratio to market cap (§15's own definition), the 5-term importance vector (§14), the probability weight (§22) |
+| **fundamental impact** (20%) | §18 (revenue growth surprise), §19 (margin surprise), §20 (multi-metric `w1Z_EPS + … + w5Z_FCF`), §17 (the guidance leg of the same blend) | nothing; `analysis_tools.get_earnings_surprise:1645` is EPS-only | the revenue and margin surprise legs and the cross-metric `Z` blend |
+| **guidance change** (part of 15%) | §17 (`(G_new - G_old)/abs(G_old)`, `(G_new - Consensus)/abs(Consensus)`), §21 (the raised/maintained/lowered polarity map), §20 (`Z_Guidance`) | nothing; `analyst_data_tools.get_earnings_calendar:30` carries an EPS/revenue estimate only | a guidance series to difference, and the polarity map |
+| **persistence** (5%) | §49 (share of positive periods; `Σ γ^k I(S_{t-k}>0)`), §11/§12/§13 (decay shapes), §44/§45/§48 (acceleration, momentum, EWMA), §50 (reversal), §68 (reaction persistence) | `sentiment.mention_volume:43` wired as the *inverted* attention ratio (`analysis_tools._news_components:6698`); `sentiment.decayed_weight:91` exists but has no news-path call site | the library's persistence quantity (positive-period share), the multi-λ decay, and the volume first-difference the owner's weight table calls "news volume acceleration" |
+
+### 8.3 Library-internal defects
+
+Verified against the library text itself; each is a defect of the *catalogue*,
+not of the engine.
+
+1. **One quantity, four names (§28, §33, §102, §103).** §28 `NewsBalance =
+   (P-N)/(P+N+ε)`, §102 `NewsPressure* = (P-N)/(P+N+ε)`, §33 `Breadth =
+   (N+ - N-)/(N+ + N-)`, §103 `NFI = (PF - NF)/(PF + NF)` are the same normalised
+   difference on differently-labelled counts. Four sections, one formula — the
+   exact shape master rule 15 forbids on the code side.
+2. **One quantity, four "master formulas" (§24, §84, §111, §115).** §24
+   `A_i = s·R·N·Q·I·D·C`; §84 `w_i = R·Q·N·I·C·D·U`, `ArticleScore = w·S`; §111
+   `NS_raw = Σ S R Q N I C D U / Σ R Q N I C D U`; §115 `ArticleScore = S R Q N M C
+   D U`. §24 and §84 differ only by `U`; §115 renames `I` to `M` and keeps the rest
+   identical. The section titled "the most important distinction" (§114) and the
+   "production formula" (§115) are not new quantities, they are §84 again.
+3. **Materiality defined as surprise (§15).** §15 offers, for earnings,
+   `Materiality = abs((Actual - Consensus)/Consensus)` — which is *verbatim* §16's
+   `EPSSurprise`. The library thus conflates the two quantities this doc's §0.2
+   exists to separate (relevance ≠ materiality; surprise ≠ materiality), and §24's
+   single product `… R · I · …` would let either stand in for the other.
+4. **Two confidence formulas presented as one `C_i` (§4).** §4 gives
+   `C_i = max(P_pos, P_neu, P_neg)` *and* `C_i = 1 - H*` as alternatives for the
+   same symbol. They are not the same number: for `p = (0.5, 0.5, 0)` the max is
+   `0.5` and `1 - ln2/ln3 = 0.369`. Two different scales under one symbol.
+5. **The sample-size term applied twice (§40, §41, §112).** §41's `C_N = 1 - e^{-N/k}`
+   is also a factor inside §40's `Confidence = (1 - H*) × C_N`, and §112 then
+   multiplies `C_N × C_agreement × C_source × C_novelty` while §41's own
+   `AdjustedNewsScore = Raw × C_N` applies it to the score as well. Followed
+   literally, the same shrinkage enters a confidence and a score multiplier.
+6. **Two incompatible output scales (§1/§2 vs §95).** §1's architecture box ends
+   `NewsScore -100/+100` and §2 maps `NewsScore_i = 100 s_i` (−100…+100), while §95
+   maps `Score_100 = 50(x+1)` (0…100) and §113's example prints `73.4 / 100`. The
+   library carries both conventions with no rule for which is the output.
+7. **`λ` with two unit systems (§7 vs §11).** §11 defines `λ = ln2/h` (per day,
+   from a half-life); §7's `N_i = e^{-λD_i}` uses `D_i` as a *count of prior
+   stories*, so `λ` there is per story. Same symbol, incompatible units, in
+   adjacent sections.
+8. **§12 breaks the normalisation §11 establishes.** §11's `D(t) = 2^{-t/h}` has
+   `D(0) = 1`. §12's `D(t) = w1e^{-λ1t} + w2e^{-λ2t} + w3e^{-λ3t}` carries no
+   `Σw_k = 1` constraint, so `D(0) = Σw_k ≠ 1` and a "decay" can exceed 1 — while
+   `w` is also the article weight in §24/§84, inviting the two to be confused.
+9. **Undefined denominators (§7, §86).** §7's `N_i = 1 - similar/max_similar_count`
+   is undefined when the maximum similar-article count is 0; §86's
+   `W_k ∝ PredictivePower_k / Noise_k` is not normalised although §85 requires
+   `Σ W_k = 1`, and §87 immediately re-derives `W_j = abs(IC_j)/Σabs(IC_j)` — a
+   different weight recipe for the same symbol one section later.
+10. **Title/content mismatches (§48, §56).** §48 is titled "Exponentially weighted
+    news trend" but its boxed output is `NewsMomentum = S_t - S_t^{EWMA}` — a
+    momentum, already §45's quantity. §56 is titled "Market reaction score" but
+    contains only raw-return definitions (`R_30m`, `R_close`, `R_3d`) and no score;
+    the scoring is §57-§62.
+
+### 8.4 Contradictions between the library and the code
+
+§0.2 (relevance ≠ materiality, quoted from `news_relevance.py`) and §0.3 (the
+SentimentScore naming rule) are the comparison points.
+
+| Library position | Code position | Nature |
+| --- | --- | --- |
+| §2/§3/§4/§24/§25/§26-§32/§37/§45/§46/§48/§81/§82/§111/§115 build the news number from a sentiment input `s_i`, and §24/§84/§111/§115 multiply by it | `news_score.py:13-16` states the engine "imports **no** `sentiment.py` aggregation"; the novelty helper is duplicated locally rather than imported (`news_score._normalise_headline:198` docstring); §0.3's naming rule | **Direct.** The library's NewsScore *is* a sentiment-weighted average — §25's `w_i = R N Q I D C` is the same weight vector `sentiment.aggregate_weighted_sentiment:626` computes. Followed literally it would make NewsScore read SentimentScore's number, the collapse §0.3 exists to prevent |
+| §5's `R_i = 0.30 R_entity + 0.20 R_headline + 0.20 R_body + 0.20 R_event + 0.10 R_ticker`, and §15's materiality | `news_relevance.score_news_article:56` scores ticker/name presence, official host and a macro penalty only — no `R_body`, no `R_event`; materiality is caller-supplied (`news_score.ABSENT_REASONS:85`) and never inferred from relevance | **Partial.** The library's relevance vector has two terms with no producer; its §24 product `R · I` would let relevance and materiality be the same input, which §0.2 forbids |
+| §40-§43 + §112 make NewsConfidence a first-class output, printed by §113 (`Confidence: 81.2%`) | `news_score.news_score:336` emits `coverage` (a weight share from `score_engine.combine:134`) and no confidence; §0.1's Status line says "Unmeasured (vendor gate)" | **Direct.** The library's output block has a field the engine deliberately does not have; coverage is not a substitute and the code never prints one as the other |
+| §96 blends `News_1h/1d/3d/7d/30d`; §97-§99 blend short/medium/long EWMA scores | the engine is one 30-day window (`analysis_tools._news_components:6698`, `days: int = 30`) and one composite | **Direct.** The library's multi-horizon output is not built; `sentiment_research.ic_term_structure:394` measures horizon decay but does not feed a score |
+| §13/§85/§86 group articles by event class `k` with weights `W_k`; §86 says "I would **not** hard-code these weights initially" | `news_score.COMPONENT_WEIGHTS:49` hard-codes the owner's weights; the only event-class artefact is `sec_edgar._FORM_LABELS:39`, declared as the `corporate_events` producer in `news_score.COMPONENTS:139` but never supplied by the live leaf `_news_components:6698` | **Partial, and a live gap.** A 10-weight component is declared with a producer that the only leaf never feeds — the component prints `NA` for a reason that is *not* "no producer exists" |
+| §11/§12/§13 make time decay the core aggregation; §8 makes duplicate suppression a weight | the news engine has no decay component at all (`news_score.RAMPS:110`); the only decay producer is `sentiment.decayed_weight:91`, which §0.3 forbids importing; dedupe is a drop (`sentiment.aggregate_weighted_sentiment:626`) or a count (`news_score.news_novelty:215`), not a weight | **Direct.** The library's two most important aggregation terms are either forbidden by the boundary rule or unimplemented |
+| §1/§2 output `-100…+100` | `score_engine.align:61` maps to **0-100, 100 = favourable** (`news_score.align_components:312`) | **Direct.** House convention vs library convention; §95's `50(x+1)` matches the range but not the code's ramp semantics |
+
+**Doc-side readings the code has moved past** `[ADDED 2026-09-26]` — found while
+verifying the rows above, additive, nothing rewritten:
+
+- §0.1's novelty row ("syndication dedupe exists, **no novelty score**") and §1's
+  novelty row are stale: `news_score.news_novelty:215` exists and is wired at
+  `analysis_tools._news_components:6698`.
+- §0.1's analyst row ("bound to the fundamentals toolset") and §3 defect 4 are
+  closed: `get_analyst_revision_index` is bound in `news_tools()` at
+  `agents/toolsets.py:408` (P0-7b) as well as `fundamentals_company_tools` at
+  `:441` — owner decision Q4's binding move has landed.
+- §1's "news volume acceleration … UNWIRED" is stale: `sentiment.mention_volume:43`
+  has a caller (`analysis_tools._news_components:6698`, the persistence leg). The
+  second half of that citation, `sentiment.decayed_weight:91`, still has no
+  news-path call site (the code comment at `analysis_tools.py:6766-6770` says so).
+- Citation drift (line numbers, not claims): `news_relevance.score_news_article` is
+  at `:56` (§0.2/§1 say `:53`), `is_official:51` (§4 says `:48`),
+  `admit_article:100` (§4 says `:97`), `sentiment._weighted_basis:599` (§0.3 says
+  `:589`), `_FORM_LABELS` at `dataflows/sec_edgar.py:39` (§1 and
+  `news_score.COMPONENTS:139` say `:36`), `get_sec_filings` at
+  `dataflows/sec_edgar.py:426` (§1 says `:109`), and the §2 leaf rows
+  (`get_earnings_event_read:660`, `get_analyst_verdict:1554`,
+  `get_earnings_surprise:1645`, `get_beat_miss_sizing:2451`, `get_taylor_read:3064`,
+  `get_credit_spread_read:7011`, `get_macro_regime_read:8939`,
+  `get_news_sentiment_series:9297`) all sit later than §2 records.
 
 ---
 

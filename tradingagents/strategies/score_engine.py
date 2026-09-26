@@ -27,18 +27,26 @@ from __future__ import annotations
 
 import math
 
-#: The six non-monotonic technical inputs whose mapped value must MOVE THE RIGHT
+#: The eight non-monotonic technical inputs whose mapped value must MOVE THE RIGHT
 #: WAY at the producer's own band edges rather than rise with the raw value. Named
 #: here so an engine declaring one of them cannot quietly treat it as monotone.
+#:
+#: The names are the **component keys the engine emits** (``technical_score.
+#: COMPONENTS``), never the producer function's name: ``stoch_k`` / ``stoch_rsi`` /
+#: ``elder_ratio`` are the keys, while ``stochastic`` / ``stochrsi`` /
+#: ``elder_thermometer`` are the functions that fill them. Until 2026-09-26 those
+#: three were listed by function name, matched no component, and the evidence
+#: triple was silently unreachable for exactly the three most inverted bands
+#: (``stoch_k`` below 20 aligns 80).
 NON_MONOTONIC_INPUTS: tuple = (
     "rsi",
     "mfi",
-    "stochastic",
-    "stochrsi",
+    "stoch_k",
+    "stoch_rsi",
     "rsi2",
     "williams_r",
     "bollinger_pct_b",
-    "elder_thermometer",
+    "elder_ratio",
 )
 
 
@@ -75,9 +83,9 @@ def align(
       a band table's job.
     - **A band table**: ``band`` is the producer's own ``[(edge, score), ...]``
       walked top-down, for the inputs whose relationship is **not monotone** (RSI,
-      MFI, stochastic, StochRSI, RSI2, Williams %R, Bollinger %b, the Elder
-      thermometer - see ``NON_MONOTONIC_INPUTS``). The edges are the producer's,
-      never invented here.
+      MFI, stochastic K, StochRSI, RSI2, Williams %R, Bollinger %b, the Elder ratio
+      - see ``NON_MONOTONIC_INPUTS``). The edges are the producer's, never invented
+      here.
 
     ``None`` in -> ``None`` out, and an unusable input (non-finite, or a ramp with
     no edges) is ``None`` too: **never a neutral 50**, which would enter the

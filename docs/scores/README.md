@@ -11,6 +11,8 @@
 | SentimentScore | [`SentimentScore.md`](SentimentScore.md) | 10 categories | mostly buildable, four holes; **[CORRECTED 2026-09-26]** the composite exists (`strategies/sentiment_score.py::sentiment_score`) |
 | EventScore | [`EventScore.md`](EventScore.md) | *(none given)* | occurrence producers exist for 4 of 7 families; **no composite — still true, re-checked 2026-09-26** (plan §13 Q7 makes the structured state the deliverable) |
 | RiskScore | [`RiskScore.md`](RiskScore.md) | 8 categories | **[CORRECTED 2026-09-26]** the 0-100 composite exists (`strategies/risk_score.py::risk_score`, 100 = low risk); this cell read "**no 0-100 risk score exists anywhere**" |
+| MarketScore | [`MarketScore.md`](MarketScore.md) | 140 numbered sections, **no weights given** | **[ADDED 2026-09-26]** designed, **not built** - zero code hits for `market_score`/`MarketScore`: no module, no gate, no leaf. The boundary against `TechnicalScore` is **open** (§1.1) |
+| ValuationScore | [`ValuationScore.md`](ValuationScore.md) | 85 numbered sections, **no weights given** | **[ADDED 2026-09-26]** designed, **not built** - zero code hits for `valuation_score`/`ValuationScore`. It overlaps `FundamentalScore`'s `valuation_subscore` (`fundamental_score.py:211`, 20% of that engine's weight) - **open** |
 
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
@@ -30,9 +32,50 @@ document set is what interprets them against the engine**; where the documents
 and the specs disagree, the specs govern the *intent* and the documents govern
 what is *buildable*.
 
+**[ADDED 2026-09-26] The spec set has grown to nine per-system libraries.**
+`Strategies/scores/` now carries one formula library per score system -
+`event_score.md`, `fundamental_score.md`, `market_score.md`, `news_score.md`,
+`regime_score.md`, `risk_score.md`, `sentiment_score.md`, `technical_score.md`,
+`valuation_score.md` - between 1.8k and 2.9k lines each, with 36 to 156 numbered
+sections apiece. They are much larger than the three `ScoreWeight` tables above
+and are the current source of record for *what a score system may compute*; each
+engine document now carries a ledger of its own library, section by section,
+marking what the code computes and what it does not. **Seven of the nine
+libraries belong to engines that are built; two do not** - `MarketScore` and
+`ValuationScore` have no code at all and are documented as designed-not-built.
+
 Status: **built (2026-09-18).** Every engine in this set - the shared kernel, the eight engines, the composite and the measurement layer - is implemented, and every gate ships **off** by default (`default_config.py`), flipped one at a time under the dark-launch protocol (§5). The design below is the contract the code is held to; `IMPLEMENTATION_PLAN.md` §9 carries each phase's **Exit - MET** block, and §3.4 records the one defect found by exercising the path rather than reading it.
 
 **[CURRENT POSTURE 2026-09-26]** Two facts that read as a contradiction when either is read alone. (1) **Six of the seven engines have a 0-100 composite in code** (the table in §1.3 names each producer) - the composites are built, tested and advisory. (2) **Every engine gate still ships off**: `DEFAULT_CONFIG`, `.env.example` and the web app's config screen all carry `enable_quant_scorecard=false` and each engine's own `enable_*` false, so a stock run computes no composite and writes no score block at all. A machine whose `.env` turns them on (the maintainer's does) populates them; `docs/gate_registry.md` is the machine-checked list of every gate and its default. Neither fact implies the other, and "the engine has a composite" never means "this run printed one".
+
+**[ADDED 2026-09-26] A third fact, which neither of the two above implies.**
+**Nine score systems are specified and seven are built.** The two additions -
+`MarketScore` and `ValuationScore` - have no module, no gate, no leaf and no
+`default_config.py` key; their documents are designs. Nothing in the built set
+changes because they exist: no weight, no gate and no composite entry has been
+added for either.
+
+**[ADDED 2026-09-26] The owner's survey of the larger score universe sits beside
+the set.** `Strategies/other_score.md` (staged 2026-09-26) catalogs the industry's
+quantitative scoring systems in 32 sections and then gives his own hierarchy: **9
+core investment engines** (Fundamental, Valuation, Technical, *Momentum*, Regime,
+Risk, News, Sentiment, Event), **20 secondary / specialised engines** (Earnings,
+Flow, Options, Breadth, RelativeStrength, Quality, CapitalAllocation, Moat,
+AIAdoption, AIThreat, Crowding, …) and **4 meta-scores** (DataConfidence,
+SignalAgreement, ForecastUncertainty, ModelConsensus) - with his own warning
+against turning all of them into 30-40 top-level scores.
+
+Two divergences are worth naming rather than smoothing over. (1) The survey's core
+slot for the stock's own market behaviour is **`MomentumScore`**, not the
+`MarketScore` that `Strategies/scores/market_score.md` specifies - so the survey
+and the libraries do not agree on the core set either. (2) The survey makes
+`ValuationScore` a **core** engine, which sharpens the boundary question
+`ValuationScore.md` §7 puts to the owner: the built `FundamentalScore` already
+carries a `valuation_subscore` (`fundamental_score.py:211`, 20 per cent of that
+engine). **Twenty of the 24 named systems have no spec, no library and no code**;
+only the nine in `Strategies/scores/` are specified, and only seven of those are
+built. Whether any of the remaining systems becomes a document - let alone an
+engine - is an owner decision, not one this set may take.
 
 Scope of this master: the architecture, the cross-engine rules, the composite and
 its gate rules, the weight reconciliation between the owner's two iterations, the
@@ -77,6 +120,41 @@ deteriorating short-term momentum, elevated risk"*; with one `MarketScore = 63`
 you cannot. The repo already agrees — its own history is a **funnel over a single
 score** (round 3 §S3, `design_institutional_value_dip_workflow.md`).
 
+**[ADDED 2026-09-26] Nine score systems are specified; seven are built.** The
+owner's spec set grew from the three `ScoreWeight` tables to **nine** per-system
+formula libraries (36-156 numbered sections each). Seven are the engines above and
+are built; the other two - **`MarketScore`** and **`ValuationScore`** - have no
+code at all: no module, no gate, no leaf, no `default_config.py` key. They are
+documented as designed-not-built ([`MarketScore.md`](MarketScore.md),
+[`ValuationScore.md`](ValuationScore.md)). The diagram above is unchanged, and so
+is the set: no engine enters by adjacency (invariant 17), and neither new system
+has been given a weight, a gate or a composite entry.
+
+**Both libraries collide with engines that are already built, and the library set
+is not internally consistent about the split.** `market_score.md` claims price
+trend, momentum, relative strength, volatility, **breadth and market regime** -
+which `TechnicalScore` already owns at 20 / 18 / 12 / 5 / 5 per cent (§1.3 and
+`TechnicalScore.md` §0.2) and `RegimeScore` owns market-wide - while
+`technical_score.md`'s own preamble assigns momentum, relative strength and
+volatility to `MarketScore` and leaves indicator patterns to `TechnicalScore`.
+`market_score.md` §139, its own recommended separation, hands *Market regime* and
+*Breadth* to `MarketScore` **and** *Breadth regime*, *Correlation regime* and the
+VIX regime to `RegimeScore` - the same quantity in two lists - and hands
+*Valuation* to `FundamentalScore`, which is the object
+`valuation_score.md` exists to build. `valuation_score.md` in turn claims the
+earnings, book and cash-flow multiples that
+`FundamentalScore.valuation_subscore` (`fundamental_score.py:211`) already
+computes at 20 per cent of that engine's weight. **None of these collisions is
+resolved here** - each is an OPEN question for the owner in the new document's §7,
+because invariant 8 (one quantity -> one authoritative producer) cannot be
+satisfied by both readings at once.
+
+One naming collision to keep straight while reading the set: `MarketScore` in
+§1.1 above is the owner's *hypothetical single composite* - the thing the four
+separate numbers exist to avoid (`MarketScore = 63`) - while
+[`MarketScore.md`](MarketScore.md) is a proposed **eighth engine**, the stock's
+observable market-state layer. Same name, two different objects.
+
 ### 1.2 Direction convention — 100 = favourable, for every engine
 
 Every engine scores **0-100 with 100 = favourable**. For RiskScore that means the
@@ -104,6 +182,8 @@ aligned score would silently pick one of them. Printing both ends the ambiguity.
 | SentimentScore | *How is the market positioned around it?* | 6 of 10 categories | 20-day momentum, acceleration, per-source breadth, institutional on this surface | **[CORRECTED 2026-09-26]** 0-100, advisory only (`sentiment_score.py::sentiment_score`) |
 | EventScore | *Is a high-impact event happening now?* | 4 of 7 families | product/clinical, court, investor day | **none** — still true, re-checked 2026-09-26 |
 | RiskScore | *How much can this hurt?* | all 8 categories as components | the aggregation | **[CORRECTED 2026-09-26]** 0-100, advisory only, 100 = low risk (`risk_score.py::risk_score`) |
+| MarketScore | *How is this stock behaving in the market?* | **none - not built** | the whole engine | **none** - **[ADDED 2026-09-26]** zero code hits for `market_score`/`MarketScore`; designed only ([`MarketScore.md`](MarketScore.md)) |
+| ValuationScore | *Is this stock cheap or expensive?* | **none - not built** | the whole engine | **none** - **[ADDED 2026-09-26]** zero code hits for `valuation_score`/`ValuationScore`; the multiples it claims are computed today inside `FundamentalScore` (`fundamental_score.py:211`) |
 
 **"Composite today: none" was a grep result, not an impression - and it was run before the workstreams landed. [CORRECTED 2026-09-26]: re-run, six of the seven engines now have one.** `fundamental_score.py::fundamental_score`, `technical_score.py::technical_score`, `regime_score.py::regime_score`, `news_score.py::news_score`, `sentiment_score.py::sentiment_score`, `risk_score.py::risk_score`. `EventScore` still has none: `event_state.py`/`events.py` produce family occurrences and readouts, no aggregate (plan §13 Q7). The LLM-produced analyst scores (`SentimentReport.overall_score` 0-10, `agents/schemas.py:463`) and the deterministic per-factor libraries remain separate surfaces, and every composite above is **advisory** under §2 - none may be quoted as a forecast, and none reaches `opportunity_score`.
 
@@ -303,6 +383,17 @@ carries them beside the decisions that produced them.
     the composite score. The two must never be drawn or implemented as one
     object, or the producer of one of the four numbers disappears.
 
+**[ADDED 2026-09-26] Two of the nine specified score systems are not yet covered
+by these invariants**, because they are not built and their boundaries are not
+settled: `MarketScore` and `ValuationScore`. Invariant 8 (*one quantity -> one
+authoritative producer*) is the one they would violate first - the library's
+momentum, relative-strength and volatility sections against `TechnicalScore`'s
+20 / 18 / 12 / 5 per cent, and its multiples against
+`FundamentalScore.valuation_subscore`. The questions are recorded in
+[`MarketScore.md`](MarketScore.md) §7 and [`ValuationScore.md`](ValuationScore.md)
+§7. They are **owner decisions**, not decisions this document set may take, and
+until they are answered neither engine may be implemented or given a gate.
+
 
 ---
 
@@ -384,7 +475,7 @@ was not moved, the reporting was corrected, and defect 16 is closed for real.
 0..1 scale as if it were >1, so the beat/miss multiplier is only ever 1.0/0.5);
 `get_earnings_calendar`'s `look_back_days` names a forward window
 (`analyst_data_tools.py:33` vs `finnhub.py:195`); `get_tail_risk` passes a
-close-price series as an equity curve to CDaR (`analysis_tools.py:4690`);
+close-price series as an equity curve to CDaR (`analysis_tools.py:4708`);
 `portfolio_cvar` and `book_correlated_stress` re-implement the same
 weight-normalisation rules twice; the two regime-path limitations (the
 3-valued `vol_pct` proxy and `get_regime_components`' non-overlapping windows);
@@ -409,7 +500,7 @@ of them code" until they were repaired.
 | D-2 | **Cross-references to sections that no longer exist.** §6 cited §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; §7 cited §5.2/§5.3 and "§6 Phase C/D"; §1.4 cited §8.3. `FundamentalScore.md` cited "§8", §5.2/§5.3 and §6 Phase C/D | the master's headings end at §7 plus appendices; `FundamentalScore.md`'s end at §3.6 plus appendices. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) carried §3.7 (the four-score architecture), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E) and §8 (the decision record with §8.3) | a reader following a cross-reference landed nowhere. Every reference is now repointed at the live section (this document, the plan, or the engine document that owns the material) | **FIXED** - every reference repointed; re-verified 2026-09-17 by a headings-vs-references scan (the dead names survive only in this row, as the record) |
 | D-3 | **The SEC `User-Agent` carries a placeholder contact** | `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (... contact: research@example.com)`; the comment at `:28` states a descriptive UA with a contact is required | `example.com` is not a deliverable address; the SEC's published fair-access ceiling is 10 requests/second per IP and a reachable contact is what the policy asks for | **FIXED 2026-09-17** - `sec_edgar.py:33` carries the owner's reachable contact; the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` |
 | D-4 | **The per-tag fetch pattern is 11 requests where 1 would do** | `sec_edgar.get_financial_history:173` loops `_TAG_MAP:56-65` calling `_COMPANYCONCEPT_URL:66` once per tag (`:206-215`) | the `companyfacts` endpoint returns every tag in one payload; 11x the requests against a 10 req/s ceiling for the same data, and it is why extending the tag set is expensive as written | **FIXED 2026-09-17** - one `companyfacts` call for every tag (`_us_gaap_facts`), with the per-tag loop kept as the fallback; two tests, both failing against the pre-change module. Live smoke test 2026-09-17: MSFT rendered 6 annual periods from 2 requests (pre-change: 12), UA accepted |
-| D-5 | **`enable_factor_model` is not a free name.** Three design documents describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:899`; `design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109` | a plan that reused it for the deterministic composite would silently couple two different objects; the plan's six engine gates are new names for this reason | **FIXED 2026-09-17** - all three documents now name the flag as the **learned** model's gate only, in the body and the seam table |
+| D-5 | **`enable_factor_model` is not a free name.** Three design documents describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:905`; `design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109` | a plan that reused it for the deterministic composite would silently couple two different objects; the plan's six engine gates are new names for this reason | **FIXED 2026-09-17** - all three documents now name the flag as the **learned** model's gate only, in the body and the seam table |
 
 ---
 
@@ -465,7 +556,7 @@ exactly two surfaces — a gated tool leaf and `run_card.json` — and
 `run_card.json` has **no reader in the research layer at all**: the executor
 explicitly ignores it (`TradingExecution/signald/watch.py:6-8`), the web UI reads
 only `*.md` (`trading_web/backend/capabilities.py:1699`), and `complete_report.md`
-is built from state keys alone (`reporting.py:1788`). Meanwhile
+is built from state keys alone (`reporting.py:1845`). Meanwhile
 `computed_decision_context` — one deterministic string, built once at
 `trading_graph.py:649` — already reaches all ten prompt sites, is parsed into the
 L1 verifiable-claim registry, and is rendered as report section `IVa`. **One

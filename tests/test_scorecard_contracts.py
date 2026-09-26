@@ -112,6 +112,15 @@ def test_the_two_safe_forms_round_trip():
 #: asks whether it ever falls.
 RAW_SWEEP = [-95.0, -70.0, -50.0, -30.0, -10.0, 10.0, 30.0, 50.0, 70.0, 95.0]
 
+#: Two declared inputs live on their own domains - StochRSI on `0..1`, the Elder
+#: ratio on roughly `0..2` - so the shared sweep maps every value they are given to
+#: one band and the demonstration reads as "flat" for a reason that is the test's,
+#: not the producer's. A per-input sweep is the honest form.
+SWEEPS: dict[str, list[float]] = {
+    "stoch_rsi": [0.0, 0.1, 0.3, 0.5, 0.9],
+    "elder_ratio": [0.1, 0.5, 0.9, 1.2, 1.8],
+}
+
 
 def _aligned_curve(name: str, raws: list[float]) -> list[float]:
     out = []
@@ -131,11 +140,11 @@ def test_every_mapped_non_monotonic_input_really_is_non_monotonic():
     """
     checked = 0
     for name in NON_MONOTONIC_INPUTS:
-        if name not in COMPONENTS:
-            # the set spans engines; `stochastic`/`stochrsi`/`elder_thermometer`
-            # are not names this engine maps
-            continue
-        curve = _aligned_curve(name, RAW_SWEEP)
+        assert name in COMPONENTS, (
+            f"{name} is declared non-monotonic but is not a component key this "
+            "engine emits, so its raw->aligned triple is unreachable"
+        )
+        curve = _aligned_curve(name, SWEEPS.get(name, RAW_SWEEP))
         assert curve, f"{name} produced no aligned values"
         assert len(set(curve)) > 1, (
             f"{name} maps every swept raw to one value ({curve[0]}): the sweep "
@@ -156,10 +165,35 @@ def test_a_monotonic_component_never_falls():
 
 
 def test_the_declared_set_is_not_larger_than_the_engine_can_show():
-    """Every declared name must be either mapped here or mapped by a sibling.
+    """Every declared name must be a component key this engine emits.
 
     Guards against the set drifting into names nothing produces, which would make
-    the triple unreachable while the declaration looked fine.
+    the triple unreachable while the declaration looked fine. It did exactly that
+    until 2026-09-26: `stochastic`, `stochrsi` and `elder_thermometer` were
+    producer **function** names, no component carried them, and the three most
+    inverted bands printed no mapping at all. The whitelist that blessed them is
+    what this test now forbids.
     """
     unmapped = [n for n in NON_MONOTONIC_INPUTS if n not in COMPONENTS]
-    assert set(unmapped) <= {"stochastic", "stochrsi", "elder_thermometer"}
+    assert unmapped == [], (
+        "declared non-monotonic inputs with no component to map: "
+        f"{unmapped} - the evidence triple is unreachable for them"
+    )
+
+
+def test_the_evidence_triple_reaches_every_declared_input():
+    """The triple is the reader's only defence against a band inversion.
+
+    `analysis_tools._non_monotonic_triples` intersects the component keys with
+    `NON_MONOTONIC_INPUTS`, so a name that is not a component key prints nothing.
+    """
+    from tradingagents.agents.utils.analysis_tools import _non_monotonic_triples
+
+    components = {name: {"raw": 50.0, "aligned": 60.0} for name in COMPONENTS}
+    printed = {
+        line.split("=", 1)[0]
+        for line in _non_monotonic_triples({"components": components})
+    }
+    missing = sorted(set(NON_MONOTONIC_INPUTS) - printed)
+    assert missing == [], f"declared inputs whose mapping never prints: {missing}"
+    assert len(printed) == len(NON_MONOTONIC_INPUTS)
