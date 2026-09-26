@@ -81,6 +81,11 @@ from tradingagents.dataflows.statement_parsing import (  # noqa: E402,F401
     screen_ticker,
 )
 
+#: This screen's report-file prefix inside the shared screens folder
+#: (``screener/``). ``value_score_screen.py`` writes its own prefix there, and
+#: each screen's cleanup deletes only its own kind - see ``save_watchlist``.
+WATCHLIST_PREFIX = "watchlist_"
+
 
 def rank_watchlist(results: list) -> list:
     """Rank on earnings yield (desc), then EV/EBIT (asc); missing -> end."""
@@ -392,13 +397,20 @@ def print_watchlist(results) -> None:
     print(_watchlist_markdown(results))
 
 
-def save_watchlist(markdown, out_dir, ts=None):
-    """Write the watchlist markdown to <out_dir>/<finish_timestamp>.md.
+def save_watchlist(markdown, out_dir, *, prefix=WATCHLIST_PREFIX, ts=None):
+    """Write the watchlist markdown to <out_dir>/<prefix><finish_timestamp>.md.
 
-    The screener is a single-use daily tool, so only the newest report is
-    kept: after writing, every *older* ``.md`` report in the folder is
-    deleted. The folder keeps at most one report (the one just written). A
-    non-``.md`` file is never touched.
+    The screener is a single-use daily tool, so only the newest report **of its
+    own kind** is kept: after writing, every *older* ``<prefix>*.md`` report in
+    the folder is deleted, and a non-``.md`` file is never touched.
+
+    ``prefix`` exists because two different screens share one output folder and
+    their reports are not interchangeable - measured 2026-09-25: the Screener
+    and the Value screen both wrote here, and whichever ran last deleted the
+    other's report, so a reader opening the folder saw a column set from a run
+    he did not make (a value-score report had been replaced by a Value
+    Watchlist). Scoping the cleanup to the writer's own prefix keeps each
+    screen's single-report rule without letting one screen destroy the other's.
     """
     from datetime import datetime as _dt
 
@@ -408,14 +420,15 @@ def save_watchlist(markdown, out_dir, ts=None):
     out_path = resolve_output_path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     stamp = ts or _dt.now().strftime("%Y%m%d_%H%M%S")
-    file = out_path / (stamp + ".md")
+    file = out_path / (prefix + stamp + ".md")
     file.write_text(markdown + "\n", encoding="utf-8")
-    # Keep only the newest report (the one just written): delete older .md
-    # reports so the folder never accumulates stale single-use outputs.
+    # Keep only the newest report of this kind (the one just written): delete
+    # older reports of the SAME prefix so the folder never accumulates stale
+    # single-use outputs, while a sibling screen's report stays readable.
     try:
         newer = [
             p
-            for p in out_path.glob("*.md")
+            for p in out_path.glob(prefix + "*.md")
             if p.is_file() and p.resolve() != file.resolve()
         ]
         for old in newer:

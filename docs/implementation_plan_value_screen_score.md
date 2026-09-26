@@ -190,9 +190,20 @@ went, and it was paid once per date (§6).
 
 ### 4.6 Output
 
-Ranked markdown via `value_screener.save_watchlist` into `screener/<timestamp>.md` (that directory
-is gitignored at `.gitignore:225`). Columns: ticker, 1-day %, market cap, P/E, P/B, P/S, P/CF, the
-four sub-scores **with their band labels**, and the composite.
+Ranked markdown via `value_screener.save_watchlist` into
+`screener/value_score_<timestamp>.md` (that directory is gitignored at `.gitignore:225`). Columns:
+ticker, 1-day %, market cap, P/E, P/B, P/S, P/CF, the four sub-scores **with their band labels**,
+and the composite.
+
+**The file name carries its own kind, and the cleanup owns only that kind** (fixed 2026-09-25).
+Both screens write into `screener/`, and `save_watchlist` used to delete *every* other `.md` there —
+so whichever screen ran last removed the other's report. Measured from the web app that day: a
+`run_value_score_screen` job finished at 22:19 with no survivors, and the folder then held a
+`# Value Watchlist` — the **Screener's** column set (EY / EV-EBIT / TobinQ / Z / Trap / ILLIQ / …)
+— where the value-score report had been. A reader opening "Screen reports" was shown fields from a
+run he had not made, which is the reported defect. `save_watchlist` now takes the writer's own
+`prefix` (`watchlist_` for the Screener, `value_score_` here) and deletes only `<prefix>*.md`, so
+each screen keeps its single-newest rule without destroying its sibling's report.
 
 **The default output is the qualifying set alone.** The `--score-min` cut is the owner's criterion, so
 a name that scores below it is not listed at all; `--show-excluded` adds the below-cut table and the
@@ -301,6 +312,9 @@ Printed in every report, because each line changes what the number means:
 | Rate limits at 4 workers are real, not theoretical | measured on 2026-09-24: `fmp profile: status 429` repeatedly, Reddit RSS 429 on `r/stocks` and `r/investing`, Massive `403` entitlement on four snapshots and three `gainers` calls. Stage 2 is capped and the run is serial |
 | Panel build is a multi-minute keyless SEC job | `--cost-only` first; run it outside report paths; per-date cache makes it once-only |
 | A wrong market cap poisons every price-based ratio | inherited guard: withheld and named for 20-F/40-F, never derived |
+| Two screens sharing one output folder | **fixed 2026-09-25** — `save_watchlist`'s cleanup is scoped to the writer's own prefix (§4.6). Before that, the newer run deleted the other screen's report, so the folder showed a column set from a run the reader had not made |
+| A vendor that types a preferred as a common stock | measured 2026-09-25: `TFINP` (Triumph Financial's preferred) arrives from EODHD as `Common Stock` / `NYSE`, carrying the *issuer's* name and an ISIN with no class flag, so `stage_decliners` cannot classify it. It costs vendor noise (yfinance 404 + six Tiingo 400s) and its ratio gates fail it closed — but a preferred whose fetched payload is the issuer's could in principle pass them, which is why the report prints the name and the docstring records the case instead of a ticker-suffix heuristic guessing at it |
+| A funnel line that does not reconcile | **fixed 2026-09-25** — the market-cap-floor drop was uncounted, so a live run printed `passed the ratio gates 0` beside 43 counted drops out of 60 candidates (17 silent). `fails["cap"]` is now counted and printed with the other gates |
 
 ## 11. Delivery state
 
@@ -315,3 +329,6 @@ Printed in every report, because each line changes what the number means:
 | commit and push | `6dc0e99` (the `--panel` pass); the docs and the measurement above follow in the same round |
 | reachable from `trading_web` | **done 2026-09-25** — a `run_value_score_screen` capability (all 21 CLI flags), the `/value-score` screen with a declarative field list + preset round-trip, a User-guide card, and `docs/web_TOPICS.md` regenerated. Run live from the form: 287 decliners → 16 candidates → 12 past the gates, panel 286 names, 4 clearing 64, **done in 36 s** |
 | readable from `trading_web` | **done 2026-09-25** — this is a *file* in `screener/`, which the report viewer (directories under `reports/` only) could never open, so `/api/screens` + `/api/screens/{name}`, `config.SCREENER_DIR` and a Reports → "Screen reports" section with a `/screens/:name` viewer were added; the app's own Screener help carried the same false promise and now holds true |
+| screen-report collision (Screener vs Value screen) | **fixed 2026-09-25** — `save_watchlist` gained a per-screen `prefix`, so the two families coexist (`watchlist_*` / `value_score_*`); 4 tests (`tests/test_value_screener.py`, `tests/test_value_score_screen.py`) and 2 failing-first proofs |
+| funnel counters reconcile | **fixed 2026-09-25** — the market-cap-floor drop was uncounted, so a live run printed `passed the ratio gates 0` beside 43 counted drops of 60 candidates; `fails["cap"]` is counted and printed, pinned by a test + a failing-first proof |
+| the app's bare form is not the owner's invocation | **not a defect, a default**: the form starts at the script's own defaults (anchors off, no `--panel`, `no_moomoo` unchecked), so a bare app run is *not* `--roe-min 15 --chg5d-max 3 --rsi-max 55 --panel <date>`. Measured 2026-09-25: an app run with `no_moomoo` on and the anchors off found 0 survivors out of the 60 deepest decliners, all of them small caps |

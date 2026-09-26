@@ -87,6 +87,12 @@ DEFAULT_SCORE_MIN = 64.0
 # sub-score band tables, printed so a reader can see 64 does not sit on one.
 NEAREST_PUBLISHED_EDGES = (60.0, 65.0)
 
+#: This screen's report-file prefix inside the shared screens folder
+#: (``screener/``). The Screener writes ``watchlist_*`` there, and each screen's
+#: cleanup deletes only its own kind - two screens' reports are not
+#: interchangeable, and before 2026-09-25 whichever ran last deleted the other's.
+VALUE_SCORE_PREFIX = "value_score_"
+
 #: Vendor calls this run made, by stage - printed in the footer.
 _CALLS: dict[str, int] = {}
 
@@ -122,6 +128,15 @@ def stage_decliners(args) -> tuple[dict, set]:
     symbol list's ``Type == "Common Stock"`` set and its ``Exchange`` column do
     the equity and NYSE/Nasdaq gates here, which also spares the moomoo screen
     its per-row ``get_stock_basicinfo`` exchange check.
+
+    That gate is only as good as the vendor's ``Type``: measured 2026-09-25,
+    ``TFINP`` (Triumph Financial's preferred) arrives as ``Common Stock`` /
+    ``NYSE`` with the *issuer's* name and an ISIN that carries no class flag, so
+    nothing here can classify it. It costs vendor noise (yfinance 404s, Tiingo
+    400s) and its ratio gates fail it closed, but a preferred whose fetched
+    payload is the issuer's could in principle pass them - which is why the
+    report prints the name and the plan's risk table records the case rather
+    than a ticker-suffix heuristic guessing at it.
     """
     from tradingagents.dataflows.eodhd import (
         NoMarketDataError,
@@ -250,7 +265,8 @@ def stage_ratios(args, rows: list, change: dict) -> tuple[list, dict, dict]:
     back ``None``, and a ``None`` bound fails CLOSED here (the name is dropped
     and counted), never treated as a pass.
     """
-    kept, fin_by_ticker, fails = [], {}, {"ps": 0, "pcf": 0, "pe": 0, "pb": 0, "no_fin": 0}
+    kept, fin_by_ticker, fails = [], {}, {"ps": 0, "pcf": 0, "pe": 0, "pb": 0,
+                                          "cap": 0, "no_fin": 0}
     for row in rows[: args.limit]:
         sym = row["symbol"]
         try:
@@ -320,16 +336,21 @@ def stage_ratios(args, rows: list, change: dict) -> tuple[list, dict, dict]:
         # floor - an unparsed cap is not evidence of a small company.
         cap = _f(caps.get("market_cap"))
         if cap is not None and cap < args.min_mcap:
+            # Counted like every other gate: an uncounted drop made the funnel
+            # line unreconcilable (measured 2026-09-25: "passed 0" beside 43
+            # counted drops out of 60 candidates, with the other 17 silent here).
+            fails["cap"] += 1
             logger.info("skip %s: market cap %.2fB < floor", sym, cap / 1e9)
             continue
         row["ratios"] = caps
         row["change_p"] = change.get(sym)
         kept.append(row)
     logger.info("client ratios: %d names pass P/E<=%.0f, P/B<=%.0f, P/S<=%.0f, "
-                "P/CF<=%.0f (dropped: %d on P/E, %d on P/B, %d on P/S, %d on "
-                "P/CF, %d unfetchable)", len(kept), args.pe_max, args.pb_max,
-                args.ps_max, args.pcf_max, fails["pe"], fails["pb"],
-                fails["ps"], fails["pcf"], fails["no_fin"])
+                "P/CF<=%.0f, cap>=%.0fB (dropped: %d on P/E, %d on P/B, %d on "
+                "P/S, %d on P/CF, %d below the cap floor, %d unfetchable)",
+                len(kept), args.pe_max, args.pb_max, args.ps_max, args.pcf_max,
+                args.min_mcap / 1e9, fails["pe"], fails["pb"], fails["ps"],
+                fails["pcf"], fails["cap"], fails["no_fin"])
     return kept, fin_by_ticker, fails
 
 
@@ -693,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[funnel] decliners {len(change)} -> candidates {len(rows)} -> "
           f"passed the ratio gates {len(kept)} (dropped: {fails['pe']} on P/E, "
           f"{fails['pb']} on P/B, {fails['ps']} on P/S, {fails['pcf']} on P/CF, "
+          f"{fails['cap']} below the ${args.min_mcap / 1e9:.0f}B cap floor, "
           f"{fails['no_fin']} unfetchable)")
     if not kept:
         print("no candidates survived the ratio gates. Two usual causes: the "
@@ -713,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
     if not args.no_save:
         try:
-            path = save_watchlist(report, args.out_dir)
+            path = save_watchlist(report, args.out_dir, prefix=VALUE_SCORE_PREFIX)
             print(f"\n[saved] {path}")
         except OSError as exc:
             print(f"\n[save failed] {exc}")

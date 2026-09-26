@@ -9,6 +9,26 @@ import scripts.value_screener as vs
 from tradingagents.dataflows import statement_parsing as _sp_parsing
 
 
+@pytest.fixture(autouse=True)
+def _screen_reports_never_land_in_the_repo(tmp_path, monkeypatch):
+    """vs.main()'s relative ``--out-dir`` anchors to the REPO root, so these
+    tests were writing into the repo's own ``screener/`` folder - and, before
+    the per-screen prefixes (2026-09-25), deleting whatever a real screen had
+    left there (a live run's report). Relative paths go to ``tmp_path``;
+    absolute ones (a test's own ``--out-dir``) are untouched."""
+    from pathlib import Path
+
+    import tradingagents.dataflows.utils as _utils
+
+    real = _utils.resolve_output_path
+
+    def _redirect(value):
+        p = Path(str(value)).expanduser()
+        return real(value) if p.is_absolute() else tmp_path / p
+
+    monkeypatch.setattr(_utils, "resolve_output_path", _redirect)
+
+
 @contextmanager
 def _patched_router(route):
     """Patch the vendor router wherever this module reaches it.

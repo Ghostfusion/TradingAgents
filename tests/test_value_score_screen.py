@@ -112,3 +112,77 @@ def test_a_missing_panel_file_falls_back_and_says_so(panel_cache, caplog):
     assert "1999-12-31" in note
     assert any("panel" in r.message.lower() for r in caplog.records)
     assert withheld["ONLY"], "the fallback still explains why nothing scored"
+
+
+# --- the funnel's counters and the report's own file kind -------------------
+#
+# Both come from one measured run (2026-09-25, from the web app): the funnel
+# line read "candidates 60 -> passed the ratio gates 0" beside 43 counted drops,
+# and the report the reader opened was a Value Watchlist - the SCREENER's column
+# set - because whichever screen ran last deleted the other's file.
+
+
+def _fin(market_cap: float = 20e9) -> dict:
+    """A canonical fin whose four ratio gates all pass at the panel's bounds."""
+    return {
+        "market_cap": market_cap,
+        "revenue": 4e9,
+        "operating_cashflow": 1e9,
+        "net_income": 2e9,
+        "total_equity": 10e9,
+        "shares_outstanding": 1e8,
+    }
+
+
+def _ratio_args(**kw):
+    base = {"limit": 10, "date": "2026-09-24", "ps_max": 8.0, "pcf_max": 25.0,
+            "pe_max": 33.0, "pb_max": 9.0, "min_mcap": 10e9}
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_a_name_below_the_cap_floor_is_counted_not_silently_dropped(monkeypatch):
+    """Every drop is counted, so the funnel line reconciles with the candidates."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin(market_cap=4e9))
+
+    kept, _fins, fails = vss.stage_ratios(
+        _ratio_args(), [{"symbol": "SMALL", "price": 20.0}], {"SMALL": -3.0}
+    )
+
+    assert kept == []
+    assert fails["cap"] == 1
+
+
+def test_a_name_that_passes_every_gate_is_kept_and_uncounted(monkeypatch):
+    """The counter's other side: a survivor is kept, not counted as a drop."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+
+    kept, fins, fails = vss.stage_ratios(
+        _ratio_args(), [{"symbol": "BIG", "price": 20.0}], {"BIG": -3.0}
+    )
+
+    assert [r["symbol"] for r in kept] == ["BIG"]
+    assert fins["BIG"]["market_cap"] == 20e9
+    assert sum(fails.values()) == 0
+
+
+def test_the_report_lands_under_its_own_prefix_and_spares_the_sibling(
+    tmp_path, monkeypatch
+):
+    """A Value screen report never takes the Screener's file, or its name space."""
+    out = tmp_path / "screener"
+    out.mkdir(parents=True, exist_ok=True)
+    sibling = out / "watchlist_20260102_101112.md"
+    sibling.write_text("# Value Watchlist\n", encoding="utf-8")
+    monkeypatch.setattr(vss, "stage_decliners", lambda args: ({"AAPL": -3.0}, set()))
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+    monkeypatch.setattr(
+        vss, "stage_score",
+        lambda args, fins: ({"AAPL": 70.0}, {}, "basis", {}, "note"),
+    )
+
+    assert vss.main(["--no-moomoo", "--out-dir", str(out), "-d", "2026-09-24"]) == 0
+
+    written = sorted(p.name for p in out.glob("value_score_*.md"))
+    assert len(written) == 1, written
+    assert sibling.exists(), "the Screener's report is not the Value screen's to delete"

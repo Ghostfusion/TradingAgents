@@ -15,6 +15,27 @@ import pytest
 import scripts.value_screener as vs
 from tradingagents.dataflows import statement_parsing as _sp_parsing
 
+
+@pytest.fixture(autouse=True)
+def _screen_reports_never_land_in_the_repo(tmp_path, monkeypatch):
+    """vs.main()'s relative ``--out-dir`` anchors to the REPO root, so these
+    tests were writing into the repo's own ``screener/`` folder - and, before
+    the per-screen prefixes (2026-09-25), deleting whatever a real screen had
+    left there (a live run's report). Relative paths go to ``tmp_path``;
+    absolute ones (a test's own ``--out-dir``) are untouched."""
+    from pathlib import Path
+
+    import tradingagents.dataflows.utils as _utils
+
+    real = _utils.resolve_output_path
+
+    def _redirect(value):
+        p = Path(str(value)).expanduser()
+        return real(value) if p.is_absolute() else tmp_path / p
+
+    monkeypatch.setattr(_utils, "resolve_output_path", _redirect)
+
+
 #: The real connect, captured once so the offline guard can delegate to it.
 _REAL_SOCKET_CONNECT = socket.socket.connect
 
@@ -311,29 +332,46 @@ def test_min_mcap_floor_gates_universe(capsys):
 
 
 def test_save_watchlist_writes_md(tmp_path):
-    """Watchlist results must be saved to <out>/<finish_timestamp>.md."""
+    """Watchlist results must be saved to <out>/<prefix><finish_timestamp>.md."""
     out = tmp_path / "screener"
     file = vs.save_watchlist("# Value Watchlist\n", str(out), ts="20260102_101112")
-    assert file.name == "20260102_101112.md"
+    assert file.name == "watchlist_20260102_101112.md"
     assert file.read_text(encoding="utf-8").startswith("# Value Watchlist")
     assert file.parent == out
 
 
-def test_save_watchlist_keeps_only_newest_report(tmp_path):
-    """The screener is single-use: writing a new report deletes older ones."""
+def test_save_watchlist_keeps_only_newest_report_of_its_own_kind(tmp_path):
+    """The screener is single-use: a new report deletes older ones of ITS kind."""
     out = tmp_path / "screener"
     out.mkdir(parents=True, exist_ok=True)
     # Pre-populate older reports (newest-first timestamps) plus a non-.md file.
-    (out / "20260101_000000.md").write_text("old", encoding="utf-8")
-    (out / "20260102_000000.md").write_text("older", encoding="utf-8")
+    (out / "watchlist_20260101_000000.md").write_text("old", encoding="utf-8")
+    (out / "watchlist_20260102_000000.md").write_text("older", encoding="utf-8")
     (out / "notes.txt").write_text("keep me", encoding="utf-8")
 
     saved = vs.save_watchlist("# new\n", str(out), ts="20260103_000000")
 
-    assert saved.name == "20260103_000000.md"
+    assert saved.name == "watchlist_20260103_000000.md"
     remaining = {p.name for p in out.glob("*.md")}
-    assert remaining == {"20260103_000000.md"}  # only the newest survives
+    assert remaining == {"watchlist_20260103_000000.md"}  # only the newest survives
     assert (out / "notes.txt").exists()  # non-report files are untouched
+
+
+def test_save_watchlist_never_deletes_a_sibling_screens_report(tmp_path):
+    """Two screens share `screener/`: a cleanup owns only its own prefix.
+
+    Measured 2026-09-25: a Screener run deleted the Value screen's report, so a
+    reader opening the folder was shown the OTHER screen's column set.
+    """
+    out = tmp_path / "screener"
+    out.mkdir(parents=True, exist_ok=True)
+    sibling = out / "value_score_20260102_101112.md"
+    sibling.write_text("# Value screen\n", encoding="utf-8")
+
+    saved = vs.save_watchlist("# Value Watchlist\n", str(out), ts="20260103_000000")
+
+    assert saved.name == "watchlist_20260103_000000.md"
+    assert sibling.exists(), "a sibling screen's report is not this writer's to delete"
 
 
 def test_save_watchlist_newest_wins_by_timestamp(tmp_path):
@@ -342,8 +380,8 @@ def test_save_watchlist_newest_wins_by_timestamp(tmp_path):
     vs.save_watchlist("# first\n", str(out), ts="20260102_101112")
     vs.save_watchlist("# second\n", str(out), ts="20260102_101113")
     remaining = {p.name for p in out.glob("*.md")}
-    assert remaining == {"20260102_101113.md"}
-    assert (out / "20260102_101113.md").read_text(encoding="utf-8").strip() == "# second"
+    assert remaining == {"watchlist_20260102_101113.md"}
+    assert (out / "watchlist_20260102_101113.md").read_text(encoding="utf-8").strip() == "# second"
 
 
 def test_classic_path_has_no_mover_columns(capsys):

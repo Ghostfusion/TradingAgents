@@ -1335,8 +1335,10 @@ vs. price — so `heat-proxy` is a misnomer kept for CLI compatibility, not a
 stand-in for a missing endpoint. To use the literal app Heat List today, save
 its top symbols to a file and pass `-f list.txt`. Output includes the day's change, name, and a
 screen-per-column table; pick from the ranked rows. Each run also saves
-the watchlist to `screener/<finish_timestamp>.md` (e.g. `screener/20260817_180415.md`,
-same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`).
+the watchlist to `screener/watchlist_<finish_timestamp>.md` (e.g. `screener/watchlist_20260817_180415.md`,
+same `%Y%m%d_%H%M%S` format as reports; configurable via `--out-dir`; the prefix is
+this screen's own, so the Value score screen's `value_score_*.md` report in the same
+folder is never deleted by a Screener run).
 Requires OpenD running +
 logged in (same as every moomoo feature), and fails loudly if unavailable.
 
