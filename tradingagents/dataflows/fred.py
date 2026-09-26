@@ -54,6 +54,11 @@ MACRO_SERIES = {
     "real_gdp": "GDPC1",
     "gdp": "GDP",
     "industrial_production": "INDPRO",
+    # DISCONTINUED upstream: FRED no longer publishes NAPM, so these two aliases
+    # return zero observations (measured 2026-09-25). Nothing in the engine reads
+    # them any more - get_cycle_tilt moved onto `industrial_production` GROWTH -
+    # and they are kept as names, marked here so the next reader does not wire a
+    # leg to a series that cannot answer.
     "pmi": "NAPM",
     "manufacturing_pmi": "NAPM",
     # Labor

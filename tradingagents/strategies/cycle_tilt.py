@@ -3,15 +3,23 @@
 Institutional sector rotation leads with a macro regime read: which phase
 the economy is in (early / mid / late / recession) maps to historically
 favored sectors. This module classifies the phase from the published signal
-set — PMI growth momentum, the Treasury yield curve, and credit spreads —
-and returns an advisory sector tilt. Everything is None-safe: a missing
-input makes the phase unknown (``None``), never fabricated; the tilt is
-context for the analyst, not a gate.
+set — industrial-production growth as the manufacturing leg, the Treasury
+yield curve, and credit spreads — and returns an advisory sector tilt.
+Everything is None-safe: a missing input makes the phase unknown (``None``),
+never fabricated; the tilt is context for the analyst, not a gate.
 
 Sources: synthetized from web research on institutional sector rotation
-(business-cycle phase maps; PMI above/below 50; steepening curve = early;
-flattening/inversion + widening spreads = late/recession). The fork's
-advisory/no-execution mandate stands.
+(business-cycle phase maps; manufacturing expansion/contraction; steepening
+curve = early; flattening/inversion + widening spreads = late/recession). The
+fork's advisory/no-execution mandate stands.
+
+The manufacturing leg moved from the PMI diffusion level to industrial
+production's year-over-year growth (owner decision 2026-09-25): the `pmi` FRED
+alias pointed at `NAPM`, discontinued, so the leg read ``None`` for as long as
+it existed (measured 2026-09-25: 0 observations, against 13 for
+``industrial_production``). The boundary moves with it - PMI >= 50 becomes IP
+growth >= 0 - which is the same expansion test expressed on a series FRED
+actually publishes for free, so the pipeline stays automated.
 """
 
 from __future__ import annotations
@@ -25,32 +33,91 @@ TILT_MAP: dict[str, tuple[str, ...]] = {
 }
 
 
-def _classify(pmi: float | None, spread10_2: float | None, hy_spread: float | None) -> str | None:
+#: The manufacturing input's expansion boundary. The input used to be a PMI
+#: diffusion level, whose boundary is 50; it is now industrial-production
+#: GROWTH (percent, year over year), whose boundary is 0. Same meaning
+#: (expanding vs contracting), a series FRED actually publishes for free - the
+#: PMI alias pointed at `NAPM`, discontinued, so the leg read None for as long
+#: as it existed (measured 2026-09-25: 0 observations).
+MANUFACTURING_EXPANSION_PCT = 0.0
+
+#: The year-over-year window for the industrial-production growth read (monthly
+#: series, so 12 observations = a year).
+IP_GROWTH_MONTHS = 12
+
+
+def industrial_production_growth(
+    observations: list, *, months: int = IP_GROWTH_MONTHS
+) -> dict:
+    """Year-over-year growth of a monthly industrial-production series.
+
+    ``observations`` is FRED's own shape - ``[(date, value), ...]`` oldest ->
+    newest, exactly what ``dataflows/fred.get_series_values`` returns - so the
+    reading carries the dates it compared (a monthly series is published with a
+    lag, and a growth rate without its observation dates invites the reader to
+    assume today's).
+
+    INDPRO is an INDEX LEVEL, so the level says nothing on its own: the
+    expansion test is the SIGN of its growth, which is why
+    :data:`MANUFACTURING_EXPANSION_PCT` is 0 rather than the PMI's 50.
+
+    Returns ``{"growth_pct", "latest", "latest_date", "base", "base_date",
+    "months", "observations"}``; every value field is ``None`` (and
+    ``observations`` the count it did see) when the series is too short or
+    carries a non-positive base - never a fabricated growth rate.
+    """
+    pairs = [(str(d), float(v)) for d, v in (observations or []) if v is not None]
+    out = {
+        "growth_pct": None,
+        "latest": None,
+        "latest_date": None,
+        "base": None,
+        "base_date": None,
+        "months": months,
+        "observations": len(pairs),
+    }
+    if len(pairs) < months + 1 or months < 1:
+        return out
+    latest_date, latest = pairs[-1]
+    base_date, base = pairs[-(months + 1)]
+    out.update({"latest": latest, "latest_date": latest_date,
+                "base": base, "base_date": base_date})
+    if base <= 0:
+        return out
+    out["growth_pct"] = round((latest / base - 1.0) * 100.0, 4)
+    return out
+
+
+def _classify(manufacturing_growth_pct: float | None, spread10_2: float | None,
+              hy_spread: float | None) -> str | None:
     """Cycle phase from the three macro signals (published rules).
 
-    - PMI >= 50 -> expansion; < 50 -> contraction.
+    - ``manufacturing_growth_pct`` = industrial-production growth, year over
+      year, in PERCENT (e.g. +1.2): >= 0 -> expansion, < 0 -> contraction. It is
+      the manufacturing leg the PMI diffusion level used to carry (PMI >= 50 ==
+      IP growth >= 0 as an expansion test), moved onto a series FRED publishes.
     - ``spread10_2`` = 10y-2y Treasury spread in pct points (e.g. 0.40 =
       40bp positive): positive/steepening favors early; flattening/inverted
       (<= 0) favors late/recession.
     - ``hy_spread`` = high-yield option-adjusted spread in pct points:
       widening (> 5.0) raises stress -> late/recession.
 
-    Missing inputs degrade: PMI is the primary classifier; yield curve leans
-    (early vs late); credit spread confirms stress. Returns None only when
-    nothing usable is supplied.
+    Missing inputs degrade: manufacturing growth is the primary classifier;
+    yield curve leans (early vs late); credit spread confirms stress. Returns
+    None only when nothing usable is supplied.
     """
-    if pmi is not None:
-        expansion = pmi >= 50.0
+    if manufacturing_growth_pct is not None:
+        expansion = manufacturing_growth_pct >= MANUFACTURING_EXPANSION_PCT
         stress = hy_spread is not None and hy_spread > 5.0
         inverted = spread10_2 is not None and spread10_2 <= 0.0
         if not expansion:
-            return "recession"  # PMI < 50 = contraction -> defensives
+            return "recession"  # manufacturing contracting -> defensives
         if stress:
             return "late"       # expansion + widening credit = late cycle
         if inverted:
             return "late"       # expansion + flat/inverted curve = late
         return "mid"            # expansion, no stress, curve positive
-    # No PMI: yield curve + credit fall back.
+    # No manufacturing read: yield curve + credit fall back.
     if spread10_2 is not None:
         if spread10_2 <= 0.0:
             return "recession" if (hy_spread is not None and hy_spread > 5.0) else "late"
@@ -60,22 +127,28 @@ def _classify(pmi: float | None, spread10_2: float | None, hy_spread: float | No
     return None
 
 
-def cycle_phase(pmi: float | None, spread10_2: float | None, hy_spread: float | None) -> str | None:
+def cycle_phase(manufacturing_growth_pct: float | None, spread10_2: float | None,
+                hy_spread: float | None) -> str | None:
     """Public cycle-phase classifier (missing inputs -> None, never fabricated)."""
-    return _classify(pmi, spread10_2, hy_spread)
+    return _classify(manufacturing_growth_pct, spread10_2, hy_spread)
 
 
-def cycle_tilt(pmi: float | None, spread10_2: float | None, hy_spread: float | None) -> dict:
+def cycle_tilt(manufacturing_growth_pct: float | None, spread10_2: float | None,
+               hy_spread: float | None) -> dict:
     """Advisory sector tilt for the current cycle phase.
 
-    Returns ``{"phase": .., "tilt": [..], "inputs": {pmi, spread10_2,
-    hy_spread}}``; phase None -> tilt [] (never a fabricated map).
+    Returns ``{"phase": .., "tilt": [..], "inputs": {manufacturing_growth_pct,
+    spread10_2, hy_spread}}``; phase None -> tilt [] (never a fabricated map).
     """
-    phase = cycle_phase(pmi, spread10_2, hy_spread)
+    phase = cycle_phase(manufacturing_growth_pct, spread10_2, hy_spread)
     return {
         "phase": phase,
         "tilt": list(TILT_MAP[phase]) if phase else [],
-        "inputs": {"pmi": pmi, "spread10_2": spread10_2, "hy_spread": hy_spread},
+        "inputs": {
+            "manufacturing_growth_pct": manufacturing_growth_pct,
+            "spread10_2": spread10_2,
+            "hy_spread": hy_spread,
+        },
     }
 
 
@@ -146,4 +219,6 @@ def macro_stance(pmi, spread10_2, hy_spread, policy_rate, inflation,
         "tilt": list(TILT_MAP[phase]) if phase else [],
     }
 
-__all__ = ["cycle_phase", "cycle_tilt", "TILT_MAP", "taylor_rule", "taylor_deviation", "macro_stance"]
+__all__ = ["IP_GROWTH_MONTHS", "MANUFACTURING_EXPANSION_PCT", "TILT_MAP",
+           "cycle_phase", "cycle_tilt", "industrial_production_growth",
+           "macro_stance", "taylor_deviation", "taylor_rule"]

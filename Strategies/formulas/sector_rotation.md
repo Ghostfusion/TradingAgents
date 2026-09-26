@@ -215,10 +215,16 @@ Hold / no new entry.
   hold top 2-3, trim/exit on Weakening, turnover is the main cost risk —
   advisory context, not a metric.
 - **A2 — Business-cycle tilt** (`strategies/cycle_tilt.py` + `get_cycle_tilt`
-  tool, market analyst): phase = early/mid/late/recession from PMI (FRED
-  NAPM), the 10y-2y spread and HY OAS; `TILT_MAP` → favored sectors. All
-  inputs None-safe (missing → phase None, tilt [], "n/a"); `fred.get_macro_value`
-  returns the latest float directly. Advisory — the regime-gate enhancement.
+  tool, market analyst): phase = early/mid/late/recession from the
+  manufacturing leg, the 10y-2y spread and HY OAS; `TILT_MAP` → favored
+  sectors. All inputs None-safe (missing → phase None, tilt [], "n/a"); the
+  other two legs come from `fred.get_macro_value`. Advisory — the
+  regime-gate enhancement. **Corrected 2026-09-25:** the manufacturing leg was
+  the PMI diffusion level (FRED `NAPM`), which FRED discontinued, so it read
+  `None` for as long as it existed; it is now `industrial_production` (INDPRO)
+  **year-over-year growth** with the expansion boundary at 0% (the analogue of
+  PMI 50), read through `fred.get_series_values` so the growth travels with the
+  months it compared (`cycle_tilt.industrial_production_growth`).
 - **P4 — validation script** (sector-rotation Action 4) is a research option,
   not built (monthly top-3 SPDR by P1 score vs equal-weight/SPY with costs,
   via evaluate.py/CPCV). No trading_web surface (LLM-facing tools).

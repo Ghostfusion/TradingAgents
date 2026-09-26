@@ -3074,38 +3074,65 @@ def get_cycle_tilt(
     current_date: Annotated[str, "current date YYYY-MM-DD (for the FRED window)"],
 ) -> str:
     """Business-cycle phase -> advisory sector tilt (early / mid / late /
-    recession -> favored SPDR groups) from PMI, the Treasury yield curve and
-    high-yield credit spreads. Use before any 'cyclicals should lead now' /
-    'defensives are favored' / regime rotation claim.
+    recession -> favored SPDR groups) from industrial-production growth, the
+    Treasury yield curve and high-yield credit spreads. Use before any
+    'cyclicals should lead now' / 'defensives are favored' / regime rotation
+    claim.
+
+    The manufacturing leg is INDPRO's year-over-year growth (the PMI diffusion
+    level it replaced came from a discontinued FRED series, so it could only
+    read n/a). The read prints the observation dates it compared - a monthly
+    series is published with a lag - and the expansion boundary is 0% growth,
+    the analogue of PMI's 50.
 
     Args:
         current_date: current date YYYY-MM-DD (macro observations never extend
             past it - no lookahead).
 
     Returns:
-        The cycle phase + favored sectors, or an explicit 'n/a' when no macro
-        signal resolves (never fabricated).
+        The cycle phase + favored sectors + the inputs with their observation
+        dates, or an explicit 'n/a' when no macro signal resolves (never
+        fabricated).
     """
     try:
-        from tradingagents.dataflows.fred import get_macro_value
+        from tradingagents.dataflows.fred import get_macro_value, get_series_values
         from tradingagents.strategies import cycle_tilt
 
-        pmi = get_macro_value("pmi", current_date)
         curve = get_macro_value("10y_2y_spread", current_date)
         hy = get_macro_value("high_yield_spread", current_date)
-        til = cycle_tilt.cycle_tilt(pmi, curve, hy)
+        # The manufacturing proxy: industrial production's YoY GROWTH. A 30-month
+        # window leaves room for the 12-month comparison plus FRED's publication
+        # lag; the series is monthly, so the growth is a true year-over-year one.
+        try:
+            ip_obs = get_series_values(
+                "industrial_production", current_date, look_back_days=900
+            ) or []
+        except Exception:  # noqa: BLE001 - one series must not sink the read
+            ip_obs = []
+        growth = cycle_tilt.industrial_production_growth(ip_obs)
+        growth_pct = growth.get("growth_pct")
+        til = cycle_tilt.cycle_tilt(growth_pct, curve, hy)
         phase = til.get("phase")
+        origin = (
+            f"INDPRO {growth['latest_date']} vs {growth['base_date']}"
+            if growth_pct is not None
+            else f"INDPRO n/a ({growth['observations']} observation(s))"
+        )
         if not phase:
             return (
                 "cycle tilt: n/a - no macro signal resolved"
-                f" (pmi={pmi if pmi is not None else 'n/a'}, "
+                f" (manufacturing_growth_pct={growth_pct if growth_pct is not None else 'n/a'}, "
                 f"curve={curve if curve is not None else 'n/a'}, "
                 f"hy_spread={hy if hy is not None else 'n/a'})"
             )
         names = ", ".join(til["tilt"])
+        growth_txt = (
+            f"{growth_pct:+.2f}% [{origin}]" if growth_pct is not None else origin
+        )
         return (
             f"cycle tilt: {phase} - favored: {names} "
-            f"(pmi={pmi}, curve={curve}, hy_spread={hy})"
+            f"(manufacturing_growth={growth_txt}, "
+            f"curve={curve}, hy_spread={hy})"
         )
     except Exception as exc:  # noqa: BLE001 - advisory, never blocks
         return f"cycle tilt: n/a ({exc})"

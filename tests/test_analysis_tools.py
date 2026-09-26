@@ -1643,24 +1643,48 @@ def test_options_iv_read_vrp_renders_pp_not_percent(monkeypatch):
     assert float(val) < 100.0
 
 
+def _ip_obs(n: int = 13, *, first: float = 100.0, last: float = 101.5) -> list:
+    """A contiguous monthly INDPRO series as FRED returns it: (date, value)."""
+    step = (last - first) / (n - 1)
+    year, month, out = 2025, 8, []
+    for i in range(n):
+        out.append((f"{year}-{month:02d}-01", first + step * i))
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return out
+
+
 def test_cycle_tilt_renders_phase(monkeypatch):
-    # FRED resolves all three signals -> mid + favored sectors.
+    # FRED resolves the curve and credit legs; the manufacturing leg is INDPRO
+    # GROWTH now, so the read patches the series rather than a PMI level.
     import tradingagents.dataflows.fred as _fred
 
     monkeypatch.setattr(
         _fred, "get_macro_value",
-        lambda indicator, curr_date: {"pmi": 52.0, "10y_2y_spread": 0.40,
+        lambda indicator, curr_date: {"10y_2y_spread": 0.40,
                                       "high_yield_spread": 3.5}.get(indicator),
+    )
+    monkeypatch.setattr(
+        _fred, "get_series_values",
+        lambda indicator, curr_date, look_back_days=None, **kw: _ip_obs(),
     )
     out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
     assert "cycle tilt: mid" in out
     assert "Technology" in out
+    # the growth AND the months it compared travel with the read
+    assert "manufacturing_growth=+1.50%" in out
+    assert "INDPRO 2026-08-01 vs 2025-08-01" in out
 
 
 def test_cycle_tilt_degrades_to_na_when_no_signal(monkeypatch):
     import tradingagents.dataflows.fred as _fred
 
     monkeypatch.setattr(_fred, "get_macro_value", lambda indicator, curr_date: None)
+    monkeypatch.setattr(
+        _fred, "get_series_values",
+        lambda indicator, curr_date, look_back_days=None, **kw: [],
+    )
     out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
     assert "cycle tilt: n/a" in out
 
@@ -1671,6 +1695,7 @@ def test_cycle_tilt_rade_never_aborts(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("FRED down")
     monkeypatch.setattr(_fred, "get_macro_value", _boom)
+    monkeypatch.setattr(_fred, "get_series_values", _boom)
     out = T.get_cycle_tilt.invoke({"current_date": "2026-09-05"})
     assert "cycle tilt: n/a" in out
 
