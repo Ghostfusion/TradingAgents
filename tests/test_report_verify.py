@@ -2788,3 +2788,115 @@ def test_a_world_claim_that_merely_says_weighted_is_not_exempted():
     ):
         assert not rv._is_weighting_statement(claim), claim
         assert rv._anchor_claims(_v(claim), set()).claims[0].status == "UNSUPPORTED"
+
+
+# --- the MSFT 2026-09-27 gate-on tree: five verifier defects --------------- #
+
+
+def test_run_card_engines_are_evidence_for_their_own_numbers(tmp_path):
+    """The run's engine scorecard is written into every analyst prompt and quoted
+    back in the report. Grounding only against tool leaves made every engine line
+    UNSUPPORTED by construction (MSFT 2026-09-27: 11 rows across four stems)."""
+    card = {
+        "quant_scorecard": {
+            "engines": {
+                "risk": {
+                    "state": "MEASURED",
+                    "score": 75.4,
+                    "band": "contained",
+                    "coverage": 0.45,
+                },
+                "technical": {
+                    "state": "MEASURED",
+                    "score": 58.8,
+                    "band": "neutral",
+                    "coverage": 1,
+                },
+                "event": {"state": "NA", "score": None},
+            }
+        },
+        "trade_score": {"score": 65.45, "coverage": 1.0, "status": "RESEARCH_ONLY"},
+    }
+    (tmp_path / "run_card.json").write_text(json.dumps(card), encoding="utf-8")
+    lines = rv._run_card_engine_lines(tmp_path)
+    assert "RiskScore: score 75.4, band contained, coverage 0.45" in lines, lines
+    assert any(ln.startswith("EventState: not measured") for ln in lines), lines
+    assert any(ln.startswith("TradeScore: score 65.45") for ln in lines), lines
+
+    evidence = {"run_card": lines}
+    digest = rv._evidence_digest(evidence, "news")
+    assert "run_card [ok]:" in digest and "75.4" in digest
+    decimals = rv._evidence_decimals(evidence, "news")
+    assert 75.4 in decimals and 0.45 in decimals
+    # Nothing is invented when the tree has no card, and a missing path is safe.
+    assert "run_card" not in rv._evidence_digest({}, "news")
+    assert rv._run_card_engine_lines(tmp_path / "absent") == []
+
+
+def test_scenario_slash_leg_is_not_bound_to_the_first_value():
+    """A multi-leg label cell must not hand its value cell's FIRST figure to a
+    later leg: `| Scenario DCF bear/base/bull | $97.82 / … / $167.27 |` read
+    97.82 (the bear) as the `bull` value on MSFT 2026-09-27."""
+    rx = rv._INTERNAL_CONFLICT_METRICS["scenario dcf bull"][0]
+    row = (
+        "| Scenario DCF bear/base/bull | $97.82 / $123.26 / $167.27"
+        " — price above bull |"
+    )
+    assert rv._extract_metric_values(row, rx, "scenario dcf bull") == []
+
+
+def test_net_cash_with_a_minus_sign_is_not_a_contradiction():
+    """`Net debt **-19,820,000,000**` captured +19.82 because `-` sat inside the
+    separator class, so the sign-aware correction never fired and a correct
+    net-cash line read as a contradiction (MSFT 2026-09-27)."""
+    ok = (
+        "**Net Debt $19,359,000,000** (vendor `get_balance_sheet`, narrow basis)\n"
+        "on the widest basis (cash + ST investments $76,651,000,000 − total debt "
+        "$56,826,000,000) MSFT is **NET CASH by $19,825,000,000**.\n"
+        "`get_ratios` prints Net debt **-19,820,000,000** (net cash)\n"
+    )
+    assert rv._net_debt_identity(ok) == []
+    # A genuinely mis-signed net line is still caught: the R2 shape, whose net
+    # rows carry no sign at all, must keep firing now that the sign is a new
+    # optional capture group in `_NET_FIGURE_RE`.
+    bad = (
+        "| Item | 2026-07-31 |\n"
+        "| Cash + ST Investments | $62.47B |\n"
+        "| Total Debt | **$38.35B** |\n"
+        "| Net Debt | $10.92B | net cash | net cash |\n"
+        "\n**Total debt jumped from $12.35B to $38.35B** (+$26B in one quarter), "
+        "flipping the company to **net debt of $10.9B**.\n"
+    )
+    claims = rv._net_debt_identity(bad)
+    assert claims and claims[0].status == "INTERNAL_CONFLICT"
+
+
+def test_shared_sma_label_cell_binds_the_value_by_leg():
+    """`| 50 / 200 SMA | 475.40 / 430.61 | Stacked uptrend; +8.6% / +19.9% above |`
+    names one SMA per leg; the row's FIRST percentage was read as the 200-SMA
+    distance and invented a conflict with the body's own +19.9% (MSFT
+    2026-09-27)."""
+    row = "| 50 / 200 SMA | 475.40 / 430.61 | Stacked uptrend; +8.6% / +19.9% above |"
+    # The 200-SMA leg is the SECOND percentage; its sign is kept (the reader
+    # strips only the `%`), so `+19.9` — not `+8.6` — is the 200-SMA distance.
+    assert rv._sma200_percent_values(row) == ["+19.9"]
+
+
+def test_a_sibling_labelled_template_is_not_a_repetition_loop():
+    """Five `withheld: 0 of 1 components present, floor is 1` lines, one per news
+    component under its own label line, were reported as a decoder loop (MSFT
+    2026-09-27). A stuck decoder in one context is still caught."""
+    template = "".join(
+        f"- {name} (weight {w}): NA/100\n"
+        "    withheld: 0 of 1 components present, floor is 1\n"
+        for name, w in (
+            ("fundamental_impact", 20),
+            ("corporate_events", 10),
+            ("regulatory_legal", 5),
+            ("analyst_rating", 5),
+            ("macro_industry", 5),
+        )
+    )
+    assert rv._repetition_loops(template) == []
+    stuck = "Inventory series:** ``635200`. **\n" * 5
+    assert rv._repetition_loops(stuck) == ["Inventory series:** ``635200`. **"]

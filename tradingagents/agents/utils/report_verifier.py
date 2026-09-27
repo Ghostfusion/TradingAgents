@@ -458,6 +458,10 @@ def _evidence_decimals(evidence: dict, analyst_key: str) -> set:
     # claim quoting it.
     out |= _float_tokens(_reference_price_line(evidence, analyst_key))
     out |= _float_tokens(_instrument_identity_line(evidence, analyst_key))
+    # The run's own engine scorecard is evidence too (see _run_card_engine_lines):
+    # without it the anchor downgrades every claim quoting an engine composite.
+    for run_line in _run_card_lines(evidence):
+        out |= _float_tokens(run_line)
     return out
 
 
@@ -553,6 +557,89 @@ def _instrument_identity_line(evidence: dict, analyst_key: str) -> str:
     return ""
 
 
+#: The run's own engine scorecard, carried as a third prompt-level evidence
+#: source beside instrument_identity/reference_price.
+_RUN_CARD_EVIDENCE_KEY = "run_card"
+
+#: Engine key -> the label the reports use for it.
+_ENGINE_LABELS = {
+    "fundamental": "FundamentalScore",
+    "technical": "TechnicalScore",
+    "regime": "RegimeScore",
+    "risk": "RiskScore",
+    "sentiment": "SentimentScore",
+    "news": "NewsScore",
+    "event": "EventState",
+    "trade": "TradeScore",
+}
+
+
+def _run_card_engine_lines(report_dir: Path) -> list[str]:
+    """The run's engine scorecard as evidence lines (one per engine).
+
+    The scorecard is deliberately written into every analyst's prompt and report
+    (`report_hygiene.engine_score_block` / `scorecard_context_block` read
+    ``state["quant_scorecard"]``), so a report quoting "RiskScore is 75.4/100
+    (contained) at coverage 0.45" is quoting what the run itself supplied - not
+    fabricating. Until 2026-09-27 the verifier grounded only against
+    ``tool_evidence.json`` leaves, so every engine-composite line came back
+    UNSUPPORTED ("no leaf evidence") by construction: MSFT 2026-09-27 carried 11
+    such rows across all four stems. The card is the same run's artefact, so it
+    is evidence for its own numbers; ordinary numeric claims still require leaf
+    evidence.
+    """
+    card_path = Path(report_dir) / "run_card.json"
+    if not card_path.exists():
+        return []
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(card, dict):
+        return []
+    engines: dict = {}
+    scorecard = card.get("quant_scorecard")
+    if isinstance(scorecard, dict) and isinstance(scorecard.get("engines"), dict):
+        engines = scorecard["engines"]
+    out: list[str] = []
+    for key, label in _ENGINE_LABELS.items():
+        block = engines.get(key)
+        if not isinstance(block, dict):
+            continue
+        score, band, coverage, state = (
+            block.get("score"),
+            block.get("band"),
+            block.get("coverage"),
+            block.get("state"),
+        )
+        if score is None:
+            out.append(f"{label}: not measured (state {state or 'NA'})")
+            continue
+        bits = [f"score {score}"]
+        if band:
+            bits.append(f"band {band}")
+        if coverage is not None:
+            bits.append(f"coverage {coverage}")
+        out.append(f"{label}: " + ", ".join(bits))
+    trade = card.get("trade_score")
+    if isinstance(trade, dict) and trade.get("score") is not None:
+        bits = [f"score {trade['score']}"]
+        if trade.get("coverage") is not None:
+            bits.append(f"coverage {trade['coverage']}")
+        if trade.get("status"):
+            bits.append(f"status {trade['status']}")
+        out.append("TradeScore: " + ", ".join(bits))
+    return out
+
+
+def _run_card_lines(evidence: dict) -> list[str]:
+    """The run-card evidence lines carried on ``evidence`` (empty when absent)."""
+    rows = evidence.get(_RUN_CARD_EVIDENCE_KEY)
+    if not isinstance(rows, list):
+        return []
+    return [str(r) for r in rows if r]
+
+
 def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = None) -> str:
     """Compact per-stem rendering of one analyst's evidence leaves.
 
@@ -571,6 +658,9 @@ def _evidence_digest(evidence: dict, analyst_key: str, cap_chars: int | None = N
     reference = _reference_price_line(evidence, analyst_key)
     if reference:
         lines.append(f"- reference_price [ok]: {reference}")
+    run_card = _run_card_lines(evidence)
+    if run_card:
+        lines.append("- run_card [ok]: " + "; ".join(run_card))
     if isinstance(leaves, list):
         for leaf in leaves:
             if not isinstance(leaf, dict):
@@ -718,11 +808,17 @@ claim:
 Rules:
 - Base every verdict on the evidence block ONLY. Do not use outside
   knowledge to rescue or condemn a claim.
-- Two lines in the block are prompt-level facts rather than tool leaves and
+- Three lines in the block are prompt-level facts rather than tool leaves and
   are equally valid evidence: `instrument_identity` (the ticker's resolved
-  company/fund name, sector and listing venue) and `reference_price` (the
-  run's price basis, with the intraday FORMING flag). A report naming its
-  venue or its price basis is quoting what it was given, not fabricating.
+  company/fund name, sector and listing venue), `reference_price` (the
+  run's price basis, with the intraday FORMING flag) and `run_card` (the
+  run's own engine scorecard: each engine's score, band and coverage, or
+  "not measured"). A report naming its venue, its price basis, or an engine
+  composite it was handed (e.g. "RiskScore is 75.4/100 (contained) at
+  coverage 0.45", "EventState is NA") is quoting what it was given, not
+  fabricating - cite `run_card` as the supporting evidence. The exemption
+  covers the engine's own composites only: an ordinary figure the leaves
+  lack stays UNSUPPORTED.
 - A number must match an evidence number (same value, sign matters).
   If the report says a figure the evidence lacks, that claim is
   UNSUPPORTED even if the rest sounds plausible.
@@ -1791,6 +1887,30 @@ def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     return legs[ordinal]
 
 
+def _slash_label_cell_legs(line: str, m: re.Match) -> list[str]:
+    """The label cell's ``/``-legs when the match sits in a multi-leg cell.
+
+    A row like ``| Scenario DCF bear/base/bull | $97.82 / $123.26 / $167.27 |``
+    names three metrics in one cell. ``_table_cell_pair_value`` binds the leg the
+    label occupies when it can; when it declines, the generic label->value window
+    reader below has no notion of legs and takes the value cell's FIRST figure -
+    which read the scenario DCF's BEAR $97.82 as the ``bull`` value on MSFT
+    2026-09-27. When the pair reader declines on a multi-leg label cell, the row
+    yields NO value: a wrong leg is worse than a missing one.
+    """
+    if "|" not in line:
+        return []
+    pos = 0
+    for cell in line.split("|"):
+        if pos <= m.start() and m.end() <= pos + len(cell):
+            if _DOLLAR_RE.search(cell):
+                return []  # the label cell has its own figure: normal path
+            legs = _table_legs(cell)
+            return legs if len(legs) >= 2 else []
+        pos += len(cell) + 1
+    return []
+
+
 def _extract_metric_values(
     text: str, regex: re.Pattern, label: str = "", *, with_lines: bool = False
 ) -> list:
@@ -1847,6 +1967,10 @@ def _extract_metric_values(
                     continue
                 out.append(slash_pair)
                 lines_out.append(line)
+                continue
+            # A multi-leg label cell whose pair reader declined (see
+            # _slash_label_cell_legs): no value rather than the wrong leg.
+            if _slash_label_cell_legs(line, m):
                 continue
             # Skip a label immediately followed by a parenthetical multiplier
             # like "T1(2R)" — 2R is a reward multiple, not the metric's value.
@@ -2389,8 +2513,12 @@ _TOTAL_DEBT_EQ_RE = re.compile(
 _TOTAL_DEBT_RE = re.compile(
     r"(?i)total\s+debt\b[^\n\d$]{0,14}\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
+# The separator class must NOT swallow a sign: `Net debt **-19,820,000,000**`
+# captured +19.82 because `-` sat inside it, so the sign-aware correction below
+# never fired and a correct net-CASH line read as a contradiction on MSFT
+# 2026-09-27. The sign is its own group now, applied to whichever figure wins.
 _NET_FIGURE_RE = re.compile(
-    r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*\-]*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
+    r"(?i)net\s+(debt|cash)\b[\s:;,|=/~*]*([+\-]?)\s*\**\s*\$?\s*([\d][\d,]*(?:\.\d+)?)\s*([KMBTkmbt]?)(?![A-Za-z])"
 )
 # A line that names a quoted net row as WRONG rejects it as the report's own
 # figure (the row is quoted to be corrected, not asserted). Narrow on purpose:
@@ -2442,7 +2570,11 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
         if _NET_FIGURE_REJECT_RE.search(line):
             continue
         pair = _table_cell_pair_value(line, m)
-        net_matches.append((m, pair[0] if pair else m.group(2), pair[1] if pair else None))
+        sign = -1.0 if m.group(2) == "-" else 1.0
+        if pair is not None:
+            net_matches.append((m, pair[0], sign * pair[1]))
+        else:
+            net_matches.append((m, f"{m.group(2)}{m.group(3)}", None))
     if not net_matches:
         return []
     debts = [x for x in net_matches if x[0].group(1).lower() == "debt"]
@@ -2453,7 +2585,7 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
     quoted = (
         net_value
         if net_value is not None
-        else _money_billions(net_raw, net_m.group(3))
+        else _money_billions(net_raw, net_m.group(4))
     )
     if debt is None or quoted is None:
         return []
@@ -3518,6 +3650,25 @@ _SMA_LABEL_RE = re.compile(r"\b(?:10|20|50|200)\s*-?\s*(?:day\s*)?SMA\b", re.I)
 _PCT_TOKEN_RE = re.compile(r"[+-]?\d+(?:\.\d+)?%")
 
 
+def _sma_label_ordinal(cell: str, offset: int, labels: list) -> int:
+    """Which SMA the match names inside a label cell (0 = not a multi-leg cell).
+
+    Two shapes share one cell. ``50-SMA / 200-SMA`` writes the suffix on every
+    leg, so the regex finds one match per leg. ``50 / 200 SMA`` writes it once,
+    on the LAST leg, with the earlier legs implied — read as a single 200-SMA
+    label, the row's value cell gave its FIRST percentage (the 50-SMA's +8.6%)
+    to the 200-SMA (MSFT 2026-09-27). Both shapes resolve to the leg ordinal.
+    """
+    legs = _table_legs(cell)
+    if len(legs) < 2:
+        return 0
+    if len(labels) > 1:
+        return sum(1 for lm in labels if lm.start() <= offset)
+    if _SMA_LABEL_RE.search(legs[-1]):
+        return len(legs)
+    return 0
+
+
 def _sma200_percent_values(report_text: str) -> list[str]:
     """The % figures the report ties to the 200-SMA, table rows included.
 
@@ -3545,10 +3696,8 @@ def _sma200_percent_values(report_text: str) -> list[str]:
                          if len(_PCT_TOKEN_RE.findall(c)) >= 2),
                         None,
                     )
-                    if len(labels) > 1 and value_cell is not None:
-                        ordinal = sum(
-                            1 for lm in labels if lm.start() <= m.start() - pos
-                        )
+                    ordinal = _sma_label_ordinal(cell, m.start() - pos, labels)
+                    if ordinal and value_cell is not None:
                         pcts = _PCT_TOKEN_RE.findall(value_cell)
                         if 1 <= ordinal <= len(pcts):
                             out.append(pcts[ordinal - 1].rstrip("%"))
@@ -3824,19 +3973,42 @@ _REPETITION_MIN_CHARS = 16
 
 
 def _repetition_loops(report_text: str) -> list[str]:
-    """Lines repeated verbatim at least ``_REPETITION_MIN`` times.
+    """Lines repeated verbatim at least ``_REPETITION_MIN`` times, same context.
 
     Table rules and short cells are excluded: a markdown separator repeated
     four times is a table, not a stuck decoder. Returns one sample per loop.
+
+    **The context must repeat too.** A per-component scorecard template
+    (``withheld: 0 of 1 components present, floor is 1``) is printed once per
+    SIBLING component under a different label line, and counting text alone
+    reported the news stem's six rows as a decoder loop on MSFT 2026-09-27. A
+    stuck decoder repeats the line with the same surrounding text (HPE
+    2026-09-14 repeated one ``Inventory series:`` line ten times), so a repeat
+    whose preceding non-empty line differs across occurrences is a template,
+    not a loop.
     """
     counts: dict[str, int] = {}
+    contexts: dict[str, set] = {}
+    prev = ""
     for ln in report_text.splitlines():
         s = ln.strip()
-        if len(s) < _REPETITION_MIN_CHARS or set(s) <= set("-|: _"):
+        if not s:
             continue
-        counts[s] = counts.get(s, 0) + 1
+        if len(s) >= _REPETITION_MIN_CHARS and set(s) - set("-|: _"):
+            counts[s] = counts.get(s, 0) + 1
+            if prev:
+                # Only a real preceding line is context: the first occurrence's
+                # empty predecessor is not, or a back-to-back repeat (HPE
+                # 2026-09-14's four `Inventory series:` lines) would look like a
+                # template under two different contexts.
+                contexts.setdefault(s, set()).add(prev)
+        prev = s
     return sorted(
-        (s for s, n in counts.items() if n >= _REPETITION_MIN),
+        (
+            s
+            for s, n in counts.items()
+            if n >= _REPETITION_MIN and len(contexts.get(s) or ()) < 2
+        ),
         key=lambda s: -counts[s],
     )
 
@@ -5087,6 +5259,11 @@ def verify_report_dir(
                 evidence = json.load(fh)
         except (OSError, ValueError) as exc:
             logger.warning("report_verifier: cannot read %s: %s", evidence_path, exc)
+    if not isinstance(evidence, dict):
+        evidence = {}
+    # The run's engine scorecard is evidence for its own numbers - the reports
+    # are handed it by report_hygiene.engine_score_block and quote it back.
+    evidence[_RUN_CARD_EVIDENCE_KEY] = _run_card_engine_lines(Path(report_dir))
 
     as_of = _report_as_of(report_dir)
     stem_succeeded = 0

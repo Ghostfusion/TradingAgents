@@ -341,9 +341,27 @@ accept a caller-supplied mapping today.
 per-symbol path), MF-8 (`risk_score`/`sentiment_score` panel path — structurally
 blocked by data shape: position/book-level and per-symbol vendor reads), MF-6 (the
 momentum-redundancy reduction, which edits a declared owner table and needs the
-owner's signature), PLAN-5 (a gate-on tree on which `report_verify.py` and
-`verify_sweep.py` both exit 0 — needs a full gate-on run, which is an ask-first
-action), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung).
+owner's signature), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung).
+
+**PLAN-5 met 2026-09-27.** The gate-on tree `reports/MSFT_20260927_001700`
+(`batch.py --symbols MSFT --date 2026-09-25`, exit 0, ~53 min) reads
+`report_verify.py` **0 CONFIRMED** on `CONFIRMED` (four stems `PASS`,
+`sentiment` `FLAG`) and `verify_sweep.py` **148 GROUNDED / 0 CONFIRMED / 1
+SUSPECT** — against **147 / 4 CONFIRMED / 11 SUSPECT** before it. All fifteen
+adjudicated to the checker, not the report: four anchor false positives (a
+multi-leg label cell binding the bear leg to `bull`; `_NET_FIGURE_RE`'s
+separator class swallowing the minus sign, so a correct `Net debt
+-19,820,000,000` line read as a contradiction; `50 / 200 SMA`'s shared label
+cell taking the value cell's first `%`; `_repetition_loops` counting text with
+no context) plus one evidence-model gap — `engine_score_block` renders the run's
+own `quant_scorecard` into every prompt and the analyst quotes it back, so
+grounding only against `tool_evidence.json` leaves made every engine line
+UNSUPPORTED **by construction**. The run card is now a third prompt-level
+evidence source beside `instrument_identity`/`reference_price`. The one
+remaining SUSPECT is **pre-existing and correct**: `sentiment.md:14` calls the
+leaf's 16-ticker list a 15-ticker portfolio, an analyst count error in a frozen
+report (recorded in `docs/design_report_verification_llm.md`'s 2026-09-27
+round).
 
 | id | Item | Source | D | I | Verification |
 | --- | --- | --- | --: | --: | --- |
@@ -357,7 +375,7 @@ action), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung).
 | MF-8 | Give `risk_score`/`sentiment_score` a panel path, or record permanently that their inputs are book- and vendor-read-only | `MEASUREMENT_FINDINGS.md` §4 | 4 | 3 | panel rows, or an owner sentence closing it |
 | TECH-24 | Measure the pairwise correlation of `technical_score`'s nine category sub-scores over the panel (50% of the weight sits on correlated inputs) | `TechnicalScore.md` §6.5 | 4 | 3 | a reported correlation matrix |
 | FUND-24 | Promote the four sub-score weights and the composite out of `RESEARCH_ONLY` via the evidenced ladder | `FundamentalScore.md` §3.1 | 5 | 5 | a measured vector + OOS evidence → `VALIDATED` |
-| PLAN-5 | Land a gate-on tree on which `report_verify.py` and `verify_sweep.py` both exit 0 on `CONFIRMED` (Phase A's last clause) | `IMPLEMENTATION_PLAN.md` §9 | 3 | 3 | both scripts exit 0 |
+| PLAN-5 | Land a gate-on tree on which `report_verify.py` and `verify_sweep.py` both exit 0 on `CONFIRMED` (Phase A's last clause) | `IMPLEMENTATION_PLAN.md` §9 | 3 | 3 | **MET 2026-09-27** on `reports/MSFT_20260927_001700`: 0 `CONFIRMED`, 1 pre-existing-and-correct `SUSPECT` (§6.1) |
 | RLW-4 | Measure, validate and promote the composite's vector so `Movement` can leave `UNAVAILABLE` (the store and the rule are built; no run reaches `VALIDATED`) | `ResearchLayerWiring.md` §4.3/§7.1 | 4 | 3 | `scorecard_status(...)["movement"] != "UNAVAILABLE"` |
 
 ---
@@ -588,7 +606,7 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | RISK-4 / PLAN-7 | 1 | an assignment at a `BookState(...)` site | `../TradingExecution/signald/risk/state.py:82` still declares `net_beta: float \| None = None`; **no construction site passes it** (cli / engine / gates / harness / tests). Executor-side |
 | FUND-8 | 1 | `normalized_cycle_fcf` gains `std` | the yield and stability legs are built and rendered (`ratios.py:692-694`), but `cycle_dcf.normalized_cycle_fcf:23` still returns `{median,min,max,mean,n}` with **no `std`** |
 | FUND-21 | 1 | the leaf passes both; VS carries the factor | VS carries it through the engine-derived route (`fundamental_score.py:750`); **no live caller passes `dcf_upside`/`dcf_confidence_value`** (`analysis_tools.py:5484`, `reporting.py:1066`, `quant_scorecard.py:249`) |
-| PLAN-3 | 1 | a grep for the key **and** a run's `research_decision.json` | the key and its validation exist (`execution_contract.py:244/308/393`) and the grep passes; **no run artifact carries the field** — every tree in `reports/` predates it |
+| PLAN-3 | 1 | a grep for the key **and** a run's `research_decision.json` | **closed 2026-09-27**: `reports/MSFT_20260927_001700/research_decision.json:193` carries `"opportunity_score_reason": "null by decision, not by failure: …"` beside `opportunity_score: null`. Every other tree in `reports/` predates the field, which is what kept this row open |
 | NEWS-15 | 1 | an owner sentence, or the flags flipped under a labelled dark-launch diff | no sentence exists; `.env` has three of the four flags on and `enable_news_relevance` off, with no labelled diff. **Owner decision** |
 | TECH-14 | 2 | a thrust producer over the panel | the Zweig thrust exists (`technical_depth.zweig_breadth_thrust:400`) and the breadth leaf prints it; it is **not a `technical_score` component** |
 | TECH-7 / TECH-12 | 2 | a BBW producer + percentile | done; the **Keltner/Bollinger squeeze-momentum leg** (§109/§110) has no producer at all |
@@ -623,10 +641,10 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | MF-8 | 3 | panel rows, or an owner sentence closing it | neither |
 | FUND-24 | 3 | a measured vector + OOS evidence → `VALIDATED` | `STATUS_RESEARCH_ONLY`; nothing promoted |
 | RLW-4 | 3 | `scorecard_status(...)["movement"] != "UNAVAILABLE"` | no run reaches `VALIDATED`; `Movement` stays `UNAVAILABLE` |
-| PLAN-5 | 3 | both scripts exit 0 | **in flight** — a gate-on tree was launched 2026-09-26; the two verifiers run on it |
+| PLAN-5 | 3 | both scripts exit 0 | **MET 2026-09-27** against §9's own per-tool bar (`report_verify` → exit 0 **on `CONFIRMED`**; `verify_sweep` → **no new `SUSPECT`**) on `reports/MSFT_20260927_001700`: **0 `CONFIRMED`** both ways, **148 GROUNDED**, and the single `SUSPECT` was already flagged in the pre-fix run. Both processes still *exit* 1 — the sweep's exit covers the `SUSPECT` class and the verifier's covers any `FLAG` — and the one flag is a **correct detection** (a frozen report's own 16-into-15 ticker miscount), so a literal exit 0 would need that report regenerated, not the checker loosened. See §6.1 |
 | RLW-2 | 4 | no `_call_engine` from the block | the run path reads the snapshot (`snapshot=` from all four analysts), but `report_hygiene.py:177` retains the `_call_engine` **fallback** — the literal cell is unmet, and the block's own comment calls that fallback "exactly what RLW-2 removed from the run path" |
 | NEWS-1 | 4 | the 20-weight component stops printing NA | `news_score()` accepts `materiality` (`:906`) and declares it caller-supplied; **every call site passes none** (`analysis_tools.py:7209`, `reporting.py:1620`, `quant_scorecard.py:368`) |
-| the two mislabelled producer strings | 4 | the strings match the producers | `crowd_ratio`'s string is fixed; the `persistence` declaration still cites `sentiment.decayed_weight:91` **while its own note says it no longer cites that half** — self-contradictory (`news_score.py:194-201`) |
+| the two mislabelled producer strings | 4 | the strings match the producers | `crowd_ratio`'s string is fixed; the `persistence` declaration still cites `sentiment.decayed_weight:194` **while its own note says it no longer cites that half** — self-contradictory (`news_score.py:194-201`) |
 
 **Phase 0's two residual nits** (outside the rows §3 names): `CompositeTradeScore.md:240` still reads
 "the N-deflation question is open (decision 12)" with no marker — the same dangling reference §3.1

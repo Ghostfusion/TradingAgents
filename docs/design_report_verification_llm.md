@@ -35,7 +35,11 @@ qualitative claims, causality wording, or "vendor never called" phrasing.
 
 A second LLM pass, post-run, per report:
 
-- **Input**: the finished markdown report + its `tool_evidence.json` leaves.
+- **Input**: the finished markdown report + its `tool_evidence.json` leaves,
+  plus three **prompt-level facts** the report can only have got from its own
+  prompt and which no leaf prints: `instrument_identity` and `reference_price`
+  (since 2026-09-15/16) and `run_card` (the run's own engine scorecard, since
+  2026-09-27). Ordinary numeric claims still require a leaf.
 - **Job**: flag sentences that assert facts not present in, or contradicting,
   the evidence block. Output a short verdict list: `GROUNDED | UNSUPPORTED |
   CONTRADICTED`, one per claim, NO rewriting.
@@ -298,6 +302,47 @@ placeholder-masked digits, markup-only responses (40+ strips in the two re-runs)
 and cap-forced empty turns (9 journal entries). The guards now convert all of
 those into either a repaired report or an explicit unavailable notice, and the
 regenerated trees (IEI/MSFT/VTV, 12 stems) came out clean on every class.
+
+## Verification round (2026-09-27 live, MSFT_20260927_001700 — 5 stems)
+
+The first tree with the score gates on (`batch.py --symbols MSFT --date
+2026-09-25 --workers 1 --depth deep`, exit 0): 149 claims, **148 GROUNDED, 1
+UNSUPPORTED, 0 CONFIRMED** (fundamentals 42 / market 45 / news 36 / sentiment
+26). `report_verify.py` reads four stems `PASS` and `sentiment` `FLAG`;
+`verify_sweep.py` reports `confirmed: 0, suspect: 1`.
+
+**Before the fixes below the same tree read 147 GROUNDED / 4 CONFIRMED / 11
+SUSPECT.** All fifteen claims adjudicated to the **checker** (rule 8's
+verifier-noise class), in two groups:
+
+- **Four anchor false positives.** (1) A multi-leg label cell handed its value
+  cell's FIRST figure to a later leg: `| Scenario DCF bear/base/bull | $97.82 /
+  … / $167.27 |` read 97.82 (the bear) as the `bull` value. (2)
+  `_NET_FIGURE_RE`'s separator class swallowed the minus sign, so **`Net debt
+  -19,820,000,000`** captured +19.82 and the sign-aware correction never fired -
+  a *correct* net-cash line read as a contradiction. (3) `50 / 200 SMA` is ONE
+  label cell naming two legs; the reader took the value cell's first `%` as the
+  200-SMA distance. (4) `_repetition_loops` counted repeated text with no
+  context, so five per-component `withheld: …` rows under five different label
+  lines read as a decoder loop.
+- **One evidence-model gap, eleven claims.** `report_hygiene.engine_score_block`
+  renders the run's `quant_scorecard` into every analyst prompt and the analyst
+  quotes it back, but the verifier grounded only against `tool_evidence.json`
+  leaves - so every engine line (`RiskScore 75.4 (contained, coverage 0.45)`,
+  `TradeScore 65.45`, `EventState NA - …`) was UNSUPPORTED **by construction**.
+  The run card now joins `instrument_identity`/`reference_price` as the third
+  prompt-level evidence source, its decimals feed the numeric anchor, and a
+  tree without a card digests exactly as before.
+
+**The one SUSPECT is real, and it is not new.** `sentiment.md:14` says the
+r/stocks post "How is my starter setup" (2026-09-24) "lists MSFT inside a
+**15-ticker** starter portfolio"; the `reddit_posts` leaf's excerpt enumerates
+**16** (SPY, TSM, CAT, GOOGL, NVDA, JNJ, LMT, LLY, RTH, O, GDX, MSFT, BND,
+AIRR, VEA, VSS). The same claim was already flagged in the pre-fix run, and the
+leaf is right, so this is an **analyst count error in a frozen report** -
+nothing in the engine produced it. Recorded, not fixed: the guard that would
+prevent the class is a prompt rule against restating counts no leaf prints
+(this one prints none), a behaviour change this round did not take.
 
 ## Open items (state 2026-09-16)
 
