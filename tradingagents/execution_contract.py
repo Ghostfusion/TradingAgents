@@ -1,4 +1,4 @@
-"""One owner for the research -> execution artifact contract (v1.1.0).
+"""One owner for the research -> execution artifact contract (v1.2.0).
 
 The executor (``TradingExecution/signald/contracts.py``) reads
 ``research_decision.json`` as a **versioned envelope**: a declared
@@ -12,6 +12,7 @@ Three boundary facts drive it (evidence in the execution repo, plan section 0):
 
 * a version-less artifact is read as 1.0.0 and still ingests, so declaring
   ``1.1.0`` is what makes provenance, expiry and the body hash checkable;
+  ``1.2.0`` adds the ``net_beta`` envelope field (RISK-4/PLAN-7);
 * the executor reserves ``trade_permission`` / ``binding_gate`` for its own
   gate, so the advisory label this repo emits is named ``binding_constraint``;
 * a timestamp without a UTC offset is ambiguous and is **rejected**
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -36,7 +38,7 @@ from typing import Any
 
 # Kept in lockstep with the vendored copy of the executor's published schema
 # (contracts/research_decision.v1.schema.json), which a test asserts against.
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 SERVICE = "tradingagents"
 
 #: The last hour of a US session; an artifact must not be actionable after the
@@ -265,6 +267,35 @@ def opportunity_score() -> float | None:
     return None
 
 
+#: Producer-owned reason for the ``null`` ``net_beta`` slot (RISK-4/PLAN-7).
+#: One deterministic constant, the same shape as ``OPPORTUNITY_SCORE_REASON``:
+#: the slot is empty by decision (no producer), not by a failure that varies.
+#: It states an absence, never an error.
+NET_BETA_REASON = (
+    "null by decision, not by failure: the engine's run state carries no book "
+    "beta. The engine's book for the risk path is the configured risk basket "
+    "(risk_basket_tickers/weights), and no producer computes per-name betas for "
+    "it - book_risk.net_beta is fed only by the advisory cross-section momentum "
+    "screen (cross_section.momentum_book), a hypothetical long/short panel book "
+    "that is not the engine's book and never enters final_state. A fabricated "
+    "beta is worse than a missing one in a contract the executor fails closed on."
+)
+
+
+def net_beta(final_state: dict) -> float | None:
+    """Always ``None`` today - deliberately (RISK-4/PLAN-7).
+
+    ``book_risk.net_beta`` has exactly one caller (``cross_section.momentum_book``
+    via the advisory ``get_cross_section_momentum`` tool) and it computes a
+    hypothetical long/short quintile book over a caller/peer panel - never the
+    engine's own book, and it never reaches ``final_state``. There is therefore
+    no producer to read from, so this returns ``None`` and the artifact ships
+    the producer-owned ``NET_BETA_REASON`` beside it under
+    ``net_beta_reason``. ``None`` means unknown, never a flat ``0.0``.
+    """
+    return None
+
+
 def confidence_of(final_state: dict) -> float | None:
     """The PM's stated confidence (0..1), or ``None`` when unusable.
 
@@ -288,13 +319,13 @@ def envelope_fields(
     effective: date,
     now: datetime | None = None,
 ) -> dict:
-    """The v1.1.0 additive fields, from state only (no new computation).
+    """The v1.1.0/1.2.0 additive fields, from state only (no new computation).
 
     ``produced_at``/``expires_at`` are always UTC-aware; ``producer`` and the
     idempotency key are minted per artifact; the advisory blocks are ``None``
-    when their source did not run. ``opportunity_score`` is always ``null`` and
-    always accompanied by its ``opportunity_score_reason`` field
-    (``OPPORTUNITY_SCORE_REASON``).
+    when their source did not run. ``opportunity_score`` and ``net_beta`` are
+    always ``null`` and always accompanied by their producer-owned reason field
+    (``OPPORTUNITY_SCORE_REASON`` / ``NET_BETA_REASON``).
     """
     produced = now or datetime.now(timezone.utc)
     if produced.tzinfo is None:  # pragma: no cover - callers pass aware stamps
@@ -306,6 +337,8 @@ def envelope_fields(
         "producer": producer_block(run_id),
         "opportunity_score": opportunity_score(),
         "opportunity_score_reason": OPPORTUNITY_SCORE_REASON,
+        "net_beta": net_beta(final_state),
+        "net_beta_reason": NET_BETA_REASON,
         "confidence": confidence_of(final_state),
         "risk_context": risk_advisory(final_state),
     }
@@ -384,6 +417,28 @@ def integrity_problems(raw: dict, *, now: datetime) -> list[dict]:
             bad(
                 "invalid_opportunity_score",
                 f"opportunity_score {score!r} is outside 0..100",
+            )
+
+    # ``net_beta`` (RISK-4/PLAN-7): unbounded in sign and magnitude (it is a
+    # weighted sum of betas), so only number-ness and finiteness are checkable.
+    beta = raw.get("net_beta")
+    if beta is not None:
+        if isinstance(beta, bool) or not isinstance(beta, (int, float)):
+            bad("invalid_net_beta", f"net_beta {beta!r} is not a number")
+        elif not math.isfinite(float(beta)):
+            bad("invalid_net_beta", f"net_beta {beta!r} is not finite")
+
+    if "net_beta" in raw:
+        beta_reason = raw.get("net_beta_reason")
+        if beta_reason is None:
+            bad(
+                "missing_field",
+                "net_beta_reason is required when net_beta is present",
+            )
+        elif not isinstance(beta_reason, str) or not beta_reason.strip():
+            bad(
+                "invalid_net_beta_reason",
+                f"net_beta_reason {beta_reason!r} is not a non-empty string",
             )
 
     # The producer-owned reason beside the score slot (PLAN-3): the slot is

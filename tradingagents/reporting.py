@@ -591,8 +591,8 @@ def write_research_decision(
     Every unproducible field is ``null`` — the executor fails closed on anything
     it cannot validate. Advisory; never gates; never breaks a report write.
 
-    Declares ``schema_version 1.1.0`` and the envelope that version requires
-    (expiry, producer, idempotency key, body hash); the rules live in
+    Declares ``execution_contract.SCHEMA_VERSION`` (1.2.0) and the envelope it
+    requires (expiry, producer, idempotency key, body hash); the rules live in
     ``tradingagents.execution_contract``, the single owner shared with the report
     verifier, and the acceptance tests are in
     ``docs/execution_v1_emitter_plan.md``. ``now`` is injectable for tests.
@@ -710,7 +710,7 @@ def write_research_decision(
         "binding_reason": binding_reason or None,
         "disclosure": {"sources_used": sources_used, "sources_empty": sources_empty},
     }
-    # The v1.1.0 envelope (expiry, provenance, idempotency key) and both hashes
+    # The v1.1.0+ envelope (expiry, provenance, idempotency key, net_beta) and both hashes
     # are attached immediately before the write: every field above is final by
     # now, and the executor recomputes the body, so post-editing a sealed
     # artifact would dead-letter it. run_id is the report directory's name, which

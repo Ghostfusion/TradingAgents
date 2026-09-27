@@ -2188,7 +2188,7 @@ def test_verify_report_dir_carries_the_debate_block(tmp_path):
 
 
 def _sealed_decision(**overrides):
-    """A conformant 1.1.0 artifact; overrides are applied before sealing.
+    """A conformant 1.2.0 artifact; overrides are applied before sealing.
 
     The artifact is built from TODAY's effective date with ``produced_at``
     pinned to that session's start. A fixture with a hard-coded historical date
@@ -2233,7 +2233,7 @@ def test_envelope_block_is_ok_for_a_conformant_artifact(tmp_path):
 
     out = R._envelope_integrity(tmp_path)
     assert out["problems"] == []
-    assert out["version"] == "1.1.0" and out["strict"] is True
+    assert out["version"] == "1.2.0" and out["strict"] is True
 
 
 def test_envelope_flags_a_missing_expiry(tmp_path):

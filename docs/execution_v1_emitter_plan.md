@@ -48,7 +48,8 @@ interaction is written down here before either side ships.
 | `direction` ∈ {add, buy, hold, reduce, sell, exit, none}; `action` ∈ {BUY, HOLD, REDUCE, EXIT, NONE}; `data_quality` ∈ {fresh, stale, partial, unknown}; `sleeve` ∈ {swing, intraday} | `invalid_enum` | closed enums, never coerced |
 | `direction` or `rating` must resolve to an action | `unresolvable_action` | same mapping as `RATING_TO_DIRECTION` |
 | `opportunity_score`, when present, is a number in **0..100** | `invalid_opportunity_score` | producer-owned |
-| **v1.1 only:** `expires_at`, `idempotency_key`, `producer`, `artifact_sha256` present | `missing_field` | |
+| `net_beta`, when present, is a **number** (signed, unbounded) | `invalid_net_beta` | producer-owned; `null` = unknown, never `0.0` |
+| **v1.1+ only:** `expires_at`, `idempotency_key`, `producer`, `artifact_sha256` present | `missing_field` | |
 | `idempotency_key` is a **UUIDv4** | `invalid_idempotency_key` | |
 | `producer` is an object with a non-empty `service` | `invalid_producer` | |
 | `artifact_sha256` matches the body (recipe §2.2) | `artifact_hash_mismatch` | |
@@ -62,18 +63,20 @@ Idempotency at the boundary: the inbox keys on `{producer.service}:{producer.run
 
 ---
 
-## 2. What to emit — v1.1.0
+## 2. What to emit — v1.1.0 / v1.2.0
 
 ### 2.1 Additive fields (this repo's current keys are all retained)
 
 ```json
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "idempotency_key": "<uuid4>",
   "produced_at": "2026-09-12T13:45:02+00:00",
   "expires_at": "2026-09-12T20:00:00+00:00",
   "producer": {"service": "tradingagents", "git_sha": "1cbadba", "run_id": "<uuid4>"},
   "opportunity_score": 42.0,
+  "net_beta": null,
+  "net_beta_reason": "null by decision, not by failure: the engine's run state carries no book beta ...",
   "risk_context": {"regime": "risk-on", "research_cvar_975_1d_pct": 1.1,
                    "book_drawdown": 0.0724, "drawdown_limit": 0.10,
                    "single_cvar": 0.0483, "cvar_budget_pct": 0.03,
@@ -101,6 +104,7 @@ not add one).
 | Field | Owner | Rule |
 |---|---|---|
 | `opportunity_score` | **producer (this repo)** | 0..100, "how attractive is this idea on its own merits" |
+| `net_beta` (v1.2.0) | **producer (this repo)** | signed book beta `sum(w_i*beta_i)`; `null` (with `net_beta_reason`) while no producer supplies it — the executor stores it on `BookState.net_beta`, `None` = unknown |
 | `confidence`, `thesis`, `rationale`, `invalidations`, `disclosure`, `risk_context` | producer | `risk_context` is advisory only: the executor records it and never reads a number out of it |
 | `binding_constraint` (renamed), `action_basis`, `binding_reason` | producer | advisory labels that explain the *research* verdict |
 | `sleeve` | **executor router** | do not set it. The router always routes research to `swing`, and a non-`swing` value is refused and quarantined |
@@ -231,6 +235,16 @@ R1 (the version bump), so the two never coexist on the wire:
    name is also the human-traceable one.
 5. **Vendored schema location** — `contracts/research_decision.v1.schema.json` at the repo root, byte-identical
    to the executor's copy, diffed by a test that skips when the sibling repo is absent.
+
+6. **`net_beta` source (RISK-4/PLAN-7, 2026-09-27)** — **`null`**, deliberately. The owner scoped the field as
+   a new envelope key (beside `producer`/`body_sha256`, never inside `risk_advisory`) and a MINOR bump to
+   `1.2.0`. Discovery found no producer: the engine's book for the risk path is the configured risk basket
+   (`risk_basket_tickers`/`weights`), and no producer computes per-name betas for it — `book_risk.net_beta` is
+   fed only by the advisory cross-section momentum screen (`cross_section.momentum_book` via
+   `get_cross_section_momentum`), a hypothetical panel book that is not the engine's book and never enters
+   `final_state`. So the slot ships `null` with `execution_contract.NET_BETA_REASON` beside it, exactly as
+   `opportunity_score` does; the executor stores it on `BookState.net_beta` (`None` = unknown, never `0.0`).
+   Naming the missing producer is the blocker, not a fabricated number: the executor fails closed.
 
 Also decided: `binding_gate` → `binding_constraint` (§3 R2) shipped **in the same batch** as the version bump,
 so the two never coexisted on the wire; `confidence` travels only when the PM's value validates as 0..1

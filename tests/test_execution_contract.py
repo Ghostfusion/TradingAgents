@@ -1,4 +1,4 @@
-"""Acceptance tests T1-T6 for the research -> execution envelope (v1.1.0).
+"""Acceptance tests T1-T6 for the research -> execution envelope (v1.2.0).
 
 Hermetic: no network, no execution repo import. The vendored schema is the
 published interface (a copy by design - the two repos share a contract, not
@@ -289,6 +289,73 @@ def test_a_non_string_opportunity_score_reason_is_flagged(tmp_path):
 
     codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
     assert codes == ["invalid_opportunity_score_reason"]
+
+
+# --------------------------------------------------------------------------
+# T5b - the book beta is null by decision and explained (RISK-4/PLAN-7)
+# --------------------------------------------------------------------------
+def test_the_net_beta_is_null_with_its_reason(tmp_path):
+    # Discovery (2026-09-27): the engine's run state carries no book beta. The
+    # engine's book for the risk path is the configured risk basket, and no
+    # producer computes per-name betas for it - book_risk.net_beta is fed only
+    # by the advisory cross-section momentum screen, not the engine's book. So
+    # the slot is null by decision and ships its reason, never a fabricated 0.
+    doc = _emit(tmp_path)
+
+    assert doc["net_beta"] is None
+    assert doc["net_beta_reason"] == ec.NET_BETA_REASON
+
+
+def test_the_net_beta_reason_reads_as_a_decision_not_an_error():
+    reason = ec.NET_BETA_REASON
+
+    assert reason.strip() == reason and reason
+    assert "\n" not in reason
+
+
+def test_a_numeric_net_beta_passes_the_schema_and_the_verifier(tmp_path):
+    doc = _emit(tmp_path)
+    doc["net_beta"] = -0.42  # a book beta is signed and unbounded
+    ec.seal(doc)
+
+    assert _schema_problems(doc, SCHEMA) == []
+    assert ec.integrity_problems(doc, now=datetime.now(timezone.utc)) == []
+
+
+def test_a_non_number_net_beta_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc["net_beta"] = "high"
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["invalid_net_beta"]
+
+
+def test_a_non_finite_net_beta_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc["net_beta"] = float("inf")
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["invalid_net_beta"]
+
+
+def test_a_missing_net_beta_reason_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc.pop("net_beta_reason")
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["missing_field"]
+
+
+def test_a_non_string_net_beta_reason_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc["net_beta_reason"] = 0
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["invalid_net_beta_reason"]
 
 
 # --------------------------------------------------------------------------
