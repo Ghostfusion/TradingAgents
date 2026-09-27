@@ -70,13 +70,13 @@ assumed:
 | --- | --- | --- |
 | RSI | `swing.rsi:44` + `swing.rsi_band:123` | 45-70 is `strong`, >70 is `hot`, <40 is `broken` — a **band**, not a ramp |
 | Stochastic K/D | `technical_factors.stochastic_oscillator:197` | <20 is `oversold`, the dip read |
-| StochRSI | `technical_factors.stoch_rsi:373` | <0.2 is the entry |
-| RSI2 | `technical_factors.rsi2:405` | <10 is the buy |
-| Williams %R | `technical_factors.williams_r:428` | -80..-100 is oversold |
+| StochRSI | `technical_factors.stoch_rsi:374` | <0.2 is the entry |
+| RSI2 | `technical_factors.rsi2:406` | <10 is the buy |
+| Williams %R | `technical_factors.williams_r:429` | -80..-100 is oversold |
 | Bollinger %b | `value_dip.bollinger_pct_b:77` | <=0 is the dip, >1 is extended |
 | MFI | `technical_factors.mf_index:163` | >80 is overbought |
-| Elder thermometer | `technical_factors.elder_thermometer:648` | `quiet` (<0.8) is the good dip read |
-| Keltner %b | `technical_factors.keltner_channel:439` | mid-band is the read |
+| Elder thermometer | `technical_factors.elder_thermometer:649` | `quiet` (<0.8) is the good dip read |
+| Keltner %b | `technical_factors.keltner_channel:440` | mid-band is the read |
 | Support structure | `value_dip.support_structure:833` | *near* the 200-SMA is good, while `swing.trend_architecture:76` says *above* it is good — the same level, opposite signs, depending on the strategy |
 
 **Design consequence: the composite never maps a raw indicator through a ramp.**
@@ -118,7 +118,7 @@ Engine = TechnicalScore (owner's staged weights). Direction column: `+` = higher
 | Trend → golden-cross state | — | SCORABLE | `extended_indicators.golden_death_cross:55` | `golden`,`death`,`label` | + | bool/label | 2-bar crossover only (no "state" memory) |
 | Trend → ADX | — | SCORABLE | `technical_factors.adx:230` | `adx` | + (>25 strong) | 0-100 | no percentile basis |
 | Trend → DI+ / DI- | — | SCORABLE | `technical_factors.adx:230` | `di_plus`,`di_minus` | + (di+) | 0-100 | — |
-| Trend → Aroon up / down | — | SCORABLE | `technical_factors.aroon:667` | `aroon_up`,`aroon_down` | + (up) | 0-100 | Aroon OSCILLATOR not computed; a `verdict` string substitutes |
+| Trend → Aroon up / down | — | SCORABLE | `technical_factors.aroon:668` | `aroon_up`,`aroon_down` | + (up) | 0-100 | Aroon OSCILLATOR not computed; a `verdict` string substitutes |
 | Trend → Ichimoku cloud state | — | SCORABLE | `extended_indicators.ichimoku:80` | `above_cloud`,`label`,`cloud_leading` | + | bool/label | — |
 | Trend → regime trend score | (overlap) | SCORABLE | `regime_state.regime_trend:65` | `score` | + | (EMA20-EMA50)/ATR14, dimensionless | belongs to RegimeScore — naming clash per ground rule 3 |
 | Trend → trend filter | — | SCORABLE | `quant_baseline.trend_strength:28` | — | + | 0-1 | UNWIRED (tests only) |
@@ -149,26 +149,26 @@ Engine = TechnicalScore (owner's staged weights). Direction column: `+` = higher
 | **Price structure & support/resistance** | 12 | **PARTIAL** | no composite; `value_dip.support_structure:833` is the nearest (label) | `verdict` | + (at support) | label | no scale |
 | P/S-R → pivot points | — | SCORABLE | `technical_factors.pivot_points:290` | `p`,`r1`,`s1`,`r2`,`s2` | ± (level) | price | daily/weekly only; no distance-to-level metric |
 | P/S-R → support structure | — | PARTIAL | `value_dip.support_structure:833` | `verdict`,`distance_to_sma200_pct` | + | label / fraction | the 1.5-ATR branch is DEAD — see §3 |
-| P/S-R → volume profile POC / value area | — | PARTIAL | `technical_factors.volume_profile:826` | `poc`,`value_area_high`,`value_area_low` | ± (level) | price | value-area accumulator broken — see §3 |
-| P/S-R → Donchian channel | — | PARTIAL | `technical_factors.donchian_channel:467` | `upper`,`lower`,`mid` | ± | price | `breakout_up`/`breakout_dn` are hardcoded `None` — see §3 |
+| P/S-R → volume profile POC / value area | — | PARTIAL | `technical_factors.volume_profile:827` | `poc`,`value_area_high`,`value_area_low` | ± (level) | price | value-area accumulator broken — see §3 |
+| P/S-R → Donchian channel | — | PARTIAL | `technical_factors.donchian_channel:468` | `upper`,`lower`,`mid` | ± | price | `breakout_up`/`breakout_dn` are hardcoded `None` — see §3 |
 | P/S-R → Fibonacci levels | — | SCORABLE | `swing.fib_levels:295`, `value_dip.fib_retrace_entry:904` | `near_level`,`zone` | + (in golden zone) | price / fraction | — |
 | P/S-R → candlestick patterns | — | SCORABLE | `extended_indicators.scan_candlesticks:603` | `patterns{7 bools}` | ± | bool | no magnitude/strength |
 | P/S-R → Bollinger %b | — | SCORABLE | `value_dip.bollinger_pct_b:77` | `pct_b` | **NON-MONO** (<=0 dip / >1 extended) | ratio (unbounded) | — |
-| P/S-R → Keltner %b | — | SCORABLE | `technical_factors.keltner_channel:439` | `pct`,`mid` | ± | ratio | needs an ATR argument |
-| P/S-R → Supertrend line | — | SCORABLE | `technical_factors.supertrend:791` | `line`,`direction` | + (direction up) | price / label | single-bar read, not a trailing series |
+| P/S-R → Keltner %b | — | SCORABLE | `technical_factors.keltner_channel:440` | `pct`,`mid` | ± | ratio | needs an ATR argument |
+| P/S-R → Supertrend line | — | SCORABLE | `technical_factors.supertrend:792` | `line`,`direction` | + (direction up) | price / label | single-bar read, not a trailing series |
 | P/S-R → swing-low stop | — | SCORABLE | `swing.swing_low_stop:190` | `stop`,`risk_pct` | − (risk) | price / fraction | — |
 | **Volume & accumulation** | 10 | **PARTIAL** | no composite; 4 separate producers in mixed units | — | + | — | — |
 | Volume → volume ratio / RVOL | — | SCORABLE | `momentum.rvol:25` | `rvol` | + | ratio (x average) | window 50 default; `value_dip.trigger_candle:661` uses 20 |
-| Volume → Elder thermometer | — | SCORABLE | `technical_factors.elder_thermometer:648` | `ratio`,`heavy`,`quiet` | **NON-MONO** (`quiet` <0.8 is the good dip read) | ratio | — |
+| Volume → Elder thermometer | — | SCORABLE | `technical_factors.elder_thermometer:649` | `ratio`,`heavy`,`quiet` | **NON-MONO** (`quiet` <0.8 is the good dip read) | ratio | — |
 | Volume → A/D line | — | SCORABLE | `extended_indicators.accumulation_distribution:224` | value | + | share-volume units (unbounded) | cumulative sum, no normalisation |
-| Volume → Chaikin oscillator | — | SCORABLE | `technical_factors.chaikin_oscillator:732` | value | + | unbounded A/D units | scale hazard — see §3 |
+| Volume → Chaikin oscillator | — | SCORABLE | `technical_factors.chaikin_oscillator:733` | value | + | unbounded A/D units | scale hazard — see §3 |
 | Volume → Chaikin Money Flow | — | SCORABLE | `extended_indicators.chaikin_money_flow:263` | value | + (>=+0.1) | -1..1 | — |
-| Volume → OBV | — | PARTIAL | `technical_factors.obv_divergence:541` | `obv_up`,`bullish_div` | + | bool | the OBV LEVEL is computed locally and discarded |
+| Volume → OBV | — | PARTIAL | `technical_factors.obv_divergence:542` | `obv_up`,`bullish_div` | + | bool | the OBV LEVEL is computed locally and discarded |
 | Volume → Force Index / VPT | — | SCORABLE | `extended_indicators.force_index:206`, `extended_indicators.vpt:248` | value | + | unbounded | — |
 | Volume → institutional flow | — | SCORABLE | `orderflow.institutional_net:45`, `orderflow.retail_net:49`, `orderflow.summarize:128` | `inst_net`,`distribution_score` | + (inst_net) / − (distribution) | vendor currency units / 0-1 | live moomoo only; degrades to neutral |
 | Volume → volume dry-up | — | SCORABLE | `value_dip.volume_dry_up:603` | `dry_up`,`vdu_ratio` | + (low ratio) | ratio | — |
 | **Breakout & pullback** | 10 | **PARTIAL** | no composite; state flags in 5 places | — | + | bools/labels | — |
-| Breakout → channel breakout | — | PARTIAL | `technical_factors.donchian_channel:467` | `breakout_up/dn` | + | bool | always `None` — see §3 |
+| Breakout → channel breakout | — | PARTIAL | `technical_factors.donchian_channel:468` | `breakout_up/dn` | + | bool | always `None` — see §3 |
 | Breakout → opening-range breakout | — | SCORABLE | `market_session.opening_range:72` | `breakout` | + | label `up`/`down`/None | needs intraday bars |
 | Breakout → VCP base / near-breakout | — | SCORABLE | `swing.vcp_setup:342` | `candidate`,`near_breakout`,`pivot`,`depths` | + | bool / price / fractions | — |
 | Breakout → shelf / first-pullback setup | — | SCORABLE | `sector_screener.setup_a:270`, `sector_screener.setup_b:318` | `state` | + | label | needs sector + constituent context |
@@ -179,12 +179,12 @@ Engine = TechnicalScore (owner's staged weights). Direction column: `+` = higher
 | Breakout → gap type | — | SCORABLE | `market_session.gap_type:220` | `type`,`fill_probability` | ± | label / prob | fill stats are HARDCODED constants (0.8/0.3/0.4/0.6) — see §3. **[CORRECTED 2026-09-26: stale — §3 defect 11 already carries the FIXED 2026-09-17 `ba50b5f` tag, and the tree agrees: `market_session.py::_gap_fill_stats:167` is the measured basis with a labelled minimum-sample fallback, not the literal lookup table.]** |
 | **Mean reversion** | 8 | **PARTIAL** | no composite; `mean_reversion.mean_reversion_verdict:226` is a label | `verdict` | + | label | no z-scale output |
 | MR → mean-reversion z-score | — | PARTIAL | `value_dip.zscore:104` (generic helper) | — | ± | z | no per-series producer wired to any leaf; `factors.z_score:70` is cross-sectional only |
-| MR → StochRSI | — | SCORABLE | `technical_factors.stoch_rsi:373` | `stochrsi` | **NON-MONO** (<0.2 oversold) | 0-1 | — |
-| MR → RSI2 | — | SCORABLE | `technical_factors.rsi2:405` | value | **NON-MONO** (<10 buy) | 0-100 | — |
-| MR → Williams %R | — | SCORABLE | `technical_factors.williams_r:428` | value | **NON-MONO** (-80..-100 oversold) | -100..0 | — |
+| MR → StochRSI | — | SCORABLE | `technical_factors.stoch_rsi:374` | `stochrsi` | **NON-MONO** (<0.2 oversold) | 0-1 | — |
+| MR → RSI2 | — | SCORABLE | `technical_factors.rsi2:406` | value | **NON-MONO** (<10 buy) | 0-100 | — |
+| MR → Williams %R | — | SCORABLE | `technical_factors.williams_r:429` | value | **NON-MONO** (-80..-100 oversold) | -100..0 | — |
 | MR → Hurst / variance ratio / half-life | — | SCORABLE | `mean_reversion.hurst_exponent:113`, `mean_reversion.variance_ratio:259`, `mean_reversion.ar1_half_life:69`, `mean_reversion.ou_half_life:91` | `hurst`,`vr`,`z`,`half_life` | + (H<0.5 reverting) | 0-1 / ratio / bars | no leaf binds these — verify |
-| MR → PSAR reversal flag | — | PARTIAL | `technical_factors.parabolic_sar:604` | `sar` | ± | price | `below`/`exit` always `None` — see §3 |
-| MR → OBV divergence | — | SCORABLE | `technical_factors.obv_divergence:541` | `bullish_div` | + | bool | — |
+| MR → PSAR reversal flag | — | PARTIAL | `technical_factors.parabolic_sar:605` | `sar` | ± | price | `below`/`exit` always `None` — see §3 |
+| MR → OBV divergence | — | SCORABLE | `technical_factors.obv_divergence:542` | `bullish_div` | + | bool | — |
 | **Volatility & ATR** | 5 | **PARTIAL** | no composite | — | risk-increasing (higher = more risk; must be inverted for a favourable score) | — | — |
 | Vol → ATR | — | SCORABLE | `size.atr:143`; `etf_risk._atr:122` (private); `regime_state._atr14:55` (private) | value | risk-increasing | price units | **stale, corrected 2026-09-17:** `size.atr:143` returns **`None`** on failure (its own docstring records that returning `0.0` was the defect); the `0.0` claim was wrong |
 | Vol → ATR percentile | — | **ABSENT** | — | — | — | — | grepped `atr_pct|atr_percentile|percentile.*atr` in `tradingagents/` → only `etf_risk.etf_risk_profile:142`'s `atr_pct` (ATR/price, not a percentile) and a prose mention in `tradingagents/data/skills/volume_breakout.yaml:17` |
@@ -259,17 +259,17 @@ Searched (all three trees): `technical.?score|tech_score|technical_score|Technic
 | # | Defect | Lines that disagree | What a reader sees wrong today |
 | --: | --- | --- | --- |
 | 1 | **[FIXED 2026-09-17, `ba50b5f`]** Donchian breakout flags were hardcoded `None` and **no caller derived them** | `strategies/technical_factors.py:390-391` (`"breakout_up": None,  # closes not passed; caller derives`) vs the leaf `agents/utils/analysis_tools.py:1160` (`get_mean_reversion_tech` prints only `d.get('upper')`/`d.get('lower')`) | a "Donchian breakout" component is unscorable from the only leaf that calls it; `value_dip.value_dip_setup:1093` also stores the same None row |
-| 2 | **[FIXED 2026-09-17, `ba50b5f`]** `parabolic_sar` was called without `closes`, so `below`/`exit` were always `None` | `technical_factors.parabolic_sar:604` (flag only when `closes is not None`) vs `analysis_tools.py:1178` → `_psar(data["highs"], data["lows"])` | a "close below SAR = downtrend exit" read never fires; only the raw SAR level is reported |
-| 3 | **[FIXED 2026-09-17, `2c05701`]** `volume_profile` value-area accumulator is dead arithmetic: `acc` is incremented then immediately overwritten, and the moved bin is re-added in a branch that is then discarded | `technical_factors.volume_profile:826-692` (`acc += vol_by_bin[lo_i] if lo_i != hi_i else 0` then `acc = sum(vol_by_bin[lo_i : hi_i + 1])`) | the value area can collapse to the whole price range — measured in `reports/AMAT_20260914_191359/tool_evidence.json:3341`: `poc=169.5614 va_high=424.6382 va_low=169.5614` on a 424 close |
+| 2 | **[FIXED 2026-09-17, `ba50b5f`]** `parabolic_sar` was called without `closes`, so `below`/`exit` were always `None` | `technical_factors.parabolic_sar:605` (flag only when `closes is not None`) vs `analysis_tools.py:1178` → `_psar(data["highs"], data["lows"])` | a "close below SAR = downtrend exit" read never fires; only the raw SAR level is reported |
+| 3 | **[FIXED 2026-09-17, `2c05701`]** `volume_profile` value-area accumulator is dead arithmetic: `acc` is incremented then immediately overwritten, and the moved bin is re-added in a branch that is then discarded | `technical_factors.volume_profile:827-692` (`acc += vol_by_bin[lo_i] if lo_i != hi_i else 0` then `acc = sum(vol_by_bin[lo_i : hi_i + 1])`) | the value area can collapse to the whole price range — measured in `reports/AMAT_20260914_191359/tool_evidence.json:3341`: `poc=169.5614 va_high=424.6382 va_low=169.5614` on a 424 close |
 | 4 | **[FIXED 2026-09-17, `2c05701`]** `get_position_risk_multiplier` takes `knife_factor` (0..1) from the LLM; no leaf computes the composite K for the market analyst | `agents/utils/quant_adds_tools.py:96-125` (argument default `1.0`) vs `strategies/knife_guard.py:156` (`knife_score`, whose only caller is `value_dip.value_dip_setup:1093`) | a "computed execution multiplier" is fed an invented factor; a 0.0 (block) or 1.0 (no reduction) both look measured |
 | 5 | **[FIXED 2026-09-17, `2c05701`]** `get_skill_read` accepts a 0-100 `trend_score` from the model and can fold YAML constants onto it, printing a number that looks computed | `agents/utils/analysis_tools.py:9247` (`trend_score` argument) + `:9294-9300` ("Folded score (advisory)") vs `strategies/skills.py:117-120` (thresholds on the same opinion) | the report can quote "trend_score=72" / "Fold 60 + 12 = 72.0/100" with no producer behind either number; the live tool-call log shows exactly that (`ToolCallLog/MSFT_tool_calls.jsonl:187`) |
 | 6 | **[FIXED 2026-09-17, `2c05701`]** `support_structure`'s primary branch is unreachable from the only leaf: the leaf passes no `atr_value`, so the "within 1.5 ATR of base low" test is skipped | `strategies/value_dip.py:738` (`if a is not None and ... ` — `a` is `None` when no ATR) vs `agents/utils/value_dip_tools.py:1018` (`support_structure(closes, highs, lows)`) | "multi-month-base-support" can never be emitted; only the 3%-proximity and holding-above-base branches fire |
-| 7 | **[FIXED 2026-09-17, `2c05701`]** `size.atr` returns **0.0**, not None, on insufficient data — an NA→0 violation on the volatility input | `strategies/size.py:131-140` (`def atr(...) -> float: ... return 0.0`) vs the repo's own no-fabrication contract (`factors.py:5`, `technical_factors.py:12`) | a caller that checks `atr is not None` treats "unknown volatility" as "zero volatility"; `technical_factors.keltner_channel:439` only survives because it also tests `<= 0` |
+| 7 | **[FIXED 2026-09-17, `2c05701`]** `size.atr` returns **0.0**, not None, on insufficient data — an NA→0 violation on the volatility input | `strategies/size.py:131-140` (`def atr(...) -> float: ... return 0.0`) vs the repo's own no-fabrication contract (`factors.py:5`, `technical_factors.py:12`) | a caller that checks `atr is not None` treats "unknown volatility" as "zero volatility"; `technical_factors.keltner_channel:440` only survives because it also tests `<= 0` |
 | 8 | **[FIXED 2026-09-17, `2c05701`]** `rank_sectors_multifactor` substitutes `0.0` for a missing percentile in the risk leg, then emits a score | `strategies/sector_rank.py:536` (`0.6 * (s if s is not None else 0.0) + 0.4 * (d if d is not None else 0.0)`), guarded by `if (s is not None or d is not None)` | a sector with unmeasurable drawdown is scored as if it had the WORST drawdown percentile (0.0 is the floor of a higher-is-better percentile) — NA becomes a penalty, against ground rule 1 |
 | 9 | `regime_label`'s chop branch is dead for the only caller: `overlays` passes `chop=0.4` against a default `chop_threshold=0.30`, while the canonical choppiness producer returns 0-100 | `strategies/overlays.py:57` (`regime_label(vol_pct, trend, 0.4)`) vs `strategies/regime.py:133` (default 0.30) and `regime.py:87` (`choppiness` returns 0-100) | with the common `vol_pct == 0.5` (`overlays.py:43` builds a 3-valued proxy) both prior branches miss and `0.4 <= 0.30` is False → the label is `neutral` regardless of trend; a quoted `regime=neutral` carries no information. **[FIXED 2026-09-26: `overlays.py:62-63` now passes `chop = choppiness(closes_f, window=14)` (the 0-100 measured value), and `regime_label`'s threshold is the named `CHOP_TREND_THRESHOLD` = 30.0 (`regime.py:191`) on the same 0-100 scale — the chop branch is live for its caller. Aligns with `RegimeScore.md` §3 defect 1, which already carries the FIXED tag.]** |
 | 10 | **[FIXED 2026-09-17, `2c05701`]** `rule_eval.rule_signal_macd_hist_rising` (the only MACD-histogram-slope producer) has no production reader | `strategies/rule_eval.py:103` / registered at `:156` vs its only importers `scripts/rule_eval.py:24` and `tests/test_signal_action_sizing_ruleeval.py:14` | the MACD-histogram-slope sub-factor is unscoreable from any analyst tool |
 | 11 | **[FIXED 2026-09-17, `ba50b5f`]** `gap_type`'s fill statistics were hardcoded constants, not measurements | `strategies/market_session.py:178-193` (`fill_prob=0.3/0.6/0.4/0.8`, `days=5/3/4/2` literal per branch) | a "fill probability" is printed as if measured from history; it is a 4-way lookup table (ground rule 6: measure, don't assume) |
-| 12 | **[FIXED 2026-09-17, `2c05701`]** `chaikin_oscillator` returns an unbounded A/D-unit difference while the leaf labels it "positive=buying pressure" — the sign is a scale artefact, not a verdict | `technical_factors.chaikin_oscillator:732` (`round(ema_fast[-1] - ema_slow[-1], 4)`, raw share-volume units) vs `analysis_tools.py:xxxx` in `get_technical_factors:5345` (the `(positive=buying pressure)` suffix) | `reports/AMAT_20260914_191359/tool_evidence.json:3341` shows `chaikin=869687.156 (positive=buying pressure)` on a name the same block reports as `aroon … downtrend`, `di- > di+`, `sup... |
+| 12 | **[FIXED 2026-09-17, `2c05701`]** `chaikin_oscillator` returns an unbounded A/D-unit difference while the leaf labels it "positive=buying pressure" — the sign is a scale artefact, not a verdict | `technical_factors.chaikin_oscillator:733` (`round(ema_fast[-1] - ema_slow[-1], 4)`, raw share-volume units) vs `analysis_tools.py:xxxx` in `get_technical_factors:5345` (the `(positive=buying pressure)` suffix) | `reports/AMAT_20260914_191359/tool_evidence.json:3341` shows `chaikin=869687.156 (positive=buying pressure)` on a name the same block reports as `aroon … downtrend`, `di- > di+`, `sup... |
 
 ---
 
@@ -282,7 +282,7 @@ Searched (all three trees): `technical.?score|tech_score|technical_score|Technic
 | MACD line + histogram values (+ slope) | closes | yes — `value_dip._macd_hist:502` already returns `(line, signal, hist)` series | make `_macd_hist` public and add the three lines to `get_extended_indicators:5406`; slope = last minus prior bar (the same one-bar delta as `rule_eval.rule_signal_macd_hist_rising:103`) |
 | momentum 5D | closes | yes | `extended_indicators.roc:151` is already parameterised — `roc(closes, 5)`; `factors.momentum_multihorizon:418` accepts a custom `horizons` tuple |
 | ATR percentile (and per-name vol percentile) | a trailing ATR series | yes — `size.atr:143` over the cached 320-bar OHLCV | the loop already written for realized vol at `etf_risk.etf_risk_profile:142-172` (63d rolling windows over ~3Y, then `sum(x < cur)/n`) with `size.atr` in place of `_realized_vol:69`; note `regime.vol_percentile:59` is the same shape but takes a list of histories |
-| OBV value (not just divergence) | closes + volumes | yes — `technical_factors.obv_divergence:541` computes the cumulative OBV and discards it (local `obv` at `:404`) | return the last OBV value alongside `obv_up` |
+| OBV value (not just divergence) | closes + volumes | yes — `technical_factors.obv_divergence:542` computes the cumulative OBV and discards it (local `obv` at `:404`) | return the last OBV value alongside `obv_up` |
 | Donchian breakout state | closes (already available in the leaf) | yes — `get_mean_reversion_tech:1160` has `closes` in scope | pass `closes` into `donchian_channel:377` (the docstring's stated caller contract) or derive in the leaf |
 | PSAR exit state | closes | yes — same leaf | pass `closes=` to `parabolic_sar:432` (the parameter already exists) |
 | mean-reversion z-score per series | the series | yes | `value_dip.zscore:104` is generic; apply it to `bollinger_pct_b` history / `Rsi` history / price-vs-Keltner and expose one z per signal |
@@ -292,7 +292,7 @@ Searched (all three trees): `technical.?score|tech_score|technical_score|Technic
 | Momentum multi-horizon per name (already built, unreachable) | closes | yes | delete the `tests/test_calc_agent_wiring.py:40` whitelist and wire `factors.momentum_multihorizon:418` — or accept it as legacy and re-derive from `sector_rank._momentum:27`. **[CORRECTED 2026-09-26: DONE — the whitelist entry is removed and `factors.momentum_multihorizon:418` is wired at `analysis_tools.py:2433`; no residual open item.]** |
 | Upside / downside semivariance | the run's own return series (`analysis_tools._ohlcv:236` closes) | yes — nothing new to fetch | `volatility_models.semivariance(returns, *, min_obs=20) -> {"rs_up", "rs_down", "rs_total", "rs_ratio", "n"}` beside the existing estimators: `RS⁻ = Σ r²·1[r<0]`, `RS⁺ = Σ r²·1[r>0]`, and `RS⁻ + RS⁺ = RV` **exactly** (Patton & Sheppard 2015). `None` below `min_obs`, never `0`. The score consumes `√RS⁻` (return units, comparable to `realized_vol:29`) and the ratio; the raw sums print beside them. **Owned here** — `RiskScore.md` §1 reads it as a named dependency. **[CORRECTED 2026-09-26: BUILT — the real signature is `volatility_models.py::semivariance:68` = `semivariance(closes, window=None, *, min_obs=20, periods=_DAYS) -> dict` (it takes closes, not a returns series) returning `{rs_minus, rs_plus, rv, sqrt_rs_minus, sqrt_rs_plus, asymmetry, n, annualized, basis}`; every leg is `None` with the reason in `basis` below `min_obs`. The keys above (`rs_up`/`rs_down`/`rs_total`/`rs_ratio`) are superseded by the built names.]** |
 
-Note for the document: five NON-MONO rows are confirmed by reading, not assumed — `swing.rsi_band:123` (mid-band "strong"), `technical_factors.mf_index:163` (oversold good), `technical_factors.stochastic_oscillator:197` (`oversold` flag), `technical_factors.elder_thermometer:648` (`quiet` = good dip), and `value_dip.support_structure:833` (near the 200-SMA is *good*) against `swing.trend_architecture:76` (above the 200-SMA is good).
+Note for the document: five NON-MONO rows are confirmed by reading, not assumed — `swing.rsi_band:123` (mid-band "strong"), `technical_factors.mf_index:163` (oversold good), `technical_factors.stochastic_oscillator:197` (`oversold` flag), `technical_factors.elder_thermometer:649` (`quiet` = good dip), and `value_dip.support_structure:833` (near the 200-SMA is *good*) against `swing.trend_architecture:76` (above the 200-SMA is good).
 
 ---
 
@@ -430,7 +430,7 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 11 | RSI slope | 3 | PARTIAL — series at `value_dip._rsi_series:472`; no slope or acceleration producer |
 | 12 | RSI divergence | 5 | PARTIAL — `value_dip.macd_divergence:542`; the continuous `Z(ΔRSI)−Z(ΔPrice)` form absent |
 | 13 | Stochastic oscillator | 4 | PARTIAL — `technical_factors.stochastic_oscillator:197` (`k`,`d`); spread and slope not returned |
-| 14 | Williams %R | 1 | built — `technical_factors.williams_r:428` |
+| 14 | Williams %R | 1 | built — `technical_factors.williams_r:429` |
 | 15 | CCI | 3 | built — `extended_indicators.cci:128` |
 | 16 | ROC | 1 | built — `extended_indicators.roc:151` |
 | 17 | Momentum indicator | 2 | PARTIAL — `extended_indicators.momentum_oscillator:162`; the ATR-normalised form is §30 (absent) |
@@ -450,25 +450,25 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 31 | ADX | 6 | built — `technical_factors.adx:230` |
 | 32 | Directional movement spread | 2 | built — `technical_factors.adx:230` (`di_plus`,`di_minus`); the engine forms `di_spread` |
 | 33 | ADX trend-strength score | 3 | PARTIAL — `technical_factors.adx:230`; no ADX percentile or `f(ADX)` score (nearest `regime.trend_strength:130` is SMA200-based) |
-| 34 | Parabolic SAR | 3 | built — `technical_factors.parabolic_sar:604` |
+| 34 | Parabolic SAR | 3 | built — `technical_factors.parabolic_sar:605` |
 | 35 | Ichimoku | 5 | built — `extended_indicators.ichimoku:80` |
 | 36 | Ichimoku cloud position | 3 | PARTIAL — `extended_indicators.ichimoku:80` (bool `above_cloud`, `span_a`/`span_b`); no `(C−bottom)/(top−bottom)` ratio |
 | 37 | Cloud thickness | 2 | PARTIAL — `extended_indicators.ichimoku:80` exposes the spans via `cloud_leading`; no thickness/ATR read |
 | 38 | Pivot points | 7 | built — `technical_factors.pivot_points:290` |
 | 39 | Pivot distance | 3 | built — `technical_factors.pivot_distance_atr:318` |
-| 40 | Support/resistance | 4 | built — `technical_factors.donchian_channel:467` (`upper`=HighestHigh, `lower`=LowestLow) |
-| 41 | Breakout | 1 | built — `technical_factors.donchian_channel:467` (`breakout_up` vs `breakout_ref_up`) |
-| 42 | Breakdown | 1 | built — `technical_factors.donchian_channel:467` (`breakout_dn` vs `breakout_ref_dn`) |
+| 40 | Support/resistance | 4 | built — `technical_factors.donchian_channel:468` (`upper`=HighestHigh, `lower`=LowestLow) |
+| 41 | Breakout | 1 | built — `technical_factors.donchian_channel:468` (`breakout_up` vs `breakout_ref_up`) |
+| 42 | Breakdown | 1 | built — `technical_factors.donchian_channel:468` (`breakout_dn` vs `breakout_ref_dn`) |
 | 43 | Breakout persistence | 1 | ABSENT |
 | 44 | False breakout | 3 | ABSENT |
 | 45 | Volume-confirmed breakout | 1 | PARTIAL — `value_dip.trigger_candle:661` (volume-confirmed trigger), `volume_flags.rvol_ex_mechanical:90`; no `BreakoutStrength × V/avg` product |
-| 46 | Price-volume divergence | 3 | PARTIAL — `technical_factors.obv_divergence:541` (OBV vs price); no `Slope(C) − Slope(V)` producer |
-| 47 | OBV | 1 | PARTIAL — `technical_factors.obv_divergence:541` builds the cumulative OBV and discards the level |
+| 46 | Price-volume divergence | 3 | PARTIAL — `technical_factors.obv_divergence:542` (OBV vs price); no `Slope(C) − Slope(V)` producer |
+| 47 | OBV | 1 | PARTIAL — `technical_factors.obv_divergence:542` builds the cumulative OBV and discards the level |
 | 48 | OBV slope | 2 | ABSENT |
-| 49 | OBV divergence | 1 | built — `technical_factors.obv_divergence:541` |
+| 49 | OBV divergence | 1 | built — `technical_factors.obv_divergence:542` |
 | 50 | Accumulation/Distribution | 3 | built — `extended_indicators.accumulation_distribution:224` |
 | 51 | Chaikin Money Flow | 1 | built — `extended_indicators.chaikin_money_flow:263` |
-| 52 | Chaikin oscillator | 1 | built — `technical_factors.chaikin_oscillator:732` |
+| 52 | Chaikin oscillator | 1 | built — `technical_factors.chaikin_oscillator:733` |
 | 53 | Money Flow Index | 3 | built — `technical_factors.mf_index:163` |
 | 54 | VWAP | 1 | built — `momentum.vwap:49`; `extended_indicators.anchored_vwap:289` |
 | 55 | VWAP deviation | 2 | ABSENT — `extended_indicators.anchored_vwap:289` returns the level only |
@@ -520,14 +520,14 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 101 | Time since high | 1 | ABSENT |
 | 102 | Distance from high | 1 | elsewhere — `factors.high_distance:35` [CORRECTED 2026-09-26: the symbol name was wrong — `strategies/factors.py` defines `high_distance:35` ("price / trailing high − 1"); there is no `distance_from_52w_high`.] |
 | 103 | Distance from low | 1 | ABSENT |
-| 104 | Position within range | 1 | ABSENT — `technical_factors.donchian_channel:467` returns `mid`, never the position |
+| 104 | Position within range | 1 | ABSENT — `technical_factors.donchian_channel:468` returns `mid`, never the position |
 | 105 | Pivot structure | 1 | built — `technical_factors.pivot_distance_atr:318` |
 | 106 | Fibonacci retracement | 5 | built — `swing.fib_levels:295`; `value_dip.fib_retrace_entry:904` |
-| 107 | Donchian channels | 4 | built — `technical_factors.donchian_channel:467` |
-| 108 | Keltner Channels | 4 | built — `technical_factors.keltner_channel:439` |
+| 107 | Donchian channels | 4 | built — `technical_factors.donchian_channel:468` |
+| 108 | Keltner Channels | 4 | built — `technical_factors.keltner_channel:440` |
 | 109 | Keltner/Bollinger squeeze | 2 | built — `technical_factors.squeeze_momentum` (BB inside KC + the release flag vs the prior bar's ATR) [CORRECTED 2026-09-27: `TECH-7`/`TECH-12`'s remaining leg.] |
 | 110 | TTM-style squeeze momentum | 2 | built — the same producer's `momentum`/`direction` at the release (the §30 ATR-normalised move, since this item gives no formula) [CORRECTED 2026-09-27: the formula choice is declared in the module docstring.] |
-| 111 | Aroon | 3 | built — `technical_factors.aroon:667` |
+| 111 | Aroon | 3 | built — `technical_factors.aroon:668` |
 | 112 | TRIX | 4 | built — `extended_indicators.trix:173` |
 | 113 | DPO | 1 | ABSENT |
 | 114 | Ultimate Oscillator | 3 | ABSENT |
@@ -542,7 +542,7 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 123 | Technical factor normalization | 4 | PARTIAL — `value_dip.zscore:104`, `factors.z_score:68`, `normalized.percentile_hist_or_none:40`; no registry applies them across indicators |
 | 124 | Sector-relative technical normalization | 1 | PARTIAL — `sector_screener._rel_outperformance:248`; no per-indicator sector-median normaliser |
 | 125 | Technical subscores | 8 | built — `technical_score.category_score` + `CATEGORY_COMPONENTS` (nine categories; the library's eight groups lack a Setup-Quality sub-score) |
-| 126 | Composite TechnicalScore | 1 | built — `strategies/technical_score.py::technical_score`; leaf `agents/utils/analysis_tools.py::get_technical_score:5856` |
+| 126 | Composite TechnicalScore | 1 | built — `strategies/technical_score.py::technical_score`; leaf `agents/utils/analysis_tools.py::get_technical_score:6012` |
 | 127 | Redundancy control (not 100 indicators voting) | 0 | ABSENT — no indicator-correlation producer; nearest `consensus.agreement_score:14` is sentiment-rating dispersion |
 | 128 | Recommended indicator clusters | 1 | PARTIAL — `technical_score.CATEGORY_COMPONENTS` (nine categories; the library's setup-quality cluster absent) |
 | 129 | Technical State | 1 | built — `technical_score.technical_state` (the library's state names, from five directional legs + ADX) [CORRECTED 2026-09-27: `TECH-23`; states the library does not name are recorded as unbound rather than invented.] |
@@ -564,17 +564,17 @@ the repo. Every one of these is a **backlog** row, not a defect claim.
 | **Regression family** — R², trend quality, channel and channel position, trend-to-noise, efficiency ratio | 74, 75, 76, 77, 78, 79 | `rotation.clenow_momentum:89` already fits `linregress` (slope and R²); `relative_strength.slope_pct:49` is the shared normalised-OLS helper and `regime.choppiness:141` the ER |
 | **Legacy oscillators** — DPO, Ultimate Oscillator, Awesome Oscillator, RVI, Coppock, EOM | 62, 113, 114, 115, 116, 117 | the module shape is `technical_factors.py` (one pure `def` per indicator, `None` below min-obs); `technical_factors.ema:40`/`_sma:24` are the smoothers each needs |
 | **Score-layer state** — redundancy control, the state enum, acceleration, disagreement | 127, 129, 130, 131 | `strategies/technical_score.py::technical_score` already returns per-category sub-scores and coverage, so dispersion/acceleration are readers of its own output; the state enum is `TECH_BANDS` widened |
-| **OBV depth** — the OBV level and its slope | 47, 48 | `technical_factors.obv_divergence:541` computes the cumulative series and discards it (`obv` at the loop) |
-| **Breakout depth** — persistence, false breakout | 43, 44 | `technical_factors.donchian_channel:467` now returns `breakout_ref_up`/`breakout_ref_dn`, the checkable breakout level persistence is measured against |
+| **OBV depth** — the OBV level and its slope | 47, 48 | `technical_factors.obv_divergence:542` computes the cumulative series and discards it (`obv` at the loop) |
+| **Breakout depth** — persistence, false breakout | 43, 44 | `technical_factors.donchian_channel:468` now returns `breakout_ref_up`/`breakout_ref_dn`, the checkable breakout level persistence is measured against |
 | **Volume depth** — volume spike, volume trend, volume-confirmed ratio | 58, 59, 45 | `momentum.rvol:25` and `volume_flags.rvol_ex_mechanical:90` are the existing RVOL producers |
 | **Moving-average depth** — WMA, HMA, EMA slope, crossover spread/velocity, EMA5/EMA20 stack | 2, 4, 5, 6 | `technical_factors.ema:40` returns the full series; `swing.trend_architecture:76` already emits two slope booleans |
 | **MACD depth** — crossover, ATR-normalised spread, histogram acceleration | 7, 8 | `value_dip._macd_hist:502` returns `(line, signal, hist)`; `rule_eval.rule_signal_macd_hist_rising:103` is the one-bar-delta template |
 | **Candle/gap depth** — intraday strength, gap continuation, continuous gap fill | 66, 68, 69 | `extended_indicators.scan_candlesticks:603` and `market_session.gap_type:220` already hold the OHLC they need |
 | **RSI depth** — slope/acceleration, continuous divergence | 11, 12 | `value_dip._rsi_series:472` is a full Wilder series; `value_dip.macd_divergence:542` already reads RSI divergence |
-| **Range/position depth** — time since high, distance from low, position within range | 101, 103, 104 | `technical_factors.donchian_channel:467` returns the `upper`/`lower` the three need |
+| **Range/position depth** — time since high, distance from low, position within range | 101, 103, 104 | `technical_factors.donchian_channel:468` returns the `upper`/`lower` the three need |
 | **Breadth depth** — breadth thrust | 120 | `market_breadth.advance_decline_line` returns the per-session `advancers`/`decliners` and the leaf feeds `technical_depth.zweig_breadth_thrust` from the same panel [CORRECTED 2026-09-27: WIRED 2026-09-27 (TECH-14).] |
 | **ATR depth** — ATR expansion/contraction ratio, ATR-normalised movement, vol acceleration, standalone Rogers-Satchell | 28, 29, 30, 91, 95 | `size.atr:143` (series via the cached 320 bars), `compression.atr_compression_read:75`, `volatility_models.yang_zhang_vol:288` |
-| **Keltner/TTM squeeze** | 109, 110 | `technical_factors.keltner_channel:439` and `value_dip.bollinger_pct_b:77` already return both band pairs the squeeze compares |
+| **Keltner/TTM squeeze** | 109, 110 | `technical_factors.keltner_channel:440` and `value_dip.bollinger_pct_b:77` already return both band pairs the squeeze compares |
 
 ### 8.3 Library-internal defects
 
@@ -609,7 +609,7 @@ the engine band-maps. Reported, not changed.
 | 5 | §89 `VolPercentile=PercentileRank(σ_n)` implies a **measured** rank | `regime.vol_percentile:59` returns `None` when `len(wins) < 2` — no fabricated 0.5 today, but the doc's §1 volatility row still records the old `0.5` behaviour as current | **stale doc claim** (the library is satisfied; the doc row is not). **[CORRECTED 2026-09-26: the §1 row now carries the dated correction and no longer records the `0.5` as current — this contradiction is closed.]** |
 | 6 | §27 `NATR = 100·ATR_n/C_t` (**percent**) | engine `atr_pct` is passed as `size.atr:143` **/ last close** (a fraction) against `RAMPS["atr_pct"]=(0.010, 0.050)` | **scale** — both are the same quantity; the 100× is the seam |
 | 7 | §13/§53 define stochastic and MFI as formulas with **no band** | `technical_score.BANDS["stoch_k"]`, `BANDS["mfi"]` band-map both (`>80`→30/25, `<20`→80) | engine policy the library does not supply — divergence, not error |
-| 8 | **[FIXED 2026-09-26]** `score_engine.NON_MONOTONIC_INPUTS:41` now names the component keys (`stoch_k`, `stoch_rsi`, `elder_ratio`), and `tests/test_scorecard_contracts.py::test_the_declared_set_is_not_larger_than_the_engine_can_show` forbids the whitelist that hid it; as found, it named `"stochastic"`, `"stochrsi"`, `"elder_thermometer"` while the engine's own components/BANDS are `"stoch_k"`, `"stoch_rsi"`, `"elder_ratio"` | `analysis_tools._non_monotonic_triples:5760` intersects on the component name, so **three of the nine** non-monotonic inputs never print their raw→aligned mapping triple | **code defect** (name mismatch), verified by reading both files |
+| 8 | **[FIXED 2026-09-26]** `score_engine.NON_MONOTONIC_INPUTS:41` now names the component keys (`stoch_k`, `stoch_rsi`, `elder_ratio`), and `tests/test_scorecard_contracts.py::test_the_declared_set_is_not_larger_than_the_engine_can_show` forbids the whitelist that hid it; as found, it named `"stochastic"`, `"stochrsi"`, `"elder_thermometer"` while the engine's own components/BANDS are `"stoch_k"`, `"stoch_rsi"`, `"elder_ratio"` | `analysis_tools._non_monotonic_triples:5916` intersects on the component name, so **three of the nine** non-monotonic inputs never print their raw→aligned mapping triple | **code defect** (name mismatch), verified by reading both files |
 
 ---
 

@@ -510,7 +510,7 @@ library says an EventScore should measure — checked against the code:
 | 4 | Probability | **no** | `strategies/catalyst.py::fed_imminence:169` `modal_prob` is a rate-path probability, not an event probability |
 | 5 | Timing | **yes** | `strategies/event_state.py::imminence:349`, `::HORIZONS:66` |
 | 6 | Persistence | **partly** | `strategies/events.py::expected_drift_after:56`, printed as `post_event_drift` (`agents/utils/analysis_tools.py:734`) |
-| 7 | Market reaction | **partly** | `agents/utils/analysis_tools.py::get_earnings_event_read:660` print-day return + `volume_ratio` (a leaf read, not a scored component) |
+| 7 | Market reaction | **partly** | `agents/utils/analysis_tools.py::get_earnings_event_read:699` print-day return + `volume_ratio` (a leaf read, not a scored component) |
 | 8 | Credibility | **no** | `dataflows/event_calendars.py::ATTRIBUTION:68` is provenance, not a reliability score |
 | 9 | Second-order effects | **no** | none |
 | 10 | Event interaction | **no** | none |
