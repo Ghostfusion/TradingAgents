@@ -24,6 +24,12 @@ mandatory and how their score, coverage and supporting measurements are supplied
 into the LLM context rather than left to tool-calling discretion - and
 [`MEASUREMENT_FINDINGS.md`](MEASUREMENT_FINDINGS.md), Phase C's live panel.
 
+The composite layer has its own document:
+[`CompositeTradeScore.md`](CompositeTradeScore.md) - the built four-engine
+`TradeScore`, its renormalised aggregation rule and printed-block contract, and
+the owner's 2026-09-26 *Composite Trade Score* proposal (a claim-by-claim ledger,
+the invariants it would break as written, and the eight questions it leaves open).
+
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
 [`../ScoreWeight/market.md`](../ScoreWeight/market.md) and
@@ -276,6 +282,37 @@ STRONG_BULL` (a label) and `RegimeConfidence 0.75` (how much to trust the first
 three) must never be collapsed into one number. Sizing is not conviction:
 volatility targeting sizes *inversely* to volatility, and fractional Kelly
 discounts for estimation error.
+
+**[CORRECTED 2026-09-26]** That paragraph's fourth output has **no producer**: the
+name `RegimeConfidence` appears in the owner's library
+(`../Strategies/scores/regime_score.md:2190`) and is recorded **ABSENT** in
+[`RegimeScore.md`](RegimeScore.md) §104. The rule is about *types* and stands on
+the three that are built - the score
+(`strategies/regime_score.py::regime_score:265`), the sizing multiplier
+(`strategies/overlays.py:80`, `position_scale`) and the state label
+(`strategies/regime_state.py:82`, `STRONG_BULL`).
+
+**[ADDED 2026-09-26] The owner's *Composite Trade Score* note is recorded, not
+adopted.** He pasted a design note (2026-09-26) that names this composite
+*Composite Trade Score*, layers the system as evidence -> composite -> gates, and
+proposes `CTS = OpportunityScore × RiskAdjustment × ConfidenceAdjustment`, a
+seven-engine weight vector, cross-sectional standardization, interaction terms
+and a separate *Composite Alpha Score*. Its ledger is
+[`CompositeTradeScore.md`](CompositeTradeScore.md) §3. Four things it proposes
+would, as written, break a binding invariant: the product form counts `RiskScore`
+twice unless invariant 18 is amended (invariants 11/15/18, §2.1); the confidence
+multiplier collapses the fourth output this section keeps separate **and** the
+coverage the printed block must show; the seven-engine vector seats News,
+Sentiment, Valuation and Event in the decision composite against invariant 17
+(two of those legs have no producer at all); and the name `OpportunityScore` is
+the executor-owned `opportunity_score` slot this repo leaves `None`. **No weight,
+gate, key or code line changed** - the note's eight questions are in that
+document's §6. One finding softens the product form: his own survey already
+specifies the same multiplicative confidence layer on a **separate** object
+(`Strategies/other_score.md:1061`, `Conviction = BaseSignal × DataConfidence ×
+Agreement × (1 − Risk)`), which is the reading that keeps invariants 11/18 intact -
+and that survey line's `(1 − Risk)` is **inverted** against this repo's
+100 = favourable convention, which `CompositeTradeScore.md` §3.10 records.
 
 
 ---
@@ -830,3 +867,6 @@ and `retained_earnings`, which are read only inside Beneish/GP-A/Altman.
 | 26 | Baker & Wurgler, investor sentiment — high sentiment predicts **lower** subsequent returns, concentrated in hard-to-value, hard-to-arbitrage names | the sentiment leg is contrarian in the cross-section and name-dependent; supports the small research weight |
 | 27 | Barber & Odean (attention-based trading) and the limited-attention reading of PEAD — fresh, salient news is incorporated immediately while stale or competing information drifts | NewsScore's novelty/materiality emphasis is the right shape, and the one strong leg (earnings surprise + drift) is already implemented |
 | 28 | Da, Engelberg & Gao and the StockTwits literature — **attention** spikes predict negative next-day returns while **bullish sentiment** predicts positive ones; small caps are more sensitive to both | attention and sentiment are different signals with opposite short-horizon signs and must not be merged (SentimentScore.md §0.2 point 3) |
+| 29 | OECD / European Union / Joint Research Centre (2008), *Handbook on Constructing Composite Indicators: Methodology and User Guide* — DOI `10.1787/9789264043466-en` (the citable source behind row 21) | normalization, weighting and aggregation are **normative choices** to be declared and robustness-tested: the composite's own vector stays `RESEARCH_ONLY` until Phase C measures it, and a standardized or nonlinear composite needs the same treatment (CompositeTradeScore.md §3.6-§3.7) |
+| 30 | Grinold, R. C. (1989), "The fundamental law of active management", *Journal of Portfolio Management* — DOI `10.3905/jpm.1989.409211` | a 0-100 band score is **not** an expected excess return; the bridge is information coefficient × volatility × standardized score, which is what Phase C measures (`strategies/alpha_health.py::score_evaluation_rows:627`) rather than a formula (CompositeTradeScore.md §3.8) |
+| 31 | Munda, G. & Nardo, M. (2009), "Noncompensatory/nonlinear composite indicators for ranking countries: a defensible setting", *Applied Economics* — DOI `10.1080/00036840601019364` | nonlinear/noncompensatory aggregation is a defensible **design choice** that must be declared, because it changes what a ranking means (a weak leg can dominate) — the reason interaction terms need an owner decision plus a measurement (CompositeTradeScore.md §3.7) |

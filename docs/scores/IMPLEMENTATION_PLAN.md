@@ -1096,6 +1096,12 @@ manual.
 
 **Objective.** Combine the engines — **last**, and only over measured inputs.
 
+> The composite layer's own document is
+> [`CompositeTradeScore.md`](CompositeTradeScore.md) — the built object, its
+> renormalised aggregation rule, its printed-block contract, and the owner's
+> 2026-09-26 *Composite Trade Score* proposal (**recorded, not adopted**; §6 there
+> carries the questions, including whether the risk leg becomes multiplicative).
+
 **Three objects, three names, and they must not share one** (master §1.4):
 
 | Object | Definition | Status |
