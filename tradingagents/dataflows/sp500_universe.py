@@ -40,9 +40,24 @@ _GICS_MAP = {
     "utilities": "XLU",
 }
 
-# One constituent row (wikitable): {{NyseSymbol|0P0}} || Security || GICS Sector..
+# One constituent row of the wikitable: the Symbol cell (either exchange's
+# template), then the Security cell, then the GICS Sector cell.
+#
+# Three source shapes have to survive, all measured live 2026-09-27:
+#   * the Nasdaq template (`{{NasdaqSymbol|ADBE}}`) - missing before, which
+#     silently dropped 158 of the ~502 rows, AAPL/MSFT/NVDA among them;
+#   * a Security cell holding a piped wikilink (`[[AMD|Advanced Micro Devices]]`),
+#     which a `[^|]+` class cannot span - 42 further rows;
+#   * an HTML comment guarding a ticker (`{{NyseSymbol|BRK.B}} <!-- DO NOT CHANGE
+#     THIS TICKER TO BRK-B ... -->`).
+#
+# The "selected changes" table repeats both templates but has no three-cell shape,
+# so it still cannot match - and an unmapped sector is dropped by the caller too.
+_SECURITY_CELL = r"(?:\[\[[^\]]*\]\]|[^|])+?"
 _ROW_RE = re.compile(
-    r"\{\{NyseSymbol\|(?P<sym>[A-Z0-9.\- ]+?)\}\}\s*\|\|\s*[^|]+?\|\|\s*(?P<sector>[^|]+?)\s*\|\|"
+    r"\{\{(?:Nyse|Nasdaq)Symbol\|(?P<sym>[A-Z0-9.\- ]+?)\}\}"
+    r"(?:\s|<!--.*?-->)*\|\|\s*" + _SECURITY_CELL + r"\s*\|\|\s*(?P<sector>[^|]+?)\s*\|\|",
+    re.S,
 )
 
 
