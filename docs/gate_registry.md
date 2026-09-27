@@ -26,16 +26,14 @@ document on every suite run:
 **What this file covers — and what it does not.** The rows below are the
 policy, data-surface and context gates, plus the **score-engine gates** (§7e),
 the **debate and run-shape flags** (§7f), the **factor-model family** (§7g),
-the **event family** (§7h) and the **vendor and screener surfaces** (§7i)
-added in R4 stage 2: **97 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **15
+the **event family** (§7h), the **vendor and screener surfaces** (§7i) and the
+**score and aggregation flags** (§7j)
+added in R4 stage 2: **105 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **7
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the score and aggregation flags — `enable_sentiment`, `enable_sentiment_factor`,
-  `enable_weighted_sentiment_agg`, `enable_weighted_sentiment_window`,
-  `enable_news_relevance`, `enable_growth_scores`, `enable_score_eval_rows`,
-  `enable_analyst_revision_index`, `enable_orderflow`, `enable_crowd_ratio_bands`,
+- the remaining odds and ends — `enable_orderflow`, `enable_crowd_ratio_bands`,
   `enable_preopen_rvol`, `enable_strategy_overlays`, `enable_topk_drop`,
   `enable_tuner`, `enable_value_dip`.
 
@@ -368,6 +366,24 @@ return a `DATA_DISABLED` sentinel while off.
 | `enable_screener` | `TRADINGAGENTS_ENABLE_SCREENER` | the `screen_equities` tool (equity screener) | `tradingagents/agents/utils/analysis_tools.py::screen_equities` (the `_feature_gate` read) | `tradingagents/agents/utils/analysis_tools.py::screen_equities` (the gate read; no test flips it) | wired |
 | `enable_etf_engine` | `TRADINGAGENTS_ENABLE_ETF_ENGINE` | classifies an ETF and routes the fundamentals analyst to the ETF toolset | `tradingagents/agents/analysts/fundamentals_analyst.py::fundamentals_analyst_node` | `test_analyst_etf_routing.py::test_etf_classification_uses_etf_toolset` | wired |
 | `enable_enhanced_index` | `TRADINGAGENTS_ENABLE_ENHANCED_INDEX` | the enhanced-index allocation path in `allocation_block` | `tradingagents/strategies/portfolio.py::allocation_block` | `test_qlib_wiring.py::test_enhanced_index_flag` | wired |
+
+## 7j. Score and aggregation flags
+
+The score and aggregation flags: the sentiment/analyst-revision reads, the
+weighted sentiment aggregation rows, the growth-score block and the
+score-evaluation rows. Each is an additive read; none can change a rating, a
+size or a verdict.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_sentiment` | `TRADINGAGENTS_ENABLE_SENTIMENT` | pre-fetches the deterministic social-score line into the sentiment analyst prompt; off leaves the stem exactly as it was | `tradingagents/agents/analysts/sentiment_analyst.py::sentiment_analyst_node` | `test_sentiment_computed.py` (the producer of the line); the gate-off branch is exercised in `test_i18n_coverage.py` | wired |
+| `enable_sentiment_factor` | `TRADINGAGENTS_ENABLE_SENTIMENT_FACTOR` | folds the news-sentiment factor read into the run's strategy overlays | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays` / `::_sentiment_factor_read` | `test_strategies_overlays.py::test_graph_sentiment_read_returns_context`, `::test_graph_sentiment_read_off_returns_none` | wired |
+| `enable_weighted_sentiment_agg` | `TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_AGG` | appends the weighted sentiment aggregation rows to the sentiment tool | `tradingagents/agents/utils/analysis_tools.py::_sentiment_agg_rows` (the `_sentiment_flag` read) | `test_sentiment_weighted_agg.py::test_news_tool_appends_weighted_rows_only_when_gated` | wired |
+| `enable_weighted_sentiment_window` | `TRADINGAGENTS_ENABLE_WEIGHTED_SENTIMENT_WINDOW` | appends the weighted rolling-window row to the sentiment tool | `tradingagents/agents/utils/analysis_tools.py::_sentiment_agg_rows` (the `_sentiment_flag` read) | `test_sentiment_rolling_window.py::test_weighted_window_row_gated_on_the_tool` | wired |
+| `enable_news_relevance` | `TRADINGAGENTS_ENABLE_NEWS_RELEVANCE` | engages the news relevance scoring and the official-source boost in the news data tools | `tradingagents/agents/utils/news_data_tools.py::_news_relevance_enabled` | `tradingagents/agents/utils/news_data_tools.py::_news_relevance_enabled` (the gate read; no test flips it) | wired |
+| `enable_growth_scores` | `TRADINGAGENTS_ENABLE_GROWTH_SCORES` | adds the growth-score block to `get_quality_factors` | `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_quality_tool_compresses_the_median_exclusions_when_no_panel_is_supplied` | wired |
+| `enable_score_eval_rows` | `TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS` | adds the IC / score-evaluation rows to the strategy-quality report | `scripts/strategy_quality_report.py::build_report` | `test_score_eval_rows.py::test_report_gate_off_omits_score_eval`, `::test_report_gate_on_without_ledger_is_unavailable` | wired |
+| `enable_analyst_revision_index` | `TRADINGAGENTS_ENABLE_ANALYST_REVISION_INDEX` | adds the analyst-revision index to the sentiment / news component reads and the `get_analyst_revision_index` tool | `tradingagents/agents/utils/analyst_revision_tools.py::get_analyst_revision_index`, `tradingagents/agents/utils/analysis_tools.py::_sentiment_components` / `::_news_components` | `test_analyst_revision_index.py::test_tool_is_a_disabled_sentinel_while_the_flag_is_off`, `::test_tool_renders_the_weighted_index_and_the_estimate_unavailable` | wired |
 
 ## 8. Adding a gate — the rule
 

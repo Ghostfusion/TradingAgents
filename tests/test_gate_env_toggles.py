@@ -125,6 +125,15 @@ REGISTRY: dict[str, str] = {
     "enable_screener": "wired",
     "enable_etf_engine": "wired",
     "enable_enhanced_index": "wired",
+    # score and aggregation flags
+    "enable_sentiment": "wired",
+    "enable_sentiment_factor": "wired",
+    "enable_weighted_sentiment_agg": "wired",
+    "enable_weighted_sentiment_window": "wired",
+    "enable_news_relevance": "wired",
+    "enable_growth_scores": "wired",
+    "enable_score_eval_rows": "wired",
+    "enable_analyst_revision_index": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",
