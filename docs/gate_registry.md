@@ -24,17 +24,12 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates: **64 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **48
+policy, data-surface and context gates, plus the **score-engine gates** added in
+R4 stage 2 (§7e): **72 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **40
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the eight score-engine gates — `enable_fundamental_score`,
-  `enable_technical_score`, `enable_regime_score`, `enable_risk_score`,
-  `enable_sentiment_score`, `enable_news_score`, `enable_trade_score`,
-  `enable_quant_scorecard`. Covered instead by `tests/test_quant_scorecard.py`
-  (the gate map, the default-off assertions and the ownership contract) and
-  `tests/test_engine_ownership_map.py` (engine -> section -> gate);
 - the debate and run-shape flags — `enable_debate`, `enable_reflection`,
   `enable_independent_vote`, `enable_evidence_symmetry`, `enable_decision_audit`,
   `enable_pit_registry`, `enable_prediction_ledger`, `enable_report_attribution`;
@@ -297,6 +292,27 @@ a number computed over a padded one (ground rule 4).
 | `enable_factor_availability_gate` | `TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE` | H2: registration-time rejection of a forward shift or a field unobservable at the decision date | factor_expressions.py availability_gate, called from scripts/factor_bench.py | `tests/test_factor_availability_gate.py` | wired |
 | `enable_forward_stress_probability` | `TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY` | R5: a calibrated one-month-ahead forward stress probability from the cross-section | market_breadth.py forward_stress_probability, printed by regime_score.py | `tests/test_forward_stress_probability.py` | wired |
 | `enable_prompt_condition_harness` | `TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS` | N5: prompt versioning with per-condition accuracy on the decision ledger, offline by construction | agents/utils/prompt_metrics.py record_condition_run and condition_accuracy | `tests/test_prompt_condition_harness.py` | wired |
+
+## 7e. Score-engine gates — the report-level research engines (advisory only)
+
+The eight `*_score` engines. Each is a **research-layer calculator**: it can
+never set a rating, a size or a gate (the executor's hard gates run downstream),
+which is why they are not in §1. Each ships **off**. The engine gates decide
+which engines populate the `quant_scorecard` snapshot; the master
+`enable_quant_scorecard` (its own row below) decides whether the snapshot reaches the report,
+the decision context and the debate at all, and it never implies the engine
+gates.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_fundamental_score` | `TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE` | the `get_fundamental_score` leaf: four advisory 0-100 category sub-scores and the panel composite, with coverage and basis | `tradingagents/agents/utils/analysis_tools.py::get_fundamental_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_fundamental_score` | `test_fundamental_score.py::test_gate_off_makes_the_leaf_say_so`, `::test_run_card_block_is_absent_when_the_gate_is_off` | wired |
+| `enable_technical_score` | `TRADINGAGENTS_ENABLE_TECHNICAL_SCORE` | the `get_technical_score` leaf: 0-100 category sub-scores over band-mapped indicators, plus the weighted composite | `tradingagents/agents/utils/analysis_tools.py::get_technical_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_technical_score` | `test_technical_score.py::test_gate_off_makes_the_leaf_say_so`, `::test_run_card_block_is_absent_when_the_gate_is_off` | wired |
+| `enable_regime_score` | `TRADINGAGENTS_ENABLE_REGIME_SCORE` | the `get_regime_score` leaf: market-level trend / realized-vol / VIX / term-structure / chop reads with the two regime paths printed side by side | `tradingagents/agents/utils/analysis_tools.py::get_regime_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_regime_score` | `test_regime_score.py::test_the_leaf_says_the_gate_is_off`, `::test_gate_off_writes_no_card_key` | wired |
+| `enable_risk_score` | `TRADINGAGENTS_ENABLE_RISK_SCORE` | the `get_risk_score` leaf: eight advisory 0-100 risk category sub-scores (inverted, 100 = low risk) with each raw producer value and sign printed beside its contribution | `tradingagents/agents/utils/analysis_tools.py::get_risk_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_risk_score` | `test_quant_scorecard.py::test_a_gated_off_engine_is_absent_with_its_gate_named`, `::test_the_missing_engine_reaches_the_composite_as_none_not_zero` | wired |
+| `enable_sentiment_score` | `TRADINGAGENTS_ENABLE_SENTIMENT_SCORE` | the `get_sentiment_score` leaf: attention and tone as separate rows (never summed), mixed source scales refused | `tradingagents/agents/utils/analysis_tools.py::get_sentiment_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_sentiment_score` | `test_quant_scorecard.py::test_a_gated_off_engine_is_absent_with_its_gate_named` (the absence mechanism; the leaf's own gate has no dedicated test) | wired |
+| `enable_news_score` | `TRADINGAGENTS_ENABLE_NEWS_SCORE` | the `get_news_score` leaf: relevance and novelty from the news pipeline, the five unsupplied categories printing `NA` with a reason | `tradingagents/agents/utils/analysis_tools.py::get_news_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_news_score` | `test_quant_scorecard.py::test_a_gated_off_engine_is_absent_with_its_gate_named` (the absence mechanism; the leaf's own gate has no dedicated test) | wired |
+| `enable_trade_score` | `TRADINGAGENTS_ENABLE_TRADE_SCORE` | the `get_trade_score` leaf: the advisory composite over four engines, withheld below a two-engine floor; never a gate, a size or an `opportunity_score` | `tradingagents/agents/utils/analysis_tools.py::get_trade_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_trade_score` | `test_trade_score.py::test_the_leaf_says_the_gate_is_off`, `test_quant_scorecard.py::test_the_composite_is_absent_when_its_gate_is_off_but_the_engines_are_read` | wired |
+| `enable_quant_scorecard` | `TRADINGAGENTS_ENABLE_QUANT_SCORECARD` | the master surface gate: decides whether the engine snapshot reaches the report (`run_card`), the computed decision context and the debate block | `tradingagents/graph/trading_graph.py` (`_compiled_decision_context`), `tradingagents/agents/utils/report_hygiene.py::scorecard_context_block`, `tradingagents/reporting.py::_run_card_quant_scorecard` / `::_scorecard_snapshot_for_report` | `test_quant_scorecard.py::test_the_scorecard_gate_exists_and_defaults_off`, `::test_gate_off_leaves_the_context_and_the_card_unchanged` | wired |
 
 ## 8. Adding a gate — the rule
 

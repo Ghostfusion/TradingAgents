@@ -87,6 +87,15 @@ REGISTRY: dict[str, str] = {
     "enable_prompt_condition_harness": "wired",
     "backtest_limit_threshold": "wired",
     "backtest_volume_participation": "wired",
+    # score-engine gates (the report-level research engines, shipped off)
+    "enable_fundamental_score": "wired",
+    "enable_technical_score": "wired",
+    "enable_regime_score": "wired",
+    "enable_risk_score": "wired",
+    "enable_sentiment_score": "wired",
+    "enable_news_score": "wired",
+    "enable_trade_score": "wired",
+    "enable_quant_scorecard": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",
@@ -284,25 +293,6 @@ def test_the_registry_doc_does_not_claim_coverage_it_does_not_have():
     assert "every gate" not in title.lower(), title
     assert "enable_quant_scorecard" in text, "the excluded engine gates must be named"
     assert "test_quant_scorecard.py" in text, "name where they are covered"
-
-
-def test_the_engine_gates_the_doc_excludes_really_are_covered_elsewhere():
-    """The pointer the doc now makes has to be true."""
-    engine_gates = [
-        "enable_fundamental_score",
-        "enable_technical_score",
-        "enable_sentiment_score",
-        "enable_news_score",
-        "enable_trade_score",
-        "enable_regime_score",
-        "enable_risk_score",
-        "enable_quant_scorecard",
-    ]
-    for key in engine_gates:
-        assert key in dc.DEFAULT_CONFIG, key
-        assert key not in REGISTRY, f"{key} is now a registry row - update the doc"
-    scorer = (REPO / "tests" / "test_quant_scorecard.py").read_text(encoding="utf-8")
-    assert "enable_quant_scorecard" in scorer
 
 
 def test_the_doc_states_the_whole_enable_surface_and_names_every_excluded_key():
