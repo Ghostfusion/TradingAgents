@@ -712,3 +712,290 @@ def inflation_expectation_eodhd(
         result["gap_days"] = gap
         result["aligned"] = gap == 0
     return result
+
+
+# ---------------------------------------------------------------------------
+# Treasury bill auctions — /ust/bill-rates
+#
+# A bill curve point is not a note curve point. Bills are discount instruments
+# and the endpoint carries auction IDENTITY (`cusip`, `maturity_date`) that no
+# other producer in this tree has, alongside the auction's own `discount` /
+# `coupon` and their averages. The nominal par curve (`federal_reserve.
+# treasury_curve_points`) is the *secondary-market* note curve — it is not a
+# substitute for this read, and this read is not a substitute for it.
+#
+# Like its sibling `/ust/real-yield-rates`, the design measured this path as a
+# whole-history read (1,253 rows, 187 KB, one call), so the tenor filter is
+# CLIENT-SIDE and no `year` argument is offered (P0 probed that the sibling
+# ignores every query parameter — a `year` here would be a parameter that
+# silently does nothing, the defect class this repo refuses). No live probe of
+# the parameter behaviour on THIS path was made by this build.
+# ---------------------------------------------------------------------------
+
+_BILL_PATH = "ust/bill-rates"
+
+# The tenors the vendor publishes for bill auctions. Bills are the short end;
+# a note tenor like "10Y" is not a bill and must be named as absent rather than
+# interpolated (master rule 1).
+BILL_TENORS = ("4WK", "8WK", "13WK", "17WK", "26WK", "52WK")
+
+
+def _rate_or_none(value) -> float | None:
+    """Parse a vendor numeric field; an unparseable value is ``None``, never 0.0.
+
+    A discount/coupon printed as ``0.0`` because the field was missing is a
+    fabricated rate (master rule 1). Absent stays absent.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cell(value: float | None) -> str:
+    """A numeric table cell: the value, or ``-`` when the field was absent."""
+    return "-" if value is None else str(value)
+
+
+def _bill_auction_points_eodhd(tenor: str | None = None) -> list[dict]:
+    """Treasury bill auction rows from ``/ust/bill-rates``, oldest-first.
+
+    The single read behind ``get_bill_auction_rates_eodhd``. Returns
+    ``[{date, tenor, discount, coupon, avg_discount, avg_coupon,
+    maturity_date, cusip}]``, optionally filtered to one ``tenor`` (client-side,
+    as the vendor returns the whole history in one call).
+
+    The numeric fields are **percent** floats or ``None`` — a missing field is
+    never defaulted to ``0.0``. ``cusip`` and ``maturity_date`` are the auction
+    identity no other producer carries. A tenor the vendor does not publish
+    raises ``NoMarketDataError`` naming the published set.
+    """
+    data = _eodhd_get(_BILL_PATH, {"fmt": "json"})
+    rows = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError("bill-rates", "bill-rates", detail="no bill-auction rows")
+
+    want = _tenor_norm(tenor)
+    points: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_tenor = _tenor_norm(row.get("tenor"))
+        if want and row_tenor != want:
+            continue
+        points.append(
+            {
+                "date": row.get("date"),
+                "tenor": row_tenor,
+                "discount": _rate_or_none(row.get("discount")),
+                "coupon": _rate_or_none(row.get("coupon")),
+                "avg_discount": _rate_or_none(row.get("avg_discount")),
+                "avg_coupon": _rate_or_none(row.get("avg_coupon")),
+                "maturity_date": row.get("maturity_date") or None,
+                "cusip": row.get("cusip") or None,
+            }
+        )
+
+    if not points:
+        if want:
+            raise NoMarketDataError(
+                "bill-rates",
+                "bill-rates",
+                detail=f"no rows for tenor '{want}' (published tenors: "
+                f"{', '.join(BILL_TENORS)})",
+            )
+        raise NoMarketDataError("bill-rates", "bill-rates", detail="no bill-auction rows")
+
+    points.sort(key=lambda r: (r.get("date") or "", r.get("tenor") or ""))
+    return points
+
+
+def get_bill_auction_rates_eodhd(tenor: str | None = None, *, tail: int | None = None) -> str:
+    """Rendered Treasury bill auction detail (EODHD ``/ust/bill-rates``).
+
+    Prints the auction date, the tenor and the auction identity with every row,
+    because a bill's ``cusip``/``maturity_date`` are what make it an auction
+    rather than a curve point, plus the coverage the read achieved.
+
+    With no ``tenor`` the table is the **current bill curve**: the most recent
+    auction for each published tenor, one row each — the shape a report head
+    wants. With a ``tenor`` the whole (optionally ``tail``-bounded) series for
+    that tenor is rendered, and ``tail`` states how many rows it withheld while
+    the header keeps the full coverage.
+    """
+    points = _bill_auction_points_eodhd(tenor)
+
+    dates = sorted({p["date"] for p in points if p.get("date")})
+    tenors = sorted({p["tenor"] for p in points})
+    want = _tenor_norm(tenor)
+
+    lines = [
+        "## US Treasury bill auctions - EODHD /ust/bill-rates",
+        f"Tenor(s): {', '.join(tenors)} | Rows: {len(points)} | "
+        f"Coverage: {dates[0]} to {dates[-1]}" if dates else f"Rows: {len(points)}",
+        "",
+    ]
+
+    if want:
+        shown = points
+        withheld = 0
+        if tail is not None and tail > 0 and len(points) > tail:
+            shown = points[-tail:]
+            withheld = len(points) - tail
+        lines += [
+            "| Auction date | Discount % | Coupon % | Avg discount % | Avg coupon % | Maturity | CUSIP |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for p in shown:
+            lines.append(
+                f"| {p['date']} | {_cell(p['discount'])} | {_cell(p['coupon'])} | "
+                f"{_cell(p['avg_discount'])} | {_cell(p['avg_coupon'])} | "
+                f"{p['maturity_date'] or '-'} | {p['cusip'] or '-'} |"
+            )
+        if withheld:
+            lines += [
+                "",
+                f"_(showing the most recent {tail} of {len(points)} rows; "
+                f"{withheld} withheld - the header's coverage is the full read)_",
+            ]
+    else:
+        # One row per tenor: the most recent auction of each. Different tenors
+        # auction on different days, so each row carries its own date.
+        lines += [
+            "| Tenor | Latest auction | Discount % | Coupon % | Maturity | CUSIP |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for t in tenors:
+            row = next((p for p in reversed(points) if p["tenor"] == t), None)
+            if row is None:  # pragma: no cover - tenors come from the points
+                continue
+            lines.append(
+                f"| {t} | {row['date']} | {_cell(row['discount'])} | "
+                f"{_cell(row['coupon'])} | {row['maturity_date'] or '-'} | "
+                f"{row['cusip'] or '-'} |"
+            )
+        lines += [
+            "",
+            f"_(most recent auction per tenor; {len(dates)} auction dates in the returned series)_",
+        ]
+
+    lines += [
+        "",
+        "Interpretation: a bill is a discount instrument - its auction `discount` "
+        "rate is not a coupon-equivalent yield, and a bill curve point is not a "
+        "note curve point. The nominal par curve is a different read.",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Identifier join — /id-mapping
+#
+# FIGI / LEI / CUSIP have no producer anywhere in this tree. The CIK does:
+# ``sec_edgar._cik_for`` resolves a ticker from SEC's own company_tickers.json,
+# and SEC is the authoritative registrar for its own identifier. So the vendor's
+# ``cik`` field is returned ONLY as a labelled cross-check (`cik_cross_check`)
+# and no function here resolves or contributes a CIK — a second CIK path is the
+# rule-15 violation the design demotes. `sec_edgar._cik_for` remains the
+# authority.
+# ---------------------------------------------------------------------------
+
+_ID_MAPPING_PATH = "id-mapping"
+
+
+def _primary_listing(rows: list[dict], symbol: str | None = None) -> dict | None:
+    """Select the primary listing explicitly — never row 0.
+
+    ``filter[isin]`` maps one ISIN to **every** listing of the security (the
+    design measured 18 rows for one US ISIN), so taking row 0 would silently
+    pick a foreign listing's identifiers. The primary listing is the ``.US``
+    one; with no single primary and more than one candidate the read is
+    *ambiguous* and yields ``None`` so the caller can say so.
+    """
+    if symbol:
+        want = symbol.strip().upper()
+        exact = [
+            r for r in rows if str(r.get("symbol") or "").strip().upper() == want
+        ]
+        if len(exact) == 1:
+            return exact[0]
+    us = [r for r in rows if str(r.get("symbol") or "").upper().endswith(".US")]
+    if len(us) == 1:
+        return us[0]
+    if len(rows) == 1:
+        return rows[0]
+    return None
+
+
+def map_identifiers_eodhd(*, isin: str | None = None, symbol: str | None = None) -> dict:
+    """FIGI / LEI / CUSIP for a security (EODHD ``/id-mapping``).
+
+    **FIGI, LEI and CUSIP are the adopted identifiers** — the tree has none of
+    the three. Exactly one of ``isin`` or ``symbol`` selects the query
+    (``filter[isin]`` / ``filter[symbol]``); anything else is a ``ValueError``,
+    because a call with neither would query the whole vendor surface and a call
+    with both has no single meaning.
+
+    Returns::
+
+        {"query", "rows", "listing", "isin", "figi", "lei", "cusip",
+         "cik_cross_check", "unavailable"}
+
+    ``listing`` is the **primary** listing selected by ``_primary_listing``
+    (never row 0 — an ISIN maps to every listing of the security). ``rows`` is
+    how many the vendor returned, so a reader can see the selection was made.
+
+    ``cik_cross_check`` is EODHD's own ``cik`` field, printed **only** for
+    cross-checking: ``sec_edgar._cik_for`` is the sole authority for a CIK in
+    this tree and nothing here resolves or returns one as an identifier. A field
+    the chosen listing lacks is ``None``, never ``""`` (master rule 1).
+
+    A vendor failure or an empty/ambiguous response is reported in
+    ``unavailable`` with its reason rather than raised, so a caller can print
+    the gap.
+    """
+    if bool(isin) == bool(symbol):
+        raise ValueError(
+            "map_identifiers_eodhd needs exactly one of isin= or symbol= "
+            "(a call with neither queries the whole surface; a call with both "
+            "has no single meaning)"
+        )
+    key = "filter[isin]" if isin else "filter[symbol]"
+    value = str(isin or symbol).strip()
+    result: dict = {
+        "query": {"isin": isin, "symbol": symbol},
+        "rows": 0,
+        "listing": None,
+        "isin": None,
+        "figi": None,
+        "lei": None,
+        "cusip": None,
+        "cik_cross_check": None,
+        "unavailable": None,
+    }
+
+    try:
+        data = _eodhd_get(_ID_MAPPING_PATH, {key: value, "fmt": "json"})
+    except Exception as exc:  # noqa: BLE001 - a failed read is a named gap
+        result["unavailable"] = f"identifier read failed: {exc}"
+        return result
+
+    rows = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(rows, list) or not rows:
+        result["unavailable"] = f"no identifier rows for {key}={value}"
+        return result
+    dicts = [r for r in rows if isinstance(r, dict)]
+    result["rows"] = len(dicts)
+
+    chosen = _primary_listing(dicts, symbol)
+    if chosen is None:
+        result["unavailable"] = (
+            f"ambiguous: {len(dicts)} listings for {key}={value}, none primary (.US)"
+        )
+        return result
+
+    result["listing"] = chosen.get("symbol") or None
+    for field in ("isin", "figi", "lei", "cusip"):
+        result[field] = chosen.get(field) or None
+    result["cik_cross_check"] = chosen.get("cik") or None
+    return result

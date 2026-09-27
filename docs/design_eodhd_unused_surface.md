@@ -238,9 +238,9 @@ A second public function returning the same rows would be a second producer, and
 | Phase | Work | Gate |
 |---|---|---|
 | **P0** | `real_yield_points_eodhd` + `get_real_yield_rates_eodhd`; the nominal/real pairing as a single derived read — **BUILT 2026-09-19** (see below) | `enable_eodhd_rates` |
-| **P1** | `get_bill_auction_rates_eodhd` | same |
-| **P2** | `map_identifiers_eodhd`, FIGI/LEI/CUSIP only; CIK as a named fallback behind `sec_edgar._cik_for` | same |
-| **P3** | `/eod-bulk-last-day` as a **batched transport** for the existing price producer — only if the per-symbol path ever becomes the bottleneck | same |
+| **P1** | `get_bill_auction_rates_eodhd` — **BUILT 2026-09-27** (see below) | same |
+| **P2** | `map_identifiers_eodhd`, FIGI/LEI/CUSIP only; CIK as a named cross-check behind `sec_edgar._cik_for` — **BUILT 2026-09-27** (see below) | same |
+| **P3** | `/eod-bulk-last-day` as a **batched transport** for the existing price producer — only if the per-symbol path ever becomes the bottleneck — **DECLINED 2026-09-27**: no measurement shows it is (see below) | same |
 
 Each phase needs: the gate row in all four places, a failing-first test **by mutation**, and a
 `CHANGELOG.md` entry with a `**Web impact**:` line.
@@ -314,6 +314,120 @@ ignored; supplied legs ignored) — then byte-identical restore. Gate off: the b
 
 ---
 
+## P1 — build record (2026-09-27)
+
+Built as designed, with **three corrections the build forced**, all of them the same classes
+P0's build hit.
+
+**1. `year` is not a parameter this read offers.** The design's module layout sketched
+`get_bill_auction_rates_eodhd(tenor=None, year=None)`. P0 proved the sibling
+`/ust/real-yield-rates` **ignores every query parameter**, and this build could not probe
+`/ust/bill-rates` live (no live vendor access in this round), so offering a `year` would risk
+exactly the defect class P0 dropped it for — a parameter that silently does nothing. The read
+is whole-history with a **client-side** tenor filter, and no `year` argument exists. *The
+parameter behaviour of this path is unverified; the design's own measurement (1,253 rows, one
+call for a year of rows) is what the read assumes.*
+
+**2. The rendered read needed a structured read behind it — and it is private.** The design
+listed only the rendered function for P1, but the render needs the rows parsed (the coverage
+line, the "latest auction per tenor" selection, the tail bound). The established shape here is
+one read, two presentations — and the public/private split follows the consumers:
+`real_yield_points_eodhd` is public because the pairing consumes it; `_sentiment_points_eodhd`
+is private because nothing outside the module does. P1 has no second consumer, so the
+structured read is private (`_bill_auction_points_eodhd`) and the public surface is the
+rendered one. A public structured twin would have been a second producer with no consumer.
+
+**3. A bill row survives a blank numeric, and the blank is `None`, never `0.0`.** Unlike P0's
+rate rows (dropped when the rate will not parse — the row is *only* its rate), a bill row
+carries **auction identity** (`cusip`, `maturity_date`) that is the whole point of the read, so
+the row is kept and each unparseable numeric is `None`; the render prints `-`. A discount
+printed as `0.0` because the cell was blank is a fabricated rate (master rule 1).
+
+**The default render is the bill curve, not the series.** With no `tenor` the table is one row
+per published tenor — the most recent auction of each, each row carrying its own auction date
+(different tenors auction on different days). 1,253 raw rows is right for a file and wrong for
+a report head. With a `tenor` the series renders, and a `tail` bounds it while the header keeps
+the full coverage and the note names the withheld count — the same contract as P0.
+
+**Consumer (rule 1b).** `scripts/value_screener.py --rates` — the *same* flag the gate registry
+names as this gate's enforcement site. One gate, one flag, the whole rate/reference surface: the
+gate was deliberately one (the design's "One gate, not three"), so its consumer is the block
+that already read the vendor's rate surface.
+
+**Verification.** `tests/test_eodhd_rates.py`, 8 P1 tests (20 P0 + 8 P1 + 8 P2 = 36). **Eight
+mutations each turn one test red by name**, then byte-identical restore: unparseable rate
+defaulted to `0.0`; the tenor filter deleted; the published bill set dropped from the
+missing-tenor message; the tail bound ignored; a missing numeric cell rendered as `0.0`;
+the coverage header dropped; `cusip` dropped from the point; an empty payload returning `[]`
+instead of raising.
+
+## P2 — build record (2026-09-27)
+
+Built as designed, with **three corrections the build forced**, one of them a deliberate
+divergence from the plan row.
+
+**1. The CIK is a cross-check, not a fallback.** The plan row said *"CIK as a named fallback
+behind `sec_edgar._cik_for`"*; a fallback is still a second path with its own failure
+semantics. The verdict section already demotes the field to a **cross-check**, and this build
+holds that line: `map_identifiers_eodhd` returns `cik_cross_check` — the vendor's value,
+printed and labelled as a cross-check — and **no function in `eodhd.py` resolves or returns a
+CIK as an identifier**. `sec_edgar._cik_for` remains the sole producer of a CIK in this tree
+(master rule 15). A test asserts both halves: no `cik` key in the result and no `cik`-named
+callable in the module. *A fallback path was deliberately not built.*
+
+**2. The primary listing is selected by rule, never row 0.** Constraint 3 said a consumer must
+select the primary listing explicitly. `_primary_listing` prefers the exact `symbol` when one
+was queried, else the single `.US` listing, else the single returned row; with several
+candidates and no primary it returns `None` and the read reports
+`ambiguous: N listings, none primary (.US)` instead of silently taking row 0. Measured shape:
+`filter[isin]` returns **18 rows for one US ISIN**, row 0 a foreign listing.
+
+**3. An absent field is `None`, never `""`.** A listing without a `figi`/`lei`/`cusip` (or a
+`cik`) yields `None`, so the consumer sees a named gap rather than an empty string.
+
+**Signature.** `map_identifiers_eodhd(*, isin=None, symbol=None) -> dict` — **exactly one**
+selector is required (`ValueError` otherwise): neither would query the whole vendor surface and
+both have no single meaning. Returns `{query, rows, listing, isin, figi, lei, cusip,
+cik_cross_check, unavailable}`; `rows` is the vendor count so the selection is auditable. A
+vendor failure, an empty payload or an ambiguous selection is an `unavailable` reason, not a
+raise — the structured read is consumed by a script that prints gaps.
+
+**Consumer (rule 1b).** The same `--rates` block: FIGI / LEI / CUSIP for the ranked names
+(`.US` symbols — the `filter[symbol]` path the design measured as one row). The identifier read
+is a reference read of the same vendor surface, so it rides the same gate and the same flag; a
+second flag for one gate's read would multiply the toggle surface without changing what a user
+decides.
+
+**Not probed live.** The 18-row / 1-row shapes are the design's own 2026-09-19 measurement; the
+offline tests use that shape. No live EODHD call was made by this round.
+
+**Verification.** `tests/test_eodhd_rates.py`, 8 P2 tests. **Eight mutations each turn one test
+red by name**, then byte-identical restore: the primary-listing `.US` preference disabled; the
+ambiguity branch silently resolving to row 0; the exactly-one-selector guard removed; an absent
+field defaulted to `""`; `lei` dropped from the carried fields; the CIK key renamed to `cik`;
+a vendor failure raised instead of reported; an empty payload reporting no reason.
+
+## P3 — decision (2026-09-27): DECLINED
+
+The design makes P3 **conditional by its own words** — `/eod-bulk-last-day` as a batched
+transport *"only if the per-symbol path ever becomes the bottleneck"*. **No measurement shows
+it is, so it is not built.**
+
+- The one measured screener regression this design records was **not** the price path: the P0
+  build record's 158 s → 60 s fix was twelve *rate* reads collapsed to two. Nothing measured
+  the per-symbol price fetch.
+- The price route is the `core_stock_apis` chain (`eodhd` first), wrapped in the 6 h disk cache
+  (`dataflows/vendor_cache.py`), on an EOD plan of **100 k calls/day at 1000/min** — the README
+  records the plan precisely because the moomoo K-line quota, not EODHD's, was the constraint.
+- Building it now would trade a cached per-symbol read for a **6.6 MB** response and a new
+  transport seam with no measurement to justify either.
+
+**Trigger to reopen:** a measured per-run breakdown showing the per-symbol price fetch dominates
+the screener's vendor time (count and latency). That measurement needs live EODHD access, which
+is why it was not taken here. Until it exists, P3 stays declined rather than built speculatively.
+
+---
+
 ## Open questions
 
 1. **Does the owner want the inflation expectation *computed*, or only the two legs
@@ -332,6 +446,11 @@ ignored; supplied legs ignored) — then byte-identical restore. Gate off: the b
 3. **Does `/eod-bulk-last-day` (45,009 rows, one call) change the panel's cost model?** It is
    the same producer batched, so it is not a rule-15 question — but it is a 6.6 MB response and
    the panel fetches per symbol today.
+   **ANSWERED 2026-09-27 by the P3 decision: no measurement shows the per-symbol path is the
+   bottleneck, so P3 is DECLINED** (see the P3 decision above). The one measured screener
+   regression was redundant *rate* reads, not price fetches; the price route is cached 6 h on a
+   100 k calls/day plan. Reopen only on a measured per-run breakdown showing the per-symbol
+   price fetch dominates vendor time.
 
 ---
 
@@ -343,7 +462,7 @@ real Treasury yield, and the real-yield series is the other half of that measure
 call, 42 KB, gated off by default.
 
 **Build P1 and P2 behind the same gate** — they are small, they have no producer in the tree,
-and P2's CIK demotion is already specified.
+and P2's CIK demotion is already specified. **BUILT 2026-09-27** (see the P1/P2 build records).
 
 **Do not build Tier 2.** Six reachable endpoints are second producers or reference plumbing.
 Reachability is not a reason to adopt; rule 15 is the reason not to.

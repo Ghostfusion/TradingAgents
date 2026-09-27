@@ -1229,13 +1229,18 @@ SHIPPED_DEFAULTS = {
         # `strategies/analyst_revisions.estimate_change_index` documents itself as
         # never having, plus the direct up/down revision counts. Off by default.
         "enable_analyst_estimates": False,
-        # `docs/design_eodhd_unused_surface.md` P0: TIPS real yields from EODHD's
-        # `/ust/real-yield-rates`, and the ONE producer of the nominal-minus-real
-        # inflation expectation (`dataflows/eodhd.inflation_expectation_eodhd`).
-        # Nothing in the tree read TIPS before this, while
-        # `strategies/dcf.py::wacc_from_beta` already consumes a nominal 10y and
-        # *assumes* the equity risk premium. Off by default: with it off no rate
-        # call is made and a run is byte-identical.
+        # `docs/design_eodhd_unused_surface.md` P0-P2: TIPS real yields from
+        # EODHD's `/ust/real-yield-rates` with the ONE producer of the
+        # nominal-minus-real inflation expectation
+        # (`dataflows/eodhd.inflation_expectation_eodhd`); the Treasury bill
+        # **auction** table (`/ust/bill-rates`, including `maturity_date`/`cusip`)
+        # from `dataflows/eodhd.get_bill_auction_rates_eodhd`; and the identifier
+        # join (`/id-mapping`) from `dataflows/eodhd.map_identifiers_eodhd` for
+        # FIGI / LEI / CUSIP (the CIK stays `sec_edgar._cik_for`'s, returned here
+        # only as a labelled cross-check). Nothing in the tree read TIPS before
+        # P0, while `strategies/dcf.py::wacc_from_beta` already consumes a nominal
+        # 10y and *assumes* the equity risk premium. Off by default: with it off
+        # no vendor call is made and a run is byte-identical.
         "enable_eodhd_rates": False,
         # WP-2 (docs/scores/IMPLEMENTATION_PLAN.md §5.1): the four FundamentalScore
         # category sub-scores + their RESEARCH_ONLY composite. Off by default;

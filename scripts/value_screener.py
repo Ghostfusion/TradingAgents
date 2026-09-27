@@ -1416,9 +1416,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--rates",
         action="store_true",
-        help="print the US real-yield (TIPS) curve and the measured inflation "
-        "expectation (nominal par yield - TIPS real yield) at the head of the "
-        "report. Requires enable_eodhd_rates; with the gate off the block "
+        help="print the EODHD rate/reference reads at the head of the report: the "
+        "US real-yield (TIPS) curve with the measured inflation expectation "
+        "(nominal par yield - TIPS real yield), the Treasury bill auction table "
+        "(auction discount/coupon, maturity, CUSIP), and FIGI/LEI/CUSIP for the "
+        "ranked names. Requires enable_eodhd_rates; with the gate off the block "
         "prints unavailable and its reason. Advisory: it never gates a row and "
         "never changes a valuation - dcf.wacc_from_beta keeps its own assumed "
         "premium.",
@@ -2581,10 +2583,13 @@ def main(argv: list[str] | None = None) -> int:
         if sector_table:
             markdown = markdown.rstrip() + "\n\n" + sector_table
             print(sector_table)
-    # Real-yield / inflation-expectation block (--rates). Advisory only: it
-    # prints a rate read and never touches a valuation. dcf.wacc_from_beta keeps
-    # its own assumed premium - the point of printing this is that the reader can
-    # now see the measured counterpart of that assumption rather than only the
+    # EODHD rate/reference block (--rates): the whole `enable_eodhd_rates`
+    # surface, because the gate is one read of one vendor's rate/reference
+    # surface. P0 real yields + the inflation expectation, P1 the Treasury bill
+    # auction table, P2 FIGI/LEI/CUSIP for the ranked names. Advisory only: it
+    # prints reads and never touches a valuation. dcf.wacc_from_beta keeps its
+    # own assumed premium - the point of printing this is that the reader can now
+    # see the measured counterpart of that assumption rather than only the
     # constant. Gate: enable_eodhd_rates (docs/gate_registry.md §6).
     if args.rates:
         rate_lines: list[str] = ["\n## US real yields and the inflation expectation"]
@@ -2604,8 +2609,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             try:
                 from tradingagents.dataflows.eodhd import (
+                    get_bill_auction_rates_eodhd,
                     get_real_yield_rates_eodhd,
                     inflation_expectation_eodhd,
+                    map_identifiers_eodhd,
                     real_yield_points_eodhd,
                 )
                 from tradingagents.dataflows.federal_reserve import treasury_curve_points
@@ -2660,6 +2667,33 @@ def main(argv: list[str] | None = None) -> int:
                         "(`erp=0.05`). It measures the *rate* half of the input; the "
                         "premium itself is unchanged.",
                     ]
+                # P1 (docs/design_eodhd_unused_surface.md): auction-level bill
+                # detail. `cusip`/`maturity_date` are auction identity no other
+                # producer carries, and a bill curve point is not a note curve
+                # point. Same gate, same vendor surface.
+                rate_lines += ["", get_bill_auction_rates_eodhd()]
+                # P2: FIGI / LEI / CUSIP for the ranked names - the tree has none
+                # of the three. CIK is deliberately NOT read from the vendor:
+                # sec_edgar._cik_for owns that join (rule 15).
+                if ranked:
+                    rate_lines += [
+                        "",
+                        "## Instrument identifiers (EODHD /id-mapping)",
+                        "",
+                        "| Ticker | Listing | ISIN | FIGI | LEI | CUSIP |",
+                        "| --- | --- | --- | --- | --- | --- |",
+                    ]
+                    for _row in ranked[:10]:
+                        _sym = str(_row.get("ticker") or "")
+                        _id = map_identifiers_eodhd(symbol=f"{_sym}.US")
+                        if _id.get("unavailable"):
+                            rate_lines.append(f"| {_sym} | - | - | - | - | unavailable |")
+                            continue
+                        rate_lines.append(
+                            f"| {_sym} | {_id['listing']} | {_id['isin'] or '-'} | "
+                            f"{_id['figi'] or '-'} | {_id['lei'] or '-'} | "
+                            f"{_id['cusip'] or '-'} |"
+                        )
             except Exception as exc:  # noqa: BLE001 - a failed read is reported, not raised
                 rate_lines += ["", f"unavailable - rate read failed: {exc}"]
         rates_block = "\n".join(rate_lines)

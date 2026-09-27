@@ -1,9 +1,12 @@
-"""P0 of `docs/design_eodhd_unused_surface.md`, offline.
+"""P0-P2 of `docs/design_eodhd_unused_surface.md`, offline.
 
 The readers behind `enable_eodhd_rates`:
 `tradingagents/dataflows/eodhd.py::real_yield_points_eodhd` /
 `::get_real_yield_rates_eodhd` (TIPS real yields) and
-`::inflation_expectation_eodhd` (the single producer of nominal - real).
+`::inflation_expectation_eodhd` (the single producer of nominal - real) —
+plus P1 `::get_bill_auction_rates_eodhd` (Treasury bill auction detail) and P2
+`::map_identifiers_eodhd` (FIGI / LEI / CUSIP; CIK only as a labelled
+cross-check, never a path).
 
 Offline: `eodhd._eodhd_get` and `federal_reserve._get` are mocked, so nothing
 touches the network. The payload shapes are the measured ones (probed live
@@ -18,6 +21,10 @@ import pytest
 
 from tradingagents.dataflows import eodhd, federal_reserve
 from tradingagents.dataflows.errors import NoMarketDataError
+
+# Rule 5: every test file carries its own deadline; these reads are mocked, so
+# 30s is generous.
+pytestmark = pytest.mark.timeout(30)
 
 # The measured response body: the whole history in one call, oldest-first,
 # five tenors. Every query parameter is ignored by the vendor (probed), which
@@ -308,3 +315,258 @@ def test_rendered_curve_still_comes_from_the_same_parse():
     for label, rate in curve["rows"]:
         assert f"| {label} | {rate} |" in rendered
     assert f"As of: {curve['as_of']}" in rendered
+
+
+# ---------------------------------------------------------------------------
+# P1 - the bill-auction reader (a bill curve point is not a note curve point)
+# ---------------------------------------------------------------------------
+
+# The measured auction shape: date, tenor, the auction's own discount/coupon
+# and their averages, plus the auction identity (maturity_date, cusip). The
+# third row's numerics are unparseable on purpose - they must stay None.
+_BILL_BODY = {
+    "meta": {"total": 3},
+    "data": [
+        {
+            "date": "2026-09-18",
+            "tenor": "13WK",
+            "discount": 3.58,
+            "coupon": 3.64,
+            "avg_discount": 3.57,
+            "avg_coupon": 3.63,
+            "maturity_date": "2026-12-17",
+            "cusip": "912797XX1",
+        },
+        {
+            "date": "2026-09-18",
+            "tenor": "4WK",
+            "discount": 4.02,
+            "coupon": 4.09,
+            "avg_discount": 4.01,
+            "avg_coupon": 4.08,
+            "maturity_date": "2026-10-15",
+            "cusip": "912797YY2",
+        },
+        {
+            "date": "2026-09-17",
+            "tenor": "13WK",
+            "discount": None,
+            "coupon": "",
+            "avg_discount": None,
+            "avg_coupon": None,
+            "maturity_date": "2026-12-16",
+            "cusip": "912797ZZ3",
+        },
+    ],
+}
+
+
+def test_bill_points_carry_the_auction_identity():
+    """The point of the bill read is the auction identity, not a curve point."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY):
+        pts = eodhd._bill_auction_points_eodhd("13WK")
+    assert set(pts[0]) == {
+        "date",
+        "tenor",
+        "discount",
+        "coupon",
+        "avg_discount",
+        "avg_coupon",
+        "maturity_date",
+        "cusip",
+    }, "every field the design names must be carried"
+    assert [p["date"] for p in pts] == ["2026-09-17", "2026-09-18"], "oldest-first"
+    assert pts[-1]["cusip"] == "912797XX1"
+    assert pts[-1]["maturity_date"] == "2026-12-17"
+
+
+def test_bill_tenor_filter_is_client_side_and_exact():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY):
+        four = eodhd._bill_auction_points_eodhd("4WK")
+    assert {p["tenor"] for p in four} == {"4WK"}
+    assert [p["cusip"] for p in four] == ["912797YY2"]
+
+
+def test_bill_missing_rate_is_none_never_zero():
+    """A missing/blank discount is absent - `None` is never `0.0`."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY):
+        pts = eodhd._bill_auction_points_eodhd("13WK")
+    assert [p["discount"] for p in pts] == [None, 3.58]
+    assert [p["coupon"] for p in pts] == [None, 3.64]
+    assert 0.0 not in [p["discount"] for p in pts]
+
+
+def test_bill_tenor_that_is_not_a_bill_is_named_never_interpolated():
+    """`10Y` is a note tenor: it must raise, naming the published bill set."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY), pytest.raises(
+        NoMarketDataError
+    ) as ei:
+        eodhd._bill_auction_points_eodhd("10Y")
+    msg = str(ei.value)
+    assert "10Y" in msg, "the requested tenor must be named"
+    assert "13WK" in msg and "52WK" in msg, "the published set must be named"
+
+
+def test_bill_empty_payload_raises():
+    with mock.patch.object(
+        eodhd, "_eodhd_get", return_value={"meta": {"total": 0}, "data": []}
+    ), pytest.raises(NoMarketDataError):
+        eodhd._bill_auction_points_eodhd()
+
+
+def test_bill_rendered_curve_prints_date_tenor_and_cusip():
+    """The default render is the current bill curve: one row per tenor."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY):
+        out = eodhd.get_bill_auction_rates_eodhd()
+    assert "| 13WK | 2026-09-18 | 3.58 | 3.64 | 2026-12-17 | 912797XX1 |" in out
+    assert "| 4WK | 2026-09-18 | 4.02 |" in out
+    assert "Rows: 3" in out, "coverage must be stated"
+    assert "Coverage: 2026-09-17 to 2026-09-18" in out
+    assert "a bill curve point is not a note curve point" in out
+
+
+def test_bill_tail_bounds_rows_without_hiding_coverage():
+    long_body = {
+        "meta": {"total": 0},
+        "data": [
+            {
+                "date": f"2026-08-{d:02d}",
+                "tenor": "13WK",
+                "discount": 3.0 + d / 100,
+                "coupon": None,
+                "avg_discount": None,
+                "avg_coupon": None,
+                "maturity_date": None,
+                "cusip": None,
+            }
+            for d in range(1, 21)
+        ],
+    }
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=long_body):
+        out = eodhd.get_bill_auction_rates_eodhd("13WK", tail=3)
+    rows = [ln for ln in out.splitlines() if ln.startswith("| 2026-")]
+    assert len(rows) == 3, f"expected 3 rendered rows, got {len(rows)}"
+    assert "| 2026-08-20 |" in out, "the tail must be the most recent rows"
+    assert "| 2026-08-01 |" not in out
+    assert "Rows: 20" in out, "the full read must still be stated"
+    assert "of 20 rows" in out, "the withheld count must be named"
+
+
+def test_bill_rendered_series_keeps_the_tenor_on_every_row():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BILL_BODY):
+        out = eodhd.get_bill_auction_rates_eodhd("13WK")
+    assert "Tenor(s): 13WK" in out
+    assert "| 2026-09-18 | 3.58 | 3.64 | 3.57 | 3.63 | 2026-12-17 | 912797XX1 |" in out
+    # the unparseable row renders `-`, not a fabricated 0.0
+    assert "| 2026-09-17 | - | - | - | - | 2026-12-16 | 912797ZZ3 |" in out
+    assert "0.0" not in out
+
+
+# ---------------------------------------------------------------------------
+# P2 - the identifier join (FIGI / LEI / CUSIP; CIK is a labelled cross-check)
+# ---------------------------------------------------------------------------
+
+# `filter[isin]` maps one US ISIN to EVERY listing (18 rows measured live), so
+# row 0 is a foreign listing: taking it would silently pick the wrong row.
+_ID_BODY = {
+    "data": [
+        {
+            "symbol": "AAPL.MX",
+            "isin": "US0378331005",
+            "figi": "BBG000B9XRY4",
+            "lei": "HWUPKR0MPOU8FGXBT394",
+            "cusip": "037833100",
+            "cik": "0000320193",
+        },
+        {
+            "symbol": "AAPL.US",
+            "isin": "US0378331005",
+            "figi": "BBG000B9XRY4",
+            "lei": "HWUPKR0MPOU8FGXBT394",
+            "cusip": "037833100",
+            "cik": "0000320193",
+        },
+        {
+            "symbol": "APC.DE",
+            "isin": "US0378331005",
+            "figi": "BBG000B9XRY4",
+            "lei": "HWUPKR0MPOU8FGXBT394",
+            "cusip": "037833100",
+            "cik": "0000320193",
+        },
+    ]
+}
+
+
+def test_id_mapping_by_symbol_returns_the_three_new_identifiers():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_ID_BODY):
+        got = eodhd.map_identifiers_eodhd(symbol="AAPL.US")
+    assert got["listing"] == "AAPL.US"
+    assert got["figi"] == "BBG000B9XRY4"
+    assert got["lei"] == "HWUPKR0MPOU8FGXBT394"
+    assert got["cusip"] == "037833100"
+    assert got["unavailable"] is None
+    assert got["rows"] == 3, "the returned row count must be visible"
+
+
+def test_id_mapping_picks_the_primary_listing_not_row_zero():
+    """An ISIN maps to every listing; row 0 is a foreign listing here."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_ID_BODY):
+        got = eodhd.map_identifiers_eodhd(isin="US0378331005")
+    assert got["listing"] == "AAPL.US", "the primary (.US) listing must be selected"
+    assert got["listing"] != _ID_BODY["data"][0]["symbol"]
+
+
+def test_id_mapping_ambiguous_selection_is_named_not_row_zero():
+    """No primary listing and more than one candidate -> a named gap."""
+    body = {
+        "data": [
+            dict(_ID_BODY["data"][0], symbol="AAPL.MX"),
+            dict(_ID_BODY["data"][2], symbol="APC.DE"),
+        ]
+    }
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=body):
+        got = eodhd.map_identifiers_eodhd(isin="US0378331005")
+    assert got["figi"] is None, "an ambiguous read must not return a row's identifiers"
+    assert "ambiguous" in got["unavailable"]
+    assert "none primary (.US)" in got["unavailable"]
+
+
+def test_id_mapping_requires_exactly_one_query():
+    with pytest.raises(ValueError):
+        eodhd.map_identifiers_eodhd()
+    with pytest.raises(ValueError):
+        eodhd.map_identifiers_eodhd(isin="US0378331005", symbol="AAPL.US")
+
+
+def test_id_mapping_absent_field_is_none_never_empty_string():
+    body = {"data": [{"symbol": "ZZZZ.US", "isin": "US0000000000", "figi": "BBG000000001"}]}
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=body):
+        got = eodhd.map_identifiers_eodhd(symbol="ZZZZ.US")
+    assert got["figi"] == "BBG000000001"
+    assert got["lei"] is None and got["cusip"] is None, "absent must stay None"
+    assert got["cik_cross_check"] is None
+
+
+def test_id_mapping_vendor_failure_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", side_effect=RuntimeError("gateway down")):
+        got = eodhd.map_identifiers_eodhd(symbol="AAPL.US")
+    assert got["figi"] is None
+    assert "identifier read failed" in got["unavailable"]
+
+
+def test_id_mapping_empty_payload_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value={"data": []}):
+        got = eodhd.map_identifiers_eodhd(symbol="AAPL.US")
+    assert "no identifier rows" in got["unavailable"]
+
+
+def test_cik_is_a_labelled_cross_check_with_no_second_path():
+    """`sec_edgar._cik_for` owns the CIK join; EODHD's value is a cross-check."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_ID_BODY):
+        got = eodhd.map_identifiers_eodhd(symbol="AAPL.US")
+    assert "cik" not in got, "the CIK must never be returned as an identifier"
+    assert got["cik_cross_check"] == "0000320193", "the vendor value is still viewable"
+    # No public eodhd surface resolves a CIK: a second path is the rule-15
+    # violation the design demotes.
+    assert not [n for n in dir(eodhd) if "cik" in n.lower()]

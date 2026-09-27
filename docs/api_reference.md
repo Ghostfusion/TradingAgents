@@ -1200,7 +1200,14 @@ so a tree carries its own consistency record instead of depending on the opt-in
   `::get_real_yield_rates_eodhd` (TIPS real yields) and
   `::inflation_expectation_eodhd` (the single producer of nominal − real, both
   legs' dates and the basis printed), with `federal_reserve.treasury_curve_points`
-  refactored to a structured read the existing renderer now draws from. Gate off
+  refactored to a structured read the existing renderer now draws from.
+  **P1 and P2 are BUILT (2026-09-27)**: `eodhd.get_bill_auction_rates_eodhd`
+  (Treasury bill **auction** detail — discount/coupon, `maturity_date`, `cusip`)
+  and `eodhd.map_identifiers_eodhd` (**FIGI / LEI / CUSIP**; the vendor's CIK is
+  returned only as a labelled `cik_cross_check`, since `sec_edgar._cik_for` owns
+  that join). **P3 (`/eod-bulk-last-day`) is DECLINED** — no measurement shows
+  the per-symbol price path is the bottleneck. All behind the one
+  `enable_eodhd_rates` gate, read by `scripts/value_screener.py --rates`. Gate off
   by default.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
