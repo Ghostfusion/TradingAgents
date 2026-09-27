@@ -24,15 +24,13 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates, plus the **score-engine gates** (§7e)
-and the **debate and run-shape flags** (§7f) added in R4 stage 2: **80 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **32
+policy, data-surface and context gates, plus the **score-engine gates** (§7e),
+the **debate and run-shape flags** (§7f) and the **factor-model family** (§7g)
+added in R4 stage 2: **87 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **25
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the factor-model family — `enable_factor_model`, `enable_factor_profile`,
-  `enable_factor_proposal_loop`, `enable_composite_rank`,
-  `enable_quality_composite`, `enable_f_score_detail`, `enable_altman_variants`;
 - the event family — `enable_events`, `enable_event_calendars`,
   `enable_event_state`;
 - the vendor and screener surfaces — `enable_alpaca`, `enable_massive_flat`,
@@ -327,6 +325,25 @@ decision. They never change a threshold, a size or a rating.
 | `enable_pit_registry` | `TRADINGAGENTS_ENABLE_PIT_REGISTRY` | stores the OHLCV profile snapshot and caches the fitted moments in the point-in-time registry when the factor profile is read | `tradingagents/agents/utils/analysis_tools.py::get_factor_profile` | `tradingagents/agents/utils/analysis_tools.py::get_factor_profile` (the gate read — no test flips it); `test_pit_registry.py` proves the registry itself | wired |
 | `enable_prediction_ledger` | `TRADINGAGENTS_ENABLE_PREDICTION_LEDGER` | logs every completed decision as a scorable prediction row (advisory; never gates) | `tradingagents/graph/trading_graph.py::TradingAgentsGraph.finalize_run` | `tradingagents/graph/trading_graph.py::TradingAgentsGraph.finalize_run` (the gate read — no test flips it); `test_prediction_ledger.py` proves the ledger itself | wired |
 | `enable_report_attribution` | `TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION` | appends the Phase D disclosure + invalidation advisory block to the PM decision (computed; never gates) | `tradingagents/reporting.py::write_report_tree` (decision finalization) | `test_reporting.py::test_disclosure_block_does_not_false_mark_truncation`; producers in `test_report_disclosure.py` | wired |
+
+## 7g. Factor-model family
+
+The factor-model / quality surfaces. The screener and tool rows are additive
+render-only extra columns — when the gate is on they add a computed zone or band,
+and the underlying score is byte-identical. Two of the flags are **inert**
+(declared and settable, read by nothing): the learned factor model and the
+proposal loop are research scripts whose docstrings name their flags, but no
+code reads them, so flipping them changes nothing today.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_factor_model` | `TRADINGAGENTS_ENABLE_FACTOR_MODEL` | **intended**: gate the learned advisory factor-model score (`scripts/factor_model_train.py`) so it never reaches the LLM unless on — **no code reads it** | — (no read site) | `scripts/factor_model_train.py` (L7 docstring names the flag; the read-site scan finds no reader) | inert |
+| `enable_factor_profile` | `TRADINGAGENTS_ENABLE_FACTOR_PROFILE` | the `get_factor_profile` leaf: computed momentum / reversal / volatility / value rows off the run's OHLCV cache, or an explicit unavailable when off | `tradingagents/agents/utils/analysis_tools.py::get_factor_profile` | `test_qlib_wiring.py::test_gated_off_returns_unavailable`, `::test_gated_on_returns_computed_rows` | wired |
+| `enable_factor_proposal_loop` | `TRADINGAGENTS_ENABLE_FACTOR_PROPOSAL_LOOP` | **intended**: gate the LLM-proposed candidate sheet (`scripts/factor_proposal_loop.py`) so only gated rows reach the factor profile — **no code reads it** | — (no read site) | `scripts/factor_proposal_loop.py` (the script implements the loop; the read-site scan finds no reader) | inert |
+| `enable_composite_rank` | `TRADINGAGENTS_ENABLE_COMPOSITE_RANK` | the default ranking mode for `scripts/value_screener.py`: composite when on, value otherwise | `scripts/value_screener.py::main` (rank-mode default) | `scripts/value_screener.py::main` (the gate read; no test flips it) | wired |
+| `enable_quality_composite` | `TRADINGAGENTS_ENABLE_QUALITY_COMPOSITE` | adds the quality-composite line to `get_composite_rank` | `tradingagents/agents/utils/analysis_tools.py::get_composite_rank` | `test_round3_wiring.py::test_composite_rank_gate_controls_the_quality_line` | wired |
+| `enable_f_score_detail` | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | adds the render-only `f_score_band` extra to the screener row and the earnings-quality tool | `tradingagents/dataflows/statement_parsing.py::screen_ticker`, `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_screen_row_carries_the_zone_and_band_when_the_gates_are_on`, `::test_earnings_quality_renders_the_zone_and_band_when_on` | wired |
+| `enable_altman_variants` | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | adds the render-only Altman variant and distress zone (`altman_zone` / `altman_variant`) to the screener row and the earnings-quality tool | `tradingagents/dataflows/statement_parsing.py::screen_ticker`, `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_screen_row_carries_the_zone_and_band_when_the_gates_are_on`, `::test_screen_row_has_no_round3_keys_when_the_gates_are_off` | wired |
 
 ## 8. Adding a gate — the rule
 

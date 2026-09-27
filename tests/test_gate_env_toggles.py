@@ -105,6 +105,14 @@ REGISTRY: dict[str, str] = {
     "enable_pit_registry": "wired",
     "enable_prediction_ledger": "wired",
     "enable_report_attribution": "wired",
+    # factor-model family (two inert: the learned model and the proposal loop)
+    "enable_factor_model": "inert",
+    "enable_factor_profile": "wired",
+    "enable_factor_proposal_loop": "inert",
+    "enable_composite_rank": "wired",
+    "enable_quality_composite": "wired",
+    "enable_f_score_detail": "wired",
+    "enable_altman_variants": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",
