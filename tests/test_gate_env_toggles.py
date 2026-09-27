@@ -113,6 +113,10 @@ REGISTRY: dict[str, str] = {
     "enable_quality_composite": "wired",
     "enable_f_score_detail": "wired",
     "enable_altman_variants": "wired",
+    # event family
+    "enable_events": "wired",
+    "enable_event_calendars": "wired",
+    "enable_event_state": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",

@@ -25,14 +25,13 @@ document on every suite run:
 
 **What this file covers — and what it does not.** The rows below are the
 policy, data-surface and context gates, plus the **score-engine gates** (§7e),
-the **debate and run-shape flags** (§7f) and the **factor-model family** (§7g)
-added in R4 stage 2: **87 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **25
+the **debate and run-shape flags** (§7f), the **factor-model family** (§7g) and
+the **event family** (§7h)
+added in R4 stage 2: **90 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **22
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the event family — `enable_events`, `enable_event_calendars`,
-  `enable_event_state`;
 - the vendor and screener surfaces — `enable_alpaca`, `enable_massive_flat`,
   `enable_market_movers`, `enable_market_routing`, `enable_screener`,
   `enable_etf_engine`, `enable_enhanced_index`;
@@ -344,6 +343,18 @@ code reads them, so flipping them changes nothing today.
 | `enable_quality_composite` | `TRADINGAGENTS_ENABLE_QUALITY_COMPOSITE` | adds the quality-composite line to `get_composite_rank` | `tradingagents/agents/utils/analysis_tools.py::get_composite_rank` | `test_round3_wiring.py::test_composite_rank_gate_controls_the_quality_line` | wired |
 | `enable_f_score_detail` | `TRADINGAGENTS_ENABLE_F_SCORE_DETAIL` | adds the render-only `f_score_band` extra to the screener row and the earnings-quality tool | `tradingagents/dataflows/statement_parsing.py::screen_ticker`, `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_screen_row_carries_the_zone_and_band_when_the_gates_are_on`, `::test_earnings_quality_renders_the_zone_and_band_when_on` | wired |
 | `enable_altman_variants` | `TRADINGAGENTS_ENABLE_ALTMAN_VARIANTS` | adds the render-only Altman variant and distress zone (`altman_zone` / `altman_variant`) to the screener row and the earnings-quality tool | `tradingagents/dataflows/statement_parsing.py::screen_ticker`, `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_screen_row_carries_the_zone_and_band_when_the_gates_are_on`, `::test_screen_row_has_no_round3_keys_when_the_gates_are_off` | wired |
+
+## 7h. Event family
+
+The event surfaces: a scheduled-catalyst overlay folded into the run, the forward
+calendars the event row is measured against, and the `EventScore` leaf. They add
+an event read — never a threshold, a size or a rating.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_events` | `TRADINGAGENTS_ENABLE_EVENTS` | folds the scheduled-catalyst (PEAD) overlay into the run's strategy overlays | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays` | `test_strategies_catalyst.py::test_graph_overlay_wiring_enable_events`, `::test_graph_overlay_wiring_events_disabled` | wired |
+| `enable_event_calendars` | `TRADINGAGENTS_ENABLE_EVENT_CALENDARS` | fetches the forward event calendars once for the scorecard's event row and the trade-score calendar answers; off returns `{}` | `tradingagents/reporting.py::_card_event_calendars` / `::_scorecard_snapshot_for_report`, `tradingagents/agents/utils/analysis_tools.py::_event_calendar_answers` | `test_quant_scorecard.py::test_the_card_fetches_the_forward_calendars_once_for_both_readers` (the gate-on fetch; the off path is the `{}` return in `_card_event_calendars`) | wired |
+| `enable_event_state` | `TRADINGAGENTS_ENABLE_EVENT_STATE` | the `get_event_state` leaf and the event row in the scorecard snapshot and run card | `tradingagents/agents/utils/analysis_tools.py::get_event_state`, `tradingagents/reporting.py::_run_card_event_state` / `::_scorecard_snapshot_for_report` | `test_event_state.py::test_the_leaf_says_the_gate_is_off`, `::test_the_card_block_reads_the_runs_own_snapshot` | wired |
 
 ## 8. Adding a gate — the rule
 
