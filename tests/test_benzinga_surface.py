@@ -14,6 +14,8 @@ import pytest
 
 from tradingagents.dataflows.errors import NoMarketDataError
 
+pytestmark = pytest.mark.timeout(600)
+
 
 def _fake_response(body, status=200):
     """A minimal requests-Response stand-in carrying ``body``."""
@@ -154,6 +156,46 @@ def test_guidance_renders_the_forward_range_and_prior(monkeypatch):
     assert "primary" in out
     # an absent prior range is a named gap, never a zero
     assert "prior" not in out
+
+
+def test_guidance_rows_are_the_structured_producer_behind_the_render(monkeypatch):
+    """NEWS-3: `guidance_revision_rows` is what `guidance_change_score` differences.
+
+    One producer, two readers: the markdown leaf and the news engine read the
+    same rows, so a guidance change cannot be computed from a different set of
+    revisions than the one a reader sees.
+    """
+    from tradingagents.dataflows import benzinga
+
+    payload = [
+        {
+            "revenue_guidance_min": "100.0",
+            "revenue_guidance_max": "120.0",
+            "revenue_guidance_prior_min": "80.0",
+            "revenue_guidance_prior_max": "100.0",
+        },
+        "not-a-row",
+    ]
+    with mock.patch.object(benzinga, "_benzinga_get", return_value=payload):
+        rows = benzinga.guidance_revision_rows("AAPL", "2026-01-01", "2026-09-20")
+
+    assert rows == [payload[0]]
+    # the same rows drive the render
+    with mock.patch.object(benzinga, "_benzinga_get", return_value=payload):
+        out = benzinga.get_guidance_benzinga("AAPL", "2026-01-01", "2026-09-20")
+    assert "revenue GAAP" in out or "revenue" in out
+
+
+def test_an_empty_guidance_window_is_no_rows_but_an_empty_rows_list(monkeypatch):
+    """The rows producer does not raise on an empty window: the engine withholds
+    the component with its own reason, which is a different statement from "the
+    vendor has no data"."""
+    from tradingagents.dataflows import benzinga
+
+    with mock.patch.object(benzinga, "_benzinga_get", return_value=[]):
+        assert benzinga.guidance_revision_rows("AAPL", "2026-01-01", "2026-09-20") == []
+        with pytest.raises(NoMarketDataError):
+            benzinga.get_guidance_benzinga("AAPL", "2026-01-01", "2026-09-20")
 
 
 def test_fda_renders_the_drug_indication_and_sponsors(monkeypatch):

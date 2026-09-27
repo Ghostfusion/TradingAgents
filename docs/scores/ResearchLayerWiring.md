@@ -263,6 +263,12 @@ report's number and the card's number are one number. The no-snapshot path keeps
 the direct call as a documented caller-bug fallback; the run path no longer
 reaches it.
 
+**[CLOSED 2026-09-27 (`RLW-2`): the fallback is gone too.]** `_call_engine` is
+deleted; `engine_score_block` returns `""` with no snapshot, exactly as
+`scorecard_context_block` and `engine_report_section` already did. A caller with
+no snapshot has no number, and the engine's own reader was a *second* producer of
+a figure the card already carries - the two could disagree inside one prompt.
+
 The pre-graph cost is **not new spending**: the leaf and the card each pay that
 fetch today. Doing it once is cheaper than the status quo.
 

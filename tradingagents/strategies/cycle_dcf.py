@@ -23,19 +23,28 @@ MIN_YEARS = 3  # fewer annual FCFs -> no normalized figure
 def normalized_cycle_fcf(fcf_series: Sequence[float | None]) -> dict:
     """Mid-cycle FCF = median of the annual FCF series (>= MIN_YEARS periods).
 
-    Returns ``{"median": ..., "min": ..., "max": ..., "mean": ..., "n": ...}``
-    with ``None`` fields when the series is too short. None entries are
-    dropped before computing; the median is the anchor, min/max the span.
+    Returns ``{"median": ..., "min": ..., "max": ..., "mean": ..., "std": ...,
+    "n": ...}`` with ``None`` fields when the series is too short. None entries
+    are dropped before computing; the median is the anchor, min/max the span, and
+    ``std`` is the sample standard deviation (the FUND-8 stability input - a wide
+    cycle and a flat one can share a median, and only the dispersion tells them
+    apart).
     """
     vals = [float(v) for v in fcf_series if v is not None]
     if len(vals) < MIN_YEARS:
-        return {"median": None, "min": None, "max": None, "mean": None, "n": len(vals)}
+        return {
+            "median": None, "min": None, "max": None, "mean": None, "std": None,
+            "n": len(vals),
+        }
     vals_sorted = sorted(vals)
     return {
         "median": statistics.median(vals),
         "min": vals_sorted[0],
         "max": vals_sorted[-1],
         "mean": statistics.mean(vals),
+        # Sample stdev needs 2+ points; MIN_YEARS already guarantees that, and
+        # statistics.stdev raises on a degenerate series, so it is guarded.
+        "std": statistics.stdev(vals) if len(vals) > 1 else None,
         "n": len(vals),
     }
 

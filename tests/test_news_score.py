@@ -351,15 +351,12 @@ def test_persistence_is_assembled_from_the_mention_count_series(monkeypatch) -> 
     does: `_sentiment_points_with_source` -> `daily_sentiment_sma` returns `n`
     per calendar day."""
     from tradingagents.agents.utils import analysis_tools as at
-    from tradingagents.strategies import analyst_revisions as ar
 
+    _silence_leaf(monkeypatch)
     points = _mention_points(("2026-09-01", 2), ("2026-09-02", 2),
                              ("2026-09-03", 2), ("2026-09-04", 8))
     monkeypatch.setattr(at, "_sentiment_points_with_source",
                         lambda *a, **k: (points, "eodhd"))
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
-    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
-    monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
 
     vals = at._news_components("PERS", "2026-09-04")
     # the headline window is EMPTY here on purpose: mentions and headlines are
@@ -369,14 +366,144 @@ def test_persistence_is_assembled_from_the_mention_count_series(monkeypatch) -> 
 
 def test_persistence_stays_absent_without_a_mention_series(monkeypatch) -> None:
     from tradingagents.agents.utils import analysis_tools as at
-    from tradingagents.strategies import analyst_revisions as ar
 
+    _silence_leaf(monkeypatch)
     monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
-    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
-    monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
 
     assert "persistence" not in at._news_components("PERS", "2026-09-04")
+
+
+# ---------------------------------------------------------------------------
+# The assembler legs this engine declares: materiality, corporate events,
+# guidance change
+# ---------------------------------------------------------------------------
+
+
+def _silence_leaf(monkeypatch) -> None:
+    """Every live producer `_news_components` reaches, stubbed to "nothing".
+
+    The leaf is offline by construction (no vendor call in a test), and the SEC
+    filings reader it now consults is stubbed too - the *tests* would otherwise
+    resolve a CIK over the network. Individual tests override the leg under test.
+    """
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import config as cfg_mod, sec_edgar
+    from tradingagents.strategies import analyst_revisions as ar
+
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
+    monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
+    monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
+    monkeypatch.setattr(sec_edgar, "recent_filing_forms", lambda *a, **k: [])
+    monkeypatch.setattr(cfg_mod, "get_config", lambda: {"enable_benzinga_surface": False})
+
+
+def test_materiality_and_surprise_read_the_one_catalyst_snapshot(monkeypatch) -> None:
+    """NEWS-1: the 20-weight materiality row is EventScore's own number.
+
+    `catalyst.build_catalyst_snapshot` already carries `implied_move` - the
+    figure the event engine reads - so the news leaf consumes it (owner Q6)
+    instead of leaving the component caller-supplied forever. The same snapshot
+    supplies the surprise leg: **the old call passed the snapshot DICT to
+    `last_earnings_surprise`, which takes the vendor calendar LIST**, so every
+    row was a `str` and the surprise leg could never measure at all.
+    """
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        at,
+        "_catalyst_snapshot",
+        lambda *a, **k: {"implied_move": 0.042, "last_surprise": {"surprise": 0.015}},
+    )
+
+    vals = at._news_components("MAT", "2026-09-04")
+    assert vals["materiality"] == pytest.approx(0.042)
+    assert vals["earnings_surprise"] == pytest.approx(0.015)
+
+
+def test_materiality_stays_absent_without_an_implied_move(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {"implied_move": None})
+
+    assert "materiality" not in at._news_components("MAT", "2026-09-04")
+
+
+def test_corporate_events_are_typed_from_the_recent_filings(monkeypatch) -> None:
+    """NEWS-4: the declared form vocabulary (`sec_edgar._FORM_LABELS` ->
+    `FORM_EVENT_SCORES`) reaches the engine through `recent_filing_forms`."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import sec_edgar
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        sec_edgar,
+        "recent_filing_forms",
+        lambda *a, **k: [
+            {"form": "10-Q", "date": "2026-09-01"},
+            {"form": "8-K", "date": "2026-09-02"},
+        ],
+    )
+
+    vals = at._news_components("FILER", "2026-09-04")
+    # the most material recognised form wins, not the mean of the set
+    assert vals["corporate_events"] == pytest.approx(FORM_EVENT_SCORES["8-K"])
+
+
+def test_corporate_events_ignore_a_filing_filed_after_the_trade_date(monkeypatch) -> None:
+    """A historical run must not read a filing filed after `end` (lookahead)."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import sec_edgar
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        sec_edgar,
+        "recent_filing_forms",
+        lambda *a, **k: [{"form": "8-K", "date": "2026-09-10"}],
+    )
+
+    assert "corporate_events" not in at._news_components("FILER", "2026-09-04")
+
+
+def test_guidance_change_is_wired_behind_the_benzinga_gate(monkeypatch) -> None:
+    """NEWS-3: the gate-on route feeds the SIGNED midpoint change.
+
+    The engine's own ramp for `guidance_change` is a signed relative change, so
+    the aligned 0-100 the producer also returns is NOT what the leaf passes.
+    """
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import benzinga, config as cfg_mod
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        cfg_mod, "get_config", lambda: {"enable_benzinga_surface": True}
+    )
+    monkeypatch.setattr(
+        benzinga,
+        "guidance_revision_rows",
+        lambda *a, **k: [
+            {
+                "revenue_guidance_min": 100.0,
+                "revenue_guidance_max": 120.0,
+                "revenue_guidance_prior_min": 80.0,
+                "revenue_guidance_prior_max": 100.0,
+            }
+        ],
+    )
+
+    vals = at._news_components("GUID", "2026-09-04")
+    # (110 - 90) / 90 = +0.2222: a raise, signed, not the saturated 100
+    assert vals["guidance_change"] == pytest.approx(0.2222, abs=1e-4)
+
+
+def test_guidance_change_stays_absent_with_the_gate_off(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)  # get_config -> enable_benzinga_surface False
+
+    assert "guidance_change" not in at._news_components("GUID", "2026-09-04")
 
 
 # ---------------------------------------------------------------------------

@@ -225,35 +225,46 @@ def test_master_gate_off_makes_the_prompt_block_empty():
 
 def test_report_level_analyst_key_gets_no_block():
     """An analyst with no owned engine gets nothing to report."""
+    snap = _fake_snapshot()
     assert report_hygiene.engine_score_block(
-        "sentiment", "MSFT", "2026-09-19", _cfg(master=True)
+        "sentiment", "MSFT", "2026-09-19", _cfg(master=True), snapshot=snap
     ) != ""  # sentiment DOES own the sentiment engine
     assert report_hygiene.engine_score_block(
-        "nonexistent", "MSFT", "2026-09-19", _cfg(master=True)
+        "nonexistent", "MSFT", "2026-09-19", _cfg(master=True), snapshot=snap
     ) == ""
 
 
-def test_block_carries_the_owned_engine_numbers(monkeypatch):
-    """The result is SUPPLIED, so it lands regardless of the model's choices."""
-    monkeypatch.setattr(
-        report_hygiene, "_call_engine", lambda name, t, d: f"{name}: 72/100 coverage 68%"
+def test_block_is_empty_without_a_snapshot():
+    """RLW-2: no snapshot means no block - never a recomputed engine.
+
+    The block used to fall back to the engine's own reader, a second producer of
+    a number the scorecard block already carries, so one prompt could show two
+    different values for one engine. The fallback is gone.
+    """
+    assert (
+        report_hygiene.engine_score_block("market", "MSFT", "2026-09-19", _cfg()) == ""
     )
-    block = report_hygiene.engine_score_block("market", "MSFT", "2026-09-19", _cfg())
-    assert "get_technical_score: 72/100 coverage 68%" in block
-    assert "TechnicalScore" in block
-    assert "coverage" in block.lower()
+    assert not hasattr(report_hygiene, "_call_engine")
+
+
+def test_block_carries_the_owned_engine_numbers():
+    """The result is SUPPLIED, so it lands regardless of the model's choices."""
+    block = report_hygiene.engine_score_block(
+        "market", "MSFT", "2026-09-19", _cfg(), snapshot=_fake_snapshot()
+    )
+    assert "**TechnicalScore: 60/100**" in block
+    assert "coverage 1" in block
     assert "NOT an order" in block
     # and it does NOT carry an engine the market analyst does not own
-    assert "get_fundamental_score" not in block
+    assert "FundamentalScore" not in block
 
 
-def test_block_carries_both_engines_owned_by_the_news_analyst(monkeypatch):
-    monkeypatch.setattr(
-        report_hygiene, "_call_engine", lambda name, t, d: f"{name}: measured"
+def test_block_carries_both_engines_owned_by_the_news_analyst():
+    block = report_hygiene.engine_score_block(
+        "news", "MSFT", "2026-09-19", _cfg(), snapshot=_fake_snapshot()
     )
-    block = report_hygiene.engine_score_block("news", "MSFT", "2026-09-19", _cfg())
-    assert "get_news_score: measured" in block
-    assert "get_event_state: measured" in block
+    assert "**NewsScore: NA** - no news producer measured" in block
+    assert "**EventState: 60/100**" in block
 
 
 def test_config_hash_moves_with_the_master_scorecard_gate():

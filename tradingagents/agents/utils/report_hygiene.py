@@ -88,26 +88,6 @@ def _engine_summary_line(engine: str, entry: dict, *, ticker: str) -> str:
     return line
 
 
-def _call_engine(tool_name: str, ticker: str, trade_date: str | None) -> str:
-    """Run one engine's own reader. Never raises - an engine that cannot be
-    measured yields an explicit unavailable line, never a zero."""
-    from tradingagents.agents.utils import analysis_tools
-
-    fn = getattr(analysis_tools, tool_name, None)
-    if fn is None:
-        return f"{tool_name}: unavailable (reader not found)"
-    fn = getattr(fn, "func", fn)
-    try:
-        return str(fn(ticker, trade_date))
-    except TypeError:
-        try:
-            return str(fn(ticker))
-        except Exception as exc:  # noqa: BLE001
-            return f"{tool_name}: unavailable ({type(exc).__name__})"
-    except Exception as exc:  # noqa: BLE001
-        return f"{tool_name}: unavailable ({type(exc).__name__})"
-
-
 def engine_score_block(
     analyst_key: str,
     ticker: str,
@@ -128,27 +108,28 @@ def engine_score_block(
       result, but does not decide whether or where the authoritative engine
       result appears"* - a tool the model may or may not call does not satisfy
       that. The number is in the prompt either way.
-    * **It READS the run's snapshot; it does not recompute the engine.** The
+    * **It READS the run's snapshot; it never recomputes the engine.** The
       calling analyst passes ``snapshot=state["quant_scorecard"]``, and the owned
       engine's line comes from that one snapshot through the same renderer the
       report section uses - so the prompt's number, the report's number and the
-      card's number are one number. Without a snapshot the block falls back to
-      the engine's own reader, which is a second producer of the same quantity
-      and is exactly what `RLW-2` removed from the run path (`_call_engine`).
+      card's number are one number. There is no fallback producer: with no
+      snapshot in hand there is no number to supply, and the block returns ``""``
+      exactly as `scorecard_context_block` and `engine_report_section` do
+      (RLW-2 - the engine leaf's own reader here was a second producer of the
+      same quantity, and the two could disagree inside one prompt).
     * **It works for an analyst that binds no tools at all.** The sentiment
       analyst pre-fetches its data and has no ToolNode, so a "call
       `get_sentiment_score`" instruction there would invite a hallucinated call
       (`NO_EXTERNAL_TOOLS`). Supplying the text is the only route that reaches
       that report.
 
-    Returns ``""`` when the master gate is off, when the analyst owns no engine,
-    or when every owned engine is unmeasurable - so a gate-off prompt is
-    byte-identical to a pre-scorecard one.
+    Returns ``""`` when the master gate is off, when no snapshot was handed down,
+    when the analyst owns no engine, or when every owned engine is unmeasurable -
+    so a gate-off prompt is byte-identical to a pre-scorecard one.
     """
     try:
         from tradingagents.strategies.quant_scorecard import (
             ENGINE_GATES,
-            ENGINE_TOOLS,
             engines_for_analyst,
         )
     except Exception:  # noqa: BLE001 - no map means no block
@@ -161,23 +142,23 @@ def engine_score_block(
         return ""
 
     snap = snapshot if isinstance(snapshot, dict) else None
+    if not snap:
+        # No run snapshot handed down: there is no number to supply, and running
+        # the engine's own reader here would be a SECOND producer of a figure the
+        # scorecard block already carries - the two could then disagree inside
+        # one prompt (RLW-2). Same contract as `scorecard_context_block` and
+        # `engine_report_section`: no snapshot, no block.
+        return ""
     sections: list[str] = []
     for engine in owned:
         if not config.get(ENGINE_GATES[engine]):
             continue
-        text = ""
-        if snap:
-            entry = (snap.get("engines") or {}).get(engine) or {}
-            if entry.get("enabled"):
-                text = _engine_summary_line(engine, entry, ticker=ticker)
-        if not text:
-            # No snapshot handed down - a direct caller or a test. Fall back to
-            # the engine's own reader rather than dropping the number: a missing
-            # snapshot is a caller bug, not an unmeasured engine.
-            text = _call_engine(ENGINE_TOOLS[engine], ticker, trade_date).strip()
-        if not text:
+        entry = (snap.get("engines") or {}).get(engine) or {}
+        if not entry.get("enabled"):
             continue
-        sections.append(text)
+        text = _engine_summary_line(engine, entry, ticker=ticker)
+        if text:
+            sections.append(text)
     if not sections:
         return ""
 

@@ -27,6 +27,24 @@ def test_normalized_cycle_fcf_median_not_mean():
     assert r["median"] < 3.4e9
 
 
+def test_normalized_cycle_fcf_reports_the_dispersion():
+    """FUND-8: the stability leg needs a σ, not only a centre.
+
+    A wide cycle and a flat one can share a median; only the dispersion tells
+    them apart, and the leaf prints it beside min/max/mean.
+    """
+    wide = normalized_cycle_fcf([-5.8e9, 0.8e9, 2.5e9, 3.5e9, 1.1e9])
+    flat = normalized_cycle_fcf([1.0e9, 1.05e9, 0.95e9, 1.02e9, 1.0e9])
+    assert wide["std"] is not None and flat["std"] is not None
+    assert wide["std"] > flat["std"]
+    # the sample σ, computed from the same non-None values as the median
+    vals = [0.1, 0.2, 0.4]
+    expected = (sum((v - 0.2333333333333333) ** 2 for v in vals) / (len(vals) - 1)) ** 0.5
+    assert normalized_cycle_fcf(vals)["std"] == pytest.approx(expected, abs=1e-9)
+    # too short -> no dispersion either, never a fabricated 0
+    assert normalized_cycle_fcf([1e9, 2e9])["std"] is None
+
+
 def test_normalized_cycle_requires_min_years():
     r = normalized_cycle_fcf([1e9, 2e9])
     assert r["median"] is None

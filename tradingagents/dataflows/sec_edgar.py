@@ -423,16 +423,19 @@ def peek_sic(ticker: str) -> tuple[str | None, str | None]:
     return _SIC_MEMO.get(int(cik), (None, None))
 
 
-def get_sec_filings(ticker: str, limit: int = 10) -> str:
-    """Return a formatted summary of the most recent SEC filings for a ticker.
+def recent_filing_forms(ticker: str, limit: int | None = None) -> list[dict]:
+    """The recent filings as ROWS - the structured producer behind
+    :func:`get_sec_filings`' markdown and the form vocabulary `news_score.
+    corporate_events_score` types (one producer, two readers).
 
-    Args:
-        ticker: Ticker symbol (exchange suffixes like ``0700.HK`` are stripped
-            for the CIK lookup; non-US tickers typically have no EDGAR record).
-        limit: Max filings to summarize (default 10).
+    Each row is ``{"form", "date", "accession", "document", "url"}``. **Every**
+    form type is returned, including the ones ``get_sec_filings`` filters out of
+    its prose: the caller decides what it can type, and an unknown form is
+    ignored by the event table rather than defaulted. ``limit`` caps the rows
+    (``None`` returns the whole recent window).
 
-    Returns:
-        A markdown report of recent filings by form type + date + accession.
+    Raises ``NoMarketDataError`` exactly as ``get_sec_filings`` does: no CIK, a
+    failed fetch, or a payload with no filings.
     """
     cik = _cik_for(ticker)
     if cik is None:
@@ -460,27 +463,62 @@ def get_sec_filings(ticker: str, limit: int = 10) -> str:
     if not forms:
         raise NoMarketDataError(ticker, detail="no recent EDGAR filings returned")
 
+    rows: list[dict] = []
+    for i, form in enumerate(forms):
+        if limit is not None and len(rows) >= int(limit):
+            break
+        acc = str(accessions[i]).replace("-", "") if i < len(accessions) else ""
+        doc = str(primary_docs[i]) if i < len(primary_docs) else ""
+        rows.append(
+            {
+                "form": str(form),
+                "date": str(dates[i]) if i < len(dates) else "",
+                "accession": acc,
+                "document": doc,
+                "url": (
+                    f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+                    if acc
+                    else ""
+                ),
+            }
+        )
+    return rows
+
+
+def get_sec_filings(ticker: str, limit: int = 10) -> str:
+    """Return a formatted summary of the most recent SEC filings for a ticker.
+
+    Renders :func:`recent_filing_forms`, the structured producer, keeping only
+    the forms that carry a label and a decision signal.
+
+    Args:
+        ticker: Ticker symbol (exchange suffixes like ``0700.HK`` are stripped
+            for the CIK lookup; non-US tickers typically have no EDGAR record).
+        limit: Max filings to summarize (default 10).
+
+    Returns:
+        A markdown report of recent filings by form type + date + accession.
+    """
+    rows = recent_filing_forms(ticker)
+
     shown = 0
     lines = [f"## {ticker.upper()} Recent SEC Filings (EDGAR)", ""]
-    for i, form in enumerate(forms):
+    for row in rows:
         if shown >= limit:
             break
+        form = row["form"]
         # Only surface forms we have a useful label for; skip the noisy 4/A,
         # EFFECT, S-8, etc. that carry little decision signal.
         if form not in _FORM_LABELS:
             continue
-        date = dates[i] if i < len(dates) else "?"
-        acc = accessions[i].replace("-", "") if i < len(accessions) else "?"
-        doc = primary_docs[i] if i < len(primary_docs) else ""
-        url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}" if acc else ""
-        lines.append(f"- **{form}** — {_FORM_LABELS[form]} · filed {date}")
-        if url:
-            lines.append(f"  {url}")
+        lines.append(f"- **{form}** — {_FORM_LABELS[form]} · filed {row['date'] or '?'}")
+        if row["url"]:
+            lines.append(f"  {row['url']}")
         shown += 1
 
     if shown == 0:
         # Recent window had only forms we filtered out — still useful to say so.
-        top_forms = sorted(set(forms))[:8]
+        top_forms = sorted({row["form"] for row in rows})[:8]
         lines.append(f"(Recent filings were all in filtered form types: {', '.join(top_forms)})")
 
     lines.append("")

@@ -100,9 +100,11 @@ ABSENT_COMPONENTS: tuple[str, ...] = (
 
 ABSENT_REASONS: dict[str, str] = {
     "materiality": (
-        "EventScore owns the materiality / expected-move number (owner Q6) and it "
-        "is caller-supplied; NA until the caller passes it - NEVER approximated by "
-        "relevance"
+        "EventScore owns the materiality / expected-move number (owner Q6): "
+        "analysis_tools._news_components supplies it from the catalyst snapshot's "
+        "`implied_move` - the same figure the event engine reads, never a second "
+        "estimate; NA when that snapshot carries no implied move, and NEVER "
+        "approximated by relevance"
     ),
     "fundamental_impact": (
         "no revenue/margin-impact producer exists; the honest answer is NA"
@@ -111,8 +113,10 @@ ABSENT_REASONS: dict[str, str] = {
         "the guidance source EXISTS but is behind its default-off gate: "
         "benzinga_tools.get_guidance_revisions (toolsets.py:411; "
         "enable_benzinga_surface off by default) is consumed by "
-        "news_score.guidance_change_score, which returns a None-valued score with "
-        "the reason while the gate is off; never fake it from the EPS estimate"
+        "news_score.guidance_change_score, which the news leaf now calls - so the "
+        "component is NA either because that gate is off (its default) or because "
+        "the read carried no differencable row (a forward-only read cannot show a "
+        "change); never fake it from the EPS estimate"
     ),
     "regulatory_legal": (
         "no regulatory-action classifier; only an unscaled, undirected litigious "
@@ -192,13 +196,13 @@ COMPONENTS: dict[str, Component] = {
            "the binding moves to the news surface (Q4)"),
         _c("industry_shock", "macro_industry", "higher_better", None, None),
         _c("persistence", "persistence", "lower_better",
-           "sentiment.mention_volume:43 (the level ratio - the ONLY half wired; "
-           "sentiment.decayed_weight:91 has no call site on this path) + "
-           "news_score.news_persistence (the library's quantity: positive-period "
-           "share and a multi-lambda decay, a DIFFERENT measure with the opposite "
-           "direction)",
-           "neglected-firm sign (plan §13 Q9): lower abnormal coverage is positive; "
-           "the declaration no longer cites the unwired decayed_weight half"),
+           "sentiment.mention_volume:43 (the level ratio - the WIRED half)",
+           "neglected-firm sign (plan §13 Q9): lower abnormal coverage is positive. "
+           "No unwired half is cited: `sentiment.decayed_weight` has no call site on "
+           "this path (D-9, fixed 2026-09-27), and the library's own persistence "
+           "quantity (`news_score.news_persistence`: positive-period share and a "
+           "multi-lambda decay) is a DIFFERENT measure with the opposite direction, "
+           "so it is not this component's producer either"),
     )
 }
 

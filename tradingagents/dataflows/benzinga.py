@@ -453,8 +453,27 @@ def get_news_removed_benzinga(limit: int = 100, page: int = 1) -> str:
 # calendars (new capabilities)
 # --------------------------------------------------------------------------- #
 
+def guidance_revision_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
+    """The guidance revisions as ROWS - the structured producer behind
+    :func:`get_guidance_benzinga`'s markdown and the rows `news_score.
+    guidance_change_score` differences (one producer, two readers).
+
+    One dict per vendor item, with the forward and prior ranges as the vendor
+    wrote them. An empty window is an **empty list, not a raise**: a leg that
+    cannot be differenced is withheld with its own reason, which is a different
+    statement from "the vendor has no data at all".
+    """
+    _require_dates(start_date, end_date)
+    items = _benzinga_get(
+        "v2.1/calendar/guidance", _calendar_params(ticker, start_date, end_date)
+    )
+    return [i for i in (items or []) if isinstance(i, dict)]
+
+
 def get_guidance_benzinga(ticker: str, start_date: str, end_date: str) -> str:
     """Corporate guidance revisions via ``/v2.1/calendar/guidance``.
+
+    Renders :func:`guidance_revision_rows`, the structured producer.
 
     The forward-looking companion to the reported statements: management's own
     revenue/EPS range for a named future period, plus the prior range when the
@@ -463,14 +482,11 @@ def get_guidance_benzinga(ticker: str, start_date: str, end_date: str) -> str:
     a trailing measure and comes back ``NA`` when the statement history is
     short.
     """
-    _require_dates(start_date, end_date)
-    items = _benzinga_get(
-        "v2.1/calendar/guidance", _calendar_params(ticker, start_date, end_date)
-    )
-    if not items:
+    rows = guidance_revision_rows(ticker, start_date, end_date)
+    if not rows:
         raise _no_rows(ticker, "guidance", start_date, end_date)
     lines = _header("Guidance Revisions", ticker, start_date, end_date)
-    for item in items:
+    for item in rows:
         if not isinstance(item, dict):
             continue
         date = _plain(item.get("date"))
@@ -1248,4 +1264,5 @@ __all__ = [
     "get_news_removed_benzinga",
     "get_offerings_benzinga",
     "get_stock_data_benzinga",
+    "guidance_revision_rows",
 ]

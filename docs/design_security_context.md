@@ -292,10 +292,12 @@ Every field is `None`-able. A `SecurityContext` with everything `None` is valid 
 
 ### 9.3 Recovering the SEC SIC that is already on the wire
 
-`sec_edgar.get_sec_filings` (`sec_edgar.py:387`) fetches the full submissions payload:
+`sec_edgar.get_sec_filings` (`sec_edgar.py:488`) renders the structured producer
+`sec_edgar.recent_filing_forms` (`sec_edgar.py:426`, one fetch, two readers since
+2026-09-27), which fetches the full submissions payload:
 
 ```python
-payload = _json_get(_SUBMISSIONS_URL.format(cik=int(cik)))   # sec_edgar.py:406
+payload = _json_get(_SUBMISSIONS_URL.format(cik=int(cik)))   # sec_edgar.py:448
 ```
 
 and then reads **only** `payload["filings"]["recent"]` (`:411`). The payload's top-level `sic`, `sicDescription`, `name`, `exchanges` and `tickers` are fetched and discarded on every call.
@@ -666,7 +668,7 @@ These slot into the parent doc's §39 order (`doc:1506-1525`) **between items 2 
 | # | Deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
 | SC-1 | `SecurityContext` object + `build_security_context` | `resolve_instrument_identity` (`agent_utils.py:575`) | provenance and canonical sector present; no new network call |
-| SC-2 | SEC SIC capture from the existing submissions payload | `sec_edgar.py:406` | `sic`/`sicDescription` recovered when present, `None` otherwise, no extra fetch |
+| SC-2 | SEC SIC capture from the existing submissions payload | `sec_edgar.py:448` (inside `recent_filing_forms:426`) | `sic`/`sicDescription` recovered when present, `None` otherwise, no extra fetch |
 | SC-3 | `agreement` / `disagreement` record | SC-1, SC-2 | two sources disagreeing are both retained |
 | SC-4 | `THEME_APPLICABILITY` + `MATRIX_VERSION` + validator | parent doc §18 registry | validator rejects unknown theme id / sector row / numeric cell |
 | SC-5 | `candidate_themes` with the widening invariant | SC-4 | property test §11.4 passes for every sector |
@@ -773,7 +775,7 @@ A sector label is a prior. A prior that can exclude is a decision, and this laye
 | `_ticker_info` | `tradingagents/dataflows/yfinance_sector.py:21` |
 | `get_company_profile` | `tradingagents/dataflows/fmp.py:68` |
 | `get_profile_finnhub` | `tradingagents/dataflows/finnhub.py:468` |
-| `get_sec_filings` / submissions fetch | `tradingagents/dataflows/sec_edgar.py:387` / `:406` |
+| `get_sec_filings` / submissions fetch | `tradingagents/dataflows/sec_edgar.py:488` / `:448` (producer `recent_filing_forms:426`) |
 | `_SUBMISSIONS_URL` | `tradingagents/dataflows/sec_edgar.py:35` |
 | `resolve_instrument_identity` (+ `lru_cache`) | `tradingagents/agents/utils/agent_utils.py:575` / `:574` |
 | `build_instrument_context` | `tradingagents/agents/utils/agent_utils.py:618` |

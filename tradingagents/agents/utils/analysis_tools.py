@@ -5031,7 +5031,8 @@ def get_normalized_cycle_dcf(
             f"normalized cycle dcf {ticker}: fair_value/share={per_share:,.2f} "
             f"(median-of-annual-FCF; wacc={wacc:.2%} g={g:.2%}); "
             f"annual FCF median={cyc['median']:,.0f} min={cyc['min']:,.0f} "
-            f"max={cyc['max']:,.0f} mean={cyc['mean']:,.0f} n={cyc['n']}; "
+            f"max={cyc['max']:,.0f} mean={cyc['mean']:,.0f} "
+            f"sd={cyc['std']:,.0f} n={cyc['n']}; "
             f"MoS(fv-basis)={mos:.1%} ({band}) price={price:,.2f} "
             f"price/fv={bases['price_to_intrinsic']:.2f}x"
         )
@@ -7029,15 +7030,18 @@ def _news_components(
 
     Relevance comes from `news_relevance.score_news_article` (the same producer
     the news analyst's leaf uses), novelty from the article set itself, the
-    surprise leg from `catalyst.last_earnings_surprise`, the analyst leg from
-    `analyst_revisions.revision_ratio` and persistence from the mention volume.
-    **Materiality is deliberately absent here**: `EventScore` owns it (owner Q6),
-    and a second estimate would be the double count the master forbids - the
-    caller supplies it when it has it.
+    surprise and materiality legs from ONE catalyst snapshot
+    (`catalyst.build_catalyst_snapshot`: `last_surprise` and `implied_move` - the
+    latter is EventScore's own materiality figure, consumed here per owner Q6,
+    never re-estimated), the analyst leg from `analyst_revisions.revision_ratio`,
+    persistence from the mention volume, corporate events from the SEC form
+    vocabulary (`sec_edgar.recent_filing_forms`) and guidance change from the
+    Benzinga guidance rows (behind `enable_benzinga_surface`, default off).
 
-    The five categories with no supplier (fundamental impact, guidance change,
-    regulatory/legal, industry shock, and materiality until the caller supplies
-    it) stay absent and the engine prints `NA` with its reason, never 0.
+    The three categories with no supplier (fundamental impact, regulatory/legal,
+    industry shock) stay absent and the engine prints `NA` with its reason, never
+    0. `materiality` and `guidance_change` are declared absent because they have
+    a gate or a snapshot dependency, not because nothing produces them.
     """
     from datetime import date, timedelta
 
@@ -7096,10 +7100,10 @@ def _news_components(
     # history the producer takes. It is deliberately OUTSIDE the `if articles:`
     # block above: mentions and headlines are different feeds, so an empty news
     # window must not withhold an attention leg the sentiment feed can measure.
-    # NOTE: the declaration also cites `sentiment.decayed_weight:91`. That half
-    # is NOT called here: `mention_volume(history, recent)` accepts no weights,
-    # so a decayed baseline would be a second producer of the same ratio
-    # (master rule 15). The citation's second half has no call site.
+    # NOTE (D-9, fixed 2026-09-27): the declaration cites only the level ratio
+    # (`sentiment.mention_volume`). `sentiment.decayed_weight` is NOT called here
+    # - `mention_volume(history, recent)` accepts no weights, so a decayed
+    # baseline would be a second producer of the same ratio (master rule 15).
     try:
         from tradingagents.strategies.sentiment import (
             daily_sentiment_sma,
@@ -7134,12 +7138,57 @@ def _news_components(
                 vals["analyst_revision"] = rev["ratio"]
     except Exception:  # noqa: BLE001
         pass
+    # One catalyst snapshot feeds two legs: the trigger's own surprise, and - for
+    # NEWS-1 - EventScore's materiality number (`implied_move`). Materiality is
+    # the event engine's figure consumed here (owner Q6), never a second estimate.
+    #
+    # The snapshot is a DICT of already-built legs; the old call passed it to
+    # `last_earnings_surprise`, which takes the vendor CALENDAR LIST and iterates
+    # it - so every row was a str and the leg could never measure (fixed
+    # 2026-09-27, same shape as the revision_ratio TICKER bug).
     try:
-        from tradingagents.strategies.catalyst import last_earnings_surprise
+        snap = _catalyst_snapshot(ticker, end) or {}
+        last = snap.get("last_surprise")
+        if isinstance(last, dict) and last.get("surprise") is not None:
+            vals["earnings_surprise"] = last["surprise"]
+        move = snap.get("implied_move")
+        if move is not None:
+            vals["materiality"] = move
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
+    # Corporate events: the form vocabulary the declaration names
+    # (`sec_edgar._FORM_LABELS:39`) reached by `recent_filing_forms`, windowed to
+    # the trade date - a historical run must not read a filing filed AFTER `end`
+    # (SEC publishes ISO `filingDate`s). The value the engine ramps is
+    # `FORM_EVENT_SCORES`' 0-100 typing of the most material form.
+    try:
+        from tradingagents.dataflows.sec_edgar import recent_filing_forms
+        from tradingagents.strategies.news_score import corporate_events_score
 
-        sur = last_earnings_surprise(_catalyst_snapshot(ticker, end))
-        if isinstance(sur, dict) and sur.get("score") is not None:
-            vals["earnings_surprise"] = sur["score"]
+        end_day = str(end)[:10]
+        forms = [
+            r
+            for r in (recent_filing_forms(ticker) or [])
+            if not r.get("date") or str(r.get("date"))[:10] <= end_day
+        ]
+        events = corporate_events_score(forms, window_days=days)
+        if events.get("score") is not None:
+            vals["corporate_events"] = events["score"]
+    except Exception:  # noqa: BLE001
+        pass
+    # Guidance change needs the Benzinga surface (default off). The value the
+    # engine ramps is the SIGNED relative midpoint change, not the aligned score;
+    # with the gate off the component stays NA with its declared reason.
+    try:
+        from tradingagents.dataflows.config import get_config as _cfg_guide
+
+        if bool((_cfg_guide() or {}).get("enable_benzinga_surface", False)):
+            from tradingagents.dataflows.benzinga import guidance_revision_rows
+            from tradingagents.strategies.news_score import guidance_change_score
+
+            guide = guidance_change_score(guidance_revision_rows(ticker, start, end))
+            if guide.get("signed_change") is not None:
+                vals["guidance_change"] = guide["signed_change"]
     except Exception:  # noqa: BLE001
         pass
     return vals
