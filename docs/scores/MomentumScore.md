@@ -236,7 +236,7 @@ the report tree's `1_analysts/market.md` engine section.
 
 ## 9. Verification
 
-`tests/test_momentum_score.py` (20 tests, `pytestmark = pytest.mark.timeout(120)`,
+`tests/test_momentum_score.py` (21 tests, `pytestmark = pytest.mark.timeout(120)`,
 hermetic — the leaf's fetch is monkeypatched) covers:
 
 * the eight legs are exactly §54's and each declares ≥ 1 mapped member naming a
