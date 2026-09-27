@@ -50,6 +50,9 @@ NON_MONOTONIC_ENDS: dict[str, tuple[float, float]] = {
 }
 
 
+
+pytestmark = pytest.mark.timeout(600)
+
 def _full_values() -> dict:
     return {
         "adx": 30.0, "di_spread": 10.0, "above_sma200": True, "sma_stack": True,
@@ -535,3 +538,34 @@ def test_explicit_breakout_value_wins_over_the_donchian_kwarg() -> None:
     vals["breakout_persistence"] = -1.0
     out = technical_score(vals, donchian={"persistence_up": 1.0, "persistence_dn": 0.0})
     assert out["components"]["breakout_persistence"]["raw"] == -1.0
+
+
+# --- TECH-14: the Zweig thrust as a breadth LEG -----------------------------
+
+
+def test_the_zweig_thrust_is_a_leg_of_the_existing_breadth_category():
+    """TECH-14 (owner decision 2026-09-27): a leg, never a new weight.
+
+    The declared `CATEGORY_WEIGHTS` vector must not move - the thrust joins the
+    `breadth` category's legs, so a category whose weight is unchanged now
+    measures one more input and renormalises over it.
+    """
+    from tradingagents.strategies.technical_score import (
+        CATEGORY_WEIGHTS,
+        COMPONENTS,
+        technical_score,
+    )
+
+    assert COMPONENTS["zweig_thrust"].category == "breadth"
+    assert len(CATEGORY_WEIGHTS) == 9
+    assert CATEGORY_WEIGHTS["breadth"] == 5.0
+
+    base = {"pct_above_50d": 60.0, "pct_above_200d": 55.0, "ad_ratio": 0.05}
+    without = technical_score(base)
+    with_thrust = technical_score({**base, "zweig_thrust": 0.20})
+
+    assert with_thrust["components"]["zweig_thrust"]["aligned"] is not None
+    assert without["components"]["zweig_thrust"]["aligned"] is None
+    # +0.20 is the library's own thrust magnitude -> the top of the ramp
+    assert with_thrust["components"]["zweig_thrust"]["aligned"] == pytest.approx(100.0)
+    assert with_thrust["categories"]["breadth"]["score"] > without["categories"]["breadth"]["score"]

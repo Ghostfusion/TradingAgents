@@ -536,7 +536,7 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 117 | Coppock Curve | 1 | ABSENT |
 | 118 | Know Sure Thing | 1 | built — `technical_factors.kst:104` |
 | 119 | Technical breadth | 2 | built — `market_breadth.market_breadth:114` (engine's `pct_above_50d`/`pct_above_200d`); `sector_breadth.multi_breadth:165` |
-| 120 | Technical breadth thrust | 1 | ABSENT |
+| 120 | Technical breadth thrust | 1 | built — `technical_depth.zweig_breadth_thrust:400` (the EMA of adv/(adv+dec) and the Zweig event) is now a LEG of the `breadth` category (`technical_score.COMPONENTS['zweig_thrust']`, ramp 0.0-0.20 = this item's own 0.40→0.615 event) [CORRECTED 2026-09-27: owner decision: a leg, not a new weight; `CATEGORY_WEIGHTS` unchanged.] |
 | 121 | New-high/new-low technical breadth | 2 | built — `market_breadth.market_breadth:114` (`net_new_highs_52w`) |
 | 122 | Relative technical strength | 1 | PARTIAL — `sector_screener._rel_outperformance:248` (ETF/sector level; no per-name sector-median) |
 | 123 | Technical factor normalization | 4 | PARTIAL — `value_dip.zscore:104`, `factors.z_score:68`, `normalized.percentile_hist_or_none:40`; no registry applies them across indicators |
@@ -572,7 +572,7 @@ the repo. Every one of these is a **backlog** row, not a defect claim.
 | **Candle/gap depth** — intraday strength, gap continuation, continuous gap fill | 66, 68, 69 | `extended_indicators.scan_candlesticks:603` and `market_session.gap_type:220` already hold the OHLC they need |
 | **RSI depth** — slope/acceleration, continuous divergence | 11, 12 | `value_dip._rsi_series:472` is a full Wilder series; `value_dip.macd_divergence:542` already reads RSI divergence |
 | **Range/position depth** — time since high, distance from low, position within range | 101, 103, 104 | `technical_factors.donchian_channel:467` returns the `upper`/`lower` the three need |
-| **Breadth depth** — breadth thrust | 120 | `market_breadth.market_breadth:114` already returns `advancers`/`decliners` (and the A/D ratio) |
+| **Breadth depth** — breadth thrust | 120 | `market_breadth.advance_decline_line` returns the per-session `advancers`/`decliners` and the leaf feeds `technical_depth.zweig_breadth_thrust` from the same panel [CORRECTED 2026-09-27: WIRED 2026-09-27 (TECH-14).] |
 | **ATR depth** — ATR expansion/contraction ratio, ATR-normalised movement, vol acceleration, standalone Rogers-Satchell | 28, 29, 30, 91, 95 | `size.atr:143` (series via the cached 320 bars), `compression.atr_compression_read:75`, `volatility_models.yang_zhang_vol:288` |
 | **Keltner/TTM squeeze** | 109, 110 | `technical_factors.keltner_channel:439` and `value_dip.bollinger_pct_b:77` already return both band pairs the squeeze compares |
 

@@ -745,3 +745,35 @@ def test_the_industry_shock_leg_stays_absent_without_a_resolvable_sector(monkeyp
     _silence_leaf(monkeypatch)  # fetch_sector -> None
 
     assert "industry_shock" not in at._news_components("SHOCK", "2026-09-04")
+
+
+def test_the_regulatory_legal_leg_reads_the_article_tags(monkeypatch) -> None:
+    """NEWS-5: the tags the AV feed already carries drive a real component."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        at,
+        "_av_news_articles",
+        lambda *a, **k: [
+            {"title": "Company faces a SEC investigation", "topics": [{"topic": "legal"}]},
+            {"title": "Routine product note", "topics": [{"topic": "technology"}]},
+        ],
+    )
+
+    vals = at._news_components("TAGS", "2026-09-04")
+    # one of two tags recognised -> a 0-1 share, not a neutral 50
+    assert vals["regulatory_legal"] == pytest.approx(0.5)
+
+
+def test_an_unrecognised_tag_set_leaves_the_category_absent(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        at,
+        "_av_news_articles",
+        lambda *a, **k: [{"title": "x", "topics": [{"topic": "technology"}]}],
+    )
+
+    assert "regulatory_legal" not in at._news_components("TAGS", "2026-09-04")

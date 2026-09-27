@@ -13,6 +13,13 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Added
+**Two owner-decided legs and four recorded decisions (2026-09-27, second pass).**
+
+- **TECH-14 — the Zweig breadth thrust is a LEG of `breadth`, not a new weight.** `technical_score.COMPONENTS` gains `zweig_thrust` with the raw value being the window's EMA change in the advance ratio (the continuous magnitude, not the boolean event) and the ramp set to the library's own thrust magnitude (EMA 0.40 → 0.615 within 10 bars = +0.20). `CATEGORY_WEIGHTS` is unchanged. `_technical_components` feeds it from the SAME market panel the three breadth rates use.
+- **NEWS-5 — the regulatory/legal classifier is wired.** The component's declared ramp was `(0.0, 0.05)` while `tag_category_read` returns a 0-1 share; per the owner's decision the ramp is now the producer's own scale, and `_news_components` feeds it from the Alpha Vantage feed's per-article `topics[]`. An unrecognised tag set still refuses with a reason.
+- **Recorded, no code:** MF-8 closed permanently (risk/sentiment inputs are book-level and per-symbol vendor reads, so the wide panel cannot carry them); NEWS-15 closed (all four dark flags stay off by default with their reasons in the gate registry, `.env` left to the owner); EVT-9 decided (EventScore is a 0-100 score, so it joins the panel); RISK-4/PLAN-7 decided (the engine's `net_beta` rides in `research_decision.json`, an executor-schema change that lands as its own step).
+- **Web impact: none** — two component legs and one declaration; no tool, flag, gate, env key or JSON shape moved.
+
 **The cluster-exposure share producer, executor side (RISK-7/RISK-12, 2026-09-27).** `risk_score.CATEGORIES` declares `cluster_exposure_share` against the board's own arithmetic — `cluster_notional / equity` — and nothing returned it, so the number stayed an externally supplied input. `../TradingExecution/signald/risk/state.py::BookState.cluster_exposure_share` (executor `a2e74c0`) is that producer: the largest cluster's share of book equity by default, a named cluster's share on request, on the same 0..1 scale as `portfolio_hhi` and never `ownership_hhi`'s 0-10000. It is the pinned PROXY, not a correlation coefficient, and returns `None` — never `0.0` — when equity is unmeasurable or the key maps to no position.
 
 - The engine's declaration now names that method and its real divisor; it previously cited `executor gate._correlation_stress:369 (cluster_notional / portfolio_exposure)`, and the divisor is equity. The gate's own per-key cap arithmetic is unchanged.

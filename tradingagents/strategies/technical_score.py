@@ -122,6 +122,10 @@ RAMPS: dict[str, tuple[float, float]] = {
     "pct_above_50d": (20.0, 80.0),
     "pct_above_200d": (20.0, 80.0),
     "ad_ratio": (-0.30, 0.30),
+    # TECH-14: the library's thrust is the EMA rising from 0.40 to 0.615
+    # within the window - a +0.20 move in the advance ratio is the
+    # canonical magnitude, so 0 credit at no rise and 100 at the event.
+    "zweig_thrust": (0.0, 0.20),
     # max pain: how far spot sits from the monthly pin, in ATRs. Closer
     # is the mean-reverting read, so lower_better.
     "max_pain_dist_atr": (0.0, 2.0),
@@ -210,6 +214,17 @@ COMPONENTS: dict[str, Component] = {
         _c("pct_above_50d", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
         _c("pct_above_200d", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
         _c("ad_ratio", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
+        # TECH-14 (owner decision 2026-09-27): the Zweig breadth thrust is a LEG
+        # of this category, not a new weighted one - the declared
+        # CATEGORY_WEIGHTS vector does not move. The raw value is the window's
+        # EMA change in the advance ratio (`technical_depth.zweig_breadth_thrust`
+        # returns the continuous magnitude AND the boolean event; the magnitude
+        # is what a ramp can score).
+        _c("zweig_thrust", "breadth", "higher_better",
+           "technical_depth.zweig_breadth_thrust:400",
+           "the EMA change in adv/(adv+dec) over the thrust window; the library's "
+           "own event (\u00a7120) is the EMA rising 0.40 -> 0.615 within 10 bars, "
+           "so the ramp below is that magnitude"),
     )
 }
 

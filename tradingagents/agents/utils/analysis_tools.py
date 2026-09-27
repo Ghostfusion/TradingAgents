@@ -5892,6 +5892,24 @@ def _technical_components(ticker: str) -> dict:
     for key in ("pct_above_50d", "pct_above_200d", "ad_ratio"):
         if breadth.get(key) is not None:
             vals[key] = breadth[key]
+    # The Zweig thrust (TECH-14, owner decision 2026-09-27) is the fifth LEG of
+    # this category - no declared weight moves. It is fed the SAME panel's
+    # per-session advancers/decliners, so it cannot describe a different universe
+    # from the three rates above, and the raw value is the window's EMA CHANGE in
+    # the advance ratio (the continuous magnitude, not the boolean event).
+    try:
+        from tradingagents.strategies.market_breadth import advance_decline_line
+        from tradingagents.strategies.technical_depth import zweig_breadth_thrust
+
+        adl = advance_decline_line(_market_panel() or {})
+        if adl:
+            thrust = zweig_breadth_thrust(
+                adl.get("advancers") or [], adl.get("decliners") or []
+            )
+            if thrust.get("ema_change") is not None:
+                vals["zweig_thrust"] = thrust["ema_change"]
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
     return vals
 
 
@@ -7364,6 +7382,28 @@ def _news_components(
                     vals["industry_shock"] = shock["abnormal"]
     except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
         pass
+    # NEWS-5: the regulatory/legal classifier over the tags the AV feed already
+    # carries per article (`topics[]`). Only the regulatory_legal category is
+    # fed from this read: the other tags this table knows map to categories that
+    # already have their own producer (corporate_events, earnings_guidance), and
+    # a second supplier for those would be the double count the master forbids.
+    # The component's declared ramp is the producer's own 0..1 scale (owner
+    # decision 2026-09-27).
+    if articles:
+        try:
+            from tradingagents.strategies.news_score import tag_category_read
+
+            topics = [
+                topic.get("topic")
+                for article in articles
+                for topic in (article.get("topics") or [])
+                if isinstance(topic, dict)
+            ]
+            tag = tag_category_read(topics)
+            if tag.get("read") is not None and tag.get("category") == "regulatory_legal":
+                vals["regulatory_legal"] = tag["read"]
+        except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+            pass
     # Guidance change needs the Benzinga surface (default off). The value the
     # engine ramps is the SIGNED relative midpoint change, not the aligned score;
     # with the gate off the component stays NA with its declared reason.

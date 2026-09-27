@@ -119,10 +119,10 @@ ABSENT_REASONS: dict[str, str] = {
         "change); never fake it from the EPS estimate"
     ),
     "regulatory_legal": (
-        "the classifier EXISTS (`news_score.tag_category_read`, NEWS-5) but is not "
-        "wired: this component's declared ramp is (0.0, 0.05) while the producer "
-        "returns a 0-1 share, so feeding it needs a rescale decision - the category "
-        "is withheld rather than scored on a scale nobody declared"
+        "no recognised regulatory/legal tag in the fetched set (NEWS-5: "
+        "`news_score.tag_category_read` over the AV feed's per-article `topics[]`; "
+        "the component's ramp is the producer's own 0..1 scale since 2026-09-27) - "
+        "an unrecognised tag set is withheld with this reason, never scored neutral"
     ),
     "industry_shock": (
         "no per-name industry-shock producer; market/sector breadth is a "
@@ -140,7 +140,12 @@ RAMPS: dict[str, tuple[float, float]] = {
     "earnings_surprise": (-0.05, 0.05),  # signed ratio (actual-estimate)/|estimate|
     "guidance_change": (-0.05, 0.05),   # (gate-off producer: guidance_change_score)
     "corporate_events": (0.0, 100.0),   # FORM_EVENT_SCORES form->event-class score
-    "regulatory_legal": (0.0, 0.05),    # (no producer)
+    # NEWS-5: the classifier's own scale. It was (0.0, 0.05) while no
+    # producer existed; `tag_category_read` returns the matched-tag share
+    # times an importance severity in 0..1, so the ramp is that scale
+    # (owner decision 2026-09-27). lower_better: more legal/regulatory
+    # coverage is a risk read, not a quality one.
+    "regulatory_legal": (0.0, 1.0),
     "analyst_revision": (-0.5, 0.5),    # weighted up/down ratio
     "industry_shock": (-0.10, 0.10),    # sector-relative move (no producer)
     "persistence": (0.5, 3.0),          # attention ratio; neglected-firm sign (Q9)
@@ -191,12 +196,21 @@ COMPONENTS: dict[str, Component] = {
            "sec_edgar._FORM_LABELS:39",
            "a DECLARED mapping, unvalidated like RAMPS; an unknown form is "
            "ignored, never defaulted to a neutral 50"),
-        _c("regulatory_legal", "regulatory_legal", "lower_better", None,
-           "text_factors.lm_tone:121 gives a litigious count only; no classifier"),
+        _c("regulatory_legal", "regulatory_legal", "lower_better",
+           "news_score.tag_category_read (this module), fed by the AV feed's "
+           "per-article topics[]",
+           "the DECLARED TAG_CATEGORIES vocabulary maps a vendor tag/channel/topic "
+           "to this category; read = matched share x importance severity in 0..1. "
+           "`text_factors.lm_tone:121` gives a litigious word count only, which is "
+           "NOT a classifier - it stays unused here"),
         _c("analyst_revision", "analyst_rating", "higher_better",
            "analyst_revisions.revision_ratio:79",
            "the binding moves to the news surface (Q4)"),
-        _c("industry_shock", "macro_industry", "higher_better", None, None),
+        _c("industry_shock", "macro_industry", "higher_better",
+           "news_score.industry_shock (this module)",
+           "the summed sector-relative excess return over the news window, "
+           "z-standardised by the window's own dispersion (a zero-dispersion "
+           "window refuses)"),
         _c("persistence", "persistence", "lower_better",
            "sentiment.mention_volume:43 (the level ratio - the WIRED half)",
            "neglected-firm sign (plan §13 Q9): lower abnormal coverage is positive. "
@@ -288,7 +302,9 @@ SCALE_CONVENTION = (
     "relevance 0-100; novelty 0-1 (first-seen share); materiality |expected/implied "
     "move| fraction (caller-supplied); earnings surprise a signed ratio; corporate "
     "event typing 0-100 (FORM_EVENT_SCORES); analyst revision -1..1; persistence a "
-    "mention ratio; guidance change a signed relative midpoint change"
+    "mention ratio; guidance change a signed relative midpoint change; regulatory/"
+    "legal a matched-tag share x severity in 0..1; industry shock a sector-relative "
+    "excess return"
 )
 
 
