@@ -1272,26 +1272,32 @@ def test_level_two_renders_categories_beside_their_measurements():
     snap["engines"]["technical"]["result"] = {
         "status": "advisory",
         "score": 85.0,
+        # The two legs must be ones the engine still DECLARES: the renderer
+        # reads the non-monotonic flag off the declaration, so a retired leg
+        # renders as monotonic and this test would silently stop covering the
+        # branch it exists for. (MF-6 trimmed the leg set on 2026-09-27:
+        # `rsi`/`stoch_k`/`adx`/`di_spread` are retired, `stoch_rsi` and
+        # `keltner_pct` are the legs still flagged NON-MONOTONIC.)
         "categories": {
             "momentum": {
                 "score": 72.0,
                 "weight": 0.18,
                 "coverage": 0.5,
-                "present": ["rsi", "adx"],
+                "present": ["stoch_rsi", "sma_stack"],
             }
         },
         "components": {
-            "rsi": {"raw": 82.0, "aligned": 45.0},
-            "adx": {"raw": 25.0, "aligned": 40.0},
+            "stoch_rsi": {"raw": 82.0, "aligned": 45.0},
+            "sma_stack": {"raw": 25.0, "aligned": 40.0},
         },
     }
     text = qs.format_engine_detail(snap)
     assert "### TechnicalScore — 85/100" in text
     assert "- momentum (weight 0.18): 72/100 over 2 components" in text
     # the non-monotonic component shows the triple; the monotonic one does not
-    assert "rsi=82 rsi_aligned=45 mapping=producer-defined non-monotonic band" in text
-    assert "adx=25 -> 40" in text
-    assert "adx_aligned" not in text
+    assert "stoch_rsi=82 stoch_rsi_aligned=45 mapping=producer-defined non-monotonic band" in text
+    assert "sma_stack=25 -> 40" in text
+    assert "sma_stack_aligned" not in text
 
 
 def test_level_two_reads_the_analysed_tickers_own_row_in_a_panel_engine():
