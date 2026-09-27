@@ -1417,9 +1417,16 @@ def test_the_report_shows_level_two_only_when_the_gate_is_on(tmp_path):
     on = write_report_tree(
         state, "TST", tmp_path / "on", config={"enable_quant_scorecard": True}
     )
-    assert "## V. Engine score detail" in on.read_text(encoding="utf-8")
+    text = on.read_text(encoding="utf-8")
+    assert "## IVc. Engine score detail" in text
+    # The advisory detail is a **sub-section of the risk block**, not a section of
+    # its own: it shipped as `## V.` while the Portfolio Manager decision already
+    # held that number, so `complete_report.md` carried two `## V.` headings and a
+    # reader following the table of contents landed on the advisory block.
+    assert "## V. Engine score detail" not in text
+    assert text.count("\n## V. ") <= 1
     off = write_report_tree(state, "TST", tmp_path / "off", config={})
-    assert "## V. Engine score detail" not in off.read_text(encoding="utf-8")
+    assert "## IVc. Engine score detail" not in off.read_text(encoding="utf-8")
 
 
 def test_the_three_engine_states_are_named_not_inferred():

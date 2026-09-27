@@ -2184,7 +2184,7 @@ def write_report_tree(
                     detail = format_engine_detail(snapshot)
                     if detail:
                         sections.append(
-                            "## V. Engine score detail (advisory)\n\n"
+                            "## IVc. Engine score detail (advisory)\n\n"
                             "Each engine's categories beside the measurements they "
                             "came from, so the composite can be recomputed rather "
                             "than trusted. Where a component is **non-monotonic** "

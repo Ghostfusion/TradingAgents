@@ -337,9 +337,11 @@ explicit:
   score. The note's `C` collapses it, and `R` (the risk multiplier) collapses a
   *sizing* multiplier into a *score* — the same merge invariant 11 forbids.
 
-This is also the live topic of **decision 12** (coverage/`N` deflation in the score
-panel), so the note is not inventing a question; it is proposing a specific answer
-to an open one. Recorded as §6 Q3.
+This is also the live topic of the **score panel's coverage question** (owner Q4
+labels a sub-floor run `INSUFFICIENT_CROSS_SECTION`; `IMPLEMENTATION_PLAN.md` §13
+Q12 is a *different* decision — the semivariance measure — so the earlier "decision
+12" reference here was wrong and is corrected), so the note is not inventing a
+question; it is proposing a specific answer to an open one. Recorded as §6 Q3.
 
 ### 3.6 Standardization — what exists, and why it is panel-time
 
@@ -513,7 +515,8 @@ Written now so a future implementation cannot land without them:
   four-engine composite the only one?
 * **Q3 — coverage: multiplier or printed qualifier?** Folding coverage into the
   number contradicts "the reader must see both" and the four-outputs rule. This is
-  decision 12's N-deflation question with a specific proposed answer attached.
+  the score panel's open N-deflation question with a specific proposed answer
+  attached.
 * **Q4 — standardization.** Do you want a cross-sectional z composite (today only
   computable in the validation panel), or does the 0-100 band convention stay?
 * **Q5 — interactions.** Is measuring `γᵢⱼ` in scope for Phase C/E, or does the
