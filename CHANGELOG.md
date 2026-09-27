@@ -17,6 +17,16 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 - **Web impact: none** — `get_technical_score` stays the leaf and `enable_technical_score` the gate; the block's JSON shape is unchanged (fewer component rows), and no tool, flag, gate, env key or screener column moved.
 
 ### Added
+**Five owner decisions recorded, and three items close by decision rather than by code (2026-09-27, third pass).**
+
+- **MOM-4 — the six §54 legs STAY in `technical_score.CATEGORY_WEIGHTS`.** The migration into the new `MomentumScore` was considered and declined: MF-6 has just trimmed that table to the legs that survive on the panel, so moving 75 of the 100 points would re-derive `TechnicalScore` a second time and re-open the table the owner had only just settled. `MomentumScore` is therefore **additive** and reads the same underlying producers. Recorded in `MASTER_PLAN.md` §10 and `MomentumScore.md`.
+- **MOM-4's class — the declared-table signature is the owner's.** `FUND-24`/`RLW-4` are *attempted* (the ladder is computed from the 37 cached panels) and *presented*; the promotion out of `RESEARCH_ONLY` is not landed, because leaving that rung is the signature the owner reserved.
+- **History left as-is.** The `6f5052c` attribution (the `net_beta` documentation sitting under a panel-run message) and the `b74fd55` cleanup are both declined: the content in HEAD is correct and only the commit attribution is mixed, which does not justify rewriting pushed history.
+- **The poisoned tickers and the 68 report trees older than `f7ffc91` are not regenerated** — they stay a known, listed item rather than costing vendor calls and overwriting cached trees.
+- **The panel universe stays the 149-name sample** (`~/.tradingagents/cache/panel_universe_sample.txt`); widening it would re-baseline every measurement taken so far.
+- **`docs/scores/MEASUREMENT_FINDINGS.md` authorised for repair** — it was stale in four places (§1's `regime.vol_percentile` returning `0.5` where the producer returns `None`; §4/§7 claiming no wide panel run had happened when there have been two; and the `n_measured 0` / "2 of 11 live" pair against a live run measuring 6 of 11).
+- **Web impact: none** — every item above is a record or a decline; no tool, flag, gate, env key, JSON shape or screener column moved.
+
 **Two owner-decided legs and four recorded decisions (2026-09-27, second pass).**
 
 - **TECH-14 — the Zweig breadth thrust is a LEG of `breadth`, not a new weight.** `technical_score.COMPONENTS` gains `zweig_thrust` with the raw value being the window's EMA change in the advance ratio (the continuous magnitude, not the boolean event) and the ramp set to the library's own thrust magnitude (EMA 0.40 → 0.615 within 10 bars = +0.20). `CATEGORY_WEIGHTS` is unchanged. `_technical_components` feeds it from the SAME market panel the three breadth rates use.
