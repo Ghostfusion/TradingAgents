@@ -897,16 +897,21 @@ ENGINE_MODULES: tuple[tuple[str, str], ...] = (
     ("risk_score", "tradingagents.strategies.risk_score"),
     ("news_score", "tradingagents.strategies.news_score"),
     ("sentiment_score", "tradingagents.strategies.sentiment_score"),
+    # EventScore (EVT-9, owner decision 2026-09-27): `event_state` DOES return a
+    # 0-100 `{score, band, coverage, families}`, so it is a scored engine like the
+    # six above and the panel carries its column. Its factors are event-driven
+    # (calendars, filings, product dates), so most of them report `measured: False`
+    # with their own reason on a price/fundamentals panel - which is the honest
+    # answer, and strictly more than "not a score, not measured".
+    ("event_state", "tradingagents.strategies.event_state"),
 )
 
-#: EventScore is a *state*, not a scored engine (plan section 8, master 1.4).
-ENGINE_NOT_SCORED: dict[str, str] = {
-    "event_state": (
-        "EventScore is a state/flag object, not a 0-100 score (master rule: four "
-        "output types stay four); the panel measures scores and takes no "
-        "position on the event state"
-    ),
-}
+#: Engines the panel deliberately does NOT score. **Empty since 2026-09-27**:
+#: `event_state` was the only entry - its claim ("a state/flag object, not a
+#: 0-100 score") is what the owner's EVT-9 decision rejected, so the row moved
+#: into `ENGINE_MODULES`. Kept as data (not deleted) so a reader of the old
+#: claim finds the correction rather than an absence.
+ENGINE_NOT_SCORED: dict[str, str] = {}
 
 
 def _import_module(path: str):

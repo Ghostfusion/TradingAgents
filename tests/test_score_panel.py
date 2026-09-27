@@ -637,15 +637,24 @@ def test_the_status_vocabulary_is_advisory_and_research_only():
             STATUS_RESEARCH_ONLY, "UNMEASURED")
 
 
-def test_an_engine_whose_module_is_absent_is_reported_not_omitted():
+def test_an_engine_whose_module_is_absent_is_reported_not_omitted(monkeypatch):
+    """Every engine of the map has a module today (EVT-9 moved `event_state` in
+    on 2026-09-27), so the "reported, not omitted" contract is pinned against a
+    module that genuinely cannot be imported."""
+    from scripts import score_panel as sp
+
     registry = engine_registry()
-    assert registry["fundamental_score"]["available"] is True
-    assert registry["technical_score"]["available"] is True
-    absent = [name for name, e in registry.items() if not e["available"]]
-    assert absent, "at least one engine of the map has no module in this tree"
-    for name in absent:
-        assert registry[name]["reason"], f"{name} must state why it is UNMEASURED"
-    assert "event_state" in registry and "state" in registry["event_state"]["reason"]
+    assert all(e["available"] for e in registry.values())
+    assert registry["event_state"]["available"] is True
+
+    monkeypatch.setattr(
+        sp,
+        "ENGINE_MODULES",
+        sp.ENGINE_MODULES + (("ghost_engine", "tradingagents.strategies.nope"),),
+    )
+    registry = sp.engine_registry()
+    assert registry["ghost_engine"]["available"] is False
+    assert registry["ghost_engine"]["reason"], "an unimportable engine must say why"
 
 
 def test_a_sibling_engine_module_is_picked_up_by_the_registry(monkeypatch):
@@ -1104,3 +1113,30 @@ def test_a_short_history_or_a_thin_vector_refuses_with_its_own_reason():
     # the None cell is skipped, not treated as a zero
     assert out["per_name"]["THIN"]["momentum"]["n_factors"] == 1
     assert out["n_agreement"] == 0 and out["mean_agreement"] is None
+
+
+def test_event_state_is_a_registry_engine_and_the_panel_carries_its_column():
+    """EVT-9 (owner decision 2026-09-27): EventScore IS a 0-100 score.
+
+    `event_state` returns `{score, band, coverage, families}`, so the row moved
+    out of `ENGINE_NOT_SCORED` and into `ENGINE_MODULES`: the registry reads its
+    declared components and the panel carries its column. Its factors are
+    event-driven, so on a price/fundamentals panel they report `measured: False`
+    WITH their reason - the honest answer, and more than "not a score".
+    """
+    from scripts import score_panel as sp
+
+    names = [name for name, _ in sp.ENGINE_MODULES]
+    assert "event_state" in names
+    assert sp.ENGINE_NOT_SCORED == {}
+
+    entry = sp.engine_registry()["event_state"]
+    assert entry["module"] == "tradingagents.strategies.event_state"
+    assert entry["available"] is True
+    # its declared component table reaches the registry, with the producers named
+    assert entry["factors"], "the registry read no declared component table"
+    assert any(
+        row.get("producer") for row in entry["factors"].values()
+    ), "the declared producers did not survive the read"
+    # nothing fabricates category weights for an engine that declares none
+    assert entry["categories"] == {}
