@@ -46,6 +46,11 @@ The block also carries the FundamentalScore library's families
   Turnover (§6)      DIO, DSO, DPO, cash-conversion cycle, the turnover ratios
   Bonds (§14)        earnings-yield and FCF-yield spreads over a passed-in
                      risk-free rate (this module never fetches one)
+  SBC (§55,          SBC, SBC/revenue, SBC-adjusted FCF and SBC/FCF - the
+  ValuationScore)    economic cash flow = reported FCF - us-gaap:ShareBasedCompensation,
+                     read from the one XBRL concept whose definition is the
+                     cash-flow add-back; a filer without it refuses with a reason
+                     rather than adjusting by zero
 
 No-fabrication rule: every ratio returns ``None`` when an input is missing
 (never an invented number), mirroring ``dataflows/quantitative_scores``. The
@@ -422,6 +427,149 @@ def shareholder_yield(fin: dict, *, market_cap: float | None = None,
     }
 
 
+#: The XBRL concept this read is allowed to use for the SBC leg, named in full
+#: so a refusal can say exactly what it looked for. It is ``sec_edgar._TAG_MAP``'s
+#: "Share-based compensation" row, surfaced under the canonical key ``sbc``.
+SBC_XBRL_TAG = "us-gaap:ShareBasedCompensation"
+
+#: The candidate that is deliberately NOT used as a fallback, with the live
+#: measurement that disqualifies it (see the docstring's refusal note).
+SBC_REJECTED_TAG = "us-gaap:AllocatedShareBasedCompensationExpense"
+
+
+def sbc_adjusted_fcf(
+    fin: dict,
+    *,
+    fcf: float | None = None,
+    revenue: float | None = None,
+    market_cap: float | None = None,
+) -> dict:
+    """Share-based-compensation adjustment to free cash flow (ValuationScore §55).
+
+    The library keeps two measures rather than one:
+
+        ReportedFCF  = OCF - |capex|          (what ``compute_ratios`` publishes)
+        EconomicFCF  = ReportedFCF - SBC      (the same cash flow with the
+                                               non-cash equity compensation
+                                               charged as the cost it is)
+
+    ``SBC`` is the **cash-flow statement's non-cash add-back**, i.e.
+    ``us-gaap:ShareBasedCompensation`` (``SBC_XBRL_TAG``; the label
+    ``sec_edgar._TAG_MAP`` maps to the canonical ``sbc`` key, carried as a flat
+    value by the panel and as ``sbc_series`` on the ``with_sec_series`` path).
+    It is the exact amount OCF adds back, so subtracting it again is the
+    economic-cost read and not a double count. The companion ratio the external
+    quality review names beside the other quality metrics is
+    ``SBC / Revenue`` (``altman_composite.md``, Quality pillar, `SBC/Revenue`).
+
+    **Refusal, never a substituted zero.** A filer that does not carry the tag
+    gets ``sbc=None``, ``economic_fcf=None`` and a ``reason`` that names the
+    missing concept - ``EconomicFCF`` is *not* set equal to ``ReportedFCF``,
+    because "no SBC line" is not "no SBC cost" and the neutral substitution is
+    the failure ``EventScore.md`` §8 records. The nearest alternative concept,
+    ``AllocatedShareBasedCompensationExpense`` (``SBC_REJECTED_TAG``), is the
+    INCOME-STATEMENT allocated expense: measured 2026-09-27 on SIMO FY2025 the
+    two are 26,283,000 vs 203,305,000 (7.7x), so using it as a fallback would
+    silently redefine the factor from one name to the next.
+
+    ``fcf`` / ``revenue`` / ``market_cap`` are optional pass-throughs so a caller
+    that already computed them (``compute_ratios``) prints one number and no
+    second formula exists. Without them, FCF is ``OCF - |capex|`` under this
+    module's own ``abs()`` convention (vendors disagree on the capex sign) and
+    revenue is the latest canonical/TTM figure.
+
+    Returns ``{"sbc", "reported_fcf", "economic_fcf", "sbc_to_revenue",
+    "sbc_to_ocf", "sbc_to_fcf", "economic_fcf_yield", "xbrl_tag", "basis",
+    "reason"}``; every ratio is ``None`` when its own denominator is missing.
+    No fetching, no exceptions.
+    """
+    def _leg(*flat_keys: str, series_key: str, prefer_series: bool):
+        """Latest value of a leg, preferring the basis the SBC leg came from.
+
+        When SBC is read from the SEC 10-K ``sbc_series`` the cash-flow legs
+        follow it to the series too, so the adjustment never subtracts one
+        fiscal year's equity compensation from another year's cash flow.
+        """
+        if prefer_series:
+            entry = _series_entry(fin, series_key)
+            if entry:
+                return _num(entry["values"][-1])
+        value = _num(_flow(fin, *flat_keys))
+        if value is None:
+            entry = _series_entry(fin, series_key)
+            if entry:
+                value = _num(entry["values"][-1])
+        return value
+
+    sbc = _num(_flow(fin, "sbc_ttm", "sbc"))
+    sbc_from_series = False
+    if sbc is None:
+        entry = _series_entry(fin, "sbc")
+        if entry:
+            sbc = _num(entry["values"][-1])
+            sbc_from_series = True
+
+    ocf = _leg(
+        "operating_cashflow_ttm",
+        "operating_cashflow",
+        series_key="operating_cashflow",
+        prefer_series=sbc_from_series,
+    )
+    capex = _leg("capex_ttm", "capex", series_key="capex", prefer_series=sbc_from_series)
+    rev = revenue if revenue is not None else _leg(
+        "revenue_ttm", "revenue", series_key="revenue", prefer_series=sbc_from_series
+    )
+    mc = market_cap if market_cap is not None else _num(fin.get("market_cap"))
+
+    reported = _num(fcf)
+    if reported is None:
+        reported = (
+            _sub(ocf, abs(capex)) if (ocf is not None and capex is not None) else None
+        )
+
+    economic = _sub(reported, sbc) if (reported is not None and sbc is not None) else None
+
+    reason = None
+    if sbc is None:
+        reason = (
+            f"no {SBC_XBRL_TAG} value for this filer: the canonical statements carry "
+            f"no share-based-compensation line, so the SBC adjustment is refused "
+            f"({SBC_REJECTED_TAG} is the income-statement allocated expense, a "
+            f"different quantity, and is not substituted)"
+        )
+    elif reported is None:
+        reason = (
+            "reported free cash flow unavailable (needs operating cash flow and capex), "
+            "so the SBC adjustment has no base"
+        )
+
+    if sbc is None:
+        sbc_basis = "no SBC line"
+    elif _num(fin.get("sbc_ttm")) is not None:
+        sbc_basis = "ttm"
+    elif sbc_from_series:
+        sbc_basis = "as reported (SEC 10-K annual series)"
+    else:
+        sbc_basis = "as reported"
+
+    return {
+        "sbc": sbc,
+        "reported_fcf": reported,
+        "economic_fcf": economic,
+        "sbc_to_revenue": _ratio_min(sbc, rev),
+        "sbc_to_ocf": _ratio_min(sbc, ocf),
+        # Only meaningful against a POSITIVE reported FCF: a ratio of a
+        # positive SBC to a negative FCF flips sign and reads as a "credit".
+        "sbc_to_fcf": (
+            _ratio_min(sbc, reported) if (reported is not None and reported > 0) else None
+        ),
+        "economic_fcf_yield": _ratio_min(economic, mc),
+        "xbrl_tag": SBC_XBRL_TAG if sbc is not None else None,
+        "basis": f"{sbc_basis}; SBC = {SBC_XBRL_TAG}" if sbc is not None else sbc_basis,
+        "reason": reason,
+    }
+
+
 def _basis_label(flows: str, flows_period: str | None, balance: str | None) -> str:
     """One sentence naming the period behind every family in the block."""
     if flows == "TTM":
@@ -564,6 +712,10 @@ def compute_ratios(fin: dict, price: float | None = None,
     # --- FUND-2 / FUND-3: capital returns and capital allocation ----------
     cap = return_on_capital(fin)
     sy = shareholder_yield(fin, market_cap=mc)
+    # ValuationScore §55: the SBC-adjusted (economic) FCF, read from the same
+    # ``fcf``/``rev`` this block publishes so the two measures of one cash flow
+    # cannot drift apart.
+    sbc_read = sbc_adjusted_fcf(fin, fcf=fcf, revenue=rev, market_cap=mc)
 
     # --- FUND-6: margins and the stability legs (§5/§28) ------------------
     gm = _num(fin.get("gross_margin"))
@@ -684,6 +836,13 @@ def compute_ratios(fin: dict, price: float | None = None,
         "buyback_yield": sy["buyback_yield"],
         "shareholder_yield": sy["shareholder_yield"],
         "net_issuance_yield": sy["net_issuance_yield"],
+        # ---- ValuationScore §55: SBC adjustment --------------------------
+        # ``sbc_adjusted_fcf`` owns the formula; these four keys are the read's
+        # own output, so the block prints one FCF adjustment, not a second.
+        "sbc": sbc_read["sbc"],
+        "sbc_to_revenue": sbc_read["sbc_to_revenue"],
+        "sbc_adjusted_fcf": sbc_read["economic_fcf"],
+        "sbc_to_fcf": sbc_read["sbc_to_fcf"],
         # ---- FUND-6 margins (§5) -----------------------------------------
         "gross_margin": gm,
         "ebit_margin": _ratio_min(op, rev),
@@ -808,6 +967,12 @@ RENDER_ORDER = [
     ("buyback_yield", "Buyback yield", "pct"),
     ("shareholder_yield", "Shareholder yield", "pct"),
     ("net_issuance_yield", "Net issuance yield", "pct"),
+    # ValuationScore §55 - the SBC-adjusted free-cash-flow read. The analyst
+    # ratio leaf renders every RENDER_ORDER row, so these reach a reader.
+    ("sbc", "SBC", "int"),
+    ("sbc_to_revenue", "SBC/revenue", "pct"),
+    ("sbc_adjusted_fcf", "SBC-adj FCF", "int"),
+    ("sbc_to_fcf", "SBC/FCF", "pct"),
     ("gross_margin", "Gross margin", "pct"),
     ("ebit_margin", "EBIT margin", "pct"),
     ("ebitda_margin", "EBITDA margin", "pct"),
@@ -873,6 +1038,8 @@ __all__ = [
     "render_ratios",
     "return_on_capital",
     "shareholder_yield",
+    "sbc_adjusted_fcf",
+    "SBC_XBRL_TAG",
     "robust_z",
     "RENDER_ORDER",
     "MAD_SCALE",

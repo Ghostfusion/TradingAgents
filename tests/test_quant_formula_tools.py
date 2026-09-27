@@ -236,6 +236,45 @@ def test_quality_factors_renders_hand_checked_values(monkeypatch):
     assert "quality counterweight" in out
 
 
+def test_quality_factors_renders_the_sbc_adjustment(monkeypatch):
+    """ValuationScore §55 reaches the model through this leaf, with both measures."""
+    _cfg(monkeypatch)
+    fin = {
+        "revenue": 1000.0,
+        "cogs": 600.0,
+        "total_assets": {"current": 2000.0, "prior": 1800.0},
+        "operating_cashflow": 300.0,
+        "capex": 100.0,
+        "sbc": 25.0,
+    }
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin
+    )
+    out = qft.get_quality_factors.invoke({"ticker": "TEST"})
+    assert "sbc=25 (us-gaap:ShareBasedCompensation)" in out
+    assert "reported_fcf=200 sbc_adjusted_fcf=175" in out
+    assert "sbc_to_revenue=2.50%" in out
+
+
+def test_quality_factors_prints_the_sbc_refusal_not_a_zero(monkeypatch):
+    """A filer with no SBC line must not read as an adjustment by zero."""
+    _cfg(monkeypatch)
+    fin = {
+        "revenue": 1000.0,
+        "cogs": 600.0,
+        "total_assets": {"current": 2000.0, "prior": 1800.0},
+        "operating_cashflow": 300.0,
+        "capex": 100.0,
+    }
+    monkeypatch.setattr(
+        "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: fin
+    )
+    out = qft.get_quality_factors.invoke({"ticker": "TEST"})
+    assert "sbc: unavailable" in out
+    assert "us-gaap:ShareBasedCompensation" in out
+    assert "sbc_adjusted_fcf=" not in out
+
+
 # --- Q3: valuation band prerequisite ----------------------------------------
 
 

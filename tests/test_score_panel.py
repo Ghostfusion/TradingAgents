@@ -724,6 +724,26 @@ def test_the_sec_facts_map_to_canonical_financials_with_no_fabrication():
     assert canonical_fin_from_sec(_facts({})) == {}
 
 
+def test_the_sec_facts_carry_sbc_and_omit_it_rather_than_zero_it():
+    """ValuationScore §55's input on the panel path.
+
+    ``us-gaap:ShareBasedCompensation`` reaches the panel's canonical ``fin`` as
+    ``sbc``; a filer that does not file the tag has NO key (``NA != 0``), which
+    is what lets ``ratios.sbc_adjusted_fcf`` refuse instead of adjusting by zero.
+    """
+    fin = canonical_fin_from_sec(_facts({
+        "Revenue": {"2025-06-30": (1000.0, "2025-08-01")},
+        "Total assets": {"2025-06-30": (2000.0, "2025-08-01")},
+        "Share-based compensation": {"2025-06-30": (12.0, "2025-08-01")},
+    }))
+    assert fin["sbc"] == {"current": 12.0, "prior": None}
+    without = canonical_fin_from_sec(_facts({
+        "Revenue": {"2025-06-30": (1000.0, "2025-08-01")},
+        "Total assets": {"2025-06-30": (2000.0, "2025-08-01")},
+    }))
+    assert "sbc" not in without
+
+
 def test_the_sec_read_is_point_in_time_so_a_panel_cannot_see_the_future():
     """A 10-K filed after the panel date is not a fact that date could know.
 

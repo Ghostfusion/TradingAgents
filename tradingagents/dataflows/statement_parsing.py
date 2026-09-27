@@ -723,6 +723,11 @@ _SEC_SERIES_KEYS: dict = {
     "Operating income": "operating_income",
     "D&A": "d_and_a",
     "Capex (-)": "capex",
+    # ValuationScore §55: the SBC-adjusted (economic) FCF read needs the
+    # cash-flow add-back as a canonical series (``ratios.sbc_adjusted_fcf``
+    # prefers this concept to any substitute). ``us-gaap:ShareBasedCompensation``
+    # is the ONLY tag mapped to it - see ``sec_edgar._TAG_MAP``.
+    "Share-based compensation": "sbc",
     "Gross profit": "gross_profit",
     "Total liabilities": "total_liabilities",
     "Stockholders equity": "stockholders_equity",

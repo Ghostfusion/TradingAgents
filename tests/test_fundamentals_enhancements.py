@@ -219,6 +219,33 @@ def test_xbrl_annual_facts_carry_the_cover_page_share_count(monkeypatch):
     assert "1.0B" in out and "companyfacts" in out
 
 
+def test_xbrl_share_based_compensation_is_the_cashflow_addback_tag_only(monkeypatch):
+    """ValuationScore §55's input is ONE named concept, and absence is not zero.
+
+    ``us-gaap:ShareBasedCompensation`` is the cash-flow statement's non-cash
+    add-back; ``AllocatedShareBasedCompensationExpense`` is the income-statement
+    allocated expense and a different quantity (2026-09-27, SIMO FY2025:
+    26,283,000 vs 203,305,000). Only the former is mapped, so a filer filing
+    only the latter contributes no value at all - never a substituted one.
+    """
+    _patch_facts(monkeypatch, _cfacts({
+        "ShareBasedCompensation": [_concept("2025-06-30", 12e9, start="2024-07-01")],
+        "Assets": [_concept("2025-06-30", 1e9)],
+    }))
+    facts = sec_edgar.annual_facts("MSFT")
+    assert facts["series"]["Share-based compensation"]["2025-06-30"]["val"] == 12e9
+    assert "Share-based compensation" in sec_edgar.get_financial_history("MSFT", years=3)
+
+    _patch_facts(monkeypatch, _cfacts({
+        "Assets": [_concept("2025-06-30", 1e9)],
+        "AllocatedShareBasedCompensationExpense": [
+            _concept("2025-06-30", 203e6, start="2024-07-01"),
+        ],
+    }))
+    only_allocated = sec_edgar.annual_facts("MSFT")
+    assert "Share-based compensation" not in only_allocated["series"]
+
+
 def test_xbrl_annual_facts_flag_a_foreign_private_issuer_cover_page(monkeypatch):
     """The flag exists because an FPI's US-listed line may be an ADS.
 

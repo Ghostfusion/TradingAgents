@@ -62,6 +62,39 @@ def _grouped_deviations(deviations: list) -> list:
     return out + rest
 
 
+def _sbc_lines(read: dict) -> list:
+    """ValuationScore §55 rows for the quality leaf: the read, or its refusal.
+
+    Never substitutes a zero for a missing XBRL concept: a filer that does not
+    file ``us-gaap:ShareBasedCompensation`` prints the producer's own reason.
+    Raw statement units (no currency conversion, the same convention as the rest
+    of the leaf).
+    """
+    if not read:
+        return ["  sbc: unavailable (no statement data)"]
+    if read.get("sbc") is None:
+        return [f"  sbc: unavailable - {read.get('reason') or 'no SBC line'}"]
+
+    def _num(value) -> str:
+        return f"{value:,.0f}" if value is not None else "n/a"
+
+    lines = [
+        f"  sbc={_num(read['sbc'])} ({read['xbrl_tag']}); "
+        f"reported_fcf={_num(read.get('reported_fcf'))} "
+        f"sbc_adjusted_fcf={_num(read.get('economic_fcf'))}"
+    ]
+    if read.get("sbc_to_revenue") is not None:
+        lines.append(f"  sbc_to_revenue={read['sbc_to_revenue']:.2%} (quality pillar)")
+    if read.get("sbc_to_fcf") is not None:
+        lines.append(f"  sbc_to_fcf={read['sbc_to_fcf']:.2%} of reported FCF")
+    lines.append(
+        "Interpretation: the SBC-adjusted (economic) FCF removes the non-cash "
+        "equity compensation the cash-flow statement added back - a wide gap "
+        "means reported FCF overstates the cash left for shareholders."
+    )
+    return lines
+
+
 def _disabled(tool_name: str, flag: str) -> str:
     return (
         f"{tool_name}: DISABLED (set {flag}=true / "
@@ -172,6 +205,13 @@ def get_quality_factors(
     otherwise leaves open. Cite before any 'cheap quality name / value trap /
     balance-sheet bloat' claim. Missing COGS or prior-year assets render
     unavailable - never substituted. Advisory.
+
+    Also carries the share-based-compensation read (ValuationScore §55): the
+    reported FCF beside the SBC-adjusted (economic) FCF = FCF -
+    ``us-gaap:ShareBasedCompensation``, and SBC/revenue - the quality-pillar
+    ratio the round-3 composite study names beside the other quality metrics.
+    A filer that does not file that XBRL concept prints the refusal reason, never
+    an adjustment by zero.
     """
     try:
         from tradingagents.dataflows.quantitative_scores import (
@@ -179,18 +219,20 @@ def get_quality_factors(
             net_operating_assets,
         )
         from tradingagents.dataflows.statement_parsing import fetch_ticker
+        from tradingagents.strategies.ratios import sbc_adjusted_fcf
 
         # The G-Score's G4/G5 legs need a 5-year annual series the vendor
         # statements do not carry; the SEC XBRL 10-K history does (P0-1).
         fin = fetch_ticker(ticker, current_date or "", with_sec_series=True) or {}
         gp = gross_profitability(fin) if fin else None
         noa = net_operating_assets(fin) if fin else None
+        sbc = sbc_adjusted_fcf(fin) if fin else {}
         _extra_gates = (
             _flag("enable_altman_variants")
             or _flag("enable_f_score_detail")
             or _flag("enable_growth_scores")
         )
-        if not gp and not noa and not _extra_gates:
+        if not gp and not noa and not _extra_gates and sbc.get("sbc") is None:
             return (
                 f"quality factors {ticker}: unavailable (needs revenue/COGS/total "
                 "assets and a prior-year balance sheet)"
@@ -204,6 +246,7 @@ def get_quality_factors(
             lines.append(f"  noa={noa['value']:+.4f} ({noa['classification']}; {noa['basis']})")
         else:
             lines.append("  noa=unavailable (needs two consecutive balance sheets)")
+        lines.extend(_sbc_lines(sbc))
         lines.append(
             "Interpretation: GP/A is a quality counterweight to cheapness; high "
             "NOA (bloated balance sheet) is a documented drag on forward returns."

@@ -253,6 +253,11 @@ SEC_FIN_KEYS: dict[str, str] = {
     "Gross profit": "gross_profit",
     "Operating cash flow": "operating_cashflow",
     "Capex (-)": "capex",
+    # ValuationScore §55: the SBC-adjusted (economic) FCF read's input, from the
+    # single ``us-gaap:ShareBasedCompensation`` row (``sec_edgar._TAG_MAP``).
+    # Absent for a filer that does not file it - the key is then simply not in
+    # ``fin``, never 0 (``canonical_fin_from_sec`` skips a missing value).
+    "Share-based compensation": "sbc",
     "Total assets": "total_assets",
     "Total liabilities": "total_liabilities",
     "Stockholders equity": "total_equity",

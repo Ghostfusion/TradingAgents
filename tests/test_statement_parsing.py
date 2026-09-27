@@ -725,6 +725,25 @@ def test_sec_annual_series_maps_labels_and_derives_the_untagged_rows(monkeypatch
 
 
 @pytest.mark.unit
+def test_sec_annual_series_carries_the_share_based_compensation_row(monkeypatch):
+    """ValuationScore §55's input: the cash-flow add-back reaches the canonical
+    ``sbc_series`` (it is what ``ratios.sbc_adjusted_fcf`` reads on the
+    ``with_sec_series`` path). Presence only - a filer without the tag
+    contributes no series, never a zero-filled one."""
+    _patch_sec(monkeypatch, _sec_facts({
+        "Assets": _sec_rows(_YEARS, lambda y: (y - 2020) * 100e9),
+        "ShareBasedCompensation": _sec_rows(_YEARS, lambda y: (y - 2020) * 1e9),
+        "AllocatedShareBasedCompensationExpense": _sec_rows(_YEARS, lambda y: 9e9),
+    }))
+    got = sp.sec_annual_series("TST")
+    assert got["sbc_series"]["values"] == [v * 1e9 for v in range(1, 7)]
+    assert got["sbc_series"]["years"] == list(_YEARS)
+    # The income-statement allocated expense is a DIFFERENT concept and is not
+    # mapped: only ``us-gaap:ShareBasedCompensation`` produces this series.
+    assert 9e9 not in got["sbc_series"]["values"]
+
+
+@pytest.mark.unit
 def test_sec_annual_series_is_empty_when_edgar_has_no_record(monkeypatch):
     """A non-US ticker has no CIK: the series is OPTIONAL depth and must return
     an empty dict rather than raising into a caller that never asked for it."""

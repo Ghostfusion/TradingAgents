@@ -5,6 +5,9 @@ arXiv:2609.14858v1 [cs.CL], 2026-09-14 (Google / UMD / Google DeepMind / UVA).
 `github.com/zhengkid/Dream-RSI`.
 
 **Status.** Design only. No code changed, no gate added, no behaviour touched.
+**Decision (2026-09-27): the replay simulator is DECLINED, on the record — see §8.**
+No round-index recorder and no replay loop were built; the precondition that
+would have to move first is named there.
 
 **One-line finding.** The paper's *mechanism* does not transfer to this project, because the
 artifacts this project records are not a discovery tree — but its *constraints* do, and two of
@@ -266,10 +269,15 @@ producer for `N_im` and `k_i*`: a per-round index on the tool-call journal, writ
 report tree* rather than to the cache dir. Without this, no allocation replay is possible. Note
 this is a prerequisite, not a win: it buys the ability to run Phase E, and Phase E is only worth
 running if the truncation-only scope (§3.1) is enough for the question being asked.
+**DECLINED 2026-09-27 (§8):** not started. The item as written also aims at the wrong artifact —
+the `tool_evidence.json` leaves are the deterministic single-pass gather's and carry no round at
+all (§8, item 2).
 
 **Phase E — replay + corrected selection.** Build the allocation replay over truncations, and
 select with `pbo_flag` / `deflated_sharpe` rather than a raw argmax. Ship only behind a gate,
 default off, in the pattern the eight score-engine gates already use.
+**DECLINED 2026-09-27 (§8):** not built, and not to be built until the tree, the round record and
+the measured cost term all exist.
 
 **Do not start at Phase E.** The paper's loop is the last thing that should be built here, and it
 is the only thing the paper is about.
@@ -289,3 +297,85 @@ is the only thing the paper is about.
 - **It does not propose a gate, a config key, or a code change.** No code was changed.
 - **It does not credit this repo with the replay idea.** `scripts/context_ab.py` had it first, for
   context policies, and it is the reason the comparison in §2 is possible at all.
+
+---
+
+## 8. The decision (2026-09-27): declined, with the precondition named
+
+**Decision.** The paper's loop is **not built here**: no allocation replay, no round-index
+recorder, no research-allocation policy object, no new gate. Phases D and E of §6 are cancelled,
+not deferred-for-effort. The design record stays, and the three transferable items in §4 stay
+available on their own terms (they never depended on the loop).
+
+### 8.1 Why
+
+1. **The mechanism does not transfer (§3), and both blockers were checked against the code, not
+   inferred.** A recorded tree here is a chain — one trajectory per analyst (`REPORT_STEMS` is a
+   contract, not a search dimension) — so replay can only evaluate *truncations* of what ran; and
+   the round structure is absent, so `N_im` and `k_i*` have no producer. Neither is a wiring gap.
+2. **The §6 Phase D item aims at the wrong artifact.** `tool_evidence.json`'s leaves are built by
+   the *deterministic single-pass* gather (`evidence_gather.gather_evidence` →
+   `evidence_gather._leaf`, where `ts = time.monotonic() - start` is that tool's **duration in
+   seconds**). They have no round to index. The LLM's own tool calls *are* journaled
+   (`tool_call_log.log_tool_call`, into `<data_cache_dir>/tool_calls/<SYMBOL>_tool_calls.jsonl`,
+   outside the report tree, with no round field) and the graph counts rounds
+   (`conditional_logic.MAX_TOOL_ROUNDS = 8`, `ConditionalLogic.tool_rounds(messages)`) — so the real
+   prerequisite is a round index on *that* journal, written into the report tree.
+3. **That recorder would have no consumer.** A scoped grep finds **no reader** of
+   `<SYMBOL>_tool_calls.jsonl` anywhere in `tradingagents/`, `scripts/` or the web app — only its
+   writer and its tests. The single consumer this study names is Phase E, which this decision
+   declines; and `reporting._run_card_debate` records no round count either. Building a producer
+   whose only consumer is a declined phase is the dead-weight case the repo's own wiring gate
+   (`tests/test_calc_agent_wiring.py`) exists to catch.
+4. **Offline policy evaluation is only valid inside the support of the logged data.** A candidate
+   policy can be scored only on trajectories the logged policy actually took; with one trajectory
+   per decision there is no repeated evidence for the alternative action at the same decision
+   point, so an importance-weighted or replay estimate has no effective sample. That is §3.1
+   restated as the standard OPE limitation, and it is not fixable by history at all.
+5. **The selection rule would be the winner's curse unless corrected, and the correction needs a
+   candidate set this repo does not have.** §4.1's point stands (the paper's `V^{m*} ≥ V^0` is an
+   in-sample claim); the repo owns `evaluate.deflated_sharpe` / `pbo_flag` / `reality_check` /
+   `spa`, but those need *M candidates scored on shared worlds*. With one trajectory per run and
+   56 heterogeneous recorded trees, there is nothing to deflate.
+6. **The question the project actually has does not need the loop.** "Was the debate / tool budget
+   worth its cost for this symbol" is the truncation half of replay, and §4.3 (Phase B) asks it by
+   joining artifacts that already exist. Phase C (§4.4) — the `enable_reflection` ablation — is the
+   one item with a real chance of changing production behaviour, and it needs neither the round
+   index nor the loop.
+
+### 8.2 What would have to change first (all three, in this order)
+
+| # | Precondition | Where it lives today | Why it is a product change, not plumbing |
+| --: | --- | --- | --- |
+| **P1** | The recorded artifact must contain **siblings**: more than one trajectory per analyst per run, so a different policy could have taken a branch that is on record | one trajectory per analyst; `report_verifier.REPORT_STEMS` is a contract | making the analyst set / round configuration a search dimension changes what a report *is*, not how it is stored |
+| **P2** | A **round index** on the LLM tool-call journal, written **into the report tree**, plus the per-round record (which node was expanded, the batch, the stopping rule) | `tool_call_log` (cache dir, no round); `run_card.json` `debate` block (no counts) | it changes a persisted artifact's contract; the leaf `ts` fields must not be repurposed (they are durations) |
+| **P3** | A **measured cost term** for `V = quality − β₁·cost + …` | `reporting._run_card_llm_cost_est` is a **rate table + an output-leg upper bound at the configured max-output cap**, not per-run token usage | `β₁·N_im` cannot be estimated from a cap-bound figure |
+
+Until P1–P3 exist, an allocation replay is not constructible — and P1 means the replay would be
+guessing at outcomes that were never produced, which is the fabrication the repo forbids.
+
+### 8.3 What this unblocks, and what it does not
+
+- **Unblocks nothing from the paper's loop.** The loop is the only thing the paper is about, and it
+  is out.
+- **Leaves unimpaired:** §4.1 (selection discipline — apply `deflated_sharpe`/`pbo_flag` to any
+  *future* candidate selection, and note the `deflated_sharpe` docstring/body discrepancy recorded
+  there), §4.2 (state the prefix-only constraint on the existing allocation knobs — a docs change,
+  no code), §4.3 (Phase B: quality joined to cost — with the P3 caveat that the cost leg is a
+  bound, not a measurement), §4.4 (Phase C: the `enable_reflection` ablation — independent of all
+  of this).
+- **Reopen condition:** a future proposal that supplies P1–P3 may reopen Phase E; anything that
+  does not is answered by this section.
+
+### 8.4 What was checked for this decision (so it is not re-litigated)
+
+```
+$ grep -rn "tool_calls.jsonl" tradingagents/ scripts/ tests/ ../TradingNew/trading_web   # writer + tests only, no reader
+$ grep -n "ts=time.monotonic" tradingagents/agents/utils/evidence_gather.py              # :308  (duration, not a round)
+$ grep -n "def log_tool_call" -A 40 tradingagents/agents/utils/tool_call_log.py          # ts, symbol, trade_date, analyst, tool, event, in_model_pool, args
+$ grep -n "rounds" tradingagents/graph/conditional_logic.py                              # MAX_TOOL_ROUNDS = 8; tool_rounds() counts, nothing persists it
+$ grep -n "def _run_card_debate" -A 50 tradingagents/reporting.py                        # enabled/evidence/degraded/terminated/reason - no counts
+$ grep -n "def _run_card_llm_cost_est" -A 30 tradingagents/reporting.py                  # rate table + max-output cap bound
+```
+
+No gate, no config key and no persisted artifact changed under this decision.

@@ -13,9 +13,11 @@ from tradingagents.dataflows.statement_parsing import _canonicalize
 from tradingagents.strategies.ratios import (
     MAD_SCALE,
     RENDER_ORDER,
+    SBC_XBRL_TAG,
     compute_ratios,
     return_on_capital,
     robust_z,
+    sbc_adjusted_fcf,
     shareholder_yield,
 )
 
@@ -455,3 +457,112 @@ def test_risk18_renders_the_burn_family_and_refuses_a_non_burn():
     calm = render_ratios(compute_ratios(_fin()))
     assert "- Cash runway (years): n/a" in calm
     assert "- FCF deterioration: n/a" in calm
+
+
+# ---------------------------------------------------------------------------
+# ValuationScore §55 - the SBC-adjusted (economic) free-cash-flow read
+# ---------------------------------------------------------------------------
+
+def test_vs55_sbc_adjustment_reads_the_cashflow_addback():
+    """ReportedFCF and EconomicFCF are kept as two measures, per §55."""
+    fin = _fin(operating_cashflow=90e6, capex=30e6, revenue=900e6, sbc=12e6)
+    read = sbc_adjusted_fcf(fin, market_cap=1000e6)
+    assert read["xbrl_tag"] == SBC_XBRL_TAG
+    assert read["sbc"] == pytest.approx(12e6)
+    assert read["reported_fcf"] == pytest.approx(60e6)
+    assert read["economic_fcf"] == pytest.approx(48e6), "economic = FCF - SBC"
+    assert read["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
+    assert read["sbc_to_ocf"] == pytest.approx(12e6 / 90e6)
+    assert read["sbc_to_fcf"] == pytest.approx(12e6 / 60e6)
+    assert read["economic_fcf_yield"] == pytest.approx(48e6 / 1000e6)
+    assert read["reason"] is None
+    # The block prints ONE cash-flow adjustment, from the same FCF it publishes.
+    r = compute_ratios(fin)
+    assert r["sbc"] == pytest.approx(12e6)
+    assert r["sbc_adjusted_fcf"] == pytest.approx(r["free_cash_flow"] - 12e6)
+    assert r["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
+
+
+def test_vs55_refuses_without_the_xbrl_concept_never_a_zero_adjustment():
+    """A filer that does not file ``us-gaap:ShareBasedCompensation`` refuses.
+
+    The fabricated neutral - ``EconomicFCF = ReportedFCF - 0`` - is the failure
+    this asserts against: the refusal must leave ``economic_fcf`` None rather
+    than equal to the reported figure, and name the concept it looked for.
+    """
+    fin = _fin(operating_cashflow=90e6, capex=30e6, revenue=900e6)  # no sbc key
+    read = sbc_adjusted_fcf(fin, market_cap=1000e6)
+    assert read["sbc"] is None and read["xbrl_tag"] is None
+    assert read["reported_fcf"] == pytest.approx(60e6)
+    assert read["economic_fcf"] is None, "an absent SBC line is not a zero SBC cost"
+    assert read["sbc_to_revenue"] is None
+    assert SBC_XBRL_TAG in read["reason"]
+    assert "not substituted" in read["reason"]
+    # The ratio block carries the same refusal, not a substituted adjustment.
+    r = compute_ratios(fin)
+    assert r["sbc"] is None and r["sbc_adjusted_fcf"] is None
+    from tradingagents.strategies.ratios import render_ratios
+
+    assert render_ratios(r).count("- SBC-adj FCF: n/a") == 1
+
+
+def test_vs55_does_not_fall_back_to_the_income_statement_sbo_tag():
+    """The income-statement allocated expense is a different quantity.
+
+    Measured 2026-09-27 on SIMO FY2025: ``us-gaap:ShareBasedCompensation``
+    26,283,000 vs ``us-gaap:AllocatedShareBasedCompensationExpense`` 203,305,000
+    (7.7x). A canonical dict carrying only the allocated leg must refuse, so no
+    silent redefinition can enter a cross-section.
+    """
+    fin = _fin(
+        operating_cashflow=90e6,
+        capex=30e6,
+        revenue=900e6,
+        allocated_share_based_compensation_expense=203.305e6,
+    )
+    read = sbc_adjusted_fcf(fin)
+    assert read["sbc"] is None
+    assert read["economic_fcf"] is None
+
+
+def test_vs55_reads_the_sec_series_when_no_flat_key_is_present():
+    """``fetch_ticker(with_sec_series=True)`` yields ``sbc_series``, not a flat key."""
+    fin = _fin(
+        sbc_series=_series([8e6, 10e6, 12e6]),
+        operating_cashflow_series=_series([70e6, 80e6, 90e6]),
+        capex_series=_series([20e6, 25e6, 30e6]),
+        revenue_series=_series([700e6, 800e6, 900e6]),
+    )
+    read = sbc_adjusted_fcf(fin)
+    assert read["sbc"] == pytest.approx(12e6)
+    assert read["reported_fcf"] == pytest.approx(60e6)
+    assert read["economic_fcf"] == pytest.approx(48e6)
+    # No flat revenue either: the ratio reads the newest series point.
+    flat = dict(fin)
+    flat.pop("revenue")
+    assert sbc_adjusted_fcf(flat)["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
+
+
+def test_vs55_ratio_to_fcf_is_refused_when_reported_fcf_is_negative():
+    """SBC / negative FCF flips sign and would read as a credit."""
+    read = sbc_adjusted_fcf(
+        _fin(operating_cashflow=-70e6, capex=30e6, sbc=12e6, revenue=900e6)
+    )
+    assert read["reported_fcf"] == pytest.approx(-100e6)
+    assert read["economic_fcf"] == pytest.approx(-112e6)
+    assert read["sbc_to_fcf"] is None
+    # SBC/Revenue is unaffected by the FCF sign and still computes.
+    assert read["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
+
+
+def test_vs55_renders_both_measures_and_the_refusal():
+    from tradingagents.strategies.ratios import render_ratios
+
+    with_sbc = render_ratios(compute_ratios(_fin(sbc=12e6)))
+    assert "- SBC: 12,000,000" in with_sbc
+    assert "- SBC/revenue: 1.33%" in with_sbc
+    assert "- SBC-adj FCF: 48,000,000" in with_sbc
+    assert "- SBC/FCF: 20.00%" in with_sbc
+    without = render_ratios(compute_ratios(_fin()))
+    assert "- SBC: n/a" in without
+    assert "- SBC-adj FCF: n/a" in without

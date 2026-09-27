@@ -30,6 +30,26 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-27] **ValuationScore row 55 gets its producer, and the Dream-RSI replay simulator is declined
+  on the record** — two items that needed a producer or a written decision rather than a wiring pass. The
+  **SBC-adjusted free-cash-flow read** (`us-gaap:ShareBasedCompensation` -> the canonical `sbc` key) now
+  exists as `strategies/ratios.sbc_adjusted_fcf`: `reported_fcf = OCF - |capex|` beside
+  `economic_fcf = reported_fcf - SBC`, plus `SBC/revenue` (the quality-pillar ratio the round-3 composite
+  study names), and all four rows render in the analyst ratio block (`- SBC / - SBC/revenue /
+  - SBC-adj FCF / - SBC/FCF`). It is a **single named XBRL concept, and a filer without it refuses with a
+  reason** - never a zero adjustment: measured live 2026-09-27, 55 of 60 large US filers carry
+  `us-gaap:ShareBasedCompensation` (MSFT FY2026 12.405B, SBC/revenue 3.74%; CVX files none and refuses),
+  and the nearest alternative, `us-gaap:AllocatedShareBasedCompensationExpense`, is a *different quantity*
+  (SIMO FY2025 26,283,000 vs 203,305,000), so it is deliberately not substituted. Not all filers are
+  fully covered at the reference year: NVDA carries the SBC row but no current capex tag, so it prints
+  SBC and SBC/revenue and refuses the FCF adjustment with the reason. **Dream-RSI**: `docs/design_dream_rsi_replay_simulator.md`
+  §8 records the decision - the replay simulator is **declined**, because a recorded tree here is a chain
+  (one trajectory per analyst), the rounds are not recorded (and the `tool_evidence.json` leaves carry a
+  *duration*, not a round, so the study's own Phase D aimed at the wrong artifact), the tool-call journal
+  has no reader anywhere in the repo or the web app, and offline policy evaluation has no counterfactual
+  support from one trajectory per decision. It names the three preconditions (sibling branches on record,
+  a round index in the report tree, a measured cost term) that would have to exist first. Details, tests,
+  mutation proofs and web impact in `CHANGELOG.md`.
 - [2026-09-26] **The six engine findings from the score trace are fixed - and two of the six were a claim
   problem, not a code problem** — a read-only trace of how RegimeScore, EventScore and RiskScore reach a report
   turned up six things worth fixing. The one that mattered most: the quant scorecard's `event` row read
