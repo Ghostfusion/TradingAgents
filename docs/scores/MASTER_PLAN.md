@@ -389,6 +389,14 @@ predicted exactly this), and a regime split needs a market-level regime series p
 date, which `RegimeScore` does not yet persist. `--sector-map`/`--regime-map`
 accept a caller-supplied mapping today.
 
+**FUND-15 / FUND-16 now run on the panel (2026-09-27).** `scripts/score_panel.py`
+gained `agreement_and_momentum`: per name, `factor_dispersion.factor_score_dispersion`
+over that date's factor vector and `fundamental_momentum` over the date axis of the
+same rows - the panel *is* those producers' source, so the panel reports them
+(`report["factor_agreement"]`, printed as one summary line and the per-name blocks).
+This is also what makes the two producers reachable outside their module, which
+`tests/test_calc_agent_wiring.py` requires.
+
 **Still open in this phase**: MF-5 (9 of 11 `news_score` components on the live
 per-symbol path), MF-8 (`risk_score`/`sentiment_score` panel path — structurally
 blocked by data shape: position/book-level and per-symbol vendor reads), MF-6 (the

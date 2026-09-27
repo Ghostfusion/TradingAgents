@@ -1058,3 +1058,49 @@ def test_news_and_regime_engines_print_unmeasured_weight_vectors():
     for engine in ("news_score", "regime_score"):
         line = next(ln for ln in text.splitlines() if ln.startswith(f"- {engine}:"))
         assert "weights NONE [UNMEASURED]" in line
+
+
+# --- FUND-15 / FUND-16: the panel reports the agreement and the momentum ----
+
+
+def test_factor_agreement_and_momentum_read_the_panel_rows():
+    """The panel IS these two producers' source, so the panel reports them."""
+    from scripts import score_panel as sp
+
+    dates = ["2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05"]
+    panels = {
+        "2026-01-02": {"UP": {"f1": 10.0, "f2": 20.0}, "DOWN": {"f1": 90.0, "f2": 80.0}},
+        "2026-01-03": {"UP": {"f1": 20.0, "f2": 30.0}, "DOWN": {"f1": 80.0, "f2": 70.0}},
+        "2026-01-04": {"UP": {"f1": 30.0, "f2": 40.0}, "DOWN": {"f1": 70.0, "f2": 60.0}},
+        "2026-01-05": {"UP": {"f1": 40.0, "f2": 50.0}, "DOWN": {"f1": 60.0, "f2": 50.0}},
+    }
+    out = sp.agreement_and_momentum(panels, dates)
+
+    assert out["n_names"] == 2
+    assert out["n_agreement"] == 2 and out["n_momentum"] == 2
+    # each latest vector is (40, 50) or (60, 50): sigma 5 on a 0-100 scale
+    assert out["mean_agreement"] == pytest.approx(1.0 - 5.0 / 50.0)
+    # the factor histories rise together for one name and fall for the other
+    assert out["per_name"]["UP"]["momentum"]["momentum"] > 0
+    assert out["per_name"]["DOWN"]["momentum"]["momentum"] < 0
+    # equal weights over symmetric changes -> the panel mean cancels to zero
+    assert out["mean_momentum"] == pytest.approx(0.0)
+
+
+def test_a_short_history_or_a_thin_vector_refuses_with_its_own_reason():
+    """A name the panel cannot measure is refused, never scored 0."""
+    from scripts import score_panel as sp
+
+    dates = ["2026-01-02", "2026-01-03"]
+    panels = {
+        "2026-01-02": {"THIN": {"f1": 50.0}},
+        "2026-01-03": {"THIN": {"f1": 50.0, "f2": None}},
+    }
+    out = sp.agreement_and_momentum(panels, dates)
+
+    # one finite metric -> one metric is not a dispersion
+    assert out["per_name"]["THIN"]["dispersion"]["dispersion"] is None
+    assert out["per_name"]["THIN"]["dispersion"]["reason"]
+    # the None cell is skipped, not treated as a zero
+    assert out["per_name"]["THIN"]["momentum"]["n_factors"] == 1
+    assert out["n_agreement"] == 0 and out["mean_agreement"] is None

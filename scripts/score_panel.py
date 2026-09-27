@@ -1938,6 +1938,75 @@ def technical_category_matrix(panels: dict, dates, *, registry: dict | None = No
 # ---------------------------------------------------------------------------
 
 
+def agreement_and_momentum(
+    panels: dict, dates, metrics=None, *, min_names: int = 4
+) -> dict:
+    """Cross-metric agreement (FUND-15) and factor momentum (FUND-16) over the panel.
+
+    Both producers were built from the library's §36 (agreement) and §26-§28
+    (momentum/acceleration/stability) items and had no consumer: the PANEL is
+    their source - each date's row already holds the name's factor values, and
+    the date axis turns the same rows into the per-factor history
+    `fundamental_momentum` differences. One pass, no fetch.
+
+    Returns ``{"n_names", "mean_agreement", "mean_momentum", "latest_date",
+    "per_name", "basis"}``. A name with fewer than two finite metrics (or no
+    factor with a full lag) carries that producer's own refusal for that leg -
+    never a fabricated 0 - and the aggregates are the mean over the names that
+    DID measure, with the count printed beside them.
+    """
+    from tradingagents.strategies.factor_dispersion import (
+        factor_score_dispersion,
+        fundamental_momentum,
+    )
+
+    ordered = sorted(panels or {})
+    per_name: dict = {}
+    for name in sorted({n for rows in (panels or {}).values() for n in (rows or {})}):
+        vector: dict = {}
+        history: dict = {}
+        for date in ordered:
+            row = (panels.get(date) or {}).get(name) or {}
+            for metric, value in row.items():
+                if metrics is not None and metric not in metrics:
+                    continue
+                if value is None:
+                    continue
+                vector[metric] = value  # ascending dates: the latest write wins
+                history.setdefault(metric, []).append(value)
+        per_name[name] = {
+            "dispersion": factor_score_dispersion(vector),
+            "momentum": fundamental_momentum(history),
+        }
+    agreements = [
+        v["dispersion"]["agreement"]
+        for v in per_name.values()
+        if v["dispersion"]["agreement"] is not None
+    ]
+    momenta = [
+        v["momentum"]["momentum"]
+        for v in per_name.values()
+        if v["momentum"]["momentum"] is not None
+    ]
+    return {
+        "n_names": len(per_name),
+        "mean_agreement": (
+            sum(agreements) / len(agreements) if agreements else None
+        ),
+        "n_agreement": len(agreements),
+        "mean_momentum": sum(momenta) / len(momenta) if momenta else None,
+        "n_momentum": len(momenta),
+        "latest_date": ordered[-1] if ordered else None,
+        "per_name": per_name,
+        "basis": (
+            f"cross-metric agreement and factor momentum over {len(ordered)} date(s) "
+            f"x {len(per_name)} name(s): agreement measured for {len(agreements)}, "
+            f"momentum for {len(momenta)} (a shorter history refuses with its own "
+            "reason rather than scoring 0)"
+        ),
+    }
+
+
 def evaluate_panel(
     panels: dict,
     *,
@@ -2123,6 +2192,10 @@ def evaluate_panel(
     # --- TECH-24: the technical category correlation matrix ---------------
     technical_categories = technical_category_matrix(panels, dates)
 
+    # --- FUND-15 / FUND-16: the panel IS their source (per-name factor
+    # vectors, and the date axis that makes them a history) ------------------
+    factor_agreement = agreement_and_momentum(panels, dates)
+
     weight_vector = {
         "produced": bool(status["status"] == alpha_health.CROSS_SECTION_OK),
         "status": STATUS_RESEARCH_ONLY,
@@ -2166,6 +2239,7 @@ def evaluate_panel(
         "redundancy": {**matrix, "blocks": blocks},
         "robustness": robustness,
         "technical_categories": technical_categories,
+        "factor_agreement": factor_agreement,
         "family": family,
         "engines": per_engine,
         "weight_vector": weight_vector,
@@ -2372,6 +2446,16 @@ def render_text(report: dict, build: dict | None = None) -> str:
                 else:
                     lines.append(
                         f"    {factor} [{label}]: withheld - {rec.get('reason')}")
+    fa = report.get("factor_agreement") or {}
+    if fa:
+        lines.append(
+            f"cross-metric agreement / factor momentum: "
+            f"{fa.get('n_agreement')} of {fa.get('n_names')} name(s) measured an "
+            f"agreement (panel mean {fa.get('mean_agreement')}), "
+            f"{fa.get('n_momentum')} measured a momentum (panel mean "
+            f"{fa.get('mean_momentum')}); per-name blocks under "
+            f"`factor_agreement.per_name`"
+        )
     tc = report.get("technical_categories") or {}
     lines.append("")
     lines.append("## Technical category correlations (TECH-24)")
