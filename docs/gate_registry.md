@@ -24,15 +24,12 @@ document on every suite run:
    by nothing.
 
 **What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates, plus the **score-engine gates** added in
-R4 stage 2 (§7e): **72 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **40
+policy, data-surface and context gates, plus the **score-engine gates** (§7e)
+and the **debate and run-shape flags** (§7f) added in R4 stage 2: **80 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **32
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the debate and run-shape flags — `enable_debate`, `enable_reflection`,
-  `enable_independent_vote`, `enable_evidence_symmetry`, `enable_decision_audit`,
-  `enable_pit_registry`, `enable_prediction_ledger`, `enable_report_attribution`;
 - the factor-model family — `enable_factor_model`, `enable_factor_profile`,
   `enable_factor_proposal_loop`, `enable_composite_rank`,
   `enable_quality_composite`, `enable_f_score_detail`, `enable_altman_variants`;
@@ -313,6 +310,23 @@ gates.
 | `enable_news_score` | `TRADINGAGENTS_ENABLE_NEWS_SCORE` | the `get_news_score` leaf: relevance and novelty from the news pipeline, the five unsupplied categories printing `NA` with a reason | `tradingagents/agents/utils/analysis_tools.py::get_news_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_news_score` | `test_quant_scorecard.py::test_a_gated_off_engine_is_absent_with_its_gate_named` (the absence mechanism; the leaf's own gate has no dedicated test) | wired |
 | `enable_trade_score` | `TRADINGAGENTS_ENABLE_TRADE_SCORE` | the `get_trade_score` leaf: the advisory composite over four engines, withheld below a two-engine floor; never a gate, a size or an `opportunity_score` | `tradingagents/agents/utils/analysis_tools.py::get_trade_score` (`_r3_flag`), `tradingagents/reporting.py::_run_card_trade_score` | `test_trade_score.py::test_the_leaf_says_the_gate_is_off`, `test_quant_scorecard.py::test_the_composite_is_absent_when_its_gate_is_off_but_the_engines_are_read` | wired |
 | `enable_quant_scorecard` | `TRADINGAGENTS_ENABLE_QUANT_SCORECARD` | the master surface gate: decides whether the engine snapshot reaches the report (`run_card`), the computed decision context and the debate block | `tradingagents/graph/trading_graph.py` (`_compiled_decision_context`), `tradingagents/agents/utils/report_hygiene.py::scorecard_context_block`, `tradingagents/reporting.py::_run_card_quant_scorecard` / `::_scorecard_snapshot_for_report` | `test_quant_scorecard.py::test_the_scorecard_gate_exists_and_defaults_off`, `::test_gate_off_leaves_the_context_and_the_card_unchanged` | wired |
+
+## 7f. Debate and run-shape flags
+
+These decide the **shape of a run** — which debate node set is built, which
+evidence reaches it, and which advisory artefacts are appended to the finished
+decision. They never change a threshold, a size or a rating.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_debate` | `TRADINGAGENTS_ENABLE_DEBATE` | swaps the legacy one-shot bull/bear chain for the structured, claim-verified debate node set, and resolves the per-role debate LLMs | `tradingagents/graph/setup.py::setup_graph` (node set), `tradingagents/graph/trading_graph.py` (`TradingAgentsGraph.__init__` role-LLM resolution), `tradingagents/reporting.py::_run_card_debate` | `test_debate_stream_hermetic.py::test_structured_debate_graph_compiles_with_stub_llms`, `::test_legacy_path_unchanged_with_flag_off` | wired |
+| `enable_reflection` | `TRADINGAGENTS_ENABLE_REFLECTION` | records the run's reflection outcome into the memo overlays | `tradingagents/graph/trading_graph.py::TradingAgentsGraph._maybe_record_reflection_outcome`, `tradingagents/strategies/overlays.py::record_reflection_outcome` | `test_strategies_overlays.py::test_record_reflection_guarded` | wired |
+| `enable_independent_vote` | `TRADINGAGENTS_ENABLE_INDEPENDENT_VOTE` | adds the independent researcher stance read and the vote summary to the debate path (the node no-ops when off) | `tradingagents/agents/utils/independent_vote.py::independent_stance_node` | `test_independent_vote.py::test_node_noops_when_flag_off` | wired |
+| `enable_evidence_symmetry` | `TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY` | adds the S11 evidence-symmetry layer: the macro leaf prefetch and the pre-debate symmetry assertion, changing *how* evidence is gathered, never the decision | `tradingagents/graph/setup.py::setup_graph` (symmetry assertion), `tradingagents/agents/analysts/sentiment_analyst.py::sentiment_analyst_node`, `tradingagents/agents/utils/evidence_gather.py` (the `_flag` reads) | `test_structured_agents.py::test_journals_macro_leaf_only_when_the_gate_is_on`, `test_evidence_symmetry.py` | wired |
+| `enable_decision_audit` | `TRADINGAGENTS_ENABLE_DECISION_AUDIT` | appends the computed claim-vs-contract audit note to the PM decision (advisory; never blocks) | `tradingagents/reporting.py::write_report_tree` (decision finalization) | `tradingagents/reporting.py::write_report_tree` (the gate read — no test flips it); `test_reporting.py::test_audit_decision_numbers_flags_mismatch` proves the audit itself | wired |
+| `enable_pit_registry` | `TRADINGAGENTS_ENABLE_PIT_REGISTRY` | stores the OHLCV profile snapshot and caches the fitted moments in the point-in-time registry when the factor profile is read | `tradingagents/agents/utils/analysis_tools.py::get_factor_profile` | `tradingagents/agents/utils/analysis_tools.py::get_factor_profile` (the gate read — no test flips it); `test_pit_registry.py` proves the registry itself | wired |
+| `enable_prediction_ledger` | `TRADINGAGENTS_ENABLE_PREDICTION_LEDGER` | logs every completed decision as a scorable prediction row (advisory; never gates) | `tradingagents/graph/trading_graph.py::TradingAgentsGraph.finalize_run` | `tradingagents/graph/trading_graph.py::TradingAgentsGraph.finalize_run` (the gate read — no test flips it); `test_prediction_ledger.py` proves the ledger itself | wired |
+| `enable_report_attribution` | `TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION` | appends the Phase D disclosure + invalidation advisory block to the PM decision (computed; never gates) | `tradingagents/reporting.py::write_report_tree` (decision finalization) | `test_reporting.py::test_disclosure_block_does_not_false_mark_truncation`; producers in `test_report_disclosure.py` | wired |
 
 ## 8. Adding a gate — the rule
 

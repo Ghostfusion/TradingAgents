@@ -96,6 +96,15 @@ REGISTRY: dict[str, str] = {
     "enable_news_score": "wired",
     "enable_trade_score": "wired",
     "enable_quant_scorecard": "wired",
+    # debate and run-shape flags
+    "enable_debate": "wired",
+    "enable_reflection": "wired",
+    "enable_independent_vote": "wired",
+    "enable_evidence_symmetry": "wired",
+    "enable_decision_audit": "wired",
+    "enable_pit_registry": "wired",
+    "enable_prediction_ledger": "wired",
+    "enable_report_attribution": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",
