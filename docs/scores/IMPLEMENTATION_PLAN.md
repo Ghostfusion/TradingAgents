@@ -925,8 +925,8 @@ return)` over {confirm-up, confirm-down, diverge-up, diverge-down} — because t
 owner's rule is *"don't assume positive sentiment is bullish"*.
 
 **Prerequisite zero — pin the unit.** The news-sentiment route carries **two
-scales behind one name**: EODHD/Alpha Vantage deliver −1..1, **GDELT delivers
-−100..100** (`gdelt.get_news_sentiment_gdelt:317`, `_sentiment_points_gdelt:250`,
+**scales behind one name**: EODHD/Alpha Vantage deliver −1..1, **GDELT delivers
+−100..100** (`gdelt.get_news_sentiment_gdelt:285`, `_sentiment_points_gdelt:243`,
 routed at `interface.py:488-492`) and the category is advertised as −1..1
 (`interface.py:187`, `news_data_tools.get_news_sentiment:110`). A GDELT-sourced
 `sma_7d` is therefore ~100× an EODHD one. GDELT's own documentation confirms the
@@ -935,6 +935,11 @@ most values in the **−10..+10** band. The fix is a normalisation **plus a stat
 source**, because the distributions differ even after dividing by 100 — a test
 asserts a GDELT series and an EODHD series over the same window produce
 comparable `sma_7d`/`innovation`, or the code refuses to mix them.
+[CORRECTED 2026-09-27: the GDELT leg cannot measure at all — its DOC 2.0
+article-list response carries no per-article tone, so `_sentiment_points_gdelt`
+returns `None` with the reason and the ~100× normalisation question is moot for
+GDELT until `mode=timelineTone` is wired. The scale note above describes that
+mode, not the current article path.]
 
 **The four holes** (§0.1), each with a producer that already exists:
 

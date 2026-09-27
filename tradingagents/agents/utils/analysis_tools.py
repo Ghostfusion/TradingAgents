@@ -9899,7 +9899,8 @@ def get_news_sentiment_series(
 ) -> str:
     """Daily news-sentiment series: per-day score (-1..1), 7-day SMA, latest
     innovation, article count — the computed series from the news_sentiment
-    chain (EODHD /sentiments -> Alpha Vantage NEWS_SENTIMENT -> GDELT tone).
+    chain (EODHD /sentiments -> Alpha Vantage NEWS_SENTIMENT -> GDELT, whose
+    leg currently refuses: its article-list response carries no tone).
     Use before any 'news sentiment is shifting / at extremes' claim; it is a
     computed number, not a vibe. Degrades to an explicit unavailable string.
     """

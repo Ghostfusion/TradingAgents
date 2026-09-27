@@ -2737,7 +2737,12 @@ has changed before); never assume an endpoint works — the SDK's
   free 100 req/day global headlines, `NEWSAPI_API_KEY`), Benzinga
   (`dataflows/benzinga.py`, free ticker financial news, `BENZINGA_API_KEY`).
   NewsAPI in the default `news_data` chain; GDELT/Benzinga opt-in (GDELT
-  endpoint is network-flaky). See CHANGELOG.
+  endpoint is network-flaky). See CHANGELOG. [CORRECTED 2026-09-27: the GDELT
+  *tone* half of this entry was never measurable — the DOC 2.0 article-list
+  response carries no per-article tone field (tone is a query filter/sort; a
+  per-day series needs `mode=timelineTone`), so `get_gdelt_tone_series` /
+  `_sentiment_points_gdelt` now refuse with that reason instead of parsing a
+  field that is not there, and the article render prints no tone line.]
 - 2026-08-30 `(working tree)` - Quant-formula calculations (quants.md +
   quant2.md implementation): volatility estimators (Parkinson/GK/EWMA/GARCH
   + `volatility_estimator` overlay switch), book tail decomposition

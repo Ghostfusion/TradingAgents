@@ -1,6 +1,6 @@
 """News/sentiment providers (GDELT, NewsAPI, Benzinga) - hermetic tests.
 
-Phase A-C of the news/sentiment enhancement: GDELT (keyless native tone),
+Phase A-C of the news/sentiment enhancement: GDELT (keyless news article list),
 NewsAPI (key-gated global headlines) and Benzinga (free ticker-scoped financial
 news). Covers key resolution, typed-error degradation, render shape, and the
 interface registration. Network is mocked (``_requests.get`` / module getters).
@@ -34,7 +34,7 @@ def test_gdelt_no_key_needed():
     assert gdelt.BASE  # import succeeded
 
 
-def test_gdelt_articles_render_tone(monkeypatch):
+def test_gdelt_articles_render_without_a_tone_claim(monkeypatch):
     from tradingagents.dataflows import gdelt
 
     payload = [
@@ -43,14 +43,18 @@ def test_gdelt_articles_render_tone(monkeypatch):
             "url": "https://x.com/a",
             "source": "cnn.com",
             "seendate": "20260830000000",
-            "tone": "5.2,0.6,0.1,0.3",
         }
     ]
     with mock.patch.object(gdelt, "_gdelt_get", return_value=payload):
         out = gdelt.get_news_gdelt("AAPL", "2026-08-28", "2026-08-30")
-    assert "## AAPL News — GDELT (native tone)" in out
+    assert "## AAPL News — GDELT" in out
     assert "AAPL beats earnings" in out
-    assert "tone:" in out and "5.2" in out  # native tone surfaced
+    assert "https://x.com/a" in out
+    assert "tone" not in out.lower(), (
+        "the DOC artlist response carries no per-article tone; the render must "
+        "not imply one (the claim was never measured live - all fixtures were "
+        "hand-written mocks)"
+    )
 
 
 def test_gdelt_no_articles_raises(monkeypatch):
@@ -60,27 +64,77 @@ def test_gdelt_no_articles_raises(monkeypatch):
         gdelt.get_news_gdelt("AAPL", "2026-08-28", "2026-08-30")
 
 
-def test_gdelt_tone_series_aggregates(monkeypatch):
+def test_gdelt_window_uses_the_documented_datetime_form(monkeypatch):
+    """STARTDATETIME/ENDDATETIME are documented as YYYYMMDDHHMMSS.
+
+    The old call sites sent ``YYYY-MM-DD`` + ``"000000"``, a string that is not
+    that format - and a window the API cannot read is a window it does not
+    apply, which on a historical run is the lookahead class this repo treats as
+    critical.
+    """
     from tradingagents.dataflows import gdelt
 
-    payload = [
-        {"title": "a", "seendate": "20260829120000", "tone": "3.0,0.5,0.1,0.4"},
-        {"title": "b", "seendate": "20260829130000", "tone": "-1.0,0.1,0.5,0.4"},
-        {"title": "c", "seendate": "20260830120000", "tone": "2.0,0.4,0.2,0.4"},
-    ]
-    with mock.patch.object(gdelt, "_gdelt_get", return_value=payload):
-        out = gdelt.get_gdelt_tone_series("AAPL", look_back_days=5)
-    assert "gdelt tone series AAPL" in out
-    assert "20260829" in out  # avg of 3.0 and -1.0 = 1.0
-    assert "1.00" in out
+    seen: dict = {}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict:
+            return {"articles": [{"title": "t", "seendate": "20260830000000"}]}
+
+    def _get(url, params=None, timeout=None):
+        seen.update(params or {})
+        return _Resp()
+
+    monkeypatch.setattr(gdelt._requests, "get", _get)
+    gdelt.get_news_gdelt("AAPL", "2026-08-28", "2026-08-30")
+    assert seen["startdatetime"] == "20260828000000"
+    assert seen["enddatetime"] == "20260830235959"
 
 
-def test_gdelt_tone_series_empty_degrades(monkeypatch):
+def test_gdelt_rate_limited_text_body_is_a_rate_limit(monkeypatch):
+    """A 429 body is plain text with no content-type - measured live 2026-09-27.
+
+    Parsing the body before the status check classified GDELT's rate limit as
+    "non-JSON response" (NoMarketDataError), a no-data verdict that skips the
+    rate-limit path entirely.
+    """
+    from tradingagents.dataflows import gdelt
+    from tradingagents.dataflows.errors import VendorRateLimitError
+
+    class _Resp:
+        status_code = 429
+        text = "Please limit requests to one every 5 seconds or contact kalev..."
+
+        @staticmethod
+        def json():
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr(gdelt, "_MAX_RETRIES", 0)
+    monkeypatch.setattr(gdelt._requests, "get", lambda *a, **k: _Resp())
+    with pytest.raises(VendorRateLimitError):
+        gdelt._gdelt_get({"query": '"AAPL"'})
+
+
+def test_gdelt_tone_series_names_the_missing_capability(monkeypatch):
+    """The tone series refuses with the reason, and never fetches to pretend.
+
+    GDELT's ``tone`` is a query filter/sort in DOC 2.0; the artlist response has
+    no per-article tone field, so there is nothing to aggregate. The old
+    producer aggregated a mocked field and would have returned "tone fields
+    missing" forever against the live API.
+    """
     from tradingagents.dataflows import gdelt
 
-    with mock.patch.object(gdelt, "_gdelt_get", return_value=[]):
-        out = gdelt.get_gdelt_tone_series("AAPL", look_back_days=5)
+    def _must_not_fetch(*a, **k):
+        raise AssertionError("the tone series must not fetch: it cannot measure")
+
+    monkeypatch.setattr(gdelt, "_gdelt_get", _must_not_fetch)
+    out = gdelt.get_gdelt_tone_series("AAPL", look_back_days=5)
     assert "unavailable" in out
+    assert "no per-article tone" in out
+    assert gdelt._sentiment_points_gdelt("AAPL", "2026-08-28", "2026-08-30") is None
 
 
 # ---------------------------------------------------------------------------

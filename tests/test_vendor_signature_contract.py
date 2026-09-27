@@ -220,7 +220,6 @@ def test_gdelt_global_news_entry_serves_through_the_router():
     articles = [{
         "title": "Fed holds rates steady", "url": "https://example.com/fed",
         "source": "example.com/business", "seendate": "20260910T120000Z",
-        "tone": "5.2,1.0,2.0,3.0",
     }]
     set_config({"data_vendors": {"news_data": "gdelt"}})
     vendor_cache.clear()
@@ -229,7 +228,7 @@ def test_gdelt_global_news_entry_serves_through_the_router():
 
     assert "## Global Macro News" in out
     assert "Fed holds rates steady" in out
-    assert "tone: avg=5.2" in out
+    assert "tone" not in out.lower()  # the artlist response has no tone field
 
 
 def test_tiingo_fundamentals_entry_serves_through_the_router():

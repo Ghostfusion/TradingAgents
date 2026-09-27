@@ -1,19 +1,27 @@
-"""GDELT news + native tone/sentiment vendor (free, no API key).
+"""GDELT news vendor (free, no API key).
 
 GDELT DOC 2.0 is a fully free, keyless full-text news search API covering a
-rolling ~3-month window across 65 translated languages. Crucially for this
-project it returns a computer-coded **tone** for each article (avg tone,
-positive/negative/hit quotas, emotional lexicons) - a *computed* sentiment the
-analysts can cite rather than one they must guess from headlines (the same
-no-fabrication value as Massive's per-article sentiment).
+rolling ~3-month window across 65 translated languages.
+
+**What this vendor does and does not deliver (measured against GDELT's own
+documentation, 2026-09-27).** The ``mode=artlist`` response used here carries
+article metadata only - ``url``/``url_mobile``/``title``/``seendate``/
+``socialimage``/``domain``/``language``/``sourcecountry``. It carries **no
+per-article tone**: GDELT's ``tone`` is a *query filter and sort* (``tone<-5``,
+``sort=tonedesc``) plus the separate ``mode=timelineTone``/``mode=tonechart``
+outputs and the GKG dataset. So the tone surfaces (``get_gdelt_tone_series``,
+``_sentiment_points_gdelt``) refuse with that reason instead of parsing a field
+that is not there; wiring ``mode=timelineTone`` is a separate change that needs a
+live probe (GDELT answers 429 to this host, 2026-09-27). Nothing is inferred
+from a headline.
 
 Endpoints used:
 - ``/api/v2/doc/doc`` with ``mode=artlist`` (article list) + ``format=json``
-  -> headline, URL, date, source + native tone fields.
+  -> headline, URL, date, source, domain, language.
 
 News asset = ticker keywords OR the company name; GDELT is keyword-based (no
-legal-entity ticker map), so we pass the ticker verbatim and let the tone be
-the signal. ``get_global_news_gdelt`` serves the router's macro
+legal-entity ticker map), so we pass the ticker verbatim.
+``get_global_news_gdelt`` serves the router's macro
 ``get_global_news(curr_date, look_back_days, limit)`` contract from the
 configured ``global_news_queries``. Missing / malformed data degrades to the
 typed errors the router understands (never a fabricated value).
@@ -58,10 +66,10 @@ def _gdelt_get(params: dict) -> list | None:
             if attempt < _MAX_RETRIES:
                 continue
             raise VendorRateLimitError(f"GDELT network error: {exc}") from exc
-        try:
-            data = resp.json()
-        except ValueError:
-            raise NoMarketDataError("gdelt", "doc", detail="non-JSON response") from None
+        # Status BEFORE the body parse. GDELT answers a rate-limited request with
+        # a plain-text 429 body and no content-type (measured live 2026-09-27), so
+        # a `resp.json()` first classified its rate limit as "non-JSON response" -
+        # a no-data verdict that skips the rate-limit path entirely.
         if resp.status_code == 429:
             if attempt < _MAX_RETRIES:
                 import time
@@ -74,6 +82,10 @@ def _gdelt_get(params: dict) -> list | None:
             if attempt < _MAX_RETRIES:
                 continue
             raise VendorRateLimitError(f"GDELT doc: status {resp.status_code}")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise NoMarketDataError("gdelt", "doc", detail="non-JSON response") from None
         if not isinstance(data, dict):
             raise NoMarketDataError("gdelt", "doc", detail="malformed response")
         if isinstance(data.get("Error"), str) and data["Error"]:
@@ -91,11 +103,26 @@ def _fmt_name(ticker: str) -> str:
     return f'"{ticker}"'
 
 
-def _render_articles(header: str, articles: list, limit: int) -> str:
-    """Headline/date/source/URL + native tone block for each GDELT article.
+def _doc_datetime(date_str: str, *, last: bool) -> str:
+    """``YYYY-MM-DD`` -> the DOC API's own ``YYYYMMDDHHMMSS`` window stamp.
 
-    Shared by the ticker-news and global-news surfaces so both cite the same
-    computed tone fields (avg/pos/neg/neutral) in one format.
+    ``STARTDATETIME``/``ENDDATETIME`` are documented as ``YYYYMMDDHHMMSS``; the
+    previous call sites assembled ``YYYY-MM-DD`` + ``"000000"``, a string that is
+    not that format. A window the API cannot read is a window it does not apply,
+    and for a historical run that is the lookahead class this repo treats as
+    critical - so the form is built here and raises ValueError on a bad date
+    rather than reaching the wire.
+    """
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y%m%d") + (
+        "235959" if last else "000000"
+    )
+
+
+def _render_articles(header: str, articles: list, limit: int) -> str:
+    """Headline/date/source/URL for each GDELT article.
+
+    Shared by the ticker-news and global-news surfaces. No tone line: the
+    ``mode=artlist`` response carries none (module docstring).
     """
     lines = [f"## {header}", ""]
     for index, article in enumerate(articles):
@@ -105,34 +132,25 @@ def _render_articles(header: str, articles: list, limit: int) -> str:
         url = str(article.get("url") or "")
         source = str(article.get("source") or "").split("/")[-1] or ""
         date = str(article.get("seendate") or "")[:8]
-        # GDELT native tone fields.
-        tone = article.get("tone")  # "avg_tone,pos,neg,neutral"
-        tone_str = "n/a"
-        if isinstance(tone, str) and "," in tone:
-            t = [x.strip() for x in tone.split(",")]
-            tone_str = f"avg={t[0]} pos={t[1] if len(t) > 1 else '?'} neg={t[2] if len(t) > 2 else '?'} neu={t[3] if len(t) > 3 else '?'}"
         lines.append(f"- **{title}**  ({date} {source})")
-        lines.append(f"  tone: {tone_str}")
         if url:
             lines.append(f"  url: {url}")
     return "\n".join(lines)
 
 
 def get_news_gdelt(ticker: str, start_date: str, end_date: str) -> str:
-    """News + native GDELT tone for a ticker over [start_date, end_date].
+    """Headlines for a ticker over [start_date, end_date] (the DOC article list).
 
-    Renders each article with headline, date, source, URL and the tone block
-    (avg tone, positive %, negative %, neutral %) - the shape the news /
-    sentiment analysts consume. GDELT keeps only a rolling ~3-month window; a
-    request outside it degrades to NoMarketDataError -> next vendor.
+    Renders each article's headline, date, source and URL. The ``mode=artlist``
+    response carries no per-article tone, so no polarity is printed or implied.
+    GDELT keeps only a rolling ~3-month window; a request outside it degrades to
+    NoMarketDataError -> next vendor.
     """
-    datetime.strptime(start_date, "%Y-%m-%d")
-    datetime.strptime(end_date, "%Y-%m-%d")
     articles = _gdelt_get(
         {
             "query": _fmt_name(ticker),
-            "startdatetime": start_date + "000000",
-            "enddatetime": end_date + "235959",
+            "startdatetime": _doc_datetime(start_date, last=False),
+            "enddatetime": _doc_datetime(end_date, last=True),
             "maxrecords": _ARTICLE_LIMIT,
         }
     )
@@ -140,9 +158,7 @@ def get_news_gdelt(ticker: str, start_date: str, end_date: str) -> str:
         raise NoMarketDataError(
             ticker, "doc", detail=f"no articles between {start_date} and {end_date}"
         )
-    return _render_articles(
-        f"{ticker} News — GDELT (native tone)", articles, _ARTICLE_LIMIT
-    )
+    return _render_articles(f"{ticker} News — GDELT", articles, _ARTICLE_LIMIT)
 
 
 def _fmt_query(query: str) -> str:
@@ -155,15 +171,16 @@ def _fmt_query(query: str) -> str:
 
 def get_global_news_gdelt(curr_date: str, look_back_days: int | None = None,
                           limit: int | None = None) -> str:
-    """Global/macro headlines + native tone for the router's ``get_global_news``
-    contract ``(curr_date, look_back_days, limit)``.
+    """Global/macro headlines for the router's ``get_global_news`` contract
+    ``(curr_date, look_back_days, limit)``.
 
     GDELT has no macro feed (it is a keyword engine), so coverage comes from the
     configured ``global_news_queries`` OR-joined into one query over the
     trailing window ending at ``curr_date``; ``look_back_days`` / ``limit``
     default to ``global_news_lookback_days`` / ``global_news_article_limit``.
-    No coverage degrades to NoMarketDataError -> the router tries the next
-    vendor (never a fabricated headline).
+    The ``mode=artlist`` response carries no per-article tone, so none is
+    printed. No coverage degrades to NoMarketDataError -> the router tries the
+    next vendor (never a fabricated headline).
     """
     datetime.strptime(curr_date, "%Y-%m-%d")
     config = get_config()
@@ -184,8 +201,8 @@ def get_global_news_gdelt(curr_date: str, look_back_days: int | None = None,
     articles = _gdelt_get(
         {
             "query": query,
-            "startdatetime": start + "000000",
-            "enddatetime": curr_date + "235959",
+            "startdatetime": _doc_datetime(start, last=False),
+            "enddatetime": _doc_datetime(curr_date, last=True),
             "maxrecords": max(1, min(int(limit), _MAXARTICLE_LIMIT)),
         }
     )
@@ -194,101 +211,52 @@ def get_global_news_gdelt(curr_date: str, look_back_days: int | None = None,
             curr_date, "doc", detail=f"no macro articles between {start} and {curr_date}"
         )
     return _render_articles(
-        f"Global Macro News {start} to {curr_date} — GDELT (native tone)",
+        f"Global Macro News {start} to {curr_date} — GDELT",
         articles,
         int(limit),
     )
 
 
+#: Why the tone surfaces cannot measure. The DOC ``mode=artlist`` response this
+#: vendor reads carries no per-article tone - GDELT's ``tone`` is a query
+#: filter and sort, and a per-day series needs ``mode=timelineTone`` (or the GKG
+#: dataset), which is a separate, unwired call. Stated once so every refusing
+#: surface cites the same reason instead of a data-gap that does not exist.
+_NO_ARTICLE_TONE = (
+    "the GDELT DOC 2.0 article-list response this vendor reads carries no "
+    "per-article tone (tone is a query filter/sort there; a per-day series needs "
+    "mode=timelineTone, not wired) - no headline-derived substitute is invented"
+)
+
+
 def get_gdelt_tone_series(ticker: str, look_back_days: int = 7) -> str:
-    """Daily GDELT tone timeline for a ticker (avg tone per day) over the
-    trailing ``look_back_days``. A computed sentiment series the sentiment
-    analyst can cite (trend + latest).
+    """Unavailable: there is no per-article tone on this path (``_NO_ARTICLE_TONE``).
 
-    Values stay on GDELT's **native** tone scale (-100..100) and the header says
-    so: this is a raw timeline, not the normalised -1..1 series
-    (``get_news_sentiment_gdelt``), and the two must never be compared."""
-    end = datetime.now()
-    start = end - timedelta(days=look_back_days + 1)
-    s = start.strftime("%Y-%m-%d")
-    e = end.strftime("%Y-%m-%d")
-    articles = _gdelt_get(
-        {
-            "query": _fmt_name(ticker),
-            "startdatetime": s + "000000",
-            "enddatetime": e + "235959",
-            "maxrecords": 50,
-        }
-    ) or []
-    if not articles:
-        return f"gdelt tone unavailable for {ticker}: no coverage in trailing {look_back_days}d (GDELT keeps ~3 months)"
-    # Aggregate avg tone per calendar day.
-    from collections import defaultdict
-
-    per_day = defaultdict(list)
-    for a in articles:
-        t = (a.get("tone") or "") if isinstance(a.get("tone"), str) else ""
-        parts = t.split(",")
-        if parts and _is_num(parts[0]):
-            date = str(a.get("seendate") or "")[:8]
-            per_day[date].append(float(parts[0]))
-    if not per_day:
-        return f"gdelt tone unavailable for {ticker}: tone fields missing"
-    lines = [
-        f"gdelt tone series {ticker} (avg per day, GDELT native tone -100..100, "
-        f"trailing {look_back_days}d; not comparable to a -1..1 EODHD tone):"
-    ]
-    for day in sorted(per_day)[-look_back_days:]:
-        vals = per_day[day]
-        avg = sum(vals) / len(vals)
-        lines.append(f"  {day}: {avg:.2f} (n={len(vals)})")
-    latest = lines[-1]
-    return "\n".join(lines) + "\n  latest=" + latest.split(": ", 1)[-1]
-
-
-def _is_num(v) -> bool:
-    try:
-        float(v)
-        return True
-    except (TypeError, ValueError):
-        return False
+    Kept as a named surface because the news tool and the analyst prompt
+    reference it; the honest output is the reason, never a series inferred from
+    headlines. Wiring GDELT's own tone mode (``mode=timelineTone``) is what would
+    make this measurable, and it needs its own live probe.
+    """
+    return f"gdelt tone unavailable for {ticker}: {_NO_ARTICLE_TONE}"
 
 
 def _sentiment_points_gdelt(ticker: str, start_date: str, end_date: str) -> list[dict] | None:
-    """Daily GDELT **native**-tone means -> ``[{date, score, n}]`` (score -100..100).
+    """Always None: this path has no per-article tone (``_NO_ARTICLE_TONE``).
 
-    The unit travels with the caller: this is GDELT's own scale, NOT the
-    canonical -1..1 of the EODHD/Alpha Vantage feeds. A consumer that renders or
-    compares the series must normalise first (`_gdelt_unit_points`, i.e.
-    ``strategies.sentiment_score.normalise_sentiment(score, "gdelt")``); a
-    consumer that tags the scale (``analysis_tools._sentiment_points_with_source``
-    -> ``source="gdelt"``) lets the engine's one scale table do it. Never compare
-    a raw value from here with an EODHD ``sma_7d``: it is ~100x.
+    Kept as the news-sentiment chain's GDELT leg so the router's fall-through is
+    explicit, and logged so a run's journal names the reason rather than looking
+    like a vendor that merely had no coverage. A caller reads None as "no data",
+    which is the truth here. The native-scale/-100..100 note that used to live on
+    this function applies to GDELT's tone mode once it is wired, not to now.
     """
-    articles = _gdelt_get(
-        {
-            "query": _fmt_name(ticker),
-            "startdatetime": start_date + "000000",
-            "enddatetime": end_date + "235959",
-            "maxrecords": 50,
-        }
+    logger.info(
+        "gdelt: no sentiment points for %s (%s..%s): %s",
+        ticker,
+        start_date,
+        end_date,
+        _NO_ARTICLE_TONE,
     )
-    if not articles:
-        return None
-    from collections import defaultdict
-
-    per_day: dict[str, list] = defaultdict(list)
-    for a in articles:
-        tone = a.get("tone") if isinstance(a.get("tone"), str) else ""
-        parts = tone.split(",")
-        if parts and _is_num(parts[0]):
-            per_day[str(a.get("seendate") or "")[:8]].append(float(parts[0]))
-    if not per_day:
-        return None
-    return [
-        {"date": day, "score": round(sum(v) / len(v), 4), "n": len(v)}
-        for day, v in sorted(per_day.items())
-    ]
+    return None
 
 
 _GDELT_TRANSFORM = "native tone -100..100 divided by 100 via sentiment_score.normalise_sentiment"
@@ -317,20 +285,23 @@ def _gdelt_unit_points(points: list[dict]) -> list[dict]:
 def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str:
     """Daily news-tone series on the canonical unit scale (-1..1) + 7-day SMA.
 
-    GDELT delivers its tone on -100..100 while the EODHD/Alpha Vantage feeds that
-    share this route deliver -1..1, so the native series is normalised
-    (``_gdelt_unit_points``, i.e. ``sentiment_score.normalise_sentiment(_, "gdelt")``)
-    **before** it is aggregated. The transform is named in the returned text so a
-    reader can never compare a GDELT ``sma_7d`` with an unnormalised EODHD one.
+    The transform is the substance: GDELT's tone output is on -100..100 while the
+    EODHD/Alpha Vantage feeds that share this route deliver -1..1, so a series is
+    normalised (``_gdelt_unit_points``, i.e.
+    ``sentiment_score.normalise_sentiment(_, "gdelt")``) **before** it is
+    aggregated, and the transform is named in the returned text so a reader can
+    never compare a GDELT ``sma_7d`` with an unnormalised EODHD one.
+
+    The GDELT leg of this chain cannot measure today (``_NO_ARTICLE_TONE``), so
+    the honest output is that reason; the transform below is what a wired tone
+    mode would feed, and is exercised by the recorded native-scale points the
+    tests supply.
     """
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
     points = _sentiment_points_gdelt(ticker, start_date, end_date)
     if not points:
-        return (
-            f"gdelt sentiment unavailable for {ticker}: no tone coverage "
-            f"between {start_date} and {end_date} (GDELT keeps ~3 months)"
-        )
+        return f"gdelt sentiment unavailable for {ticker}: {_NO_ARTICLE_TONE}"
     unit_points = _gdelt_unit_points(points)
     if not unit_points:
         return (

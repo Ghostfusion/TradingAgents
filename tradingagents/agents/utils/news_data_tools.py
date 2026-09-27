@@ -116,8 +116,10 @@ def get_news_sentiment(
     Daily news-sentiment series for a ticker (scale -1..1 unless noted): per-day
     mean score, 7-day SMA, latest innovation, article count. Uses the configured
     news_sentiment chain (EODHD /sentiments -> Alpha Vantage NEWS_SENTIMENT ->
-    GDELT native tone). Cite before any "news sentiment is turning" claim; an
-    explicit unavailable string when no feed has coverage.
+    GDELT). The GDELT leg cannot measure: its article-list response carries no
+    per-article tone (see `dataflows/gdelt.py`), so a GDELT-sourced call returns
+    the reason. Cite before any "news sentiment is turning" claim; an explicit
+    unavailable string when no feed has coverage.
     """
     return route_to_vendor("get_news_sentiment", ticker, start_date, end_date)
 
@@ -198,17 +200,19 @@ def get_gdelt_sentiment(
     look_back_days: Annotated[int, "Days of GDELT tone history to aggregate"] = 7,
 ) -> str:
     """
-    GDELT native news-tone sentiment for a ticker: a daily average-tone series
-    over the trailing ``look_back_days`` (keyless, free). GDELT's tone is a
-    computer-coded -100..100 lexical sentiment score, so it is a *computed*
-    sentiment read the analysts can cite (or see an explicit 'unavailable'
-    when GDELT is unreachable/missing - never fabricated).
+    GDELT news-tone read for a ticker. **Currently unavailable**: the GDELT DOC
+    2.0 article-list response this vendor reads carries no per-article tone
+    (tone is a query filter/sort there; a per-day series needs GDELT's
+    ``mode=timelineTone``, which is not wired). The tool returns that reason
+    rather than a sentiment inferred from headlines - never fabricated. Use
+    `get_news_sentiment` or `get_massive_news` for a computed sentiment read.
 
     Args:
         ticker (str): Ticker symbol
-        look_back_days (int): Rolling window in days; default 7.
+        look_back_days (int): Rolling window in days; default 7 (unused until
+            the tone mode is wired).
     Returns:
-        str: GDELT daily tone series (+ latest), or an explicit 'unavailable'.
+        str: an explicit 'unavailable' line naming the missing vendor capability.
     """
     from tradingagents.dataflows.gdelt import get_gdelt_tone_series
 

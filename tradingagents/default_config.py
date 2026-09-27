@@ -743,7 +743,8 @@ SHIPPED_DEFAULTS = {
             "news_data": "eodhd,benzinga,moomoo,yfinance,alpha_vantage,stockdata,newsapi",  # Options: + newsapi; set "...,gdelt" to use GDELT (keyless, may be network-flaky)
             # Daily news-sentiment series (-1..1) + 7d SMA. EODHD /sentiments
             # (primary, EOD plan entitled); AV NEWS_SENTIMENT (25 req/day tail);
-            # GDELT native tone (keyless, flaky, ~3-month window) last.
+            # GDELT last (keyless, flaky, ~3-month window - its article-list
+            # response carries no tone, so its leg refuses with the reason).
             "news_sentiment": "eodhd,alpha_vantage,gdelt",
             "macro_data": "fred,moomoo",  # Options: fred (needs FRED_API_KEY), moomoo
             "prediction_markets": "polymarket,moomoo",  # Options: polymarket (keyless), moomoo (SG/MY event contracts)

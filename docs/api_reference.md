@@ -665,8 +665,8 @@ deliberate step with a vendor-suite re-run.
 ### 6.2 Vendor implementations per tool (exact)
 
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
-- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `moomoo`, `massive`, `eodhd`, `stockdata`, `gdelt`, `benzinga`, `newsapi`, `seekingalpha` (GDELT keyless native tone; NewsAPI 100 req/day; Benzinga free tier; seekingalpha = keyless opinion-only tail served last — GDELT/Benzinga opt-in via `news_data` chain, not default)
-- news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` tone
+- news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `moomoo`, `massive`, `eodhd`, `stockdata`, `gdelt`, `benzinga`, `newsapi`, `seekingalpha` (GDELT keyless article list; NewsAPI 100 req/day; Benzinga free tier; seekingalpha = keyless opinion-only tail served last — GDELT/Benzinga opt-in via `news_data` chain, not default)
+- news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` (refuses: its article-list response carries no per-article tone)
 - quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/YZ/EWMA/GARCH), `get_garch_volatility`, `get_covariance_read` (Ledoit-Wolf shrunk + EWMA covariance), `get_concentration_read` (active share / effective holdings / HHI / entropy), `get_tail_decomposition` (incremental/component VaR), `get_tail_extreme_var` (EVT/GPD extreme-quantile VaR/ES), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread + Kyle lambda (`get_liquidity_risk`/`get_kyle_lambda`), `get_kelly_alloc` (multi-asset fractional Kelly), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
@@ -849,7 +849,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_order_imbalance(ticker)` | `market_session.order_imbalance` | market | buy/sell-heavy from flow nets |
 | `get_premarket_liquidity(ticker)` | `market_session.premarket_liquidity` | market | thin-book warning |
 | `get_post_close_confirmation(ticker)` | `market_session.post_close_confirmation` | market | stopped-out / target-hit / holding |
-| `get_gdelt_sentiment(ticker, look_back_days?)` | `gdelt.get_gdelt_tone_series` | news | GDELT native daily news-tone series (keyless, -100..100) - a computed sentiment read |
+| `get_gdelt_sentiment(ticker, look_back_days?)` | `gdelt.get_gdelt_tone_series` | news | UNAVAILABLE, with the reason: GDELT's DOC 2.0 article-list response carries no per-article tone (a per-day series needs `mode=timelineTone`, unwired, verified against GDELT's API docs 2026-09-27) |
 | `get_technical_factors(ticker)` | `technical_factors` (ADX/pivots R1-R3/S1-S3 + ATR-normalised pivot distance/Aroon/Fisher/Chaikin/Elder-Ray/Supertrend/volume-profile) | market | extended technicals in one call (shares the run-level OHLCV cache) |
 | `get_extended_indicators(ticker)` | `strategies.extended_indicators` (Ichimoku/CCI/ROC/momentum/TRIX/Force/A-D/VPT/CMF/anchored VWAP/golden-death) | market | the standard trend/momentum/volume group plus cloud + VWAP cost basis, one call (shares the OHLCV cache) |
 | `get_candlestick_patterns(ticker)` | `strategies.extended_indicators.scan_candlesticks` | market | latest-bar doji/hammer/shooting-star/engulfing/morning+evening star scan |

@@ -159,7 +159,7 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 | `news_data_tools.get_global_news:126` | news_tools :353 | macro headline string | Yes |
 | `news_data_tools.get_insider_transactions:152` | news_tools :364 | insider transaction report | Yes |
 | `news_data_tools.get_massive_news:167` | news_tools :349 | per-article positive/negative/neutral + reasoning | Yes |
-| `news_data_tools.get_gdelt_sentiment:196` | news_tools :351 | GDELT daily tone series | Yes |
+| `news_data_tools.get_gdelt_sentiment:198` | news_tools :351 | GDELT read: **UNAVAILABLE** - its article-list response carries no per-article tone (2026-09-27) | Yes |
 | `analysis_tools.get_news_sentiment_series:9896` | news_tools :352 (also market_tools :279) | score/-1..1 + SMA + innovation + article count | Yes |
 | `analysis_tools.get_earnings_event_read:660` | news_tools :371 | surprise% + side + print-day move/vol + PEAD verdict | Yes |
 | `analysis_tools.get_earnings_surprise:1671` | fundamentals_company_tools :392 | last surprise% + side + date | Yes |
