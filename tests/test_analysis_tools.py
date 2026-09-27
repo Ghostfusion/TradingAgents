@@ -3650,3 +3650,66 @@ def test_the_vix_percentile_reports_why_it_cannot_rank(monkeypatch):
     assert got["percentile"] is None
     assert got["n"] == 3
     assert "unmeasurable" in got["basis"]
+
+
+# ---------------------------------------------------------------------------
+# TECH-7 / TECH-12 / TECH-23: the TTM squeeze histogram + acceleration
+# ---------------------------------------------------------------------------
+
+
+def _squeeze_bars(n=80):
+    """A linear ramp: TR is a constant 1.0, so ATR = 1.0 and the 12-bar move is
+    exactly 12.0 ATR-normalised units - a deterministic histogram."""
+    closes = [100.0 + i for i in range(n)]
+    return {
+        "dates": [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)],
+        "closes": closes,
+        "highs": [c + 0.5 for c in closes],
+        "lows": [c - 0.5 for c in closes],
+        "volumes": [1000.0] * n,
+    }
+
+
+def test_squeeze_histogram_is_the_series_of_producer_momenta(monkeypatch):
+    """TECH-7/TECH-12: the histogram is a SERIES, not one bar - every point comes
+    from `technical_factors.squeeze_momentum` on its own prefix/ATR, and the
+    acceleration leg (TECH-23) reads that series."""
+    fake = _squeeze_bars(80)
+    hist, latest = T._squeeze_histogram_series(
+        fake["closes"], fake["highs"], fake["lows"], bars=20
+    )
+    assert len(hist) == 20
+    # TR = |high_k - close_{k-1}| = 1.5 on this ramp, so ATR = 1.5 and the 12-bar
+    # move is 12 / 1.5 = 8.0 ATR units at every point
+    assert all(h == pytest.approx(8.0) for h in hist)
+    assert latest["squeeze"] is False
+    assert latest["direction"] == "bullish"
+
+
+def test_get_squeeze_read_renders_the_histogram_and_its_ramp(monkeypatch):
+    """End-to-end: the leaf prints the BBW percentile, the squeeze flag, the
+    0-100 histogram score (declared ramp) and the §130 acceleration numbers.
+
+    Mutation-proof: on this synthetic ramp the momentum is +12 ATR (score 100)
+    and the histogram is constant (acceleration 0) - break the series slicing or
+    the ramp and both numbers move."""
+    from tradingagents.strategies.technical_score import technical_acceleration
+
+    fake = _squeeze_bars(80)
+    monkeypatch.setattr(T, "_ohlcv", lambda *a, **k: fake)
+    out = T.get_squeeze_read.invoke({"ticker": "RAMP"})
+    assert out.startswith("## Squeeze read - RAMP")
+    assert "momentum histogram (last 20 bars" in out
+    assert "score=100.0000/100" in out
+    assert "direction=bullish" in out
+    # the same series the leaf builds feeds the acceleration reader
+    accel = technical_acceleration([8.0] * 20)
+    assert accel["acceleration"] == pytest.approx(0.0)
+    assert "histogram velocity=0.0000 acceleration=0.0000" in out
+
+
+def test_get_squeeze_read_degrades_without_enough_bars(monkeypatch):
+    fake = _squeeze_bars(10)
+    monkeypatch.setattr(T, "_ohlcv", lambda *a, **k: fake)
+    out = T.get_squeeze_read.invoke({"ticker": "SHORT"})
+    assert "unavailable" in out and "40 bars" in out

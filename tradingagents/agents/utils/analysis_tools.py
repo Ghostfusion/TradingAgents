@@ -7391,6 +7391,300 @@ def _closes_upto(ticker: str, end: str) -> list:
     return [c for d, c in zip(dates, closes, strict=False) if str(d)[:10] <= day]
 
 
+# ---------------------------------------------------------------------------
+# NEWS-12 / NEWS-13: the distinct-horizon read and the weight vector
+# ---------------------------------------------------------------------------
+
+#: Horizons the news blend reads (NewsScore library §96 names 1h/1d/3d/7d/30d;
+#: the DAILY series this repo holds resolves the 1d/3d/7d/30d legs).
+NEWS_HORIZONS: tuple[int, ...] = (1, 3, 7, 30)
+
+#: §96 leaves the blend weights ``w_i`` unbound and §87/§88 would derive them
+#: from a factor's measured IC (``W_j = |IC_j| / Σ|IC_j|``). No IC evidence
+#: exists in a single-name run - the cross-sectional IC term structure needs a
+#: >=15-name sentiment panel - so the DECLARED fallback is equal weights,
+#: printed with its reason, never sold as a fit.
+NEWS_HORIZON_DECLARED_WEIGHTS: dict[int, float] = {
+    h: 1.0 / len(NEWS_HORIZONS) for h in NEWS_HORIZONS
+}
+
+
+def _align_sentiment_to_bars(
+    ticker: str, start: str, end: str, ohlcv: dict
+) -> tuple[list, list, list]:
+    """Aligned (sentiment, closes, volumes) over the bars a sentiment point shares.
+
+    Same by-DATE alignment ``get_sentiment_lead_lag`` does (never by index), so
+    the regression's rows are the days both feeds measured. The three lists are
+    empty when the overlap is unusable. A date the sentiment feed skipped leaves
+    no row rather than a fabricated 0.
+    """
+    points, _src = _sentiment_points_with_source(ticker, start, end)
+    dates = ohlcv.get("dates") or []
+    closes = ohlcv.get("closes") or []
+    volumes = ohlcv.get("volumes") or []
+    if not points or not dates or len(dates) != len(closes):
+        return [], [], []
+    by_date = {
+        p["date"]: p["score"]
+        for p in points
+        if p.get("score") is not None and p.get("date")
+    }
+    sent, px, vol = [], [], []
+    for d, c, v in zip(dates, closes, volumes, strict=False):
+        if d in by_date:
+            sent.append(by_date[d])
+            px.append(c)
+            vol.append(v)
+    return sent, px, vol
+
+
+def _news_horizon_weights(term: list | None, reg: list | None) -> tuple[dict, str]:
+    """The per-horizon blend weights, derived where evidence exists else declared.
+
+    Library §96 blends horizon news reads with weights ``w_i``; §87 derives a
+    weight from a factor's |IC| (``W_j = |IC_j| / Σ|IC_j|``). Priority:
+
+    1. the measured IC term structure (``ic_term_structure``) per-horizon
+       ``mean_rank_ic`` when a signal panel was available - the IC-derived vector;
+    2. else the per-name ``multi_horizon_sentiment_regression`` elasticity
+       ``|sent_coef|`` over the horizons it found significant (``p <= 0.10``) -
+       the single-name predictive strength §96's blend is about;
+    3. else the DECLARED equal-weight fallback, with the reason.
+
+    Returns ``({horizon: weight}, basis)`` with the weights summing to 1.
+    """
+
+    def _norm(pairs: list[tuple[int, float]]) -> dict | None:
+        total = sum(v for _, v in pairs)
+        if total <= 0:
+            return None
+        return {h: v / total for h, v in pairs}
+
+    if term:
+        pairs = [
+            (int(r["horizon_days"]), abs(float(r["mean_rank_ic"])))
+            for r in term
+            if isinstance(r, dict)
+            and r.get("horizon_days") is not None
+            and r.get("mean_rank_ic") is not None
+        ]
+        w = _norm(pairs)
+        if w:
+            return w, (
+                "IC-derived horizon weights (NewsScore §87: |mean_rank_ic| "
+                "normalised) from sentiment_research.ic_term_structure over a "
+                "supplied signal panel"
+            )
+    if reg:
+        pairs = [
+            (int(r["horizon_days"]), abs(float(r["sent_coef"])))
+            for r in reg
+            if isinstance(r, dict)
+            and r.get("horizon_days") is not None
+            and r.get("sent_coef") is not None
+            and (r.get("sent_pval") if r.get("sent_pval") is not None else 1.0) <= 0.10
+        ]
+        w = _norm(pairs)
+        if w:
+            return w, (
+                "elasticity-derived horizon weights (|sent_coef| over the horizons "
+                "multi_horizon_sentiment_regression found significant at p<=0.10); "
+                "DECLARED, not IC-fitted"
+            )
+    return dict(NEWS_HORIZON_DECLARED_WEIGHTS), (
+        "declared equal horizon weights: no measured IC vector is in hand (the "
+        "cross-sectional IC term structure needs a >=15-name sentiment panel; "
+        "scripts/sentiment_factor_eval.py owns that measurement)"
+    )
+
+
+def _news_component_weights(
+    evidence: dict | None = None,
+) -> tuple[dict | None, str]:
+    """Derive the NewsScore component weights from measured IC evidence, or None.
+
+    Library §86 says the component weights should be estimated rather than
+    hard-coded; §87 gives the recipe ``W_j = |IC_j| / Σ_j |IC_j|``. When a
+    measured ``{component: ic}`` map is supplied, that vector replaces the
+    engine's declared ``news_score.COMPONENT_WEIGHTS`` and is handed to
+    ``news_score(weights=...)``. With no evidence the caller keeps the DECLARED
+    owner table and this returns ``(None, reason)`` so the basis can say why the
+    table was not replaced.
+
+    The map is a MEASUREMENT input, not something this leaf can compute: a
+    per-component IC needs a cross-sectional panel of each component's signal
+    (the Phase-C layer), which a single-name run does not hold. Only the
+    components present in the evidence receive weight; the rest drop out of the
+    composite and lower its coverage, exactly like an absent component.
+    """
+    if not evidence:
+        return None, (
+            "the declared owner weight table (NewsScore.md §0.1) stays in force: "
+            "no measured per-component IC vector is in hand (a >=15-name panel "
+            "measurement, owned by the Phase-C layer, must supply it)"
+        )
+    pairs = {
+        str(k): abs(float(v))
+        for k, v in evidence.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+    total = sum(pairs.values())
+    if total <= 0:
+        return None, (
+            "measured IC vector supplied but all values are zero: the declared "
+            "owner table stays in force"
+        )
+    weights = {k: v / total for k, v in pairs.items()}
+    return weights, (
+        "IC-derived component weights (NewsScore §87: |IC| normalised) from "
+        "supplied measurement evidence"
+    )
+
+
+def _news_horizon_read(
+    ticker: str,
+    current_date: str | None = None,
+    *,
+    signal_panel: dict | None = None,
+    price_panel: dict | None = None,
+) -> dict:
+    """The distinct-horizon news read (NEWS-12) and its weight vector (NEWS-13).
+
+    Drives the two producers that were built and unused:
+
+    * ``sentiment_research.multi_horizon_sentiment_regression`` over the name's
+      own aligned sentiment/close/volume series - the per-horizon
+      news-to-price elasticity (library §69/§71) with HAC t-stats, i.e. the
+      DISTINCT horizon reads §96's blend needs.
+    * ``sentiment_research.ic_term_structure`` over a supplied signal panel -
+      the per-horizon cross-sectional IC when a >=15-name panel exists. A
+      single-name run holds none, so the IC vector is reported missing and the
+      horizon weights fall back to the elasticity-derived/declared vector
+      (``_news_horizon_weights``).
+
+    Returns ``{"reg", "term", "weights", "weights_basis", "reason"}`` - never
+    raises; each leg carries its own reason instead of a fabricated number.
+    """
+    from datetime import date, timedelta
+
+    from tradingagents.strategies.sentiment_research import (
+        ic_term_structure,
+        multi_horizon_sentiment_regression,
+    )
+
+    out: dict = {
+        "reg": None,
+        "term": None,
+        "weights": None,
+        "weights_basis": None,
+        "reason": None,
+    }
+    end = current_date or date.today().isoformat()
+    try:
+        start = (date.fromisoformat(str(end)[:10]) - timedelta(days=400)).isoformat()
+    except ValueError:
+        out["reason"] = "unreadable current_date: horizon read not built"
+        return out
+    ohlcv = _ohlcv(ticker)
+    sent, px, vol = _align_sentiment_to_bars(ticker, start, end, ohlcv)
+    if len(sent) < 30:
+        out["reason"] = (
+            f"only {len(sent)} aligned sentiment/price rows: the multi-horizon "
+            "regression needs >=30 (the horizon read is withheld, never faked)"
+        )
+    else:
+        try:
+            out["reg"] = multi_horizon_sentiment_regression(
+                sent, px, vol, horizons=tuple(NEWS_HORIZONS)
+            )
+        except Exception as exc:  # noqa: BLE001 - one absent leg is not a failure
+            out["reason"] = f"multi-horizon regression failed: {type(exc).__name__}"
+    # The cross-sectional IC term structure needs BOTH panels; a single-name
+    # run supplies neither, so its absence is reported, not hidden.
+    if signal_panel and price_panel:
+        try:
+            out["term"] = ic_term_structure(signal_panel, price_panel)
+        except Exception as exc:  # noqa: BLE001
+            out["term"] = None
+            out["reason"] = (out["reason"] or "") + (
+                f" ic_term_structure failed: {type(exc).__name__};"
+            )
+    out["weights"], out["weights_basis"] = _news_horizon_weights(
+        out["term"], out["reg"]
+    )
+    return out
+
+
+@tool
+def get_news_horizon_read(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
+) -> str:
+    """NewsScore's distinct-horizon read (library §96-§99): the per-horizon
+    news-to-price elasticity from `sentiment_research.multi_horizon_sentiment_regression`
+    (HAC t-stats) and the horizon blend weights, derived from the measured IC
+    term structure where a panel exists else declared with the reason.
+
+    Use it before any 'the news matters over the next few days / over the next
+    month / how fast does this name's news decay' claim - a single 30-day window
+    cannot separate the horizons. Advisory only: it never sets a rating, a size
+    or a gate.
+    """
+    if not _r3_flag("enable_news_score"):
+        return (
+            "news horizon read unavailable: the engine is gated off "
+            "(enable_news_score)"
+        )
+    try:
+        res = _news_horizon_read(ticker, current_date)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"news horizon read unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    reg = res.get("reg")
+    if not reg:
+        return (
+            f"news horizon read unavailable for {ticker}: "
+            f"{res.get('reason') or 'no multi-horizon regression row'}"
+        )
+    lines = [
+        f"## News horizon read - {ticker.upper()} (advisory)",
+        "",
+        "Per-horizon news-to-price elasticity (library §69/§71; "
+        "multi_horizon_sentiment_regression, Newey-West HAC):",
+    ]
+    for r in reg:
+        if not isinstance(r, dict) or r.get("horizon_days") is None:
+            continue
+        lines.append(
+            f"- {r['horizon_days']}d: elasticity={_txt(r.get('sent_coef'))} "
+            f"t={_txt(r.get('sent_tstat'))} p={_txt(r.get('sent_pval'))} "
+            f"r2_adj={_txt(r.get('r_squared_adj'))} n={r.get('observations')}"
+        )
+    weights = res.get("weights") or {}
+    if weights:
+        lines.append(
+            "- horizon weights: "
+            + ", ".join(f"{h}d={w:.2f}" for h, w in sorted(weights.items()))
+        )
+    lines.append(f"- weights basis: {res.get('weights_basis')}")
+    lines.append(
+        "- IC term structure: "
+        + (
+            "measured over the supplied signal panel"
+            if res.get("term")
+            else "unavailable (needs a >=15-name sentiment panel; none in a "
+            "single-name run - scripts/sentiment_factor_eval.py owns it)"
+        )
+    )
+    if res.get("reason"):
+        lines.append(f"- note: {res['reason']}")
+    lines.append("")
+    lines.append("computed, advisory - never a gate, never a size")
+    return "\n".join(lines)
+
+
 def _news_components(
     ticker: str,
     current_date: str | None,
@@ -7419,11 +7713,18 @@ def _news_components(
     The **industry shock** leg is measured against the ticker's sector ETF
     (`news_score.industry_shock`), with every bar after the trade date dropped.
 
-    The two categories with no supplier (fundamental impact, regulatory/legal -
-    the latter has the NEWS-5 classifier but not a declared scale) stay absent
-    and the engine prints `NA` with its reason, never 0. `materiality` and
+    The **regulatory/legal** leg IS wired (NEWS-5): `news_score.tag_category_read`
+    over the AV feed's per-article `topics[]`, on the producer's own 0..1 scale
+    (the ramp was widened from `(0.0, 0.05)` by owner decision 2026-09-27), so the
+    leg measures whenever the fetched topics carry a recognised legal/regulatory
+    tag. Only **fundamental impact** has no supplier at all; it stays absent and
+    the engine prints `NA` with its reason, never 0. `materiality` and
     `guidance_change` are declared absent because they have a gate or a snapshot
     dependency, not because nothing produces them.
+
+    The distinct-horizon read (NEWS-12) and the component-weight vector (NEWS-13)
+    live in `_news_horizon_read` / `_news_component_weights` below; this assembler
+    stays the single 30-day window the engine's declared components describe.
     """
     from datetime import date, timedelta
 
@@ -7564,11 +7865,11 @@ def _news_components(
     # `end` is dropped, so a historical run cannot read a bar it could not have
     # seen (the `_closes_upto` guard).
     #
-    # NOT wired by the same producer: `regulatory_legal` (NEWS-5). Its declared
-    # ramp is `(0.0, 0.05)` while `tag_category_read` returns a 0-1 share, so
-    # feeding it would need a scale conversion - and inventing one is the owner's
-    # call, not this leaf's. The producer exists and is tested; the ramp is the
-    # open item.
+    # `regulatory_legal` (NEWS-5) is wired BELOW, not here: its producer is the
+    # tag classifier over the AV feed's `topics[]`, not the sector-relative move
+    # this block computes. (It used to say the leg was unwired with a (0.0, 0.05)
+    # ramp - stale after the owner widened the ramp to the producer's own 0..1
+    # scale on 2026-09-27; the block at the end of this function feeds it.)
     try:
         from tradingagents.dataflows.yfinance_sector import fetch_sector
         from tradingagents.strategies.news_score import industry_shock
@@ -7627,13 +7928,22 @@ def _news_components(
     return vals
 
 
-def _render_news_score(ticker: str, res: dict, evidence: list | None = None) -> str:
+def _render_news_score(
+    ticker: str,
+    res: dict,
+    evidence: list | None = None,
+    weights_basis: str | None = None,
+) -> str:
     """Render the engine dict: components, absent categories with reasons, basis.
 
     ``evidence`` carries the per-article rows behind the aggregate relevance
     (`_news_components` fills it), printed concise and highest-first so the
     number can be challenged rather than only trusted (`NEWS-14`). The aggregate
     stays the primary read: the list is capped and never summed into a score.
+
+    ``weights_basis`` states why the component weights are the measured
+    IC-derived vector or the declared owner table (NEWS-13), printed beside the
+    engine's own weight basis so a reader sees which vector produced the number.
     """
     lines = [
         f"## NewsScore - {ticker} (advisory; "
@@ -7693,6 +8003,8 @@ def _render_news_score(ticker: str, res: dict, evidence: list | None = None) -> 
                 lines.append(f"- {name}: no producer supplied it on this path")
     lines.append("")
     lines.append(f"basis: {res.get('basis')}")
+    if weights_basis:
+        lines.append(f"weights: {weights_basis}")
     return "\n".join(lines)
 
 
@@ -7705,12 +8017,15 @@ def get_news_score(
 ) -> str:
     """NewsScore: how much new, material information arrived about the name.
 
-    Relevance and novelty come from the news pipeline's own producers; the five
-    categories with no supplier (fundamental impact, guidance change,
-    regulatory/legal, industry shock, and materiality - which `EventScore` owns,
-    owner Q6) print `NA` **with a reason**, never 0. Relevance alone cannot raise
-    the composite: the two are independent rows. Advisory only - never a gate,
-    never a size, never a forecast. Gated by ``enable_news_score``.
+    Relevance and novelty come from the news pipeline's own producers; the
+    components with no supplier on this path (fundamental impact, guidance change
+    behind its gate, and materiality - which `EventScore` owns, owner Q6) print
+    `NA` **with a reason**, never 0. Relevance alone cannot raise the composite:
+    the two are independent rows. The component weights are the MEASURED
+    IC-derived vector when one is in hand, else the declared owner table with its
+    reason (NEWS-13); the distinct per-horizon read is `get_news_horizon_read`.
+    Advisory only - never a gate, never a size, never a forecast. Gated by
+    ``enable_news_score``.
     """
     if not _r3_flag("enable_news_score"):
         return "news score unavailable: the engine is gated off (enable_news_score)"
@@ -7721,11 +8036,17 @@ def get_news_score(
         vals = _news_components(ticker, current_date, evidence=evidence)
         if not vals:
             return f"news score unavailable for {ticker}: no news producer measured"
-        res = news_score(vals)
+        # NEWS-13: replace the hard-coded owner table with the measured
+        # |IC|-derived vector when evidence is in hand; `(None, reason)` keeps
+        # the declared table and the reason is printed in the render below.
+        weights, weights_basis = _news_component_weights()
+        res = news_score(vals, weights=weights)
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"news score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:
-        return _render_news_score(ticker, res, evidence=evidence)
+        return _render_news_score(
+            ticker, res, evidence=evidence, weights_basis=weights_basis
+        )
     except Exception as exc:  # noqa: BLE001
         return f"news score unavailable for {ticker}: render failed ({exc})"
 
@@ -8488,6 +8809,147 @@ def get_post_close_confirmation(
         )
     except Exception as exc:  # noqa: BLE001
         return f"post-close confirmation unavailable for {ticker}: {exc}"
+
+
+#: Declared ramp for the TTM squeeze-histogram leg (library §110). The producer
+#: reports the histogram in ATR-normalised 12-bar move units (`< 0` bearish,
+#: `> 0` bullish) and the library names the histogram without an edge, so this
+#: DECLARED policy edge (never a fit, like every engine's ramp) saturates the
+#: 0-100 histogram score at +/-1 ATR of move; 0 maps to 50.
+SQUEEZE_HISTOGRAM_RAMP: tuple[float, float] = (-1.0, 1.0)
+
+
+def _squeeze_histogram_series(
+    closes: list,
+    highs: list,
+    lows: list,
+    *,
+    bars: int = 20,
+    atr_window: int = 14,
+) -> tuple[list, dict | None]:
+    """The TTM squeeze momentum HISTOGRAM over the last ``bars`` closes.
+
+    §110's MomentumHistogram is a SERIES, not one bar - the per-bar signed
+    ATR-normalised move :func:`technical_factors.squeeze_momentum` reports,
+    recomputed on each progressively longer prefix so every point comes from the
+    same producer with that bar's own ATR. Returns ``(hist, latest)`` where
+    ``hist`` is the numeric series (for the §130 acceleration read) and
+    ``latest`` is the most recent producer dict (squeeze / release / bands).
+    ``([], None)`` when no bar can be measured - never a fabricated point.
+    """
+    from tradingagents.strategies.size import atr as _atr
+    from tradingagents.strategies.technical_factors import squeeze_momentum
+
+    if not closes or len(closes) != len(highs) or len(closes) != len(lows):
+        return [], None
+    hist: list = []
+    latest: dict | None = None
+    start = max(1, len(closes) - int(bars))
+    for i in range(start, len(closes)):
+        end = i + 1
+        atr_v = _atr(highs[:end], lows[:end], closes[:end], atr_window)
+        if atr_v is None or atr_v <= 0:
+            continue
+        atr_prev = _atr(highs[:i], lows[:i], closes[:i], atr_window)
+        res = squeeze_momentum(
+            closes[:end], atr_value=atr_v, atr_prev=atr_prev
+        )
+        if res.get("momentum") is None:
+            continue
+        hist.append(float(res["momentum"]))
+        latest = res
+    return hist, latest
+
+
+@tool
+def get_squeeze_read(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """TTM squeeze read (TechnicalScore library §21-§25, §109/§110): the
+    Bollinger bandwidth with its own-history percentile and squeeze/expansion
+    flags, the Keltner channel, the Bollinger-inside-Keltner squeeze flag with
+    its release, and the squeeze MOMENTUM HISTOGRAM - the histogram's 0-100
+    ramp score, its direction, and the §130 velocity/acceleration/jerk of the
+    histogram series.
+
+    Use it before any 'volatility is compressed / a squeeze is on / the squeeze
+    is releasing / BBW is at a multi-month low / the histogram is rolling over'
+    claim. Advisory only - never a gate, a size or a direction.
+    """
+    try:
+        from tradingagents.strategies.score_engine import align as _align
+        from tradingagents.strategies.size import atr as _atr
+        from tradingagents.strategies.technical_factors import (
+            bollinger_bandwidth as _bbw,
+            keltner_channel as _kelt,
+        )
+        from tradingagents.strategies.technical_score import (
+            technical_acceleration as _accel,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"squeeze read unavailable for {ticker}: {exc}"
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    if len(closes) < 40 or len(highs) != len(closes) or len(lows) != len(closes):
+        return (
+            f"squeeze read unavailable for {ticker}: fewer than 40 bars (or "
+            "mismatched high/low series)."
+        )
+    try:
+        atr_v = _atr(highs, lows, closes, 14)
+        bb = _bbw(closes)
+        kc = _kelt(closes, atr_value=atr_v)
+        hist, latest = _squeeze_histogram_series(closes, highs, lows)
+        accel = _accel(hist) if hist else {"reason": "no histogram points"}
+        momentum = (latest or {}).get("momentum")
+        lo, hi = SQUEEZE_HISTOGRAM_RAMP
+        score = (
+            _align(momentum, direction="higher_better", lo=lo, hi=hi)
+            if momentum is not None
+            else None
+        )
+        lines = [
+            f"## Squeeze read - {ticker.upper()} (close {closes[-1]:.2f}, "
+            f"advisory)",
+            "",
+            f"- Bollinger bandwidth: {_txt(bb.get('bbw'))} "
+            f"(percentile {_txt(bb.get('bbw_percentile'))} of its own history; "
+            f"squeeze={bb.get('squeeze')}, expansion={_txt(bb.get('expansion'))})",
+            f"- Keltner %b: {_txt(kc.get('pct'))} "
+            f"(mid {_txt(kc.get('mid'))}, k=2.0, n=20)",
+            f"- Bollinger-inside-Keltner squeeze: {(latest or {}).get('squeeze')} "
+            f"(release {(latest or {}).get('release')}; "
+            f"{(latest or {}).get('release_reason') or 'measured'})",
+            f"- momentum histogram (last {len(hist)} bars, ATR-normalised move): "
+            f"latest={_txt(momentum)} direction={(latest or {}).get('direction')} "
+            f"score={_txt(score)}/100 (declared ramp {lo:g}..{hi:g} ATR; 0 -> 50)",
+        ]
+        if accel.get("acceleration") is not None:
+            lines.append(
+                f"- histogram velocity={_txt(accel.get('velocity'))} "
+                f"acceleration={_txt(accel.get('acceleration'))} "
+                f"jerk={_txt(accel.get('jerk'))} (n={accel.get('n')}, "
+                f"{accel.get('observations')} points)"
+            )
+        else:
+            lines.append(f"- histogram acceleration: n/a ({accel.get('reason')})")
+        latest = latest or {}
+        lines.append(
+            f"- band levels: bb=[{_txt(latest.get('bb_lower'))}, "
+            f"{_txt(latest.get('bb_upper'))}] "
+            f"kc=[{_txt(latest.get('kc_lower'))}, {_txt(latest.get('kc_upper'))}] "
+            f"(bandwidth reason: {bb.get('reason') or 'measured'})"
+        )
+        lines.append("")
+        lines.append(
+            "computed, advisory - the squeeze flag and histogram are readings, "
+            "never a gate or a direction"
+        )
+        return "\n".join(lines)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"squeeze read unavailable for {ticker}: {exc}"
 
 
 @tool

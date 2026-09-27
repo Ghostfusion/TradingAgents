@@ -777,3 +777,114 @@ def test_an_unrecognised_tag_set_leaves_the_category_absent(monkeypatch) -> None
     )
 
     assert "regulatory_legal" not in at._news_components("TAGS", "2026-09-04")
+
+
+# ---------------------------------------------------------------------------
+# NEWS-12 / NEWS-13: the distinct-horizon read and the weight vector
+# ---------------------------------------------------------------------------
+
+
+def test_horizon_weights_prefer_the_ic_term_structure() -> None:
+    """NEWS-13: the branch that makes `ic_term_structure` drive the vector.
+
+    Library §87 derives a weight from a factor's |IC|; the measured per-horizon
+    |mean_rank_ic| is the IC evidence, so it takes priority over the per-name
+    elasticity."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    term = [
+        {"horizon_days": 1, "mean_rank_ic": 0.04},
+        {"horizon_days": 3, "mean_rank_ic": -0.02},
+        {"half_life_days": 5.0},
+    ]
+    w, basis = at._news_horizon_weights(term, None)
+    assert w == pytest.approx({1: 0.04 / 0.06, 3: 0.02 / 0.06})
+    assert "IC-derived" in basis
+
+
+def test_horizon_weights_follow_the_measured_regression() -> None:
+    """NEWS-12: with no panel, `multi_horizon_sentiment_regression`'s own
+    per-horizon elasticity drives the weights; an insignificant horizon (p>0.10)
+    gets zero rather than a share."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    reg = [
+        {"horizon_days": 1, "sent_coef": 0.10, "sent_pval": 0.01},
+        {"horizon_days": 3, "sent_coef": 0.30, "sent_pval": 0.02},
+        {"horizon_days": 7, "sent_coef": 0.90, "sent_pval": 0.50},
+        {"horizon_days": 30, "sent_coef": 0.05, "sent_pval": 0.03},
+    ]
+    w, basis = at._news_horizon_weights(None, reg)
+    assert w == pytest.approx({1: 0.10 / 0.45, 3: 0.30 / 0.45, 30: 0.05 / 0.45})
+    assert 7 not in w
+    assert "elasticity" in basis
+
+
+def test_horizon_weights_are_declared_when_no_evidence_exists() -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    w, basis = at._news_horizon_weights(None, None)
+    assert set(w) == set(at.NEWS_HORIZONS)
+    assert sum(w.values()) == pytest.approx(1.0)
+    assert "declared equal" in basis
+
+
+def test_component_weights_derive_from_ic_evidence_else_declare() -> None:
+    """NEWS-13: evidence replaces the owner table; its absence keeps it with a
+    stated reason, never a silent change of the number."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    w, basis = at._news_component_weights({"relevance": 0.04, "novelty": -0.02})
+    assert w == pytest.approx({"relevance": 0.04 / 0.06, "novelty": 0.02 / 0.06})
+    assert "IC-derived" in basis
+    weights, why = at._news_component_weights()
+    assert weights is None
+    assert "declared owner weight table" in why
+
+
+def test_news_horizon_read_drives_the_regression_producer(monkeypatch) -> None:
+    """NEWS-12 end-to-end: the leaf runs the per-name producer over the aligned
+    series at the declared horizons, and the printed weights come from its
+    coefficients - a mutation of the producer's output changes the weights."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies import sentiment_research as sr
+
+    n = 40
+    dates = [f"2026-02-{i:02d}" for i in range(1, n + 1)]
+    points = [{"date": d, "score": 0.1 * ((i % 5) - 2)} for i, d in enumerate(dates)]
+    ohlcv = {
+        "dates": dates,
+        "closes": [100.0 + i for i in range(n)],
+        "highs": [101.0 + i for i in range(n)],
+        "lows": [99.0 + i for i in range(n)],
+        "volumes": [1000.0] * n,
+    }
+    monkeypatch.setattr(
+        at, "_sentiment_points_with_source", lambda *a, **k: (points, "eodhd")
+    )
+    monkeypatch.setattr(at, "_ohlcv", lambda *a, **k: ohlcv)
+    monkeypatch.setattr(at, "_r3_flag", lambda *a, **k: True)
+    seen: dict = {}
+
+    def fake_reg(sent, close, volume=None, horizons=(1, 3, 5, 10, 20)):
+        seen["n"] = len(sent)
+        seen["horizons"] = tuple(horizons)
+        return [
+            {"horizon_days": 1, "sent_coef": 0.4, "sent_pval": 0.01,
+             "sent_tstat": 2.5, "r_squared_adj": 0.1, "observations": 39},
+            {"horizon_days": 3, "sent_coef": 0.2, "sent_pval": 0.02,
+             "sent_tstat": 2.0, "r_squared_adj": 0.05, "observations": 37},
+        ]
+
+    monkeypatch.setattr(sr, "multi_horizon_sentiment_regression", fake_reg)
+
+    res = at._news_horizon_read("HORZ", "2026-03-01")
+    assert seen == {"n": n, "horizons": tuple(at.NEWS_HORIZONS)}
+    assert res["weights"] == pytest.approx({1: 0.4 / 0.6, 3: 0.2 / 0.6})
+
+    out = at.get_news_horizon_read.invoke(
+        {"ticker": "HORZ", "current_date": "2026-03-01"}
+    )
+    assert "1d: elasticity=0.4" in out
+    assert "horizon weights: 1d=" in out
+    assert "IC term structure: unavailable" in out
