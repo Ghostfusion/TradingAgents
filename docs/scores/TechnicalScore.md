@@ -14,7 +14,7 @@ this stock doing?"* — from the owner's nine categories in
 trades in is `RegimeScore`; how much the position can hurt is `RiskScore`. This
 document must not absorb either.
 
-Status: **built (2026-09-18); gate off by default.** `strategies/technical_score.py` is the engine (40 components over 9 categories), `get_technical_score` is its leaf and `enable_technical_score` its membership switch. The composite §0.1 said existed nowhere is `technical_score`, and the price leg is the **one engine whose inputs were measured** - 30 panel dates, `MEASUREMENT_FINDINGS.md`.
+Status: **built (2026-09-18); gate off by default.** `strategies/technical_score.py` is the engine (since **MF-6**, owner decision 2026-09-27, **18 components over 9 categories** - the 2026-09-27 panel retired 25 of the 43 declared legs; §5.2), `get_technical_score` is its leaf and `enable_technical_score` its membership switch. The composite §0.1 said existed nowhere is `technical_score`, and the price leg is the **one engine whose inputs were measured** - 37 panel dates, `MEASUREMENT_FINDINGS.md`.
 
 ---
 
@@ -78,6 +78,12 @@ assumed:
 | Elder thermometer | `technical_factors.elder_thermometer:649` | `quiet` (<0.8) is the good dip read |
 | Keltner %b | `technical_factors.keltner_channel:440` | mid-band is the read |
 | Support structure | `value_dip.support_structure:833` | *near* the 200-SMA is good, while `swing.trend_architecture:76` says *above* it is good — the same level, opposite signs, depending on the strategy |
+
+**[MF-6, 2026-09-27]** Of this table, only **StochRSI** and **Keltner %b** remain
+declared legs of the engine; the other seven (`RSI`, `stochastic K/D`, `RSI2`,
+`Williams %R`, `Bollinger %b`, `MFI`, the Elder thermometer) were retired by the
+2026-09-27 panel (§5.2). The direction problem below applies to what remains, and
+`score_engine.NON_MONOTONIC_INPUTS` now names only `stoch_rsi`.
 
 **Design consequence: the composite never maps a raw indicator through a ramp.**
 Every non-monotonic input is **band-mapped** (a piecewise table with the bands
@@ -342,6 +348,57 @@ Nothing here is implemented. The design constraints:
 
 ---
 
+### 5.2 The declared leg set after MF-6 (owner decision 2026-09-27)
+
+**The owner chose a third route: trim the legs, keep the vector.** MF-6's
+recorded acceptance (`MASTER_PLAN.md` §6) was *"a revised `CATEGORY_WEIGHTS` with
+a record, or an owner sentence declining"* — this is neither. The 2026-09-27
+score-panel run (37 dates × 149 names, 2026-08-06..2026-09-25,
+`~/.tradingagents/cache/panels_edgar`) measured every `technical_score` leg and
+printed a verdict per category; the owner acted on those verdicts **inside the
+categories**, leaving `CATEGORY_WEIGHTS` byte-identical (trend 20 / momentum 18 /
+relative_strength 12 / price_structure 12 / volume 10 / breakout 10 /
+mean_reversion 8 / volatility 5 / breadth 5). 25 of the 43 legs are retired.
+
+The rule applied, uniformly:
+
+1. **A category whose legs were dropped against legs of the same category keeps
+   the strongest of the mutually-redundant set** (by the run's `ic_ir`, then
+   |rank_ic|), so the category still has a producer and its weight still buys
+   something. A category is never left with **zero** legs — that would silently
+   renormalise the composite, which is exactly what the owner declined.
+2. **A leg whose only redundancy is cross-category** keeps the strongest side and
+   records which category is the other party, so a reader sees the remaining
+   overlap.
+3. **An unmeasured leg** (`breakout_persistence`; a tie-collapsed
+   `vcp_candidate`) is **retained with its reason or retired with its reason** —
+   never dropped silently.
+4. **Every retirement names the surviving leg it duplicated**, or states the
+   evidence that retired it when it had no redundancy partner.
+
+The declared legs, and every retirement, are in `technical_score.COMPONENTS` and
+`technical_score.RETIRED_COMPONENTS` (the ledger). `tests/test_technical_score.py`
+pins the set: a retired leg re-declared fails the suite.
+
+| Category | Weight | Declared legs (kept) | Retired (→ the surviving leg it duplicated / the evidence) |
+| --- | --: | --- | --- |
+| trend | 20 | `sma_stack`, `aroon_osc` | `adx` (WEAK, unpaired), `di_spread` (→ momentum via `rsi`), `above_sma200` / `ichimoku_above_cloud` / `golden_cross` (one mutually-redundant block, dropped whole; `golden_cross` also the weaker side of the trend↔RS overlap) |
+| momentum | 18 | `momentum_12_1` | `rsi`, `stoch_k` (the oscillator cluster), `mfi` (WEAK), `roc20` (→ `rsi`), `macd_hist_pct` (WEAK) |
+| relative_strength | 12 | `rs_slope_pct`, `rs_new_high`, `rs_divergence` | `rs_above_sma` (→ `rs_slope_pct`). **Rule 1 rescue:** `rs_slope_pct` (ic_ir 3.61 STRONG) is the only measured leg kept; its redundancy is cross-category with trend's `golden_cross` |
+| price_structure | 12 | `keltner_pct`, `near_sma200` | `bollinger_pct_b` (→ `keltner_pct`), `fib_zone` (WEAK), `max_pain_dist_atr` (WEAK). **Rule 1 rescue:** `keltner_pct` (2.96) over `bollinger_pct_b` (1.2) |
+| volume | 10 | `cmf` | `rvol`, `elder_ratio` (the same-category pair, both dropped → `cmf`), `volume_dry_up` (WEAK) |
+| breakout | 10 | `near_breakout`, `breakout_persistence` | `pullback_candidate` (WEAK), `trigger_candle` (WEAK), `vcp_candidate` (IC withheld; **same producer** as `near_breakout`, `swing.vcp_setup:342`). `breakout_persistence` is **UNMEASURED** on the panel (no panel row carries it) and is **retained with that reason** |
+| mean_reversion | 8 | `stoch_rsi`, `obv_bullish_div` | `williams_r` (→ the oscillator cluster), `rsi2` (WEAK), `hurst` (WEAK) |
+| volatility | 5 | `sqrt_rs_minus` | `atr_pct` (→ `sqrt_rs_minus`), `vol_percentile` (UNMEASURED — no panel row and the leaf never emitted it). **Rule 1 rescue:** `sqrt_rs_minus` (ic_ir −4.74) over `atr_pct` (−3.79) |
+| breadth | 5 | `pct_above_50d`, `pct_above_200d`, `ad_ratio`, `zweig_thrust` | none — the run's verdict was REDUNDANCY_ONLY and it **dropped nothing** here (all four legs are tie-collapsed booleans with IC withheld); all four stay |
+
+`analysis_tools._technical_components` computes only the surviving legs — the 25
+retired producers no longer run, and the one component that used to fetch (the
+monthly options chain for `max_pain_dist_atr`) is among them, so the leaf now
+takes no fetch beyond the run's cached OHLCV.
+
+---
+
 ## 6. Verification requirements
 
 1. **Direction tests are mandatory for the band rows.** Each of the six
@@ -436,19 +493,19 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 17 | Momentum indicator | 2 | PARTIAL — `extended_indicators.momentum_oscillator:162`; the ATR-normalised form is §30 (absent) |
 | 18 | Rate-of-change acceleration | 1 | ABSENT |
 | 19 | Bollinger Bands | 4 | built — `value_dip.bollinger_pct_b:77` (`mid`/`upper`/`lower`) |
-| 20 | Bollinger %B | 1 | built — `value_dip.bollinger_pct_b:77` (engine component `bollinger_pct_b`) |
+| 20 | Bollinger %B | 1 | built — `value_dip.bollinger_pct_b:77` **(producer only; the engine component `bollinger_pct_b` was RETIRED 2026-09-27, MF-6 — §5.2)** |
 | 21 | Bollinger bandwidth | 1 | ABSENT — `value_dip.bollinger_pct_b:77` returns the bands, never `BBW` |
 | 22 | Bollinger bandwidth percentile | 1 | ABSENT |
 | 23 | Bollinger squeeze | 3 | PARTIAL — `swing.vcp_setup:342` (contraction) and `compression.atr_compression_read:75` (ATR-based percentile, not BBW) |
 | 24 | Bollinger expansion | 1 | ABSENT |
 | 25 | Bollinger mean-reversion distance | 1 | PARTIAL — `value_dip.bollinger_pct_b:77` computes `(C−LB)/(UB−LB)`; the `(C−MB)/(UB−LB)` form absent |
 | 26 | ATR | 2 | built — `size.atr:143` |
-| 27 | Normalized ATR | 1 | built — `size.atr:143` / close (engine's `atr_pct`) |
+| 27 | Normalized ATR | 1 | built — `size.atr:143` / close **(producer only; the engine leg `atr_pct` was RETIRED 2026-09-27, MF-6 — §5.2)** |
 | 28 | ATR expansion | 1 | PARTIAL — `compression.atr_compression_read:75` (percentile, not the short/long ratio) |
 | 29 | ATR contraction | 1 | PARTIAL — `compression.atr_compression_read:75` |
 | 30 | ATR-normalized movement | 1 | ABSENT — nearest is `knife_guard.atr_ratio_z:115` (ATR ratio z, not price-move/ATR) |
-| 31 | ADX | 6 | built — `technical_factors.adx:230` |
-| 32 | Directional movement spread | 2 | built — `technical_factors.adx:230` (`di_plus`,`di_minus`); the engine forms `di_spread` |
+| 31 | ADX | 6 | built — `technical_factors.adx:230` **(the engine's `adx` leg was RETIRED 2026-09-27, MF-6 — §5.2)** |
+| 32 | Directional movement spread | 2 | built — `technical_factors.adx:230` (`di_plus`,`di_minus`); the engine *formed* `di_spread` until MF-6 retired it 2026-09-27 (§5.2) |
 | 33 | ADX trend-strength score | 3 | PARTIAL — `technical_factors.adx:230`; no ADX percentile or `f(ADX)` score (nearest `regime.trend_strength:130` is SMA200-based) |
 | 34 | Parabolic SAR | 3 | built — `technical_factors.parabolic_sar:605` |
 | 35 | Ichimoku | 5 | built — `extended_indicators.ichimoku:80` |

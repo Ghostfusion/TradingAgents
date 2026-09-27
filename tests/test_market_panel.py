@@ -174,7 +174,7 @@ def test_an_unavailable_panel_leaves_breadth_absent_never_zero(monkeypatch):
     assert "pct_above_50d" not in vals
     assert "pct_above_200d" not in vals
     assert "ad_ratio" not in vals
-    assert "rsi" in vals  # the name's own legs are unaffected
+    assert "aroon_osc" in vals  # the name's own legs are unaffected
 
 
 def test_a_panel_below_min_n_leaves_breadth_absent_never_zero(monkeypatch):

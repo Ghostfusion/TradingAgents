@@ -26,6 +26,7 @@ from tradingagents.strategies.technical_score import (
     CATEGORY_WEIGHTS,
     COMPONENTS,
     RAMPS,
+    RETIRED_COMPONENTS,
     TECH_BANDS,
     align_components,
     category_score,
@@ -38,14 +39,11 @@ from tradingagents.strategies.volatility_models import semivariance
 # the producers' own consumers (TechnicalScore.md §0.3). A table that inverts
 # one of these is the single biggest correctness risk this engine has.
 NON_MONOTONIC_ENDS: dict[str, tuple[float, float]] = {
-    "rsi": (60.0, 80.0),          # 45-70 `strong` beats >70 `hot`
-    "stoch_k": (10.0, 90.0),      # <20 oversold is the dip read
-    "mfi": (10.0, 90.0),          # >80 overbought
+    # MF-6 (owner decision 2026-09-27): only the two non-monotonic legs the
+    # engine still declares. The other seven (rsi, stoch_k, mfi, rsi2,
+    # williams_r, bollinger_pct_b, elder_ratio) were retired - see
+    # `technical_score.RETIRED_COMPONENTS`.
     "stoch_rsi": (0.1, 0.9),      # <0.2 is the entry
-    "rsi2": (5.0, 80.0),          # <10 is the buy
-    "williams_r": (-90.0, -10.0),  # -80..-100 oversold
-    "bollinger_pct_b": (-0.2, 1.2),  # <=0 dip, >1 extended
-    "elder_ratio": (0.5, 2.0),    # `quiet` (<0.8) is the good dip read
     "keltner_pct": (0.5, 1.2),    # the mid-band is the read
 }
 
@@ -54,20 +52,28 @@ NON_MONOTONIC_ENDS: dict[str, tuple[float, float]] = {
 pytestmark = pytest.mark.timeout(600)
 
 def _full_values() -> dict:
+    """Every surviving leg of every category (breakout_persistence is fed via
+    the real `donchian` keyword, so `_score` supplies it)."""
     return {
-        "adx": 30.0, "di_spread": 10.0, "above_sma200": True, "sma_stack": True,
-        "golden_cross": True, "ichimoku_above_cloud": True, "aroon_osc": 40.0,
-        "rsi": 60.0, "stoch_k": 50.0, "mfi": 50.0, "roc20": 0.05,
-        "momentum_12_1": 0.20, "macd_hist_pct": 0.005, "rs_slope_pct": 0.05,
-        "rs_above_sma": True, "rs_new_high": False, "rs_divergence": False,
-        "bollinger_pct_b": 0.6, "keltner_pct": 0.5, "near_sma200": True,
-        "fib_zone": False, "rvol": 1.4, "elder_ratio": 1.0, "cmf": 0.1,
-        "volume_dry_up": False, "vcp_candidate": False, "near_breakout": True,
-        "pullback_candidate": True, "trigger_candle": True, "stoch_rsi": 0.5,
-        "rsi2": 40.0, "williams_r": -50.0, "hurst": 0.5, "obv_bullish_div": True,
-        "atr_pct": 0.02, "vol_percentile": 0.5, "sqrt_rs_minus": 0.015,
+        "sma_stack": True, "aroon_osc": 40.0,
+        "momentum_12_1": 0.20,
+        "rs_slope_pct": 0.05, "rs_new_high": False, "rs_divergence": False,
+        "keltner_pct": 0.5, "near_sma200": True,
+        "cmf": 0.1,
+        "near_breakout": True,
+        "stoch_rsi": 0.5, "obv_bullish_div": True,
+        "sqrt_rs_minus": 0.015,
         "pct_above_50d": 55.0, "pct_above_200d": 50.0, "ad_ratio": 0.1,
     }
+
+
+#: A donchian dict that gives `breakout_persistence` a real value, so the
+#: breakout category (2 legs, floor 2) is measured in a "everything present" run.
+_DONCHIAN = {"persistence_up": 0.8, "persistence_dn": 0.2}
+
+
+def _score(values: dict) -> dict:
+    return technical_score(values, donchian=_DONCHIAN)
 
 
 # --------------------------------------------------------------------------
@@ -86,10 +92,12 @@ def test_every_non_monotonic_input_scores_its_favourable_end_higher() -> None:
         )
 
 
-def test_rsi_45_to_70_does_not_score_below_rsi_80() -> None:
-    strong = align_components({"rsi": 60.0})["rsi"]
-    hot = align_components({"rsi": 80.0})["rsi"]
-    assert strong > hot
+def test_stoch_rsi_entry_does_not_score_below_overbought() -> None:
+    """The surviving non-monotonic leg with a valley-of-good band: 0.1 is the
+    entry, 0.9 is overbought."""
+    entry = align_components({"stoch_rsi": 0.1})["stoch_rsi"]
+    overbought = align_components({"stoch_rsi": 0.9})["stoch_rsi"]
+    assert entry > overbought
 
 
 def test_monotone_ramps_are_ordered() -> None:
@@ -118,17 +126,17 @@ def test_band_tables_are_written_top_down() -> None:
 
 
 def test_booleans_are_measurements_not_gaps() -> None:
-    assert align_components({"above_sma200": True})["above_sma200"] == 75.0
-    assert align_components({"above_sma200": False})["above_sma200"] == 35.0
+    assert align_components({"sma_stack": True})["sma_stack"] == 80.0
+    assert align_components({"sma_stack": False})["sma_stack"] == 30.0
 
 
 def test_missing_components_are_none_never_a_neutral_fifty() -> None:
-    out = align_components({"rsi": 60.0})
-    assert out["rsi"] == 85.0
-    assert out["mfi"] is None
-    assert set(out.values()) - {85.0} == {None}
-    assert align_components({"rsi": None})["rsi"] is None
-    assert align_components({"rsi": float("nan")})["rsi"] is None
+    out = align_components({"stoch_rsi": 0.5})
+    assert out["stoch_rsi"] == 50.0
+    assert out["momentum_12_1"] is None
+    assert set(out.values()) - {50.0} == {None}
+    assert align_components({"stoch_rsi": None})["stoch_rsi"] is None
+    assert align_components({"stoch_rsi": float("nan")})["stoch_rsi"] is None
     # an undeclared key is ignored, not scored
     assert "not_a_component" not in align_components({"not_a_component": 1.0})
 
@@ -146,7 +154,7 @@ def test_technical_bands_are_not_the_decision_rating_bands() -> None:
 
 
 def test_a_missing_category_lowers_coverage_by_its_own_weight() -> None:
-    full = technical_score(_full_values())
+    full = _score(_full_values())
     assert full["score"] is not None
     assert full["coverage"] == pytest.approx(1.0)
 
@@ -155,7 +163,7 @@ def test_a_missing_category_lowers_coverage_by_its_own_weight() -> None:
             k: v for k, v in _full_values().items()
             if k not in CATEGORY_COMPONENTS[category]
         }
-        res = technical_score(dropped)
+        res = _score(dropped)
         expected = 1.0 - CATEGORY_WEIGHTS[category] / sum(CATEGORY_WEIGHTS.values())
         assert res["coverage"] == pytest.approx(expected), category
         assert res["categories"][category]["score"] is None, category
@@ -164,19 +172,17 @@ def test_a_missing_category_lowers_coverage_by_its_own_weight() -> None:
 
 def test_the_score_moves_toward_the_mean_of_the_present_categories() -> None:
     vals = _full_values()
-    strong = {**vals, "adx": 40.0, "di_spread": 20.0, "aroon_osc": 60.0,
-              "above_sma200": True, "sma_stack": True, "golden_cross": True}
-    weak = {**vals, "adx": 10.0, "di_spread": -20.0, "aroon_osc": -60.0,
-            "above_sma200": False, "sma_stack": False, "golden_cross": False}
-    hi = technical_score(strong)["score"]
-    lo = technical_score(weak)["score"]
+    strong = {**vals, "aroon_osc": 60.0, "sma_stack": True}
+    weak = {**vals, "aroon_osc": -60.0, "sma_stack": False}
+    hi = _score(strong)["score"]
+    lo = _score(weak)["score"]
     assert hi > lo
     # with the category removed the two extremes converge (the mean of what is
     # left is all that remains)
-    hi_wo = technical_score({k: v for k, v in strong.items()
-                             if k not in CATEGORY_COMPONENTS["trend"]})["score"]
-    lo_wo = technical_score({k: v for k, v in weak.items()
-                             if k not in CATEGORY_COMPONENTS["trend"]})["score"]
+    hi_wo = _score({k: v for k, v in strong.items()
+                    if k not in CATEGORY_COMPONENTS["trend"]})["score"]
+    lo_wo = _score({k: v for k, v in weak.items()
+                    if k not in CATEGORY_COMPONENTS["trend"]})["score"]
     assert abs(hi_wo - lo_wo) < abs(hi - lo)
 
 
@@ -227,7 +233,7 @@ def test_a_reader_recomputing_the_weighted_mean_gets_the_printed_score() -> None
 def test_a_supplied_weight_vector_is_printed_and_used() -> None:
     w = dict.fromkeys(CATEGORY_ORDER, 1.0)
     w["trend"] = 4.0
-    res = technical_score(_full_values(), weights=w)
+    res = technical_score(_full_values(), weights=w, donchian=_DONCHIAN)
     num = sum(w[c] * res["categories"][c]["score"] for c in CATEGORY_ORDER)
     assert res["score"] == pytest.approx(num / sum(w.values()), abs=0.005)
     assert res["weights"] == w
@@ -415,7 +421,7 @@ def test_the_leaf_assembles_components_from_the_run_bars(monkeypatch) -> None:
     monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: bars)
     monkeypatch.setattr(at, "_benchmark_closes", lambda: list(closes))
     vals = at._technical_components("TEST")
-    assert len(vals) >= 20, sorted(vals)
+    assert len(vals) >= 8, sorted(vals)
     for name in vals:
         assert name in COMPONENTS, name
     res = technical_score(vals)
@@ -569,3 +575,87 @@ def test_the_zweig_thrust_is_a_leg_of_the_existing_breadth_category():
     # +0.20 is the library's own thrust magnitude -> the top of the ramp
     assert with_thrust["components"]["zweig_thrust"]["aligned"] == pytest.approx(100.0)
     assert with_thrust["categories"]["breadth"]["score"] > without["categories"]["breadth"]["score"]
+
+
+# --------------------------------------------------------------------------
+# MF-6: the retired legs (owner decision 2026-09-27 - "trim legs, keep the
+# vector"). These are the tests the acceptance names: the vector is
+# byte-identical, no category is empty, and a retired leg can never be
+# re-declared without failing here.
+# --------------------------------------------------------------------------
+
+#: The declared legs the 2026-09-27 panel kept, per category.
+_KEPT: dict[str, tuple[str, ...]] = {
+    "trend": ("sma_stack", "aroon_osc"),
+    "momentum": ("momentum_12_1",),
+    "relative_strength": ("rs_slope_pct", "rs_new_high", "rs_divergence"),
+    "price_structure": ("keltner_pct", "near_sma200"),
+    "volume": ("cmf",),
+    "breakout": ("near_breakout", "breakout_persistence"),
+    "mean_reversion": ("stoch_rsi", "obv_bullish_div"),
+    "volatility": ("sqrt_rs_minus",),
+    "breadth": ("pct_above_50d", "pct_above_200d", "ad_ratio", "zweig_thrust"),
+}
+
+#: The owner's vector, byte for byte - the leg trim must not have moved it.
+_WEIGHTS_BEFORE_MF6 = {
+    "trend": 20.0, "momentum": 18.0, "relative_strength": 12.0,
+    "price_structure": 12.0, "volume": 10.0, "breakout": 10.0,
+    "mean_reversion": 8.0, "volatility": 5.0, "breadth": 5.0,
+}
+
+
+def test_the_category_weights_are_unchanged_by_the_leg_trim() -> None:
+    assert CATEGORY_WEIGHTS == _WEIGHTS_BEFORE_MF6
+    assert sum(CATEGORY_WEIGHTS.values()) == 100.0
+    assert tuple(CATEGORY_WEIGHTS) == tuple(_KEPT)
+
+
+def test_every_category_keeps_at_least_one_leg() -> None:
+    for category, names in CATEGORY_COMPONENTS.items():
+        assert names, category
+    assert set(CATEGORY_COMPONENTS) == set(_KEPT)
+
+
+def test_the_declared_leg_set_is_exactly_the_kept_set() -> None:
+    for category, names in _KEPT.items():
+        assert CATEGORY_COMPONENTS[category] == names, category
+    assert len(COMPONENTS) == 18
+
+
+def test_no_retired_leg_is_still_declared() -> None:
+    """A retired leg must not appear anywhere - component map, category map,
+    band table or ramp table. Pinning this is what makes a stale leg fail."""
+    for name in RETIRED_COMPONENTS:
+        assert name not in COMPONENTS, name
+        assert name not in BANDS and name not in RAMPS, name
+        assert all(name not in legs for legs in CATEGORY_COMPONENTS.values()), name
+
+
+def test_every_retired_leg_names_the_evidence_or_a_surviving_leg() -> None:
+    """Rule 4: a redundancy retirement names the surviving leg it duplicated;
+    an IC/UNMEASURED retirement names its own reason. Neither is silent."""
+    for name, reason in RETIRED_COMPONENTS.items():
+        assert isinstance(reason, str) and reason.strip(), name
+        low = reason.lower()
+        assert any(tok in low for tok in ("redundant", "weak", "unmeasured", "withheld")), (
+            name, reason,
+        )
+
+
+def test_the_retirement_ledger_partitions_the_43_legs() -> None:
+    assert not (set(COMPONENTS) & set(RETIRED_COMPONENTS))
+    assert len(COMPONENTS) + len(RETIRED_COMPONENTS) == 43
+
+
+def test_the_rule1_rescues_keep_the_strongest_leg_of_the_pair() -> None:
+    """The three REDUNDANT categories each keep the strongest leg, so the
+    category still has a producer and its weight still buys something."""
+    # volatility: sqrt_rs_minus (ic_ir -4.74) over atr_pct (-3.79)
+    assert "sqrt_rs_minus" in CATEGORY_COMPONENTS["volatility"]
+    assert "atr_pct" in RETIRED_COMPONENTS
+    # relative strength: rs_slope_pct (ic_ir 3.61 STRONG), the only measured leg
+    assert "rs_slope_pct" in CATEGORY_COMPONENTS["relative_strength"]
+    # price structure: keltner_pct (2.96) over bollinger_pct_b (1.2)
+    assert "keltner_pct" in CATEGORY_COMPONENTS["price_structure"]
+    assert "bollinger_pct_b" in RETIRED_COMPONENTS

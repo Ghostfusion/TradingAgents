@@ -102,11 +102,11 @@ def test_a_tree_without_a_card_is_skipped(tmp_path):
 
 def test_a_half_measured_field_reports_half(tmp_path):
     _write_tree(tmp_path, "T1", {"technical_score": {"score": 10.0, "absent": []}})
-    _write_tree(tmp_path, "T2", {"technical_score": {"score": 10.0, "absent": ["rsi"]}})
+    _write_tree(tmp_path, "T2", {"technical_score": {"score": 10.0, "absent": ["momentum_12_1"]}})
     report = cs.build_scorecard(str(tmp_path), engines=("technical_score",))
-    rsi = report["engines"]["technical_score"]["fields"]["rsi"]
-    assert (rsi["measured"], rsi["stated"], rsi["fill_rate"]) == (1, 2, 0.5)
-    assert rsi["class"] == "monitor"
+    field = report["engines"]["technical_score"]["fields"]["momentum_12_1"]
+    assert (field["measured"], field["stated"], field["fill_rate"]) == (1, 2, 0.5)
+    assert field["class"] == "monitor"
 
 
 # ---------------------------------------------------------------------------
@@ -229,11 +229,11 @@ def test_the_scan_reads_the_real_producer_strings():
 
 
 def test_render_text_reports_the_totals(tmp_path):
-    _write_tree(tmp_path, "T1", {"technical_score": {"score": 10.0, "absent": ["rsi"]}})
+    _write_tree(tmp_path, "T1", {"technical_score": {"score": 10.0, "absent": ["momentum_12_1"]}})
     report = cs.build_scorecard(str(tmp_path), engines=("technical_score",))
     text = cs.render_text(report)
     assert "Field coverage scorecard" in text
-    assert "rsi" in text
+    assert "momentum_12_1" in text
     assert "totals:" in text
 
 

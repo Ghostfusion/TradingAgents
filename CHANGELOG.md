@@ -12,6 +12,10 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Changed
+**MF-6 acted on: the `technical_score` legs are trimmed, the owner's weight vector is not (2026-09-27).** The owner took MF-6's third route — "trim legs, keep the vector" — after the 2026-09-27 score-panel run (37 dates × 149 names, 2026-08-06..2026-09-25) printed a per-category verdict for `technical_score`. `technical_score.COMPONENTS` drops from **43 legs to 18**; `CATEGORY_WEIGHTS` is **byte-identical** (trend 20 / momentum 18 / relative_strength 12 / price_structure 12 / volume 10 / breakout 10 / mean_reversion 8 / volatility 5 / breadth 5). The three REDUNDANT categories keep their strongest leg so no category is emptied and no weight is renormalised: `relative_strength` → `rs_slope_pct` (ic_ir 3.61 STRONG), `price_structure` → `keltner_pct` (2.96), `volatility` → `sqrt_rs_minus` (−4.74 STRONG). The new `technical_score.RETIRED_COMPONENTS` ledger names, for every one of the 25 retirements, the surviving leg it duplicated **or** the evidence that retired it (an unmeasured leg is retained or retired *with* a reason — never dropped silently). `score_engine.NON_MONOTONIC_INPUTS` narrows to `stoch_rsi`; `analysis_tools._technical_components` computes only the surviving legs (the monthly options-chain fetch for `max_pain_dist_atr` is gone), and `tests/test_technical_score.py` gains a test that fails the moment a retired leg is re-declared. Rule and per-leg table: `docs/scores/TechnicalScore.md` §5.2; the `MASTER_PLAN.md` MF-6 rows now record the owner's third route rather than a pending signature.
+- **Web impact: none** — `get_technical_score` stays the leaf and `enable_technical_score` the gate; the block's JSON shape is unchanged (fewer component rows), and no tool, flag, gate, env key or screener column moved.
+
 ### Added
 **Two owner-decided legs and four recorded decisions (2026-09-27, second pass).**
 

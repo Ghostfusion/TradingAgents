@@ -157,13 +157,15 @@ def test_disagreement_refuses_fewer_than_two_scores():
 
 def test_disagreement_reads_the_technical_score_categories():
     ts = technical_score({
-        "adx": 30.0, "di_spread": 10.0, "above_sma200": True, "rsi": 55.0,
-        "stoch_k": 60.0, "mfi": 55.0, "roc20": 0.05, "macd_hist_pct": 0.01,
-        "rvol": 1.2, "cmf": 0.05, "atr_pct": 0.02, "vol_percentile": 0.4,
+        "sma_stack": True, "aroon_osc": 40.0, "momentum_12_1": 0.2,
+        "stoch_rsi": 0.5, "obv_bullish_div": True, "cmf": 0.05,
+        "sqrt_rs_minus": 0.02, "pct_above_50d": 55.0, "pct_above_200d": 50.0,
+        "ad_ratio": 0.1,
     })
     out = technical_disagreement(ts)
     assert out["reason"] is None
     assert out["compared"]  # names the inputs it compared
+    assert len(out["compared"]) >= 2
     for name in out["compared"]:
         assert ts["categories"][name]["score"] is not None
     assert 0.0 <= out["disagreement"] <= 1.0

@@ -5680,10 +5680,12 @@ def _technical_components(ticker: str) -> dict:
     A producer given too few bars returns its own short dict and the component
     is simply absent.
 
-    ONE EXCEPTION TO "NO NEW FETCH": `max_pain_dist_atr` needs the monthly
-    options chain, which the OHLCV cache does not hold. It is the only
-    component here that fetches, it does so best-effort, and it is absent
-    rather than scored as 0 when the chain or the ATR is missing.
+    **MF-6 (owner decision 2026-09-27): only the surviving legs are computed.**
+    The 25 legs retired from `technical_score.COMPONENTS` (see
+    `technical_score.RETIRED_COMPONENTS`) are no longer produced here - a
+    producer that feeds no declared component is dead work. The one exception
+    that used to fetch (`max_pain_dist_atr`, the monthly options chain) is among
+    them, so this function now takes no fetch beyond the run's cached OHLCV.
     """
     data = _ohlcv(ticker)
     closes = data.get("closes") or []
@@ -5693,91 +5695,39 @@ def _technical_components(ticker: str) -> dict:
     if len(closes) < 30:
         return {}
 
-    from tradingagents.strategies.extended_indicators import (
-        chaikin_money_flow,
-        golden_death_cross,
-        ichimoku,
-        roc,
-    )
-    from tradingagents.strategies.mean_reversion import hurst_exponent
-    from tradingagents.strategies.momentum import momentum_12_1, rvol
+    from tradingagents.strategies.extended_indicators import chaikin_money_flow
+    from tradingagents.strategies.momentum import momentum_12_1
     from tradingagents.strategies.relative_strength import relative_strength_report
     from tradingagents.strategies.size import atr
-    from tradingagents.strategies.swing import (
-        fib_levels,
-        pullback_setup,
-        rsi,
-        trend_architecture,
-        vcp_setup,
-    )
+    from tradingagents.strategies.swing import trend_architecture, vcp_setup
     from tradingagents.strategies.technical_factors import (
-        adx,
         aroon,
-        elder_thermometer,
         keltner_channel,
-        mf_index,
         obv_divergence,
-        rsi2,
         stoch_rsi,
-        stochastic_oscillator,
-        williams_r,
     )
-    from tradingagents.strategies.value_dip import (
-        _macd_hist,
-        bollinger_pct_b,
-        support_structure,
-        trigger_candle,
-        volume_dry_up,
-    )
+    from tradingagents.strategies.value_dip import support_structure
     from tradingagents.strategies.volatility_models import semivariance
 
-    last_close = float(closes[-1]) if closes[-1] else None
     atr_v = atr(highs, lows, closes, window=14) if len(closes) >= 2 else None
     vals: dict = {}
 
     # --- trend -------------------------------------------------------------
-    a = adx(highs, lows, closes)
-    if a.get("adx") is not None:
-        vals["adx"] = a["adx"]
-    if a.get("di_plus") is not None and a.get("di_minus") is not None:
-        vals["di_spread"] = float(a["di_plus"]) - float(a["di_minus"])
+    # MF-6: only the surviving trend leg `sma_stack` still reads the
+    # architecture here; `aroon_osc` reads its own producer below. adx,
+    # di_spread, above_sma200, golden_cross and ichimoku_above_cloud are
+    # retired (technical_score.RETIRED_COMPONENTS) and are no longer computed.
     arch = trend_architecture(closes)
-    # `stacked` is the producer's key; `sma_stack` is the component's name
-    for src_key, dst_key in (("above_sma200", "above_sma200"), ("stacked", "sma_stack")):
-        if arch.get(src_key) is not None:
-            vals[dst_key] = arch[src_key]
-    cross = golden_death_cross(closes)
-    if cross.get("golden") or cross.get("death"):
-        vals["golden_cross"] = bool(cross.get("golden"))
-    if len(closes) >= 52:
-        ich = ichimoku(highs, lows, closes)
-        if ich.get("above_cloud") is not None:
-            vals["ichimoku_above_cloud"] = ich["above_cloud"]
+    if arch.get("stacked") is not None:
+        vals["sma_stack"] = arch["stacked"]
     ar = aroon(highs, lows)
     if ar.get("aroon_up") is not None and ar.get("aroon_down") is not None:
         vals["aroon_osc"] = float(ar["aroon_up"]) - float(ar["aroon_down"])
 
-    # --- momentum ----------------------------------------------------------
-    r = rsi(closes)
-    if r is not None:
-        vals["rsi"] = r
-    st = stochastic_oscillator(highs, lows, closes)
-    if st.get("k") is not None:
-        vals["stoch_k"] = st["k"]
-    mf = mf_index(highs, lows, closes, volumes)
-    if mf is not None:
-        vals["mfi"] = mf
-    roc20 = roc(closes, 20)
-    if roc20 is not None:
-        vals["roc20"] = float(roc20) / 100.0  # the producer returns percent
+    # --- momentum (MF-6: only momentum_12_1 survives) ----------------------
     m121 = momentum_12_1(closes)
     if m121 is not None:
         vals["momentum_12_1"] = m121
-    macd = _macd_hist(closes)
-    if isinstance(macd, tuple) and last_close:
-        hist = macd[2][-1] if macd[2] else None
-        if hist is not None:
-            vals["macd_hist_pct"] = float(hist) / last_close
 
     # --- relative strength (one benchmark, the configured one) -------------
     bench = _benchmark_closes()
@@ -5785,17 +5735,15 @@ def _technical_components(ticker: str) -> dict:
         rep = relative_strength_report(closes, bench)
         if rep.get("slope_pct") is not None:
             vals["rs_slope_pct"] = rep["slope_pct"]  # percent per day
-        if rep.get("above_sma") is not None:
-            vals["rs_above_sma"] = rep["above_sma"]
+        # MF-6: rs_above_sma is retired (redundant with golden_cross /
+        # rs_slope_pct). rs_new_high and rs_divergence are retained.
         if rep.get("new_high") is not None:
             vals["rs_new_high"] = rep["new_high"]
         if rep.get("divergence") is not None:
             vals["rs_divergence"] = rep["divergence"]
 
-    # --- price structure ---------------------------------------------------
-    bb = bollinger_pct_b(closes)
-    if bb and bb.get("pct_b") is not None:
-        vals["bollinger_pct_b"] = bb["pct_b"]
+    # --- price structure (MF-6: keltner_pct survives; bollinger_pct_b,
+    # fib_zone and max_pain_dist_atr are retired) --------------------------
     if atr_v is not None:
         kc = keltner_channel(closes, atr_value=atr_v)
         if kc.get("pct") is not None:
@@ -5804,80 +5752,30 @@ def _technical_components(ticker: str) -> dict:
     dist = sup.get("distance_to_sma200_pct")
     if dist is not None:
         vals["near_sma200"] = abs(float(dist)) <= 3.0
-    if len(closes) >= 30:
-        hi = max(float(x) for x in highs[-120:]) if highs else None
-        lo = min(float(x) for x in lows[-120:]) if lows else None
-        fib = fib_levels(hi, lo)
-        if fib.get("0.382") is not None and last_close:
-            low_zone = float(fib["0.618"])
-            high_zone = float(fib["0.382"])
-            vals["fib_zone"] = bool(low_zone <= last_close <= high_zone)
-    # max pain: the monthly pin as a stationary distance. The ONLY component
-    # here that is not fed from the run's own OHLCV - it needs the monthly
-    # options chain, so it fetches best-effort and is absent (never 0) when the
-    # chain or the ATR is missing.
-    _mp_rows = _options_chain_rows_lambda(ticker, monthly=True)
-    if _mp_rows and atr_v and last_close:
-        from tradingagents.strategies.derivatives_gamma import max_pain as _max_pain
 
-        _mp = _max_pain(_mp_rows[0])
-        if _mp and _mp.get("strike"):
-            vals["max_pain_dist_atr"] = round(
-                abs(float(last_close) - float(_mp["strike"])) / float(atr_v), 4
-            )
-
-    # --- volume ------------------------------------------------------------
-    rv = rvol(volumes)
-    if rv is not None:
-        vals["rvol"] = rv
-    elder = elder_thermometer(volumes)
-    if elder.get("ratio") is not None:
-        vals["elder_ratio"] = elder["ratio"]
+    # --- volume (MF-6: only cmf survives) ----------------------------------
     cmf = chaikin_money_flow(highs, lows, closes, volumes)
     if cmf is not None:
         vals["cmf"] = cmf
-    vdu = volume_dry_up(volumes)
-    if vdu.get("dry_up") is not None:
-        vals["volume_dry_up"] = vdu["dry_up"]
 
-    # --- breakout / pullback ----------------------------------------------
+    # --- breakout (MF-6: near_breakout survives; vcp_candidate,
+    # pullback_candidate and trigger_candle are retired) -------------------
     if len(closes) >= 90:
         vcp = vcp_setup(closes, highs, lows, volumes)
-        if vcp.get("candidate") is not None:
-            vals["vcp_candidate"] = vcp["candidate"]
         if vcp.get("near_breakout") is not None:
             vals["near_breakout"] = vcp["near_breakout"]
-    pb = pullback_setup(closes, lows, volumes)
-    if pb.get("candidate") is not None:
-        vals["pullback_candidate"] = pb["candidate"]
-    tc = trigger_candle(closes, highs, lows, volumes)
-    if tc.get("trigger") is not None:
-        vals["trigger_candle"] = tc["trigger"]
 
-    # --- mean reversion ----------------------------------------------------
+    # --- mean reversion (MF-6: stoch_rsi and obv_bullish_div survive; rsi2,
+    # williams_r and hurst are retired) ------------------------------------
     srsi = stoch_rsi(closes)
     if srsi.get("stochrsi") is not None:
         vals["stoch_rsi"] = srsi["stochrsi"]
-    r2 = rsi2(closes)
-    if r2 is not None:
-        vals["rsi2"] = r2
-    wr = williams_r(highs, lows, closes)
-    if wr is not None:
-        vals["williams_r"] = wr
-    rets = _daily_returns(closes)
-    if rets:
-        # the Hurst exponent is a property of the RETURN series, not the price
-        # level (mean_reversion.hurst_exponent:122)
-        h = hurst_exponent(rets)
-        if h is not None:
-            vals["hurst"] = h
     obv = obv_divergence(closes, volumes)
     if obv.get("bullish_div") is not None:
         vals["obv_bullish_div"] = obv["bullish_div"]
 
-    # --- volatility (risk-increasing; the engine inverts it) ---------------
-    if atr_v is not None and last_close:
-        vals["atr_pct"] = float(atr_v) / last_close
+    # --- volatility (MF-6: sqrt_rs_minus survives; atr_pct and
+    # vol_percentile are retired). Still lower_better; the engine inverts it.
     sem = semivariance(closes)
     if sem.get("sqrt_rs_minus") is not None:
         vals["sqrt_rs_minus"] = sem["sqrt_rs_minus"]
@@ -6018,11 +5916,13 @@ def get_technical_score(
     composite.
 
     Every component is produced by an existing indicator function over the same
-    bars; the non-monotonic inputs (RSI, stochastic, StochRSI, RSI2, Williams
-    %R, Bollinger %b, MFI, the Elder thermometer, Keltner %b) are band-mapped
-    over the bands their own consumers already read, so a `hot` RSI does not
-    score like a `strong` one. Advisory only - it never sets a rating, a
-    position size or a gate. Gated by ``enable_technical_score``.
+    bars; the non-monotonic inputs (StochRSI, Keltner %b) are band-mapped over
+    the bands their own consumers already read, so a `hot` reading does not
+    score like a `strong` one. Since MF-6 (owner decision 2026-09-27) the engine
+    declares only the legs the score panel supports: 18 legs over the nine
+    categories (`technical_score.RETIRED_COMPONENTS` is the ledger of the 25
+    retired and `CATEGORY_WEIGHTS` is unchanged). Advisory only - it never sets a
+    rating, a position size or a gate. Gated by ``enable_technical_score``.
     """
     if not _r3_flag("enable_technical_score"):
         return (

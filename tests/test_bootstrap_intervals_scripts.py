@@ -38,13 +38,14 @@ TRUTH = {t: (i - N_NAMES / 2) / (N_NAMES / 2) for i, t in enumerate(NAMES)}
 
 
 def _persistent_panel() -> dict:
-    """A panel whose ``fcf_yield`` series is persistent and whose ``adx`` is not.
+    """A panel whose ``fcf_yield`` series is persistent and whose ``aroon_osc``
+    is not.
 
     Every name's close loads on one common AR(1) with ``rho = 0.9``, weighted by
     that name's own ``fcf_yield`` truth, so the top-minus-bottom decile spread -
     and the rank IC against it - track the AR(1) and stay autocorrelated.
-    ``adx`` is independent noise per date, so its series do not. The two factors
-    therefore differ in persistence and must earn different block lengths.
+    ``aroon_osc`` is independent noise per date, so its series do not. The two
+    factors therefore differ in persistence and must earn different block lengths.
     """
     rng = random.Random(5)
     g = [0.0] * N_DATES
@@ -62,7 +63,7 @@ def _persistent_panel() -> dict:
     for i, date in enumerate(DATES):
         panel[date] = {
             t: {"fcf_yield": 0.05 * math.exp(0.3 * TRUTH[t]) + rng.gauss(0.0, 0.02),
-                "adx": rng.gauss(0.0, 1.0),
+                "aroon_osc": rng.gauss(0.0, 1.0),
                 "close": closes[t][i]}
             for t in NAMES
         }
@@ -89,7 +90,8 @@ def _gated(monkeypatch, on: bool = True):
 
 
 def _write_trees(root, n: int) -> None:
-    """``n`` trees where ``rsi`` is absent every third tree (a non-constant rate).
+    """``n`` trees where ``momentum_12_1`` is absent every third tree (a
+    non-constant rate).
 
     ``technical_score`` publishes presence by the complement rule (``absent``),
     and every other declared field stays present in every tree - a constant
@@ -100,7 +102,7 @@ def _write_trees(root, n: int) -> None:
         d = root / f"T{i:03d}"
         d.mkdir(parents=True)
         card = {"technical_score": {"score": 10.0,
-                                    "absent": ["rsi"] if i % 3 == 0 else []}}
+                                    "absent": ["momentum_12_1"] if i % 3 == 0 else []}}
         (d / cs.CARD_NAME).write_text(json.dumps(card), encoding="utf-8")
 
 
@@ -178,7 +180,7 @@ def test_the_scorecard_carries_an_interval_beside_each_fill_rate(tmp_path, monke
     _write_trees(tmp_path, 45)
     _gated(monkeypatch)
     report = cs.build_scorecard(str(tmp_path), engines=("technical_score",))
-    field = report["engines"]["technical_score"]["fields"]["rsi"]
+    field = report["engines"]["technical_score"]["fields"]["momentum_12_1"]
     rec = field["interval"]
     assert rec["unavailable"] is None
     assert rec["low"] <= rec["point"] <= rec["high"]
@@ -217,7 +219,7 @@ def test_the_scorecard_interval_reads_unavailable_below_the_floor(tmp_path, monk
     _write_trees(tmp_path, 5)
     _gated(monkeypatch)
     report = cs.build_scorecard(str(tmp_path), engines=("technical_score",))
-    rec = report["engines"]["technical_score"]["fields"]["rsi"]["interval"]
+    rec = report["engines"]["technical_score"]["fields"]["momentum_12_1"]["interval"]
     assert rec["unavailable"] and "floor" in rec["unavailable"]
     assert "low" not in rec and "high" not in rec
     assert "tree(s)" in rec["window"]
@@ -229,8 +231,8 @@ def test_a_constant_series_is_never_published_as_a_zero_width_interval(tmp_path,
     _gated(monkeypatch)
     report = cs.build_scorecard(str(tmp_path), engines=("technical_score",))
     fields = report["engines"]["technical_score"]["fields"]
-    assert fields["adx"]["fill_rate"] == 1.0
-    rec = fields["adx"]["interval"]
+    assert fields["aroon_osc"]["fill_rate"] == 1.0
+    rec = fields["aroon_osc"]["interval"]
     assert rec["unavailable"] and "dispersion" in rec["unavailable"]
     assert "low" not in rec and "high" not in rec
 
@@ -248,10 +250,10 @@ def test_the_block_length_is_not_a_constant_across_persistences(reports):
     """
     _off, on = reports
     persistent = on["factors"]["fcf_yield"]["rows"]["deciles"]["interval"]
-    independent = on["factors"]["adx"]["rows"]["deciles"]["interval"]
+    independent = on["factors"]["aroon_osc"]["rows"]["deciles"]["interval"]
     assert persistent["block"] > independent["block"] > 0
     ic_persistent = on["factors"]["fcf_yield"]["rows"]["ic"]["interval"]
-    ic_independent = on["factors"]["adx"]["rows"]["ic"]["interval"]
+    ic_independent = on["factors"]["aroon_osc"]["rows"]["ic"]["interval"]
     assert ic_persistent["block"] > ic_independent["block"]
     # both series are the SAME length, so the difference is persistence, not n
     assert persistent["n"] == independent["n"]

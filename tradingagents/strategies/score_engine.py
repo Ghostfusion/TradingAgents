@@ -27,26 +27,25 @@ from __future__ import annotations
 
 import math
 
-#: The eight non-monotonic technical inputs whose mapped value must MOVE THE RIGHT
-#: WAY at the producer's own band edges rather than rise with the raw value. Named
+#: The non-monotonic technical inputs whose mapped value must MOVE THE RIGHT WAY
+#: at the producer's own band edges rather than rise with the raw value. Named
 #: here so an engine declaring one of them cannot quietly treat it as monotone.
 #:
 #: The names are the **component keys the engine emits** (``technical_score.
-#: COMPONENTS``), never the producer function's name: ``stoch_k`` / ``stoch_rsi`` /
-#: ``elder_ratio`` are the keys, while ``stochastic`` / ``stochrsi`` /
-#: ``elder_thermometer`` are the functions that fill them. Until 2026-09-26 those
-#: three were listed by function name, matched no component, and the evidence
-#: triple was silently unreachable for exactly the three most inverted bands
-#: (``stoch_k`` below 20 aligns 80).
+#: COMPONENTS``), never the producer function's name: ``stoch_rsi`` is the key,
+#: while ``stoch_rsi`` / ``stochastic`` / ``elder_thermometer`` are the functions
+#: that fill them. Until 2026-09-26 those three were listed by function name,
+#: matched no component, and the evidence triple was silently unreachable for
+#: exactly the three most inverted bands (``stoch_k`` below 20 aligns 80).
+#:
+#: MF-6 (owner decision 2026-09-27): the 2026-09-27 panel retired the other seven
+#: technical legs that were non-monotonic (``rsi``, ``mfi``, ``stoch_k``,
+#: ``rsi2``, ``williams_r``, ``bollinger_pct_b``, ``elder_ratio``), so the set
+#: now names **only the non-monotonic legs the engine still declares**. This is
+#: the invariant ``technical_score``'s tests hold: every name here must be a
+#: component key, or its raw->aligned triple is unreachable.
 NON_MONOTONIC_INPUTS: tuple = (
-    "rsi",
-    "mfi",
-    "stoch_k",
     "stoch_rsi",
-    "rsi2",
-    "williams_r",
-    "bollinger_pct_b",
-    "elder_ratio",
 )
 
 

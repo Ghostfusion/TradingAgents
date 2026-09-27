@@ -416,8 +416,11 @@ contract, **7 new panels** fetched (2026-09-07, 09-18, 09-21..09-25), **37 panel
   `keltner_pct`, `max_pain_dist_atr`), `volatility` (`atr_pct`, `sqrt_rs_minus`); **redundancy-only** -
   `breadth`. Three categories carrying **32 of the 100 points** are wholly redundant on this panel, and the
   8 pairs at |rho| >= 0.80 `MEASUREMENT_FINDINGS.md` section 2 recorded now have a category-level
-  consequence. **The revised `CATEGORY_WEIGHTS` still needs the owner's signature** - this records the
-  evidence, it does not act on it.
+  consequence. **ACTED ON 2026-09-27 (owner decision): the owner took MF-6's third route — trim the
+  legs, keep the vector.** 25 of the 43 declared legs are retired from `technical_score.COMPONENTS`
+  and recorded in `technical_score.RETIRED_COMPONENTS`; `CATEGORY_WEIGHTS` is byte-identical (each
+  category keeps at least one leg, so no weight is renormalised). The uniform rule and the per-leg
+  table are `TechnicalScore.md` §5.2.
 * **The two redundancy matrices**: `technical_trend_momentum_relative_strength` **136 pairs**, max |rho|
   0.933, mean 0.355; `fundamental_fcf_yield_cluster` **6 pairs**, max |rho| 0.930.
 * **The 0-measured engines reproduce with their reasons** - `risk_score` 0 of 34 and `sentiment_score`
@@ -427,9 +430,7 @@ contract, **7 new panels** fetched (2026-09-07, 09-18, 09-21..09-25), **37 panel
 
 **Still open in this phase**: MF-5 (9 of 11 `news_score` components on the live
 per-symbol path), MF-8 (`risk_score`/`sentiment_score` panel path — structurally
-blocked by data shape: position/book-level and per-symbol vendor reads), MF-6 (the
-momentum-redundancy reduction, which edits a declared owner table and needs the
-owner's signature), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung).
+blocked by data shape: position/book-level and per-symbol vendor reads), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung). MF-6 is **closed 2026-09-27**: the owner took the third route (legs trimmed, `CATEGORY_WEIGHTS` unchanged), recorded in `TechnicalScore.md` §5.2.
 
 **PLAN-5 met 2026-09-27.** The gate-on tree `reports/MSFT_20260927_001700`
 (`batch.py --symbols MSFT --date 2026-09-25`, exit 0, ~53 min) reads
@@ -457,7 +458,7 @@ round).
 | PLAN-4 | Build `scripts/score_panel_eval.py` — the caller that runs `alpha_health.score_evaluation_rows` plus the multiple-testing machinery over the panel | `IMPLEMENTATION_PLAN.md` §7 | 3 | 3 | the script exists and prints the full row set |
 | PLAN-6 / MF-3 | Emit the **sector and regime robustness** splits the WP-10 deliverable names (the panel records them as unimplemented) | `IMPLEMENTATION_PLAN.md` §7; `MEASUREMENT_FINDINGS.md` §5 | 3 | 3 | both splits present |
 | MF-2 | Measure the FCF-yield cluster, the valuation category and the growth category once MF-1 exists | `MEASUREMENT_FINDINGS.md` §2/§4 | 2 | 4 | the redundancy matrix reports `n_pairs > 0` |
-| MF-6 | Act on the measured momentum redundancy (8 pairs at |ρ| ≥ 0.80; `williams_r` ≡ `stoch_k`): reduce to one oscillator and one MA-regime leg, or record why not — this edits a **declared** owner table | `MEASUREMENT_FINDINGS.md` §2 | 2 | 4 | a revised `CATEGORY_WEIGHTS` with a record, or an owner sentence declining |
+| MF-6 | Act on the measured momentum redundancy (8 pairs at |ρ| ≥ 0.80; `williams_r` ≡ `stoch_k`): reduce to one oscillator and one MA-regime leg, or record why not — this edits a **declared** owner table | `MEASUREMENT_FINDINGS.md` §2 | 2 | 4 | **MET 2026-09-27 (owner decision, third route)** — the legs were trimmed (`technical_score.COMPONENTS` 43→18, the other 25 in `RETIRED_COMPONENTS`), `CATEGORY_WEIGHTS` byte-identical. Neither a revised vector nor a decline: the owner's chosen third route, recorded in `TechnicalScore.md` §5.2 |
 | MF-4 | Produce readable weight vectors for the engines that have none (`fundamental_score` prints equal 1/4 unvalidated; `news_score`/`regime_score` print no table) | `MEASUREMENT_FINDINGS.md` §4 | 3 | 4 | a measured table or a WP-10 record per vector |
 | MF-5 | Measure the remaining 9 of 11 `news_score` components on the live per-symbol path | `MEASUREMENT_FINDINGS.md` §4 | 3 | 3 | a live run reporting 11 measured, or a named reason each |
 | MF-8 | Give `risk_score`/`sentiment_score` a panel path, or record permanently that their inputs are book- and vendor-read-only | `MEASUREMENT_FINDINGS.md` §4 | 4 | 3 | panel rows, or an owner sentence closing it |
@@ -746,7 +747,7 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | VAL-10 / VAL-12 / VAL-13 / VAL-14 / VAL-15 / VAL-17 | 2 | one producer per rank, `NA`-honest | belong to `ValuationScore`, which does not exist. **Superseded by D2 (Phase 7)** |
 | MF-4 | 3 | a measured table or a WP-10 record per vector | **no engine prints a measured weight table**; every vector is still `RESEARCH_ONLY` (the record still reads `n_measured 0`) |
 | MF-5 | 3 | a live run reporting 11 measured, or a named reason each | **MET 2026-09-27 on the second clause** — live MSFT 2026-09-25 measures **6 of 11** (relevance, materiality, novelty, corporate_events, industry_shock, persistence), and each of the other five carries its own reason: `fundamental_impact` (no revenue/margin-impact producer exists), `guidance_change` (behind `enable_benzinga_surface`, off by default), `regulatory_legal` (the NEWS-5 classifier exists but its declared ramp is a different scale - a rescale decision, not a missing producer), `earnings_surprise` (this run's catalyst snapshot carried no reported surprise in the window) and `analyst_revision` (the `enable_analyst_revision_index` gate is off). Was: 2 of 11 live, the rest without a producer |
-| MF-6 | 3 | a revised `CATEGORY_WEIGHTS` with a record, or an owner sentence | neither; the table is unchanged. **Needs the owner's signature** |
+| MF-6 | 3 | a revised `CATEGORY_WEIGHTS` with a record, or an owner sentence | **MET 2026-09-27 (owner decision)** — the owner's third route: trim the legs, keep the vector. 25 of 43 legs retired (`technical_score.RETIRED_COMPONENTS`), `CATEGORY_WEIGHTS` byte-identical, every category keeps ≥ 1 leg. Rule + table in `TechnicalScore.md` §5.2 |
 | MF-8 | 3 | panel rows, or an owner sentence closing it | **CLOSED 2026-09-27 (owner decision)** — recorded permanently as panel-incompatible: `risk_score`'s inputs are position/book-level (`BookState`, cluster notional, ES) and `sentiment_score`'s are per-symbol vendor reads, so neither can be measured on the wide cross-sectional panel the way the fundamental and technical legs are. Their vectors stay `RESEARCH_ONLY` with that reason rather than waiting on a run that cannot exist |
 | FUND-24 | 3 | a measured vector + OOS evidence → `VALIDATED` | `STATUS_RESEARCH_ONLY`; nothing promoted |
 | RLW-4 | 3 | `scorecard_status(...)["movement"] != "UNAVAILABLE"` | no run reaches `VALIDATED`; `Movement` stays `UNAVAILABLE` |

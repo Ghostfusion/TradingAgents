@@ -10,8 +10,7 @@ Four rules this module exists to hold:
    ``{component: raw value}`` dict - every value is produced elsewhere, from the
    run's own OHLCV. No fetch, no formula, no vendor call lives here.
 2. **Direction first, weight second.** Every component declares its direction,
-   and the **non-monotonic** ones (RSI, MFI, stochastic, StochRSI, RSI2,
-   Williams %R, Bollinger %b, the Elder thermometer, Keltner %b) are
+   and the **non-monotonic** legs that remain (StochRSI, Keltner %b) are
    **band-mapped over the producer's own edges** - the same bands the producer's
    consumers already read. A naive ramp inverts them, and that inversion is the
    single biggest correctness risk in this engine.
@@ -22,6 +21,15 @@ Four rules this module exists to hold:
 4. **Nothing here sizes anything.** `TechnicalScore` never touches
    `risk/sizing.py`, never feeds `decision_guardrail.SCORE_BANDS`, and is never
    quoted as a forecast. Its bands are advisory labels of its own.
+
+**MF-6 (owner decision 2026-09-27): trim legs, keep the vector.** The 2026-09-27
+score-panel run retired 25 of the 43 declared legs; `CATEGORY_WEIGHTS` is
+byte-identical. A category whose legs were dropped against legs of the same
+category keeps the strongest of the mutually redundant set (rule 1), a leg whose
+only redundancy is cross-category keeps the strongest side and names the other
+party (rule 2), an unmeasured leg is retained or retired WITH its reason (rule 3),
+and every redundancy retirement names the surviving leg it duplicated (rule 4).
+`RETIRED_COMPONENTS` is the ledger; no leg is dropped silently.
 
 Every ramp edge and every band's *score* is a **hypothesis** - the producer's own
 edges are used wherever the producer publishes one, and the rest are this
@@ -66,58 +74,31 @@ CATEGORY_ORDER: tuple[str, ...] = tuple(CATEGORY_WEIGHTS)
 # (TechnicalScore.md §0.3); the rest are this engine's declared policy.
 
 BANDS: dict[str, tuple] = {
-    # RSI: 45-70 is `strong`, >70 is `hot`, <40 is `broken` (swing.rsi_band).
-    "rsi": ((70.0, 45.0), (45.0, 85.0), (40.0, 55.0), (0.0, 20.0)),
-    # Stochastic K: <20 is `oversold`, the dip read.
-    "stoch_k": ((80.0, 30.0), (20.0, 50.0), (0.0, 80.0)),
-    # MFI: >80 is overbought.
-    "mfi": ((80.0, 25.0), (20.0, 50.0), (0.0, 80.0)),
+    # MF-6 (owner decision 2026-09-27): only the legs the panel kept still
+    # carry a band table. The retired legs' tables are gone with the legs; a
+    # band row for a component nothing declares is dead config.
     # StochRSI: <0.2 is the entry.
     "stoch_rsi": ((0.8, 25.0), (0.2, 50.0), (0.0, 80.0)),
-    # RSI2: <10 is the buy, >70 stretched.
-    "rsi2": ((70.0, 25.0), (10.0, 50.0), (0.0, 85.0)),
-    # Williams %R: -80..-100 is oversold.
-    "williams_r": ((-20.0, 25.0), (-80.0, 50.0), (-100.0, 80.0)),
-    # Bollinger %b: <=0 is the dip, >1 is extended.
-    "bollinger_pct_b": ((1.0, 20.0), (0.5, 45.0), (0.0, 60.0), (-10.0, 85.0)),
     # Keltner %b: the mid-band is the read.
     "keltner_pct": ((1.0, 25.0), (0.5, 70.0), (0.0, 50.0), (-10.0, 35.0)),
-    # Elder thermometer: `quiet` (<0.8) is the good dip read.
-    "elder_ratio": ((1.5, 30.0), (0.8, 55.0), (0.0, 80.0)),
     # Boolean states: 1.0 true, 0.0 false (never a missing value).
-    "above_sma200": ((1.0, 75.0), (0.0, 35.0)),
     "sma_stack": ((1.0, 80.0), (0.0, 30.0)),
-    "golden_cross": ((1.0, 75.0), (0.0, 30.0)),
-    "ichimoku_above_cloud": ((1.0, 75.0), (0.0, 35.0)),
     "rs_new_high": ((1.0, 80.0), (0.0, 45.0)),
     # A divergence is a warning, not a signal.
     "rs_divergence": ((1.0, 25.0), (0.0, 60.0)),
-    "rs_above_sma": ((1.0, 70.0), (0.0, 35.0)),
     "near_sma200": ((1.0, 80.0), (0.0, 45.0)),
-    "fib_zone": ((1.0, 80.0), (0.0, 50.0)),
-    "volume_dry_up": ((1.0, 75.0), (0.0, 50.0)),
-    "vcp_candidate": ((1.0, 80.0), (0.0, 45.0)),
     "near_breakout": ((1.0, 85.0), (0.0, 45.0)),
-    "pullback_candidate": ((1.0, 75.0), (0.0, 50.0)),
-    "trigger_candle": ((1.0, 80.0), (0.0, 45.0)),
     "obv_bullish_div": ((1.0, 75.0), (0.0, 50.0)),
 }
 
 # Ramps: ``(lo, hi)`` mapped to 0 -> 100 (inverted for ``lower_better``). Every
 # edge is a hypothesis; Phase C measures them.
 RAMPS: dict[str, tuple[float, float]] = {
-    "adx": (15.0, 40.0),
-    "di_spread": (-20.0, 20.0),
+    # MF-6: only the kept legs' ramps remain.
     "aroon_osc": (-60.0, 60.0),
-    "roc20": (-0.10, 0.10),
     "momentum_12_1": (-0.20, 0.40),
-    "macd_hist_pct": (-0.02, 0.02),
     "rs_slope_pct": (-0.10, 0.10),
-    "rvol": (0.50, 2.00),
     "cmf": (-0.20, 0.20),
-    "hurst": (0.40, 0.65),
-    "atr_pct": (0.010, 0.050),
-    "vol_percentile": (0.10, 0.90),
     "sqrt_rs_minus": (0.008, 0.030),
     "pct_above_50d": (20.0, 80.0),
     "pct_above_200d": (20.0, 80.0),
@@ -126,9 +107,6 @@ RAMPS: dict[str, tuple[float, float]] = {
     # within the window - a +0.20 move in the advance ratio is the
     # canonical magnitude, so 0 credit at no rise and 100 at the event.
     "zweig_thrust": (0.0, 0.20),
-    # max pain: how far spot sits from the monthly pin, in ATRs. Closer
-    # is the mean-reverting read, so lower_better.
-    "max_pain_dist_atr": (0.0, 2.0),
     # Donchian breakout persistence: signed net share of the last N closes
     # beyond the prior-window reference levels (persistence_up - persistence_dn),
     # in [-1, 1]. higher_better.
@@ -155,62 +133,77 @@ def _c(name, category, direction, producer, note=""):
 COMPONENTS: dict[str, Component] = {
     c.name: c
     for c in (
-        # trend (20)
-        _c("adx", "trend", "higher_better", "technical_factors.adx:230"),
-        _c("di_spread", "trend", "higher_better", "technical_factors.adx:230 (di_plus - di_minus)"),
-        _c("above_sma200", "trend", "higher_better", "swing.trend_architecture:76"),
+        # trend (20) - panel verdict SURVIVES. Kept: aroon_osc, sma_stack.
+        # Retired: adx (WEAK, unpaired), di_spread (redundant with rsi),
+        # above_sma200 / ichimoku_above_cloud / golden_cross - one mutually
+        # redundant block dropped whole (golden_cross is also the weaker side
+        # of the cross-category trend<->relative_strength overlap, ceded to
+        # rs_slope_pct).
         _c("sma_stack", "trend", "higher_better", "swing.trend_architecture:76"),
-        _c("golden_cross", "trend", "higher_better", "extended_indicators.golden_death_cross:55"),
-        _c("ichimoku_above_cloud", "trend", "higher_better", "extended_indicators.ichimoku:80"),
         _c("aroon_osc", "trend", "higher_better", "technical_factors.aroon:668 (up - down)"),
-        # momentum (18)
-        _c("rsi", "momentum", "higher_better", "swing.rsi:44", "NON-MONOTONIC: band-mapped"),
-        _c("stoch_k", "momentum", "higher_better", "technical_factors.stochastic_oscillator:197", "NON-MONOTONIC"),
-        _c("mfi", "momentum", "higher_better", "technical_factors.mf_index:163", "NON-MONOTONIC"),
-        _c("roc20", "momentum", "higher_better", "extended_indicators.roc:151"),
+        # momentum (18) - panel verdict SURVIVES. Kept: momentum_12_1.
+        # Retired: rsi, stoch_k (redundant with each other and the price-
+        # structure oscillators), mfi, roc20 (redundant with rsi),
+        # macd_hist_pct (WEAK, unpaired).
         _c("momentum_12_1", "momentum", "higher_better", "momentum.momentum_12_1:358"),
-        _c("macd_hist_pct", "momentum", "higher_better", "value_dip._macd_hist:502 / last close"),
-        # relative strength (12)
+        # relative strength (12) - panel verdict REDUNDANT (every measured leg
+        # dropped). Rule 1 rescue: keep the STRONGEST of the mutually redundant
+        # set, rs_slope_pct (ic_ir 3.61 STRONG), so the category keeps a
+        # producer. Its only redundancy is cross-category - the trend block's
+        # golden_cross (rule 2: the other party is `trend`) - and that side is
+        # the one retired. Retired: rs_above_sma (redundant with
+        # golden_cross|rs_above_sma; ceded to rs_slope_pct). rs_new_high and
+        # rs_divergence were never dropped by the run (tie-collapsed booleans,
+        # IC withheld) and stay.
         _c("rs_slope_pct", "relative_strength", "higher_better", "relative_strength.slope_pct:49 (percent per day)"),
         # The RS LEVEL (stock/benchmark) is scale-dependent - it is a price ratio,
         # not a normalised score - so it is NOT a component. `above_sma` (the RS
         # line against its own trailing average) is the scale-free equivalent.
-        _c("rs_above_sma", "relative_strength", "higher_better", "relative_strength.rs_trend:68 (above_sma)"),
         _c("rs_new_high", "relative_strength", "higher_better", "relative_strength.rs_position:89"),
         _c("rs_divergence", "relative_strength", "higher_better", "relative_strength.divergence:195", "1 = divergence present (bad)"),
-        # price structure (12)
-        _c("bollinger_pct_b", "price_structure", "higher_better", "value_dip.bollinger_pct_b:77", "NON-MONOTONIC"),
+        # price structure (12) - panel verdict REDUNDANT (every measured leg
+        # dropped). Rule 1 rescue: keltner_pct (ic_ir 2.96), the strongest of
+        # the same-category bollinger_pct_b/keltner_pct pair. Retired:
+        # bollinger_pct_b (redundant with keltner_pct), fib_zone (WEAK,
+        # unpaired), max_pain_dist_atr (WEAK, unpaired). near_sma200 was never
+        # dropped by the run (tie-collapsed boolean, IC withheld) and stays.
         _c("keltner_pct", "price_structure", "higher_better", "technical_factors.keltner_channel:440", "NON-MONOTONIC"),
         _c("near_sma200", "price_structure", "higher_better", "value_dip.support_structure:833", "1 = within 3% of the 200-SMA"),
-        _c("fib_zone", "price_structure", "higher_better", "swing.fib_levels:295"),
-        _c("max_pain_dist_atr", "price_structure", "lower_better", "derivatives_gamma.max_pain:184 (abs distance / ATR)",
-           "0 = spot sits on the monthly max-pain strike"),
-        # volume (10)
-        _c("rvol", "volume", "higher_better", "momentum.rvol:25"),
-        _c("elder_ratio", "volume", "higher_better", "technical_factors.elder_thermometer:649", "NON-MONOTONIC"),
+        # volume (10) - panel verdict SURVIVES. Kept: cmf. Retired: rvol,
+        # elder_ratio (the same-category rvol/elder_ratio pair, both dropped),
+        # volume_dry_up (WEAK, unpaired).
         _c("cmf", "volume", "higher_better", "extended_indicators.chaikin_money_flow:263"),
-        _c("volume_dry_up", "volume", "higher_better", "value_dip.volume_dry_up:603"),
-        # breakout / pullback (10)
-        _c("vcp_candidate", "breakout", "higher_better", "swing.vcp_setup:342"),
+        # breakout / pullback (10) - panel verdict SURVIVES. Kept:
+        # near_breakout. Retired: pullback_candidate (WEAK, unpaired),
+        # trigger_candle (WEAK, unpaired), vcp_candidate (IC withheld,
+        # tie-collapsed boolean; the SAME producer as the survivor
+        # swing.vcp_setup:342, so it is redundant with near_breakout).
         _c("near_breakout", "breakout", "higher_better", "swing.vcp_setup:342"),
-        _c("pullback_candidate", "breakout", "higher_better", "swing.pullback_setup:161"),
-        _c("trigger_candle", "breakout", "higher_better", "value_dip.trigger_candle:661"),
         # The Donchian breakout STATE (technical_factors.donchian_channel:
         # breakout_up/dn + persistence_up/dn) until now reached no category. Fed
         # via ``values`` or the ``donchian`` keyword of ``technical_score``.
+        # MF-6: UNMEASURED on the 2026-09-27 panel (no panel row carries it) and
+        # unpaired - RETAINED with that reason, never dropped silently.
         _c("breakout_persistence", "breakout", "higher_better",
            "technical_factors.donchian_channel (persistence_up - persistence_dn)"),
-        # mean reversion (8)
+        # mean reversion (8) - panel verdict SURVIVES. Kept: stoch_rsi,
+        # obv_bullish_div. Retired: rsi2 (WEAK, unpaired), hurst (WEAK,
+        # unpaired), williams_r (redundant with stoch_k/rsi/keltner_pct/
+        # bollinger_pct_b; ceded to the surviving oscillator stoch_rsi).
         _c("stoch_rsi", "mean_reversion", "higher_better", "technical_factors.stoch_rsi:374", "NON-MONOTONIC"),
-        _c("rsi2", "mean_reversion", "higher_better", "technical_factors.rsi2:406", "NON-MONOTONIC"),
-        _c("williams_r", "mean_reversion", "higher_better", "technical_factors.williams_r:429", "NON-MONOTONIC"),
-        _c("hurst", "mean_reversion", "lower_better", "mean_reversion.hurst_exponent:113", "H<0.5 is mean-reverting"),
         _c("obv_bullish_div", "mean_reversion", "higher_better", "technical_factors.obv_divergence:542"),
-        # volatility (5) - risk-increasing, so every leg is lower_better
-        _c("atr_pct", "volatility", "lower_better", "size.atr:143 / last close"),
-        _c("vol_percentile", "volatility", "lower_better", "regime.vol_percentile:59"),
+        # volatility (5) - risk-increasing, so every leg is lower_better.
+        # Panel verdict REDUNDANT (every measured leg dropped). Rule 1 rescue:
+        # sqrt_rs_minus (ic_ir -4.74 STRONG), the stronger half of the
+        # same-category atr_pct/sqrt_rs_minus pair. Retired: atr_pct (redundant
+        # with sqrt_rs_minus), vol_percentile (UNMEASURED - no panel row carries
+        # it and the run's leaf never emits it; unpaired, so it is retired with
+        # that reason rather than left holding a 2-of-2 floor it cannot meet).
         _c("sqrt_rs_minus", "volatility", "lower_better", "volatility_models.semivariance:68"),
-        # breadth (5)
+        # breadth (5) - panel verdict REDUNDANCY_ONLY: the run dropped NOTHING
+        # here (all four legs are tie-collapsed booleans with IC withheld, so
+        # none was refuted), so all four stay. `zweig_thrust` is a distinct
+        # producer from the three market_breadth rates.
         _c("pct_above_50d", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
         _c("pct_above_200d", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
         _c("ad_ratio", "breadth", "higher_better", "strategies/market_breadth.py::market_breadth"),
@@ -226,6 +219,52 @@ COMPONENTS: dict[str, Component] = {
            "own event (\u00a7120) is the EMA rising 0.40 -> 0.615 within 10 bars, "
            "so the ramp below is that magnitude"),
     )
+}
+
+# --- The MF-6 retirement ledger (owner decision 2026-09-27) ----------------
+#
+# "trim legs, keep the vector": every entry below is a leg the 2026-09-27
+# score-panel run (37 dates x 149 names, 2026-08-06..2026-09-25) retired from a
+# category, with the surviving leg it duplicated, or the evidence that retired
+# it when it had no redundancy partner. Kept as data so a reader - and
+# `tests/test_technical_score.py` - can tell a retired leg from one that was
+# never declared, and so NOT ONE leg was dropped silently. `CATEGORY_WEIGHTS`
+# is untouched: a category keeps at least one leg, so no weight is renormalised.
+RETIRED_COMPONENTS: dict[str, str] = {
+    # trend - redundant with the retired golden_cross block, whose own
+    # cross-category duplicate is relative_strength/rs_slope_pct (surviving).
+    "above_sma200": "redundant with golden_cross (trend block); ceded to the surviving trend producers sma_stack/aroon_osc",
+    "golden_cross": "redundant with rs_slope_pct (relative_strength) - the surviving side of the cross-category trend<->RS overlap",
+    "ichimoku_above_cloud": "redundant with golden_cross (trend block); ceded to the surviving trend producers sma_stack/aroon_osc",
+    "di_spread": "redundant with rsi (momentum); ceded to the surviving momentum producer momentum_12_1",
+    "adx": "WEAK (ic_ir 1.42, cpcv_overfit); no redundancy partner, no panel support",
+    # momentum
+    "rsi": "redundant with stoch_k / bollinger_pct_b / keltner_pct (the oscillator cluster); ceded to momentum_12_1",
+    "stoch_k": "redundant with rsi / williams_r (the oscillator cluster); ceded to momentum_12_1",
+    "mfi": "WEAK (ic_ir -1.09), unpaired",
+    "roc20": "redundant with rsi; ceded to momentum_12_1",
+    "macd_hist_pct": "WEAK (ic_ir -2.52, cpcv_overfit), unpaired",
+    # relative strength
+    "rs_above_sma": "redundant with golden_cross|rs_above_sma; ceded to the surviving relative_strength producer rs_slope_pct",
+    # price structure
+    "bollinger_pct_b": "redundant with keltner_pct (price_structure); ceded to keltner_pct",
+    "fib_zone": "WEAK (ic_ir 1.45), unpaired",
+    "max_pain_dist_atr": "WEAK (ic_ir 0.77), unpaired",
+    # volume
+    "rvol": "redundant with elder_ratio (volume pair, both dropped); ceded to the surviving volume producer cmf",
+    "elder_ratio": "redundant with rvol (volume pair, both dropped); ceded to cmf",
+    "volume_dry_up": "WEAK (ic_ir -0.71), unpaired",
+    # breakout
+    "vcp_candidate": "IC withheld (tie-collapsed boolean); same producer as near_breakout (swing.vcp_setup:342), the survivor",
+    "pullback_candidate": "WEAK (ic_ir 1.87), unpaired",
+    "trigger_candle": "WEAK (ic_ir -0.67), unpaired",
+    # mean reversion
+    "williams_r": "redundant with stoch_k/rsi/keltner_pct/bollinger_pct_b; ceded to the surviving mean_reversion oscillator stoch_rsi",
+    "rsi2": "WEAK (ic_ir -2.31), unpaired",
+    "hurst": "WEAK (ic_ir 0.56), unpaired",
+    # volatility
+    "atr_pct": "redundant with sqrt_rs_minus (volatility); ceded to sqrt_rs_minus",
+    "vol_percentile": "UNMEASURED - no panel row carries it and the run's leaf never emits it; unpaired",
 }
 
 CATEGORY_COMPONENTS: dict[str, tuple[str, ...]] = {
@@ -649,6 +688,7 @@ __all__ = [
     "CATEGORY_ORDER",
     "CATEGORY_COMPONENTS",
     "COMPONENTS",
+    "RETIRED_COMPONENTS",
     "Component",
     "BANDS",
     "RAMPS",
