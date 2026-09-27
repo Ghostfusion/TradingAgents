@@ -163,7 +163,7 @@ the plan and the only ones that cost nothing but attention.
 | --- | --- |
 | Two `## V.` headings in `complete_report.md` — the advisory engine-detail block and the Portfolio Manager decision both claimed section V | The detail block is now `## IVc. Engine score detail (advisory)`, beside `IVa`/`IVb`; the decision keeps `V`. Fixed with a failing-first test (mutation proved, source restored byte-identical) |
 | `docs/design_security_context.md` §20.3 counted the gate registry against 88 keys (now 112) and 40 rows (now 64) | Dated `[CORRECTED 2026-09-26]` marker with the re-counted numbers; the unregistered 48 is unchanged |
-| `README.md` §3.2 defects 3, 4 and 5 — the Donchian flags, the PSAR flag and `net_beta` | Dated `[CORRECTED 2026-09-26]` markers: the first two are fixed and the callers prove it (§3.1 agrees); the third is a missing **writer**, not a missing producer — the engine computes a book beta and the executor's `BookState` never receives it |
+| `README.md` §3.2 defects 3, 4 and 5 — the Donchian flags, the PSAR flag and `net_beta` | Dated `[CORRECTED 2026-09-26]` markers: the first two are fixed and the callers prove it (§3.1 agrees); the third is a missing **writer**, not a missing producer — the engine computes a book beta and the executor's `BookState` never receives it. **[UPDATED 2026-09-27: the writer shipped with RISK-4/PLAN-7 — `BookState.net_beta` now takes the artifact's value (`gates.build_context`); the artifact's value is itself `null` by decision, see the RISK-4/PLAN-7 row.]** |
 | `CompositeTradeScore.md` §3.5/§6 Q3 cited "decision 12" for the coverage question | Corrected in place: the panel's coverage question is owner Q4's label plus that document's own Q3; `IMPLEMENTATION_PLAN.md` §13 Q12 is the semivariance measure |
 
 ### 3.2 To correct
@@ -396,6 +396,34 @@ same rows - the panel *is* those producers' source, so the panel reports them
 (`report["factor_agreement"]`, printed as one summary line and the per-name blocks).
 This is also what makes the two producers reachable outside their module, which
 `tests/test_calc_agent_wiring.py` requires.
+
+**Measured 2026-09-27 - the window extended to the most recent session (MF-4's evidence, MF-6's).**
+`scripts/score_panel.py` over the same 149-name sample, dates 2026-08-06..**2026-09-25**, into
+`~/.tradingagents/cache/panels_edgar`: 30 dates were already cached and are skipped by the per-date
+contract, **7 new panels** fetched (2026-09-07, 09-18, 09-21..09-25), **37 panels** in the root, exit 0
+(462 s). Headline readings, from the run's own output:
+
+* **MF-4's acceptance is met for the engines that have a vector.** Every such engine prints its
+  `CATEGORY_WEIGHTS` with the measured evidence beside it - `technical_score` **41 of 43** factors,
+  `fundamental_score` **24 of 28** on its equal `0.25/0.25/0.25/0.25` table. Both stay `[RESEARCH_ONLY]`:
+  the panel *measures* the table and never revises it, and promotion is `FUND-24`/`RLW-4`'s evidenced
+  ladder plus the owner's signature.
+* **MF-6's evidence is in hand, and it is per-category rather than per-pair.** `technical_score`'s table
+  prints a verdict per category: **survive** - `momentum` (only `momentum_12_1` survives; `macd_hist_pct`,
+  `mfi`, `roc20`, `rsi`, `stoch_k` drop), `trend` (`aroon_osc`, `sma_stack`), `breakout` (`near_breakout`),
+  `mean_reversion` (`obv_bullish_div`, `stoch_rsi`), `volume` (`cmf`); **redundant, every leg dropped** -
+  `relative_strength` (`rs_above_sma`, `rs_slope_pct`), `price_structure` (`bollinger_pct_b`, `fib_zone`,
+  `keltner_pct`, `max_pain_dist_atr`), `volatility` (`atr_pct`, `sqrt_rs_minus`); **redundancy-only** -
+  `breadth`. Three categories carrying **32 of the 100 points** are wholly redundant on this panel, and the
+  8 pairs at |rho| >= 0.80 `MEASUREMENT_FINDINGS.md` section 2 recorded now have a category-level
+  consequence. **The revised `CATEGORY_WEIGHTS` still needs the owner's signature** - this records the
+  evidence, it does not act on it.
+* **The two redundancy matrices**: `technical_trend_momentum_relative_strength` **136 pairs**, max |rho|
+  0.933, mean 0.355; `fundamental_fcf_yield_cluster` **6 pairs**, max |rho| 0.930.
+* **The 0-measured engines reproduce with their reasons** - `risk_score` 0 of 34 and `sentiment_score`
+  0 of 18 (the `MF-8` conclusion, reached independently twice now), `regime_score` 0 of 6 and `news_score`
+  0 of 11 (no declared table on the panel path), and `event_state` **0 of 13** with none declared -
+  `EVT-9`'s column reporting `measured: False` with reasons rather than a fabricated score.
 
 **Still open in this phase**: MF-5 (9 of 11 `news_score` components on the live
 per-symbol path), MF-8 (`risk_score`/`sentiment_score` panel path — structurally
@@ -684,7 +712,7 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | --- | --- | --- | --- |
 | NEWS-3 | 1 | the component stops printing NA | **MET 2026-09-27** — `analysis_tools._news_components` now calls it behind its own gate: `benzinga.guidance_revision_rows` (the new structured producer, one fetch, two readers) -> `news_score.guidance_change_score`, feeding the SIGNED midpoint change (the engine's ramp), not the aligned score. Live: absent with the gate off (the declared reason), which is the honest state |
 | NEWS-4 | 1 | the component stops printing absent | **MET 2026-09-27** — `sec_edgar.recent_filing_forms` (new structured producer behind `get_sec_filings`) -> `corporate_events_score`, windowed so a historical run cannot read a filing filed after its trade date. Live MSFT 2026-09-25: `corporate_events = 75.0` (the 8-K typing), and the component is no longer in the absent set |
-| RISK-4 / PLAN-7 | 1 | an assignment at a `BookState(...)` site | **DECIDED 2026-09-27 (owner: extend `research_decision.json`)** — the engine writes its book beta (`book_risk.net_beta`, already emitted as `net_beta_raw`/`net_beta` by `cross_section.py:470-471`) into the decision payload and the executor reads it at its `BookState(...)` sites. That is a versioned-contract change, so it lands as its own step rather than inside a docs pass - **scoped 2026-09-27:** the field does NOT go in `execution_contract.risk_advisory`'s block, whose contract states the executor never reads a number out of it; it is a new envelope field beside `producer`/`body_sha256`, which means `tradingagents/execution_contract.py` (a MINOR bump from `1.1.0`), the vendored `contracts/research_decision.v1.schema.json` the emitter test asserts against, `../TradingExecution/signald/schema.py`'s parse/validate, and the `BookState(...)` sites that would finally populate `net_beta`. The value itself already exists engine-side (`book_risk.net_beta`, emitted as `net_beta_raw`/`net_beta` by `cross_section.py:470-471`), so no new computation is needed |
+| RISK-4 / PLAN-7 | 1 | an assignment at a `BookState(...)` site | **MET 2026-09-27, `net_beta` null by decision** - the owner's scoped change landed in one pass across both repos: the field is a NEW **envelope** key (never inside `risk_advisory`), `tradingagents/execution_contract.py` bumped `SCHEMA_VERSION` 1.1.0 -> 1.2.0 and `envelope_fields()` emits `net_beta` + `net_beta_reason` (`NET_BETA_REASON`), the vendored `contracts/research_decision.v1.schema.json` (and the executor's byte-identical published copy) declares both, `../TradingExecution/signald/schema.py` parses/validates `net_beta` into `ResearchDecision.net_beta`, and `gates.build_context` carries it onto `BookState.net_beta` (`engine.book_with_trades` propagates it; `None` when the artifact omits it, never `0.0`). **Discovery (verbatim): `final_state` CANNOT carry the engine's real book beta.** The engine's book for the risk path is the configured risk basket (`risk_basket_tickers`/`risk_basket_weights`, resolved by `book_context.configured_basket` and `trading_graph._basket_cvar`/`_basket_drawdown`), and no producer computes per-name betas for it; `book_risk.net_beta:179` has exactly one caller, `cross_section.momentum_book:491-492`, reached only by the advisory `get_cross_section_momentum` tool - a hypothetical long/short panel book, not the engine's book, and it never enters `final_state`. So the slot ships `null` beside `net_beta_reason`, exactly as `opportunity_score` does. **Named blocker (not a fabricated number):** a per-name beta resolver over the configured risk basket would have to exist before `net_beta` can carry a real value |
 | FUND-8 | 1 | `normalized_cycle_fcf` gains `std` | **MET 2026-09-27** — `cycle_dcf.normalized_cycle_fcf` returns the sample σ beside `median/min/max/mean` (never a fabricated 0: `None` below the 3-year floor), and `get_normalized_cycle_dcf` prints it as `sd=`. A wide cycle and a flat one can share a median; only the dispersion separates them |
 | FUND-21 | 1 | the leaf passes both; VS carries the factor | **MET 2026-09-27 on the outcome, by a better route** — VS carries the confidence-scaled factor for the whole panel through `_engine_dcf_upside` (`fundamental_score.py:750`), which derives it from the financials the resolver already fetched; a caller-supplied DCF remains the FIRST route and stays available, but making each of the three callers compute its own DCF would be three extra fetches for a number the engine already derives. The literal cell (a live caller passes both) is superseded, not unmet |
 | PLAN-3 | 1 | a grep for the key **and** a run's `research_decision.json` | **closed 2026-09-27**: `reports/MSFT_20260927_001700/research_decision.json:193` carries `"opportunity_score_reason": "null by decision, not by failure: …"` beside `opportunity_score: null`. Every other tree in `reports/` predates the field, which is what kept this row open |
@@ -803,8 +831,10 @@ are items above, with their ids.
 | 10 | `_render_news_score` labels its absent list "NA with a reason" and lists components that carry none | Phase 4 |
 
 Two further findings that are **not** defects: `book_risk.net_beta` has a producer
-and no executor writer (RISK-4/PLAN-7), and `overlays`' 3-valued `vol_pct` is a
-recorded limitation (REG-1).
+and no executor writer (RISK-4/PLAN-7) — **[CLOSED 2026-09-27: the
+writer shipped; `BookState.net_beta` takes the artifact's `net_beta`, which is
+`null` by decision until a configured-basket beta producer exists]**, and
+`overlays`' 3-valued `vol_pct` is a recorded limitation (REG-1).
 
 ---
 
@@ -816,7 +846,7 @@ item or a note on the item it affects.
 | Contradiction | Both sides |
 | --- | --- |
 | The Donchian breakout | `README.md` §3.1 "fixed" vs §3.2 "unreachable"; `ScoreUniverse.md` §3 repeats the stale side |
-| `net_beta` | `README.md` §3.1 "fixed" (the default) vs `ScoreUniverse.md` §4 "a dead field"; the truth is a producer with no executor writer |
+| `net_beta` | `README.md` §3.1 "fixed" (the default) vs `ScoreUniverse.md` §4 "a dead field"; the truth is a producer with no executor writer — **[UPDATED 2026-09-27: the executor writer shipped (RISK-4/PLAN-7); the artifact value is `null` by decision, so the field is still never a measured number]** |
 | `WP-12` | `README.md` §7 "not yet built" vs `IMPLEMENTATION_PLAN.md`'s own workstream naming and the wired tree |
 | The wide panel | `MEASUREMENT_FINDINGS.md` §4 "no wide panel run has been done yet" vs one 286-name EDGAR-basis date on disk |
 | The panel's fundamentals leg | `IMPLEMENTATION_PLAN.md` §3.2 (SEC XBRL) vs §15's P0-2 row (EODHD bulk) |

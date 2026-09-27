@@ -20,6 +20,9 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 - **Recorded, no code:** MF-8 closed permanently (risk/sentiment inputs are book-level and per-symbol vendor reads, so the wide panel cannot carry them); NEWS-15 closed (all four dark flags stay off by default with their reasons in the gate registry, `.env` left to the owner); EVT-9 decided (EventScore is a 0-100 score, so it joins the panel); RISK-4/PLAN-7 decided (the engine's `net_beta` rides in `research_decision.json`, an executor-schema change that lands as its own step).
 - **Web impact: none** — two component legs and one declaration; no tool, flag, gate, env key or JSON shape moved.
 
+**RISK-4/PLAN-7 landed: the `net_beta` envelope field, null by decision (2026-09-27).** The owner scoped `book_risk.net_beta` into `research_decision.json` as a NEW **envelope** key (never inside `risk_advisory`'s block, whose contract says the executor never reads a number out of it). This repo bumps `execution_contract.SCHEMA_VERSION` `1.1.0 -> 1.2.0`, `envelope_fields()` emits `net_beta` + `net_beta_reason` (`NET_BETA_REASON`), and the vendored `contracts/research_decision.v1.schema.json` (and the executor's byte-identical published copy) declares both; `integrity_problems()` gains the companion rule (a present `net_beta` must carry its reason) and a number/finiteness check. **Discovery: `final_state` cannot carry the engine's real book beta.** The engine's book for the risk path is the configured risk basket (`risk_basket_tickers`/`risk_basket_weights`, resolved by `book_context.configured_basket` and `trading_graph._basket_cvar`/`_basket_drawdown`) and no producer computes per-name betas for it; `book_risk.net_beta:179` has exactly one caller, `cross_section.momentum_book:491-492`, reached only by the advisory `get_cross_section_momentum` screen - a hypothetical long/short panel book that never enters `final_state`. So the slot ships `null` beside its producer-owned reason, exactly as `opportunity_score` does: a fabricated beta would be worse than a missing one in a contract the executor fails closed on. Executor side: `signald/schema.py` parses/validates `net_beta` into `ResearchDecision.net_beta` and `gates.build_context` carries it onto `BookState.net_beta` (`None` when the artifact omits it, never `0.0`). **Named blocker:** a per-name beta resolver over the configured risk basket must exist before `net_beta` can carry a measured value.
+- **Web impact: none** — one additive envelope key in `research_decision.json`; no tool, flag, gate, env key or screener column changed, and the web app does not read the artifact.
+
 **The cluster-exposure share producer, executor side (RISK-7/RISK-12, 2026-09-27).** `risk_score.CATEGORIES` declares `cluster_exposure_share` against the board's own arithmetic — `cluster_notional / equity` — and nothing returned it, so the number stayed an externally supplied input. `../TradingExecution/signald/risk/state.py::BookState.cluster_exposure_share` (executor `a2e74c0`) is that producer: the largest cluster's share of book equity by default, a named cluster's share on request, on the same 0..1 scale as `portfolio_hhi` and never `ownership_hhi`'s 0-10000. It is the pinned PROXY, not a correlation coefficient, and returns `None` — never `0.0` — when equity is unmeasurable or the key maps to no position.
 
 - The engine's declaration now names that method and its real divisor; it previously cited `executor gate._correlation_stress:369 (cluster_notional / portfolio_exposure)`, and the divisor is equity. The gate's own per-key cap arithmetic is unchanged.
@@ -147,6 +150,17 @@ written. The web path needs no separate test: `backend/capabilities.py` calls `b
 the split. No behaviour changed.
 
 ### Changed
+**The measurement panel now reaches the latest session, and its readings are recorded (2026-09-27).**
+`scripts/score_panel.py` over the same 149-name sample, 2026-08-06..2026-09-25, into
+`~/.tradingagents/cache/panels_edgar`: 7 new panels (2026-09-07, 09-18, 09-21..09-25), 37 in the root, exit 0.
+`technical_score` measures **41 of 43** factors and `fundamental_score` **24 of 28** on its equal table (both
+`RESEARCH_ONLY`); the technical category table now prints a per-category verdict, and three categories holding
+**32 of the 100 points** (`relative_strength`, `price_structure`, `volatility`) are wholly redundant on this
+panel while `breadth` is redundancy-only - the 8 pairs `MEASUREMENT_FINDINGS.md` recorded, now with a
+category-level consequence. `risk_score` 0 of 34 and `sentiment_score` 0 of 18 reproduce the panel-incompatible
+conclusion independently. No weight was promoted and no declared table revised: MF-6's reduction still needs
+the owner's signature. **Web impact: none.**
+
 **EVT-1 closed by decision: EventScore keeps its equal-weight 0-100 score (2026-09-27).** No per-family
 impact/severity vector is supplied. The reason is EVT-9's own: the families are event-driven and mostly report
 `measured: False` with their own reasons, so a declared per-family weight table would be precision the coverage
