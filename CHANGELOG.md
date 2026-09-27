@@ -135,6 +135,17 @@ Verification: `tests/test_strategies_covariance_models.py` 11 passed,
 candidate intensities from the panel and asserts the returned shrinkage equals the corrected form and that the
 matrix is that intensity's convex combination (max |cov − expected| = 1.4e-20).
 
+### Added
+**Tests for the per-worker memory isolation (2026-09-27).** `batch._per_symbol_memory_path` is what keeps two
+concurrent workers from interleaving a read-modify-write cycle in one memory file - it was implemented and
+documented (`docs/developer/07-persistence.md` 7.1) with *nothing* proving it, which is the shape the
+gate-registry rule exists to prevent. Three tests now pin the behaviour: two symbols derive two distinct files
+in the shared directory (never the shared file itself, and legal non-bare symbols like `BRK.B` resolve), a
+traversing symbol is refused by the path sanitiser rather than escaping the directory, and two
+`TradingMemoryLog`s on those paths each see only their own entries while the shared default file is never
+written. The web path needs no separate test: `backend/capabilities.py` calls `batch.analyze`, so it inherits
+the split. No behaviour changed.
+
 ### Changed
 **EVT-9: EventScore is a scored engine, and the panel carries its column (2026-09-27).** `event_state` returns a 0-100 `{score, band, coverage, families}`, which is what the owner's decision affirmed — so it moved out of `scripts/score_panel.py::ENGINE_NOT_SCORED` (now empty, kept as data so the old claim's reader finds the correction) and into `ENGINE_MODULES`. The registry now lists it with its declared component table and its producers, and the panel carries its column. Its factors are event-driven, so on a price/fundamentals panel they report `measured: False` **with their own reasons** rather than a number nobody measured — the engine's own 0-100 read still comes from the run's snapshot. **Web impact: none.**
 

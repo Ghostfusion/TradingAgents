@@ -5,7 +5,11 @@ These are the on-disk pieces that survive a run.
 ## 7.1 Memory log
 
 - Location: `~/.tradingagents/memory/trading_memory.md` (or
-  `TRADINGAGENTS_MEMORY_LOG_PATH`). Batch symbols get per-symbol memory files.
+  `TRADINGAGENTS_MEMORY_LOG_PATH`). Batch symbols get per-symbol memory files
+  (`batch._per_symbol_memory_path`, same folder, one file per symbol), which is what
+  keeps two concurrent workers from interleaving a read-modify-write cycle in one
+  file. Proved by `tests/test_batch_workers.py::test_two_workers_memory_logs_do_not_see_each_others_entries`;
+  the interactive CLI keeps the single shared file, which is correct for one run.
 - `TradingMemoryLog` (markdown append-only). Entries:
   `[date | TICKER | rating | pending]` -> resolved to
   `[date | TICKER | rating | resolved-return | alpha-vs-benchmark]` on a later
