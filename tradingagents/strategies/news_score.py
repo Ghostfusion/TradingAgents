@@ -119,8 +119,10 @@ ABSENT_REASONS: dict[str, str] = {
         "change); never fake it from the EPS estimate"
     ),
     "regulatory_legal": (
-        "no regulatory-action classifier; only an unscaled, undirected litigious "
-        "word count exists, so the category is withheld rather than scored"
+        "the classifier EXISTS (`news_score.tag_category_read`, NEWS-5) but is not "
+        "wired: this component's declared ramp is (0.0, 0.05) while the producer "
+        "returns a 0-1 share, so feeding it needs a rescale decision - the category "
+        "is withheld rather than scored on a scale nobody declared"
     ),
     "industry_shock": (
         "no per-name industry-shock producer; market/sector breadth is a "

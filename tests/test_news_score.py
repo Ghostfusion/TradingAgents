@@ -387,7 +387,7 @@ def _silence_leaf(monkeypatch) -> None:
     resolve a CIK over the network. Individual tests override the leg under test.
     """
     from tradingagents.agents.utils import analysis_tools as at
-    from tradingagents.dataflows import config as cfg_mod, sec_edgar
+    from tradingagents.dataflows import config as cfg_mod, sec_edgar, yfinance_sector
     from tradingagents.strategies import analyst_revisions as ar
 
     monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
@@ -395,6 +395,8 @@ def _silence_leaf(monkeypatch) -> None:
     monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
     monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
     monkeypatch.setattr(sec_edgar, "recent_filing_forms", lambda *a, **k: [])
+    # the sector label resolves over a vendor chain (FMP -> Finnhub -> yfinance)
+    monkeypatch.setattr(yfinance_sector, "fetch_sector", lambda *a, **k: None)
     monkeypatch.setattr(cfg_mod, "get_config", lambda: {"enable_benzinga_surface": False})
 
 
@@ -712,3 +714,34 @@ def test_guidance_change_refuses_without_a_prior_range() -> None:
     assert forward_only["score"] is None
     assert "prior range" in forward_only["reason"]
     assert guidance_change_score([])["score"] is None
+
+
+def test_the_industry_shock_leg_is_the_sector_relative_move(monkeypatch) -> None:
+    """NEWS-7: the leg is measured against the ticker's SECTOR ETF, not breadth."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import yfinance_sector
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        yfinance_sector, "fetch_sector", lambda *a, **k: "Technology"
+    )
+    # the stock's daily returns beat a flat sector's, with dispersion to
+    # standardise against
+    stock = [100.0, 103.0, 102.0, 106.0, 105.0, 110.0]
+    sector = [100.0] * 6
+    monkeypatch.setattr(
+        at,
+        "_closes_upto",
+        lambda ticker, end: stock if ticker == "SHOCK" else sector,
+    )
+
+    vals = at._news_components("SHOCK", "2026-09-04", days=5)
+    assert vals["industry_shock"] > 0
+
+
+def test_the_industry_shock_leg_stays_absent_without_a_resolvable_sector(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)  # fetch_sector -> None
+
+    assert "industry_shock" not in at._news_components("SHOCK", "2026-09-04")

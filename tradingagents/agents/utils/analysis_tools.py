@@ -7150,6 +7150,24 @@ def get_sentiment_score(
 # --- WP-6: NewsScore -------------------------------------------------------
 
 
+def _closes_upto(ticker: str, end: str) -> list:
+    """`_ohlcv`'s closes with every bar AFTER ``end`` dropped.
+
+    `_ohlcv` serves the newest bars the vendor has, which on a historical run
+    includes dates the trade date could not have seen; every caller that reads a
+    *series* for a dated window has to slice it. Returns the closes unchanged when
+    the frame carries no usable date column (a shorter read is the failure mode,
+    never a longer one).
+    """
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    dates = data.get("dates") or []
+    if not dates or len(dates) != len(closes):
+        return list(closes)
+    day = str(end)[:10]
+    return [c for d, c in zip(dates, closes, strict=False) if str(d)[:10] <= day]
+
+
 def _news_components(
     ticker: str,
     current_date: str | None,
@@ -7175,10 +7193,14 @@ def _news_components(
     vocabulary (`sec_edgar.recent_filing_forms`) and guidance change from the
     Benzinga guidance rows (behind `enable_benzinga_surface`, default off).
 
-    The three categories with no supplier (fundamental impact, regulatory/legal,
-    industry shock) stay absent and the engine prints `NA` with its reason, never
-    0. `materiality` and `guidance_change` are declared absent because they have
-    a gate or a snapshot dependency, not because nothing produces them.
+    The **industry shock** leg is measured against the ticker's sector ETF
+    (`news_score.industry_shock`), with every bar after the trade date dropped.
+
+    The two categories with no supplier (fundamental impact, regulatory/legal -
+    the latter has the NEWS-5 classifier but not a declared scale) stay absent
+    and the engine prints `NA` with its reason, never 0. `materiality` and
+    `guidance_change` are declared absent because they have a gate or a snapshot
+    dependency, not because nothing produces them.
     """
     from datetime import date, timedelta
 
@@ -7312,6 +7334,35 @@ def _news_components(
         if events.get("score") is not None:
             vals["corporate_events"] = events["score"]
     except Exception:  # noqa: BLE001
+        pass
+    # NEWS-7: the industry-shock leg - the stock's summed excess return over its
+    # SECTOR ETF across the news window. The label->ETF map is the same one
+    # `get_relative_strength` uses (one source of truth), and every bar after
+    # `end` is dropped, so a historical run cannot read a bar it could not have
+    # seen (the `_closes_upto` guard).
+    #
+    # NOT wired by the same producer: `regulatory_legal` (NEWS-5). Its declared
+    # ramp is `(0.0, 0.05)` while `tag_category_read` returns a 0-1 share, so
+    # feeding it would need a scale conversion - and inventing one is the owner's
+    # call, not this leaf's. The producer exists and is tested; the ramp is the
+    # open item.
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_sector
+        from tradingagents.strategies.news_score import industry_shock
+        from tradingagents.strategies.sector_rank import sector_group_of
+
+        etf = sector_group_of(fetch_sector(ticker))
+        if etf:
+            stock_closes = _closes_upto(ticker, end)
+            sector_closes = _closes_upto(etf, end)
+            if len(stock_closes) > days and len(sector_closes) > days:
+                shock = industry_shock(
+                    _daily_returns(stock_closes[-(days + 1) :]),
+                    _daily_returns(sector_closes[-(days + 1) :]),
+                )
+                if shock.get("abnormal") is not None:
+                    vals["industry_shock"] = shock["abnormal"]
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
         pass
     # Guidance change needs the Benzinga surface (default off). The value the
     # engine ramps is the SIGNED relative midpoint change, not the aligned score;
