@@ -40,14 +40,17 @@ Seven rules this module exists to hold:
    kernel's declared min/max form, which is the mapping every other engine in
    this repo uses. The choice, the section and the declined alternative are
    recorded in `docs/scores/MomentumScore.md`.
-6. **The composite weight vector is the library's own §47 example, and it is
-   NOT owner-signed.** §47 prints *"For example: 0.25M_price + 0.20M_trend +
+6. **The composite weight vector is the library's own §47 example, RATIFIED
+   by the owner on 2026-09-27.** §47 prints *"For example: 0.25M_price + 0.20M_trend +
    0.15M_relative + 0.10M_acceleration + 0.10M_volume + 0.10M_quality +
    0.05M_breakout + 0.05M_riskadj"* - an illustrative, self-consistent vector
    summing to 1.0. §54 leaves the weights symbolic. This module therefore
-   declares the library's own example as :data:`LEG_WEIGHTS`, prints the vector
-   it used in ``basis``, and **flags it as pending the owner's ratification**:
-   the composite is `RESEARCH_ONLY` and no value here was invented.
+   declares the library's own example as :data:`LEG_WEIGHTS` and prints the
+   vector it used in ``basis``. The owner was asked to ratify those exact
+   numbers and did, so the table is now an **owner-signed declared table** rather
+   than a proposal; no value was ever invented. The composite nonetheless stays
+   `RESEARCH_ONLY`, because ratification of the *weights* is not the WP-10
+   *measurement* the `VALIDATED` rung requires.
 7. **Nothing here sizes, gates, ratings or reaches `SCORE_BANDS`.** The bands are
    the library's own descriptive §49 bands (*"descriptive score bands, not
    trading recommendations"*), never `decision_guardrail.SCORE_BANDS`.
@@ -79,9 +82,10 @@ from .score_engine import align, combine, coverage_floor
 #: §54's leg symbols, in the order the library prints them.
 LEG_ORDER: tuple[str, ...] = ("P", "R", "T", "A", "B", "V", "Q", "D")
 
-#: The library's own §47 *"For example"* vector. It sums to 1.0. **Illustrative
-#: in the library and not owner-signed** - see rule 6 in the module docstring.
-#: Printed in every result's ``basis`` so a reader always sees the vector used.
+#: The library's own §47 *"For example"* vector, which sums to 1.0. It is
+#: **ratified by the owner (2026-09-27)** and therefore a declared table, not an
+#: illustration - see rule 6 in the module docstring. Printed in every result's
+#: ``basis`` so a reader always sees the vector used.
 LEG_WEIGHTS: dict[str, float] = {
     "P": 0.25,  # M_price
     "R": 0.15,  # M_relative
@@ -694,8 +698,9 @@ def momentum_score(
         "status": STATUS_RESEARCH_ONLY,
         "weights": {k: float(w.get(k, 0.0) or 0.0) for k in LEG_ORDER},
         "weight_basis": (
-            "the library's §47 illustrative vector (pending the owner's "
-            "ratification - not an owner-signed table)"
+            "the library's §47 example vector, RATIFIED by the owner "
+            "2026-09-27 (owner-signed declared table; the composite stays "
+            "RESEARCH_ONLY until a WP-10 measurement)"
         ),
         "basis": res.get("basis"),
     }

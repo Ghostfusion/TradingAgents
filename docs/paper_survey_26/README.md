@@ -329,9 +329,12 @@ Each themed plan ends with its own line; those six, plus five the grounding work
    **`T^(H-1/2)` rescaling** to reach the drawdown governor. **[PARTLY ANSWERED 2026-09-24]** K1 and K2 have
    both landed: K1 scored-printed as planned, and K2 as the card's own documented fallback for an unanswered
    mandate - **report-only**, reaching the strategy-evaluation row while `risk_governor.govern`, `drawdown_gate`
-   and `book_context.measured_book_drawdown` stay untouched on the square-root-of-time convention. **The
-   governor question itself is still open:** it is the one line that would change a gate's output rather than
-   a report's, so it waits for you.
+   and `book_context.measured_book_drawdown` stay untouched on the square-root-of-time convention.
+   **[ANSWERED 2026-09-27] The governor leg stays unwired.** The mandate does **not** permit the
+   `T^(H-1/2)` rescaling to reach the drawdown governor, so the governor keeps the square-root-of-time
+   convention and the envelope stays the report-only read beside the realized `max_drawdown`. Nothing in
+   `risk_governor.govern`, `drawdown_gate` or `book_context.measured_book_drawdown` moves; the question is
+   closed rather than deferred.
 4. **Volatility (V):** whether **V6 + V2** land as a first pass, and whether **`VXV` and a HY-spread
    series** are worth adding to the vendor surface to enable V1's full state vector.
 5. **Cross-section (X):** whether **X3 + X6 + X2** land first, and whether the panel-scale items

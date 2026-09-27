@@ -307,10 +307,14 @@ def test_the_leaf_computes_and_renders_every_leg(monkeypatch):
     assert "basis:" in out
 
 
-def test_the_leaf_names_the_weights_as_pending_ratification(monkeypatch):
+def test_the_leaf_names_the_ratified_weights_and_keeps_the_status_honest(monkeypatch):
+    """The owner ratified §47's numbers on 2026-09-27, so the leaf must say the
+    table is owner-signed - and must STILL say RESEARCH_ONLY, because ratifying
+    the weights is not the WP-10 measurement the VALIDATED rung needs."""
     at = _enable(monkeypatch, on=True)
     out = at.get_momentum_score.invoke({"ticker": "TEST"})
-    assert "pending the owner's ratification" in out
+    assert "RATIFIED by the owner" in out
+    assert "pending the owner's ratification" not in out
     assert "RESEARCH_ONLY" in out
 
 

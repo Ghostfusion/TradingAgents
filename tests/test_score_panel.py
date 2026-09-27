@@ -80,7 +80,10 @@ from tradingagents.strategies import alpha_health
 
 DATES = [f"2026-09-{d:02d}" for d in range(1, 26)]
 UNIVERSE = [f"T{i:03d}" for i in range(120)]
-NOISE_METRICS = ("earnings_yield", "price_to_earnings", "adx", "roc20")
+# MF-6 (2026-09-27) retired `adx`/`roc20` from `technical_score.COMPONENTS`, and
+# `evaluate_panel` measures only DECLARED names, so the fixture's technical legs
+# have to be legs the engine still declares.
+NOISE_METRICS = ("earnings_yield", "price_to_earnings", "sma_stack", "momentum_12_1")
 
 
 def _truth(seed: int = 7) -> dict:
@@ -387,7 +390,7 @@ def test_a_planted_predictive_factor_has_a_high_rank_ic_and_a_monotone_decile_sp
 
 def test_pure_noise_produces_neither_a_high_ic_nor_a_monotone_spread():
     report = evaluate_panel(_planted_panel(_truth()), dates=DATES)
-    noise = report["factors"]["adx"]
+    noise = report["factors"]["sma_stack"]
     planted_ic = abs(report["factors"]["fcf_yield"]["rows"]["ic"]["mean_rank_ic"])
     assert abs(noise["rows"]["ic"]["mean_rank_ic"]) < 0.15
     assert abs(noise["rows"]["ic"]["mean_rank_ic"]) < planted_ic / 3
@@ -524,9 +527,10 @@ def test_the_redundancy_matrix_is_emitted_with_the_factor_names():
     matrix = report["redundancy"]
     names = {n for key in matrix["pairs"] for n in key.split("|")}
     assert matrix["n_measured"] >= 5
-    assert {"fcf_yield", "earnings_yield", "adx", "roc20"} <= names
+    assert {"fcf_yield", "earnings_yield", "sma_stack", "momentum_12_1"} <= names
     assert "close" not in names, "a price level is not a factor"
-    pair = matrix["pairs"]["adx|roc20"]
+    pair = next(v for k, v in matrix["pairs"].items()
+                if set(k.split("|")) == {"sma_stack", "momentum_12_1"})
     assert -1.0 <= pair["spearman"] <= 1.0
     assert pair["n"] == len(DATES) * len(UNIVERSE)
     assert pair["redundant"] is False
@@ -537,14 +541,16 @@ def test_the_trend_momentum_rs_block_is_reported_with_its_pairwise_correlations(
     # make the block's members one bet by construction, as the plan says they are
     for rows in panel.values():
         for _t, row in rows.items():
-            row["roc20"] = row["adx"] * 0.5
-            row["rsi"] = row["adx"] * -0.25 + 0.1
+            row["momentum_12_1"] = row["sma_stack"] * 0.5
+            row["rs_slope_pct"] = row["sma_stack"] * -0.25 + 0.1
     report = evaluate_panel(panel, dates=DATES)
     block = report["redundancy"]["blocks"]["technical_trend_momentum_relative_strength"]
     assert block["weight_share"] == 50.0
-    assert {"adx", "roc20", "rsi"} <= set(block["measured"])
+    assert {"sma_stack", "momentum_12_1", "rs_slope_pct"} <= set(block["measured"])
     assert block["n_pairs"] == 3, "three measured members -> three pairs"
-    assert abs(block["pairs"]["adx|roc20"]["spearman"]) >= 0.99
+    pair = next(v for k, v in block["pairs"].items()
+                if set(k.split("|")) == {"sma_stack", "momentum_12_1"})
+    assert abs(pair["spearman"]) >= 0.99
     assert block["redundant_pairs"], "a near-duplicate pair is flagged"
     assert block["max_abs_spearman"] >= REDUNDANT_ABS_CORR
     assert "trend + momentum + relative strength" in block["reason"]
@@ -879,8 +885,11 @@ def test_the_technical_leg_uses_the_runs_own_component_assembly(tmp_path, monkey
     rows = technical_rows_asof(["AAA", "BBB"], long_dates[-1], provider)
     assert at._ohlcv is original, "the run's bar source is restored"
     assert set(rows) == {"AAA", "BBB"}
-    assert len(rows["AAA"]) >= 25, "the real producers measure most components"
-    assert "adx" in rows["AAA"] and "rsi" in rows["AAA"]
+    assert len(rows["AAA"]) >= 12, (
+        "the real producers measure most of the trimmed leg set: 13 of the 18 "
+        "declared legs come off a name's own bars - the four breadth legs need "
+        "a panel and breakout_persistence is unmeasured")
+    assert "momentum_12_1" in rows["AAA"] and "sma_stack" in rows["AAA"]
     assert "breadth" not in str(rows), "market-wide breadth needs a panel, not a name"
     # and every value is a measurement, not a neutral 50
     from tradingagents.strategies.technical_score import COMPONENTS
@@ -908,7 +917,7 @@ def test_the_default_price_loader_does_not_recurse_into_the_bar_patch(monkeypatc
     assert provider._loader is stub, "the loader is captured at construction"
     rows = technical_rows_asof(["AAA", "BBB"], long_dates[-1], provider)
     assert set(rows) == {"AAA", "BBB"}, "the default loader must not recurse"
-    assert len(rows["AAA"]) >= 25
+    assert len(rows["AAA"]) >= 12, "13 of the trimmed 18 legs come off the bars"
     assert at._ohlcv is stub, "the run's bar source is restored after the call"
 
 
@@ -1049,7 +1058,18 @@ def test_the_technical_category_matrix_is_reported_beside_the_component_matrix()
 
 
 def test_the_category_matrix_is_withheld_with_its_reason_on_a_componentless_panel():
-    matrix = technical_category_matrix(_planted_panel(_truth()), DATES)
+    # "componentless" has to be built, not inherited from the fixture: MF-6
+    # trimmed `momentum` to a single declared leg, so its own floor dropped to
+    # one and a lone `momentum_12_1` row now scores a category. Strip every
+    # DECLARED technical component by name so the panel really carries none.
+    from tradingagents.strategies.technical_score import COMPONENTS
+
+    panel = _planted_panel(_truth())
+    for rows in panel.values():
+        for row in rows.values():
+            for name in [k for k in row if k in COMPONENTS]:
+                row.pop(name)
+    matrix = technical_category_matrix(panel, DATES)
     assert matrix["status"] == "UNMEASURED"
     assert "can score" in matrix["reason"]
     assert matrix["pairs"] == {} and matrix["n_pairs"] == 0

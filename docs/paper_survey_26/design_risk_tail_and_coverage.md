@@ -281,3 +281,6 @@ recorded here so the idea is not lost, and not proposed for build.
 
 **Decision requested:** whether K1 + K2 land as a first pass, and whether the mandate permits the
 `T^(H-1/2)` rescaling to reach the drawdown governor.
+
+**Decided 2026-09-27 (owner):** K1 + K2 landed; the mandate does **not** permit the rescaling to reach the
+governor, so K2 stays report-only and the governor keeps the square-root-of-time convention.

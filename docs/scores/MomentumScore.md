@@ -83,16 +83,20 @@ floor is withheld with its reason, never 0). 41 members in total.
 Bands and ramps are declared in one place (`BANDS`, `RAMPS`) and every edge is a
 hypothesis, not a measurement — which is why the composite is `RESEARCH_ONLY`.
 
-### 2.1 The composite weight vector is NOT owner-signed ⚠
+### 2.1 The composite weight vector is owner-ratified (2026-09-27)
 
 §54 writes the weights symbolically (`w_P … w_D`). The only numbers the library
 prints are §47's *"For example: 0.25M_price + 0.20M_trend + 0.15M_relative +
 0.10M_acceleration + 0.10M_volume + 0.10M_quality + 0.05M_breakout +
 0.05M_riskadj"*, which sum to 1.0. The engine declares **the library's own
-example** as `LEG_WEIGHTS`, prints the vector it used in every `basis`, and
-labels it in the docstring, the render and this document as **pending the
-owner's ratification**. No value was invented; the alternative `weights=None`
-falls back to `score_engine.combine`'s equal-weight path.
+example** as `LEG_WEIGHTS` and prints the vector it used in every `basis`. The
+owner was asked to ratify **exactly those numbers** and did (2026-09-27), so the
+table is a **declared, owner-signed table** rather than a proposal - the
+docstring, the render and this section say so. No value was ever invented; the
+alternative `weights=None` falls back to `score_engine.combine`'s equal-weight
+path. Ratifying the *weights* does not promote the vector: the composite stays
+`RESEARCH_ONLY` until the `VALIDATED` rung's WP-10 measurement exists, which is
+the same ladder `FUND-24`/`RLW-4` use.
 
 ---
 
