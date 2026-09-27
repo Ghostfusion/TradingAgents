@@ -134,6 +134,14 @@ REGISTRY: dict[str, str] = {
     "enable_growth_scores": "wired",
     "enable_score_eval_rows": "wired",
     "enable_analyst_revision_index": "wired",
+    # remaining odds and ends (two inert: the tuner and value-dip flags)
+    "enable_orderflow": "wired",
+    "enable_crowd_ratio_bands": "wired",
+    "enable_preopen_rvol": "wired",
+    "enable_strategy_overlays": "wired",
+    "enable_topk_drop": "wired",
+    "enable_tuner": "inert",
+    "enable_value_dip": "inert",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",

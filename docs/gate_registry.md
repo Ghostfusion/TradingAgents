@@ -23,23 +23,17 @@ document on every suite run:
    read somewhere outside `default_config.py`, and an `inert` gate must be read
    by nothing.
 
-**What this file covers — and what it does not.** The rows below are the
-policy, data-surface and context gates, plus the **score-engine gates** (§7e),
-the **debate and run-shape flags** (§7f), the **factor-model family** (§7g),
-the **event family** (§7h), the **vendor and screener surfaces** (§7i) and the
-**score and aggregation flags** (§7j)
-added in R4 stage 2: **105 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **7
-`enable_*` keys have no row yet**, and a missing row means *not registered yet* —
-**never** "no such gate". The families still to be added:
-
-- the remaining odds and ends — `enable_orderflow`, `enable_crowd_ratio_bands`,
-  `enable_preopen_rvol`, `enable_strategy_overlays`, `enable_topk_drop`,
-  `enable_tuner`, `enable_value_dip`.
-
-Growing this file is deliberate future work, one family at a time — an
-unverified "Proven by" cell is worse than a missing row in a file whose purpose
-is to stop gates that cannot fire.
+**What this file covers.** The rows below are every policy, data-surface and
+context gate: **all 112 of the 112 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+the numeric limits and the always-on checks. R4 stage 2 registered the last six
+families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
+the factor-model family (§7g), the event family (§7h), the vendor and screener
+surfaces (§7i), the score and aggregation flags (§7j) and the remaining odds and
+ends (§7k). Four of them are **inert** — declared and settable but read by
+nothing — and their rows say so: `enable_factor_model`,
+`enable_factor_proposal_loop`, `enable_tuner` and `enable_value_dip`. Every
+other newly registered row carries a `Proven by` cell naming the test or the
+code path that fires it, verified when the row was added.
 
 **Flipping a gate.** Put the env var in `.env` (uncommented) and restart — config
 is read at import, so a running process does not pick up a change:
@@ -384,6 +378,22 @@ size or a verdict.
 | `enable_growth_scores` | `TRADINGAGENTS_ENABLE_GROWTH_SCORES` | adds the growth-score block to `get_quality_factors` | `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_quality_tool_compresses_the_median_exclusions_when_no_panel_is_supplied` | wired |
 | `enable_score_eval_rows` | `TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS` | adds the IC / score-evaluation rows to the strategy-quality report | `scripts/strategy_quality_report.py::build_report` | `test_score_eval_rows.py::test_report_gate_off_omits_score_eval`, `::test_report_gate_on_without_ledger_is_unavailable` | wired |
 | `enable_analyst_revision_index` | `TRADINGAGENTS_ENABLE_ANALYST_REVISION_INDEX` | adds the analyst-revision index to the sentiment / news component reads and the `get_analyst_revision_index` tool | `tradingagents/agents/utils/analyst_revision_tools.py::get_analyst_revision_index`, `tradingagents/agents/utils/analysis_tools.py::_sentiment_components` / `::_news_components` | `test_analyst_revision_index.py::test_tool_is_a_disabled_sentinel_while_the_flag_is_off`, `::test_tool_renders_the_weighted_index_and_the_estimate_unavailable` | wired |
+
+## 7k. Remaining odds and ends
+
+The last family: the strategy-overlay fold and its sub-reads, the crowd-ratio
+band row, the pre-open RVOL lines, the top-k drop allocation path, and two inert
+research flags. None can change a rating, a size or a verdict.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_orderflow` | `TRADINGAGENTS_ENABLE_ORDERFLOW` | folds the order-flow (distribution / VPIN) summary into the strategy overlay | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays` | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays` (the gate read; no test flips it); `test_strategies_overlays.py::test_fold_flow_scales_position_and_warns` proves the fold | wired |
+| `enable_crowd_ratio_bands` | `TRADINGAGENTS_ENABLE_CROWD_RATIO_BANDS` | adds the crowd-ratio band row to `get_sentiment_computed` | `tradingagents/agents/utils/analysis_tools.py::get_sentiment_computed` (the `_sentiment_flag` read) | `test_sentiment_crowd_ratio.py::test_crowd_row_gated_on_the_tool` | wired |
+| `enable_preopen_rvol` | `TRADINGAGENTS_ENABLE_PREOPEN_RVOL` | adds the pre-open RVOL and gap advisory lines to the computed decision context | `tradingagents/graph/trading_graph.py::_compiled_decision_context` | `tradingagents/graph/trading_graph.py::_compiled_decision_context` (the gate read; the tests set it off) | wired |
+| `enable_strategy_overlays` | `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | builds the regime / sizing overlay and folds it into the run state; off returns the state unchanged | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays`, `tradingagents/strategies/overlays.py::build_strategy_overlays` | `test_strategies_overlays.py::test_overlay_disabled_returns_none`, `::test_overlay_builds_context` | wired |
+| `enable_topk_drop` | `TRADINGAGENTS_ENABLE_TOPK_DROP` | the top-k drop allocation path in `allocation_block` | `tradingagents/strategies/portfolio.py::allocation_block` | `test_qlib_wiring.py::test_topk_drop_flag` | wired |
+| `enable_tuner` | `TRADINGAGENTS_ENABLE_TUNER` | **intended**: gate the hyper-parameter grid-search front-end (`scripts/tuner.py`) so the gate still decides — **no code reads it** | — (no read site) | `scripts/tuner.py` (its docstring names the flag; the read-site scan finds no reader) | inert |
+| `enable_value_dip` | `TRADINGAGENTS_ENABLE_VALUE_DIP` | **intended**: gate the value-dip screener / tool surface — **no code reads it** (the `--scan value-dip` mode is selected by the CLI flag, not this key) | — (no read site) | `scripts/value_screener.py` (the `value-dip` scan mode; no code reads `enable_value_dip`) | inert |
 
 ## 8. Adding a gate — the rule
 
