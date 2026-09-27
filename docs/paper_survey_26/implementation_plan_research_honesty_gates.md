@@ -1,12 +1,12 @@
 # Implementation Plan - Honest Evaluation Gates
 
-Status: **IN PROGRESS** - wave 0 (P0) is COMPLETE: H10, H1, H7, H11 (both halves), H4 and H6 all landed (2026-09-23); the T1 batch adds H2 (2026-09-24), whose availability classes stop at what this repo can honestly state because H8's sourced lag table is not built. H5, H8, H9 and H3 remain.
+Status: **IN PROGRESS** - wave 0 (P0) is COMPLETE: H10, H1, H7, H11 (both halves), H4 and H6 all landed (2026-09-23); the T1 batch adds H2 (2026-09-24), whose availability classes stop at what this repo can honestly state because H8's sourced lag table is not built; the T2 batch adds **H9** (2026-09-27) behind a NEW gate key, `enable_report_influence` (the named `enable_report_attribution` was already taken by DSA-2 - see the card). H5, H8 and H3 remain.
 2026 `q-fin` corpus survey - the gates that decide whether a claim the engine publishes is
 *earned*. Parent survey: [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).
 **Parent design:** [`design_research_honesty_gates.md`](design_research_honesty_gates.md)
 **Folder index:** [`README.md`](README.md) - the eight inherited ground rules, the measured dependency surface, the cross-theme phase map, the dependency graph and the landing protocol live there.
 **Items:** H10 (P0), H1 (P0), H7 (P0), H11 (P0), H4 (P0), H6 (P0), H2 (P2), H5 (P3), H8 (P3), H9 (P3), H3 (P4, OFFLINE)
-**Gates added:** 10 (`enable_coverage_window`, `enable_trial_ledger`, `enable_refusal_ledger`, `enable_bootstrap_intervals`, `enable_accuracy_ceiling`, `enable_materiality_verdict`, `enable_factor_availability_gate`, `enable_rule_policy_gates`, `enable_vintage_guard`, `enable_report_attribution`), no extensions to existing gates. H3 adds none.
+**Gates added:** 10 (`enable_coverage_window`, `enable_trial_ledger`, `enable_refusal_ledger`, `enable_bootstrap_intervals`, `enable_accuracy_ceiling`, `enable_materiality_verdict`, `enable_factor_availability_gate`, `enable_rule_policy_gates`, `enable_vintage_guard`, `enable_report_influence`), no extensions to existing gates. H3 adds none. (H9's card originally named `enable_report_attribution`; that key already ships for DSA-2 - the item's own collision note - so it takes a new key, which also makes its own separate registration honest.)
 
 ## 0. Scope
 
@@ -140,10 +140,10 @@ INCONCLUSIVE iff the interval straddles the threshold   (underpowered, NOT null)
 
 **Target.** A new module beside `strategies/score_disagreement.py` (which already compares quant and LLM risk reads): `attribution(reports, thesis) -> weights` by a **non-negative least squares** projection of the thesis vector onto the four report vectors, and a novelty screen for a newly admitted factor against the existing zoo plus a disclosed reference set. The per-claim granularity it sits above is `strategies/debate_claim.py`'s; the reference-set machinery is `strategies/peer_universe.py`'s.  
 **Phase / run mode.** P3 / in-run  
-**Behaviour.** The engine cannot say which analyst report drove a decision, and cannot say whether a "new" factor is a relabelling. `novelty = mean_f max_{z in Z} |corr(s_f, z)|` against a reference set `Z` held out from generation, and productivity, performance and novelty are required **jointly** - no one meaningful without the other two. One embedding pass per report plus a small NNLS solve; descriptive of a completed run, no look-ahead; the paper's rolling re-execution protocol is out of scope.  
-**Gate.** `enable_report_attribution`, default off. **[COLLISION FOUND 2026-09-24 - decide before this item is built]** That key **already ships**: `tradingagents/default_config.py:991` declares it for the DSA-2 advisory layer ("computed driver attribution + disclosure blocks"), and `docs/gate_registry.md` lists it in the DSA family. H9 therefore cannot register it as a new gate - the six-point registration asserts the key is absent - so the choice is **extend that gate** (honest only if H9's influence weights and DSA-2's computed driver attribution are the same read, which they overlap in but are not identical to) or **take a new key** (e.g. `enable_report_influence`). Either way this plan's "34 new config gates" becomes 33 new plus one extension, the same shape as R1's `enable_bocpd`. Checked against every other unbuilt gate name in the six plans on the same date: this is the only collision.  
+**Behaviour.** The engine cannot say which analyst report drove a decision, and cannot say whether a "new" factor is a relabelling. `novelty = mean_f max_{z in Z} |corr(s_f, z)|` against a reference set `Z` held out from generation, and productivity, performance and novelty are required **jointly** - no one meaningful without the other two. One embedding pass per report plus a small NNLS solve; descriptive of a completed run, no look-ahead; the paper's rolling re-execution protocol is out of scope. **The embedding stage is refused, not approximated:** this repo has no text-embedding provider, so `embed_reports` returns a named `no_embedding_backend` reason and the run-card block carries that refusal rather than a fabricated weight; the NNLS solve and the novelty screen are built and tested over caller-supplied vectors/series. Built 2026-09-27 as `strategies/report_attribution.py` (`attribution`, `novelty`, `admit_factor`, `embed_reports`, `reference_names`), reached from `reporting._run_card_report_influence` and gated by `enable_report_influence`.
+**Gate.** `enable_report_influence`, default off. **[DECIDED 2026-09-27 - new key, not an extension]** The card originally named `enable_report_attribution`; that key **already ships** for the DSA-2 advisory layer (`tradingagents/default_config.py` "DSA-2: computed driver attribution + disclosure blocks", `docs/gate_registry.md` §7f), so the six-point registration cannot assert it absent. Extending it was rejected as **not honest here**: DSA-2's `report_disclosure.signal_attribution` is a *sum-100 normalization of four already-computed engine reads*, while H9's `attribution` is an *NNLS projection of a thesis vector onto report vectors* - the same decision described by a different construction over different inputs, so one gate would claim one read where there are two. H9 takes the free key `enable_report_influence`, and the overlap is disclosed in `strategies/report_attribution.py`'s module docstring and in the registry row. R1's `enable_bocpd` stays the plan's only extension; H9 was always counted as one of the ten gates, so the count is unaffected.
 **Failing-first test.** New `tests/test_report_attribution.py::test_relabelled_factor_flagged`: a mutation that removes the novelty screen must fail by name; a factor that is a relabelling of an existing zoo member must be flagged.  
-**Acceptance.** Influence weights are non-negative and attribute the thesis across the report vectors; a relabelled factor is flagged rather than admitted as new.  
+**Acceptance.** Influence weights are non-negative and sum to 1 over the report vectors, attributing a synthetic thesis correctly (`tests/test_report_attribution.py`); a relabelled factor is flagged rather than admitted as new, and removing the novelty screen fails `test_relabelled_factor_flagged` **by name**. The embedding stage is a named refusal, not a pseudo-embedding.
 **Depends on.** nothing.  
 **Doc caveat.** 2609.00731's own headline is a near-tie against a DSR-equivalent on synthetic ground truth, and it admits a residual backbone-leakage it cannot remove.
 
@@ -178,7 +178,7 @@ K_eff   = (sum lambda_i)^2 / sum lambda_i^2   from the candidate correlation mat
 | H2 | availability-typed factor DSL gate | `strategies/factor_expressions.py`, `strategies/factor_schema.py` | P2 | in-run | `enable_factor_availability_gate` |
 | H5 | five-gate verdict + positive controls + next-open variant | `strategies/rule_eval.py` | P3 | in-run | `enable_rule_policy_gates` |
 | H8 | vintage/lag guard + non-LLM comparator | `strategies/data_quality.py`, `dataflows/` | P3 | in-run | `enable_vintage_guard` |
-| H9 | report attribution + factor novelty | new module beside `strategies/score_disagreement.py` | P3 | in-run | `enable_report_attribution` **[EXISTS - DSA-2; see the card]** |
+| H9 | report attribution + factor novelty | `strategies/report_attribution.py` (new, beside `strategies/score_disagreement.py`) | P3 | in-run | `enable_report_influence` |
 | H3 | synthetic-null workflow falsification | new offline harness | P4 | OFFLINE | none (offline harness/script) |
 
 ## 3. Gates added by this plan
@@ -194,7 +194,7 @@ K_eff   = (sum lambda_i)^2 / sum lambda_i^2   from the candidate correlation mat
 | `enable_factor_availability_gate` | H2 | `strategies/factor_expressions.py` AST gate | off |
 | `enable_rule_policy_gates` | H5 | `strategies/rule_eval.py` | off |
 | `enable_vintage_guard` | H8 | `strategies/data_quality.py` PIT invariant | off |
-| `enable_report_attribution` **[ALREADY SHIPS - DSA-2]** | H9 | new module beside `strategies/score_disagreement.py` | off |
+| `enable_report_influence` | H9 | `strategies/report_attribution.py::gate_on` (the read), `tradingagents/reporting.py::_run_card_report_influence` (the card block) | off |
 
 The six registration points per gate are listed in [`README.md`](README.md).
 

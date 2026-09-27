@@ -90,6 +90,7 @@ REGISTRY: dict[str, str] = {
     # score-engine gates (the report-level research engines, shipped off)
     "enable_fundamental_score": "wired",
     "enable_technical_score": "wired",
+    "enable_momentum_score": "wired",
     "enable_regime_score": "wired",
     "enable_risk_score": "wired",
     "enable_sentiment_score": "wired",
@@ -105,6 +106,7 @@ REGISTRY: dict[str, str] = {
     "enable_pit_registry": "wired",
     "enable_prediction_ledger": "wired",
     "enable_report_attribution": "wired",
+    "enable_report_influence": "wired",
     # factor-model family (two inert: the learned model and the proposal loop)
     "enable_factor_model": "inert",
     "enable_factor_profile": "wired",

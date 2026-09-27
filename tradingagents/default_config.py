@@ -93,6 +93,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_SKILL_DIR": "skill_dir",
     "TRADINGAGENTS_ENABLE_NEWS_RELEVANCE": "enable_news_relevance",
     "TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION": "enable_report_attribution",
+    "TRADINGAGENTS_ENABLE_REPORT_INFLUENCE": "enable_report_influence",
     "TRADINGAGENTS_ENABLE_PREDICTION_LEDGER": "enable_prediction_ledger",
     "TRADINGAGENTS_PREDICTION_HORIZON_DAYS": "prediction_horizon_days",
     "TRADINGAGENTS_LLM_TIER_MAP": "llm_tier_map",
@@ -998,6 +999,12 @@ SHIPPED_DEFAULTS = {
         "skill_dir": "",  # DSA-3: custom skill dir (overrides builtin by name)
         "enable_news_relevance": False,  # DSA-3: news relevance scoring + official boost (advisory)
         "enable_report_attribution": False,  # DSA-2: computed driver attribution + disclosure blocks (advisory)
+        # H9: report influence (NNLS thesis-over-reports) + factor novelty screen.
+        # A NEW key, not an extension of enable_report_attribution (DSA-2's read is
+        # a sum-100 normalization of already-computed engine reads; H9 is an NNLS
+        # projection of a thesis vector over report vectors - see
+        # strategies/report_attribution.py). Advisory; off by default.
+        "enable_report_influence": False,
         "enable_prediction_ledger": False,  # W1-1: log every decision as a scorable prediction row (advisory)
         "prediction_horizon_days": 60,  # W1-1: outcome horizon for ledger scoring
         "llm_tier_map": {},  # W4-5: {"frontier": [roles], "local": [roles]} hybrid tier

@@ -108,6 +108,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_SKILL_DIR` | `skill_dir` | default empty |
 | `TRADINGAGENTS_ENABLE_NEWS_RELEVANCE` | `enable_news_relevance` | default `false` |
 | `TRADINGAGENTS_ENABLE_REPORT_ATTRIBUTION` | `enable_report_attribution` | default `false` |
+| `TRADINGAGENTS_ENABLE_REPORT_INFLUENCE` | `enable_report_influence` | default `false` |
 | `TRADINGAGENTS_ENABLE_PREDICTION_LEDGER` | `enable_prediction_ledger` | default `false` |
 | `TRADINGAGENTS_PREDICTION_HORIZON_DAYS` | `prediction_horizon_days` | default `60` |
 | `TRADINGAGENTS_LLM_TIER_MAP` | `llm_tier_map` | default `{}` |
@@ -283,6 +284,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY` | `enable_evidence_symmetry` | default `false` |
 | `TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE` | `enable_fundamental_score` | default `false` |
 | `TRADINGAGENTS_ENABLE_TECHNICAL_SCORE` | `enable_technical_score` | default `false` |
+| `TRADINGAGENTS_ENABLE_MOMENTUM_SCORE` | `enable_momentum_score` | default `false` |
 | `TRADINGAGENTS_ENABLE_SENTIMENT_SCORE` | `enable_sentiment_score` | default `false` |
 | `TRADINGAGENTS_ENABLE_NEWS_SCORE` | `enable_news_score` | default `false` |
 | `TRADINGAGENTS_ENABLE_TRADE_SCORE` | `enable_trade_score` | default `false` |

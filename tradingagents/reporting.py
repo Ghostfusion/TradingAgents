@@ -1254,6 +1254,39 @@ def _run_card_risk_disagreement(final_state: dict, cfg: dict) -> dict | None:
         return {"flag": False, "unavailable": f"{type(exc).__name__}: {exc}"}
 
 
+def _run_card_report_influence(final_state: dict, cfg: dict) -> dict | None:
+    """The report-influence / factor-novelty read (H9).
+
+    Descriptive of a completed run: it embeds the four analyst reports and the
+    PM's thesis with one text model, then solves the NNLS projection that says
+    which report drove the decision. This repo ships **no text-embedding
+    provider**, so the block carries the named ``no_embedding_backend`` refusal
+    (see ``strategies/report_attribution.py``) instead of a fabricated weight -
+    the gate is a *disclosure* that the read is not computed and why. Returns
+    ``None`` when ``enable_report_influence`` is off, so a gate-off card stays
+    byte-identical. Never raises; advisory.
+    """
+    state = final_state or {}
+    try:
+        from tradingagents.strategies.report_attribution import (
+            embed_reports,
+            gate_on,
+        )
+
+        if not gate_on(cfg):
+            return None
+        texts = {
+            "market": state.get("market_report"),
+            "sentiment": state.get("sentiment_report"),
+            "news": state.get("news_report"),
+            "fundamentals": state.get("fundamentals_report"),
+        }
+        thesis = state.get("final_trade_decision") or state.get("trader_investment_plan") or ""
+        return embed_reports(texts, thesis)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must never cost the card
+        return {"reports": None, "thesis": None, "unavailable": f"{type(exc).__name__}: {exc}"}
+
+
 def _scorecard_snapshot_for_report(
     final_state: dict, cfg: dict, *, calendars: dict | None = None
 ) -> dict | None:
@@ -2494,6 +2527,9 @@ def write_report_tree(
             ("quant_scorecard", _run_card_quant_scorecard(final_state, cfg, calendars=event_calendars)),
             # WP-12/P12-9: the quant/LLM risk-disagreement flag (§5's weak form).
             ("risk_disagreement", _run_card_risk_disagreement(final_state, cfg)),
+            # H9: the report-influence / factor-novelty read (advisory, gate off
+            # by default; carries the named embedding refusal this repo owes).
+            ("report_influence", _run_card_report_influence(final_state, cfg)),
         ):
             if _block is not None:
                 card[_key] = _block
