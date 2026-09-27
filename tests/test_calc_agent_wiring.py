@@ -215,7 +215,7 @@ TOOL_LEGACY_BINDING = {
     "get_kelly_alloc": "covered: get_allocation_black_litterman / get_position_sizing / get_hrp_alloc are the bound allocation reads",
     "get_kyle_lambda": "covered: get_liquidity_risk returns ILLIQ / float-turnover / IWF / verdict; the tool docstring forbids per-ticker use",
     "get_no_trade_guard_band": "rebalance guard; needs a current book weight no agent surface carries (README documents it)",
-    # ALL EIGHT ENGINE LEAVES. These are application-internal calculation
+    # ALL NINE ENGINE LEAVES. These are application-internal calculation
     # mechanisms, NOT LLM-facing analytical tools (ScoreContextContract.md
     # §13.3): the engines are computed by the application and their results are
     # SUPPLIED to every analyst prompt by `report_hygiene.scorecard_context_block`
@@ -229,6 +229,7 @@ TOOL_LEGACY_BINDING = {
     # themselves stay - they are what the block calls.
     "get_fundamental_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
     "get_technical_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
+    "get_momentum_score": "engine leaf (MOM-1; ENGINE_SECTIONS['momentum'] = 'market'); consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
     "get_sentiment_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block - the ONLY route into the sentiment report, whose analyst binds no tools (ScoreContextContract.md §13.3)",
     "get_news_score": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",
     "get_event_state": "engine leaf; consumer is report_hygiene.scorecard_context_block / engine_score_block, which SUPPLY the computed score to every analyst prompt (ScoreContextContract.md §13.3)",

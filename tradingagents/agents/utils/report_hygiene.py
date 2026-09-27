@@ -189,8 +189,9 @@ def engine_score_block(
 #: The mandatory-manifest instruction (ScoreContextContract.md §6). One constant,
 #: read by every analyst, so the wording cannot drift between them.
 MANDATORY_ENGINE_RULES = (
-    "MANDATORY ENGINE MANIFEST. For every security, evaluate all 8 registered "
-    "scoring engines: FundamentalScore, TechnicalScore, RegimeScore, RiskScore, "
+    "MANDATORY ENGINE MANIFEST. For every security, evaluate all 9 registered "
+    "scoring engines: FundamentalScore, TechnicalScore, MomentumScore, "
+    "RegimeScore, RiskScore, "
     "SentimentScore, NewsScore, EventScore, TradeScore. Do not selectively "
     "consider engines based on discretion.\n"
     "The engines are computed by the application, not chosen by you: the results "

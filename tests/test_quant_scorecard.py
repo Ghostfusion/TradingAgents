@@ -952,7 +952,7 @@ def test_the_block_prints_its_three_status_axes_and_names_the_engines():
     text = qs.format_quant_scorecard(snap)
     assert (
         "Scorecard status: PARTIAL - enabled: fundamental, technical, risk, trade; "
-        "disabled: regime, sentiment, news, event" in text
+        "disabled: momentum, regime, sentiment, news, event" in text
     )
     assert "Vector status: RESEARCH_ONLY" in text
     assert "Movement: UNAVAILABLE" in text
@@ -991,7 +991,7 @@ def test_a_scorecard_with_engines_switched_off_is_partial_not_complete():
     )
     text = qs.format_quant_scorecard(snap)
     assert "Scorecard status: PARTIAL" in text
-    assert "disabled: sentiment, news, event" in text
+    assert "disabled: momentum, sentiment, news, event" in text
 
 
 def test_an_enabled_engine_that_could_not_measure_makes_it_partial():

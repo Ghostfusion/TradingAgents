@@ -5967,6 +5967,311 @@ def get_technical_score(
         return f"technical score unavailable for {ticker}: render failed ({exc})"
 
 
+def _momentum_components(ticker: str) -> dict:
+    """Assemble the `MomentumScore` members from the run's own bars (MOM-1).
+
+    Every value is a producer's own output (the §53 sub-items, each cited in
+    `strategies/momentum_score.py::COMPONENTS`) - this function fetches the bars
+    once and calls the calculators; it re-derives no arithmetic beyond the
+    library's own §4.1/§4.2 horizon spreads and the §13.3 correlation, which are
+    differences/calls over producer output. A member whose producer could not
+    measure is omitted, so it leaves its family's denominator rather than 0.
+    """
+    from tradingagents.strategies.evaluate import (
+        downside_deviation,
+        max_drawdown,
+        ulcer_index,
+    )
+    from tradingagents.strategies.extended_indicators import chaikin_money_flow, roc
+    from tradingagents.strategies.factor_expressions import corr
+    from tradingagents.strategies.factors import (
+        high_distance,
+        momentum_multihorizon,
+        vol_adjusted_momentum,
+    )
+    from tradingagents.strategies.momentum import momentum_12_1, rvol
+    from tradingagents.strategies.momentum_score import (
+        efficiency_ratio,
+        positive_day_ratio,
+    )
+    from tradingagents.strategies.regime import realized_vol
+    from tradingagents.strategies.size import atr
+    from tradingagents.strategies.technical_depth import (
+        moving_average_depth,
+        regression_read,
+    )
+    from tradingagents.strategies.technical_factors import (
+        adx,
+        donchian_channel,
+        macd_depth,
+        obv_divergence,
+        sma_legs,
+        volume_depth,
+    )
+
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    volumes = data.get("volumes") or []
+    if len(closes) < 30:
+        return {}
+    rets = _daily_returns(closes)
+    vals: dict = {}
+
+    def put(key, value):
+        if value is not None:
+            vals[key] = value
+
+    # --- P: price momentum (§3 horizons, §2.1 12-1) -----------------------
+    mh = momentum_multihorizon(closes)
+    hz = mh.get("horizons") or {}
+    for n, key in (
+        (5, "r_5"), (21, "r_21"), (63, "r_63"), (126, "r_126"), (252, "r_252"),
+    ):
+        value = hz.get(str(n))
+        if value is None:
+            pct = roc(closes, n)
+            value = None if pct is None else float(pct) / 100.0
+        put(key, value)
+    put("mom_12_1", momentum_12_1(closes))
+
+    # --- A: the §4.1/§4.2 horizon spreads, over the same producer ---------
+    h21, h63, h126 = hz.get("21"), hz.get("63"), hz.get("126")
+    if h63 is not None and h21 is not None:
+        put("accel_short_medium", float(h63) - float(h21))
+    if h21 is not None and h126 is not None:
+        put("accel_medium_long", float(h21) - float(h126))
+
+    # --- R: relative momentum (§16), market + sector ----------------------
+    bench = _benchmark_closes()
+    if bench and len(closes) >= 63 and len(bench) >= 63:
+        try:
+            from tradingagents.strategies.relative_strength import (
+                relative_strength_report,
+            )
+
+            rep = relative_strength_report(closes, bench)
+            put("rs_slope_pct", rep.get("slope_pct"))
+            put("rs_new_high", rep.get("new_high"))
+            put("rs_divergence", rep.get("divergence"))
+        except Exception:  # noqa: BLE001 - one absent member is not a failed engine
+            pass
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_sector
+        from tradingagents.strategies.relative_strength import (
+            relative_strength_vs_sector,
+        )
+        from tradingagents.strategies.sector_rank import sector_group_of
+
+        etf = sector_group_of(fetch_sector(ticker))
+        sector_closes = _ohlcv(etf).get("closes") if etf else None
+        if etf and sector_closes:
+            sec = relative_strength_vs_sector(closes, sector_closes, benchmark=bench)
+            put("rs_vs_sector", sec.get("excess"))
+    except Exception:  # noqa: BLE001 - the sector leg is advisory, never fatal
+        pass
+
+    # --- T: trend strength (§5, §9, §38, §39) -----------------------------
+    if len(highs) >= 15 and len(lows) >= 15:
+        a = adx(highs, lows, closes)
+        put("adx", a.get("adx"))
+        dp, dm = a.get("di_plus"), a.get("di_minus")
+        if dp is not None and dm is not None:
+            put("di_spread", float(dp) - float(dm))
+    sma = sma_legs(closes)
+    if sma.get("sma_fast"):
+        put("ma_distance", closes[-1] / float(sma["sma_fast"]) - 1.0)
+    try:
+        from tradingagents.strategies.swing import trend_architecture
+
+        arch = trend_architecture(closes)
+        # `trend_architecture` spells the stacked-MA state `stacked`; the
+        # engine's member key is `sma_stack` (the §5.5 name).
+        put("sma_stack", arch.get("stacked"))
+    except Exception:  # noqa: BLE001
+        pass
+    mad = moving_average_depth(closes)
+    put("ma_slope", mad.get("ema_slope"))
+    reg = regression_read(closes)
+    put("trend_slope", reg.get("slope_pct"))
+    put("trend_r2", reg.get("r2"))
+
+    # --- A: the MACD histogram's own acceleration (§11.4) -----------------
+    md = macd_depth(closes)
+    if md.get("hist_accel") is not None and closes[-1]:
+        put("macd_hist_accel", float(md["hist_accel"]) / float(closes[-1]))
+
+    # --- B: breakout (§6.1 four horizons, §6.2, §6.5) ---------------------
+    for n, key in (
+        (20, "donchian_20"), (50, "donchian_50"),
+        (100, "donchian_100"), (252, "donchian_252"),
+    ):
+        if len(closes) >= n + 1:
+            dc = donchian_channel(highs, lows, n=n, closes=closes)
+            up, dn = dc.get("persistence_up"), dc.get("persistence_dn")
+            if up is not None and dn is not None:
+                put(key, float(up) - float(dn))
+    atr_v = atr(highs, lows, closes, window=14) if len(closes) >= 2 else None
+    vd = volume_depth(closes, volumes, n=20, highs=highs, lows=lows, atr_value=atr_v)
+    put("breakout_strength", vd.get("breakout_strength"))
+    put("dist_from_high", high_distance(closes, window=252))
+
+    # --- V: volume confirmation (§13-§15) ---------------------------------
+    put("rvol", rvol(volumes))
+    put("volume_trend", vd.get("volume_trend"))
+    if len(closes) >= 31 and len(volumes) >= 31:
+        obv = obv_divergence(closes, volumes)
+        put("obv_slope_norm", obv.get("obv_slope_norm"))
+    if len(highs) >= 20 and len(volumes) >= 20:
+        put("cmf", chaikin_money_flow(highs, lows, closes, volumes))
+    if len(closes) == len(volumes) and len(closes) >= 21:
+        c = corr(closes, volumes, 20)
+        if c and c[-1] is not None:
+            put("pv_corr", c[-1])
+
+    # --- Q: momentum quality (§7.1, §8.1, §8.3, §40) ----------------------
+    put("efficiency_ratio", efficiency_ratio(closes, 20))
+    put("positive_day_ratio", positive_day_ratio(rets, 20))
+    try:
+        from tradingagents.strategies.book_risk import return_autocorrelation
+
+        acf = (return_autocorrelation(rets).get("acf") or [])
+        if acf:
+            put("autocorr1", acf[0])
+    except Exception:  # noqa: BLE001
+        pass
+    put("vol_adjusted", vol_adjusted_momentum(closes))
+
+    # --- D: risk-adjusted momentum (§23, §25, §26, §30) -------------------
+    put("realized_vol", realized_vol(closes))
+    put("downside_dev", downside_deviation(rets))
+    if closes:
+        put("max_drawdown", max_drawdown(closes))
+    put("ulcer", ulcer_index(rets))
+    if atr_v is not None and closes[-1]:
+        put("atr_pct", float(atr_v) / float(closes[-1]))
+    return vals
+
+
+def _render_momentum_score(ticker: str, res: dict) -> str:
+    """Render the score dict: the eight legs, the meta block, coverage, basis."""
+    from tradingagents.strategies.momentum_score import LEG_NAMES, LEG_ORDER
+
+    comps = res.get("components") or {}
+    measured = sum(1 for v in comps.values() if v is not None)
+    lines = [
+        f"## MomentumScore - {ticker} (advisory; {measured} of {len(comps)} members measured)",
+        "",
+        "The eight §54 momentum legs over the run's own bars. Advisory only: never "
+        "a gate, never a size, never a rating.",
+        "",
+    ]
+    weights = res.get("weights") or {}
+    for leg in LEG_ORDER:
+        entry = (res.get("legs") or {}).get(leg) or {}
+        score = entry.get("score")
+        if score is None:
+            lines.append(
+                f"- {leg} ({LEG_NAMES[leg]}): unavailable - {entry.get('withheld')}"
+            )
+            continue
+        lines.append(
+            f"- {leg} ({LEG_NAMES[leg]}, weight {weights.get(leg, 0):g}): "
+            f"{score:.1f}/100 - coverage {entry.get('coverage'):.0%} over "
+            f"{len(entry.get('present') or [])} of "
+            f"{len(entry.get('components') or {})} members "
+            f"{(entry.get('present') or [])}"
+        )
+    score = res.get("score")
+    if score is None:
+        lines.append(f"- composite: unavailable - {res.get('withheld')}")
+    else:
+        lines.append(
+            f"- composite [{res.get('status')}]: {score:.1f}/100"
+            + (f" ({res.get('label')})" if res.get("label") else "")
+            + f" - {res.get('weight_basis')}, renormalised over the legs "
+            f"measured; coverage {res.get('coverage'):.0%}"
+        )
+    meta = res.get("meta") or {}
+    conv = meta.get("conviction") or {}
+    disp = meta.get("dispersion") or {}
+    div = meta.get("divergence") or {}
+    lines.append("")
+    lines.append("meta (beside the score, never inside it - §50-§52):")
+    if conv.get("by_dispersion") is None:
+        lines.append(f"- horizon conviction: n/a ({conv.get('reason')})")
+    else:
+        lines.append(
+            f"- horizon conviction (§50): {conv['by_dispersion']:.2f} "
+            f"(by dispersion) / {conv['by_count']:.2f} (share above 50) over "
+            f"{conv['n']} horizon(s)"
+        )
+    if disp.get("dispersion") is None:
+        lines.append(f"- horizon dispersion (§51): n/a ({disp.get('reason')})")
+    else:
+        lines.append(
+            f"- horizon dispersion (§51): {disp['dispersion']:.2f} over "
+            f"{disp['n']} horizon(s)"
+        )
+    lines.append(
+        f"- leg divergence (§52): price-volume {div.get('price_minus_volume')}, "
+        f"short-long {div.get('short_minus_long')}, "
+        f"price-fundamental {div.get('price_minus_fundamental')} - {div.get('note')}"
+    )
+    lines.append(
+        "- regime compatibility (§54): declined - "
+        f"{(meta.get('regime_compatibility') or {}).get('declined')}"
+    )
+    absent = res.get("absent") or []
+    if absent:
+        lines.append("")
+        lines.append(
+            f"not measured (NA, never 0): {', '.join(absent)} - each member needs "
+            "the history or the source its producer names"
+        )
+    lines.append("")
+    lines.append(f"basis: {res.get('basis')}")
+    return "\n".join(lines)
+
+
+@tool
+def get_momentum_score(
+    ticker: Annotated[str, "ticker symbol"],
+) -> str:
+    """MomentumScore: the eight advisory 0-100 momentum legs (§54: price,
+    relative, trend strength, acceleration, breakout, volume confirmation,
+    quality, risk-adjusted) over the run's own price bars, plus their weighted
+    composite.
+
+    The composite vector is the library's own §47 illustrative example and is
+    **not owner-signed**, so the status is RESEARCH_ONLY. The §§50-§52 meta reads
+    (horizon conviction, horizon dispersion, leg divergence, coverage) print
+    BESIDE the number and are never folded into it. Coverage travels with the
+    score: read '68 at coverage 75%' as 68 over three quarters of the intended
+    evidence. Advisory only - it never sets a rating, a position size or a gate.
+    Gated by ``enable_momentum_score``.
+    """
+    if not _r3_flag("enable_momentum_score"):
+        return "momentum score unavailable: the engine is gated off (enable_momentum_score)"
+    try:
+        from tradingagents.strategies.momentum_score import momentum_score
+
+        vals = _momentum_components(ticker)
+        if not vals:
+            return (
+                f"momentum score unavailable for {ticker}: fewer than 30 bars or "
+                "no member could be measured"
+            )
+        res = momentum_score(vals)
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"momentum score unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    try:
+        return _render_momentum_score(ticker, res)
+    except Exception as exc:  # noqa: BLE001
+        return f"momentum score unavailable for {ticker}: render failed ({exc})"
+
+
 def _risk_options_read(ticker: str) -> dict:
     """The numeric options-surface legs ``RiskScore`` consumes, cached per run.
 

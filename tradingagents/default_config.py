@@ -340,6 +340,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_EVIDENCE_SYMMETRY": "enable_evidence_symmetry",
     "TRADINGAGENTS_ENABLE_FUNDAMENTAL_SCORE": "enable_fundamental_score",
     "TRADINGAGENTS_ENABLE_TECHNICAL_SCORE": "enable_technical_score",
+    "TRADINGAGENTS_ENABLE_MOMENTUM_SCORE": "enable_momentum_score",
     "TRADINGAGENTS_ENABLE_SENTIMENT_SCORE": "enable_sentiment_score",
     "TRADINGAGENTS_ENABLE_NEWS_SCORE": "enable_news_score",
     "TRADINGAGENTS_ENABLE_TRADE_SCORE": "enable_trade_score",
@@ -1235,6 +1236,14 @@ SHIPPED_DEFAULTS = {
         "enable_fundamental_score": False,
         # WP-3 (§5.2): the nine TechnicalScore category sub-scores + composite.
         "enable_technical_score": False,
+        # MOM-1 (docs/scores/MomentumScore.md): the §54 MomentumScore engine -
+        # the eight momentum legs (price, relative, trend strength, acceleration,
+        # breakout, volume confirmation, quality, risk-adjusted) over the run's
+        # own bars, with the §50-§52 meta reads printed beside the number. Off by
+        # default; with it off the engine is not in the scorecard and a run is
+        # byte-identical. Additive to `enable_technical_score` (MOM-4 kept
+        # `technical_score.CATEGORY_WEIGHTS` byte-identical).
+        "enable_momentum_score": False,
         # WP-11 (§8): the four-engine TradeScore decision composite, assembled
         # from the engine blocks (each present only when its own gate is on). Off by
         # default; with it off no composite tool is bound and no card key is written.

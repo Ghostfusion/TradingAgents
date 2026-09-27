@@ -72,12 +72,15 @@ __all__ = [
     "with_event_entry",
 ]
 
-#: The eight engine gates, in the order the surfaces print them. An entry is
+#: The nine engine gates, in the order the surfaces print them. An entry is
 #: present iff its own gate is on (§3.4) - the master `enable_quant_scorecard`
 #: gate governs the scorecard **surface**, never the engines it reports.
+#: `momentum` (MOM-1, `docs/scores/MomentumScore.md`) is the §54 momentum
+#: engine; it is additive to `technical` (MOM-4 kept that table intact).
 ENGINE_GATES: dict[str, str] = {
     "fundamental": "enable_fundamental_score",
     "technical": "enable_technical_score",
+    "momentum": "enable_momentum_score",
     "regime": "enable_regime_score",
     "risk": "enable_risk_score",
     "sentiment": "enable_sentiment_score",
@@ -97,6 +100,7 @@ COMPOSITE_ENGINES: tuple[str, ...] = ("fundamental", "technical", "regime", "ris
 ENGINE_TOOLS: dict[str, str] = {
     "fundamental": "get_fundamental_score",
     "technical": "get_technical_score",
+    "momentum": "get_momentum_score",
     "regime": "get_regime_score",
     "risk": "get_risk_score",
     "sentiment": "get_sentiment_score",
@@ -127,6 +131,10 @@ ENGINE_TOOLS: dict[str, str] = {
 ENGINE_SECTIONS: dict[str, str | None] = {
     "fundamental": "fundamentals",
     "technical": "market",
+    # MOM-1: the stock's own price behaviour is the market analyst's domain, the
+    # same section `technical` occupies - so the prompt, the report placement and
+    # the absence of a tool binding all follow from this one row.
+    "momentum": "market",
     "sentiment": "sentiment",
     "news": "news",
     "event": "news",
@@ -279,6 +287,31 @@ def _read_technical(ticker: str) -> dict:
         score=res.get("score"),
         coverage=res.get("coverage"),
         band=res.get("bands"),
+    )
+
+
+def _read_momentum(ticker: str) -> dict:
+    """The §54 MomentumScore engine (MOM-1), over the same bars as `technical`."""
+    try:
+        from tradingagents.agents.utils.analysis_tools import _momentum_components
+        from tradingagents.strategies.momentum_score import momentum_score
+
+        vals = _momentum_components(ticker)
+        if not vals:
+            return _entry(
+                "momentum",
+                reason="no momentum member could be measured from the run's bars",
+            )
+        res = momentum_score(vals)
+    except Exception as exc:  # noqa: BLE001
+        return _entry("momentum", reason=f"{type(exc).__name__}: {exc}")
+    return _entry(
+        "momentum",
+        result=res,
+        score=res.get("score"),
+        coverage=res.get("coverage"),
+        band=res.get("label"),
+        meta=res.get("meta"),
     )
 
 
@@ -507,6 +540,8 @@ def quant_scorecard(
             engines[name] = _read_fundamental(ticker, date)
         elif name == "technical":
             engines[name] = _read_technical(ticker)
+        elif name == "momentum":
+            engines[name] = _read_momentum(ticker)
         elif name == "regime":
             engines[name] = _read_regime()
         elif name == "risk":
