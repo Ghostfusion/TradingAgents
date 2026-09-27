@@ -25,16 +25,13 @@ document on every suite run:
 
 **What this file covers — and what it does not.** The rows below are the
 policy, data-surface and context gates, plus the **score-engine gates** (§7e),
-the **debate and run-shape flags** (§7f), the **factor-model family** (§7g) and
-the **event family** (§7h)
-added in R4 stage 2: **90 of the 112 `enable_*` keys** in
-`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **22
+the **debate and run-shape flags** (§7f), the **factor-model family** (§7g),
+the **event family** (§7h) and the **vendor and screener surfaces** (§7i)
+added in R4 stage 2: **97 of the 112 `enable_*` keys** in
+`DEFAULT_CONFIG`, plus the numeric limits and the always-on checks. **15
 `enable_*` keys have no row yet**, and a missing row means *not registered yet* —
 **never** "no such gate". The families still to be added:
 
-- the vendor and screener surfaces — `enable_alpaca`, `enable_massive_flat`,
-  `enable_market_movers`, `enable_market_routing`, `enable_screener`,
-  `enable_etf_engine`, `enable_enhanced_index`;
 - the score and aggregation flags — `enable_sentiment`, `enable_sentiment_factor`,
   `enable_weighted_sentiment_agg`, `enable_weighted_sentiment_window`,
   `enable_news_relevance`, `enable_growth_scores`, `enable_score_eval_rows`,
@@ -355,6 +352,22 @@ an event read — never a threshold, a size or a rating.
 | `enable_events` | `TRADINGAGENTS_ENABLE_EVENTS` | folds the scheduled-catalyst (PEAD) overlay into the run's strategy overlays | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays` | `test_strategies_catalyst.py::test_graph_overlay_wiring_enable_events`, `::test_graph_overlay_wiring_events_disabled` | wired |
 | `enable_event_calendars` | `TRADINGAGENTS_ENABLE_EVENT_CALENDARS` | fetches the forward event calendars once for the scorecard's event row and the trade-score calendar answers; off returns `{}` | `tradingagents/reporting.py::_card_event_calendars` / `::_scorecard_snapshot_for_report`, `tradingagents/agents/utils/analysis_tools.py::_event_calendar_answers` | `test_quant_scorecard.py::test_the_card_fetches_the_forward_calendars_once_for_both_readers` (the gate-on fetch; the off path is the `{}` return in `_card_event_calendars`) | wired |
 | `enable_event_state` | `TRADINGAGENTS_ENABLE_EVENT_STATE` | the `get_event_state` leaf and the event row in the scorecard snapshot and run card | `tradingagents/agents/utils/analysis_tools.py::get_event_state`, `tradingagents/reporting.py::_run_card_event_state` / `::_scorecard_snapshot_for_report` | `test_event_state.py::test_the_leaf_says_the_gate_is_off`, `::test_the_card_block_reads_the_runs_own_snapshot` | wired |
+
+## 7i. Vendor and screener surfaces
+
+The vendor and screener surfaces. Each adds a data source or a tool; none can
+change a rating, a size or a verdict, and the ones backed by `_feature_gate`
+return a `DATA_DISABLED` sentinel while off.
+
+| Key | Env var | What it can do | Enforced at | Proven by | Status |
+| --- | --- | --- | --- | --- | --- |
+| `enable_alpaca` | `TRADINGAGENTS_ENABLE_ALPACA` | Alpaca 1-minute bars as a realtime / OHLCV fallback when the primary vendor path is empty | `scripts/value_screener.py::_fetch_ohlcv`, `tradingagents/graph/trading_graph.py::resolve_instrument_context`, `tradingagents/agents/utils/momentum_tools.py::_momentum_text`, `scripts/action_report.py::_realtime_price`, `scripts/pre_market_review.py::_realtime_price` | `test_alpaca_data.py::test_screener_ohlcv_falls_back_to_alpaca` | wired |
+| `enable_massive_flat` | `TRADINGAGENTS_ENABLE_MASSIVE_FLAT` | reads OHLCV from the local flat-file folder when the vendor path is empty; `scripts/validate_massive_flat.py` checks the folder's NOI against it | `scripts/value_screener.py::_fetch_ohlcv`, `scripts/validate_massive_flat.py::main` | `test_massive_flat_noi.py::test_fetch_ohlcv_uses_flat_folder_when_enabled` | wired |
+| `enable_market_movers` | `TRADINGAGENTS_ENABLE_MARKET_MOVERS` | the `get_market_movers` tool (top gainers / losers / actives) | `tradingagents/agents/utils/analysis_tools.py::get_market_movers` (the `_feature_gate` read) | `tradingagents/agents/utils/analysis_tools.py::get_market_movers` (the gate read; no test flips it) | wired |
+| `enable_market_routing` | `TRADINGAGENTS_ENABLE_MARKET_ROUTING` | routes market-data methods to the configured source-priority chain instead of the fixed default vendor | `tradingagents/dataflows/interface.py::_market_routing_enabled` / `::route_to_vendor` | `test_routing_config_contract.py::test_documented_env_enables_market_routing_branch` | wired |
+| `enable_screener` | `TRADINGAGENTS_ENABLE_SCREENER` | the `screen_equities` tool (equity screener) | `tradingagents/agents/utils/analysis_tools.py::screen_equities` (the `_feature_gate` read) | `tradingagents/agents/utils/analysis_tools.py::screen_equities` (the gate read; no test flips it) | wired |
+| `enable_etf_engine` | `TRADINGAGENTS_ENABLE_ETF_ENGINE` | classifies an ETF and routes the fundamentals analyst to the ETF toolset | `tradingagents/agents/analysts/fundamentals_analyst.py::fundamentals_analyst_node` | `test_analyst_etf_routing.py::test_etf_classification_uses_etf_toolset` | wired |
+| `enable_enhanced_index` | `TRADINGAGENTS_ENABLE_ENHANCED_INDEX` | the enhanced-index allocation path in `allocation_block` | `tradingagents/strategies/portfolio.py::allocation_block` | `test_qlib_wiring.py::test_enhanced_index_flag` | wired |
 
 ## 8. Adding a gate — the rule
 

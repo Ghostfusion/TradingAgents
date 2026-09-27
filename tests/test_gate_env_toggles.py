@@ -117,6 +117,14 @@ REGISTRY: dict[str, str] = {
     "enable_events": "wired",
     "enable_event_calendars": "wired",
     "enable_event_state": "wired",
+    # vendor and screener surfaces
+    "enable_alpaca": "wired",
+    "enable_massive_flat": "wired",
+    "enable_market_movers": "wired",
+    "enable_market_routing": "wired",
+    "enable_screener": "wired",
+    "enable_etf_engine": "wired",
+    "enable_enhanced_index": "wired",
     # debate-integrity gates
     "debate_require_capability_matrix": "wired",
     "debate_baseline_fallback": "wired",
