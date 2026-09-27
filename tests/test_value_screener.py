@@ -511,6 +511,68 @@ def test_report_headers_renamed_and_legend_added(capsys):
     assert "**EY**" in md and "earnings yield" in md
 
 
+def _declared_watchlist_columns() -> list[str]:
+    """The table's column list, read off the renderer's own code object.
+
+    ``heads`` is a literal list of strings, so CPython stores it as one tuple
+    constant of ``_watchlist_markdown``. Reading the declaration (instead of
+    copying it here) is what makes the pin below bite: the column list and
+    ``_WATCHLIST_LEGEND`` are two hand-kept lists, and ``TobinQ`` sat in the
+    table with no legend entry for as long as nobody compared them.
+    """
+    for const in vs._watchlist_markdown.__code__.co_consts:
+        if isinstance(const, tuple) and "Rank" in const and "Ticker" in const:
+            return list(const)
+    raise AssertionError("no column-list constant in _watchlist_markdown")
+
+
+def _row_with_every_watchlist_column() -> dict:
+    """A row that fills every column the renderer reads, so nothing is pruned.
+
+    The read keys are the renderer's own string constants, so a column added
+    to the table is filled here automatically and the both-directions check
+    below cannot be satisfied by a stale copy of this row.
+    """
+    keys = set()
+    for fn in (vs._watchlist_markdown, vs._trap_cell):
+        keys |= {c for c in fn.__code__.co_consts if isinstance(c, str) and c.isidentifier()}
+    row = dict.fromkeys(keys, 1)
+    row["ticker"] = "TST"
+    return row
+
+
+def test_every_watchlist_column_has_a_legend_entry():
+    """The legend is the reader's only key to terse headers: it must cover
+    exactly the columns the table emits.
+
+    Both directions, because only one of them was enough to miss ``TobinQ``
+    (rendered, never explained) - and a legend entry for a column the table no
+    longer carries is the same drift the other way.
+    """
+    heads = _declared_watchlist_columns()
+    legend = [name for name, _meaning in vs._WATCHLIST_LEGEND]
+    assert not [c for c in heads if c not in legend], (
+        f"columns with no legend entry: {[c for c in heads if c not in legend]}"
+    )
+    assert not [c for c in legend if c not in heads], (
+        f"legend entries for columns the table never emits: "
+        f"{[c for c in legend if c not in heads]}"
+    )
+
+
+def test_the_rendered_legend_covers_exactly_the_rendered_columns():
+    """The same parity end to end: with every column filled, the table shows
+    them all and the legend under it names each one."""
+    md = vs._watchlist_markdown([_row_with_every_watchlist_column()])
+    header = next(line for line in md.splitlines() if line.startswith("| "))
+    columns = [c.strip() for c in header.strip("| ").split("|")]
+    assert columns == _declared_watchlist_columns(), (
+        "the full row did not reach every declared column"
+    )
+    listed = {line.split("**")[1] for line in md.splitlines() if line.startswith("- **")}
+    assert listed == set(columns), f"legend/table disagree on: {listed ^ set(columns)}"
+
+
 def _full_route(method, *a, **k):
     """Router for --scan all positional tests: statements + a steady uptrend
     so the momentum/swing/vcp/value-dip buckets compute."""

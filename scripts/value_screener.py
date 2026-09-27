@@ -112,6 +112,7 @@ _WATCHLIST_LEGEND = (
     ("EY", "earnings yield = EBIT / enterprise value (higher = cheaper)"),
     ("EV/EBIT", "acquirer's multiple = EV / EBIT (lower = cheaper)"),
     ("EV", "enterprise value = market cap + total debt - cash"),
+    ("TobinQ", "Tobin's Q = (market cap + total liabilities) / total assets (market value of the firm over its book value - the replacement-cost proxy; higher = more expensive)"),
     ("F", "Piotroski F-Score (0-9 accounting quality; >=7 strong)"),
     ("M", "Beneish M-Score (earnings-manipulation likelihood > -1.78 elevated)"),
     ("Z", "Altman Z-Score (bankruptcy risk; < 1.8 distress zone)"),
@@ -279,11 +280,12 @@ def _trap_cell(row: dict):
 def _watchlist_markdown(results: list) -> str:
     """Render the ranked watchlist as a complete table.
 
-    Every screenable column is shown on every row (fixed order); a column the
-    run did not compute is rendered ``n/a`` rather than dropped, so the set of
-    columns is identical from one report to the next (the ``_WATCHLIST_LEGEND``
-    always matches the table). ``Name`` / ``DayChg`` etc. show ``n/a`` when the
-    run carried no such metadata.
+    Every screenable column is present on every row (fixed order); a column the
+    run did not measure on ANY row is dropped by ``prune_empty_columns``
+    (``Rank`` / ``Ticker`` always survive), so a report shows exactly the
+    columns it measured and the legend below it is filtered to that same set
+    (``_legend_markdown(set(kept))``). ``Name`` / ``DayChg`` etc. show ``n/a``
+    when the run carried no such metadata.
     """
 
     def cell(v, fmt=None):
