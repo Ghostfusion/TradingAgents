@@ -535,6 +535,85 @@ gates-are-outside statement). Rows still waiting on an answer: `CTS-8`/`UNIV-AGR
 
 ---
 
+### 12.1 Audit 2026-09-26 — what Phases 0-4 left undone
+
+**Why this section exists.** The round that executed Phases 0-4 (`a5b2b7e`, plus two doc commits)
+reported all five phases done. The owner asked for a re-scan, and five read-only auditors then took
+**every row** of §3, §4, §5, §6 and §7 and performed **that row's own Verification cell** against the
+tree. Phase 0 is clean (§3.2's 22 rows all corrected, plus §3.1's four; the two residual nits are
+named below). **Phases 1, 2 and 4 were over-reported** — the rows below are not met, and none of them
+was recorded as open anywhere. **44 rows, counted by id.**
+
+| id | Phase | Acceptance cell | Where it stops (audited 2026-09-26) |
+| --- | --- | --- | --- |
+| NEWS-3 | 1 | the component stops printing NA | `news_score.guidance_change_score:772` exists and reads the Benzinga rows, but **nothing calls it**: `news_score(components, …)` takes the value as an argument and `_news_components` never supplies it |
+| NEWS-4 | 1 | the component stops printing absent | same shape: `news_score.corporate_events_score:657` exists over `FORM_EVENT_SCORES` / `_FORM_LABELS:39` and **has no caller**. It is not in `ABSENT_COMPONENTS` either, so it is neither fed nor reasoned |
+| RISK-4 / PLAN-7 | 1 | an assignment at a `BookState(...)` site | `../TradingExecution/signald/risk/state.py:82` still declares `net_beta: float \| None = None`; **no construction site passes it** (cli / engine / gates / harness / tests). Executor-side |
+| FUND-8 | 1 | `normalized_cycle_fcf` gains `std` | the yield and stability legs are built and rendered (`ratios.py:692-694`), but `cycle_dcf.normalized_cycle_fcf:23` still returns `{median,min,max,mean,n}` with **no `std`** |
+| FUND-21 | 1 | the leaf passes both; VS carries the factor | VS carries it through the engine-derived route (`fundamental_score.py:750`); **no live caller passes `dcf_upside`/`dcf_confidence_value`** (`analysis_tools.py:5484`, `reporting.py:1066`, `quant_scorecard.py:249`) |
+| PLAN-3 | 1 | a grep for the key **and** a run's `research_decision.json` | the key and its validation exist (`execution_contract.py:244/308/393`) and the grep passes; **no run artifact carries the field** — every tree in `reports/` predates it |
+| NEWS-15 | 1 | an owner sentence, or the flags flipped under a labelled dark-launch diff | no sentence exists; `.env` has three of the four flags on and `enable_news_relevance` off, with no labelled diff. **Owner decision** |
+| TECH-14 | 2 | a thrust producer over the panel | the Zweig thrust exists (`technical_depth.zweig_breadth_thrust:400`) and the breadth leaf prints it; it is **not a `technical_score` component** |
+| TECH-7 / TECH-12 | 2 | a BBW producer + percentile | done; the **Keltner/Bollinger squeeze-momentum leg** (§109/§110) has no producer at all |
+| TECH-19 | 2 | a leaf returns `relative_strength_vs_sector` | no leaf and no component; only the private `sector_screener._rel_outperformance:248` |
+| TECH-23 | 2 | a redundancy producer + the four readers | the producers exist (`alpha_zoo.redundancy_screen:581`, `score_panel.redundancy_matrix:1414`); the **state enum, acceleration and disagreement readers do not** |
+| REG-4 | 2 | three separately-printed index reads | `regime.index_trend_reads:1787` builds them and a test pins three; **no leaf emits them** |
+| REG-16 | 2 | a printed transition probability | `regime.hmm_transition_read:2092` exists and is tested; **called by nothing but its own module** |
+| REG-17 | 2 | the block is emitted | `regime.regime_state_metadata:2177` exists and is tested; **emitted nowhere** |
+| RISK-5 | 2 | a producer returns named levels | `call_wall`/`put_wall` exist and print; **distance-to-spot and a ranked top-\|GEX\| list do not** |
+| RISK-7 / RISK-12 | 2 | a scalar producer with a stated scale | the proxy is pinned and the scale stated (`risk_score.py:199-203`), but **no producer returns `cluster_exposure_share`** in either repo — it is still an externally-supplied input |
+| RISK-16 | 2 | each has a named producer | **no stop-hit-probability producer** (`stop_hit` exists only as a past-outcome boolean). Not data-blocked |
+| RISK-18 | 2 | " | **no cash-runway / FCF leg**; the FCF inputs already exist in `ratios.compute_ratios`. Not data-blocked |
+| RISK-19 | 2 | " | revenue / geographic concentration — **data-blocked (Phase 5)**: no segment-revenue store |
+| RISK-20 | 2 | " | **no FX-exposure / FX-VaR producer**; an FX *source* exists (`dataflows/fx.py`). Not data-blocked |
+| RISK-21 | 2 | " | **no commodity-beta producer**; `statistical.ols_factors` and the sector→driver map exist. Not data-blocked |
+| SENT-7 | 2 | a negation-adjusted intensity | the **raw-NLP layer** (negation window, intensifier, subjectivity, aspect taxonomy) is absent; `text_factors.lm_tone:121` is unigram-only |
+| SENT-9 | 2 | one producer per measure | **no `N_eff`/Kish, HHI, Gini or source-breadth** on the sentiment surface |
+| SENT-10 | 2 | one producer per transform | robust z, percentile and sentiment β exist; the **asymmetry split and the event study do not** |
+| SENT-11 | 2 | one model + one transform | **no entropy/Bayesian/Kalman/HMM producer and no output map** inside the sentiment engine |
+| FUND-15 | 2 | a dispersion producer | **no cross-metric agreement / factor-score dispersion producer** |
+| FUND-16 | 2 | a weighted Δ-factor composite | **absent**; only `capex_quality._delta:63`'s 3-lag change on NOPAT/IC/capex |
+| NEWS-5 | 2 | a scaled read, or a weight redistribution | **neither**: the 5% weight is retained with no classifier |
+| NEWS-7 | 2 | a sector-relative move, not breadth | **absent**; the component carries its reason |
+| NEWS-9 | 2 | a similarity measure + a weighted novelty | **absent**; `news_novelty:309` is a first-seen count share — no embedding, no `W_dup` |
+| NEWS-12 / NEWS-13 | 2 | distinct horizon scores; a measured vector | producers exist (`multi_horizon_sentiment_regression`, `ic_term_structure`); the news engine is one 30-day window with a hardcoded table. **Needs a measurement** |
+| EVT-9 | 2 | a measured panel row | `score_panel.py:903` puts `event_state` in `ENGINE_NOT_SCORED`, so no row exists. **Needs a run or an owner sentence** |
+| MKT-13 | 2 | one test per producer | belongs to `MarketScore`, which does not exist. **Superseded by D1 (Phase 7)** |
+| VAL-10 / VAL-12 / VAL-13 / VAL-14 / VAL-15 / VAL-17 | 2 | one producer per rank, `NA`-honest | belong to `ValuationScore`, which does not exist. **Superseded by D2 (Phase 7)** |
+| MF-4 | 3 | a measured table or a WP-10 record per vector | **no engine prints a measured weight table**; every vector is still `RESEARCH_ONLY` (the record still reads `n_measured 0`) |
+| MF-5 | 3 | a live run reporting 11 measured, or a named reason each | 2 of 11 live; the other nine carry reasons but no producer |
+| MF-6 | 3 | a revised `CATEGORY_WEIGHTS` with a record, or an owner sentence | neither; the table is unchanged. **Needs the owner's signature** |
+| MF-8 | 3 | panel rows, or an owner sentence closing it | neither |
+| FUND-24 | 3 | a measured vector + OOS evidence → `VALIDATED` | `STATUS_RESEARCH_ONLY`; nothing promoted |
+| RLW-4 | 3 | `scorecard_status(...)["movement"] != "UNAVAILABLE"` | no run reaches `VALIDATED`; `Movement` stays `UNAVAILABLE` |
+| PLAN-5 | 3 | both scripts exit 0 | **in flight** — a gate-on tree was launched 2026-09-26; the two verifiers run on it |
+| RLW-2 | 4 | no `_call_engine` from the block | the run path reads the snapshot (`snapshot=` from all four analysts), but `report_hygiene.py:177` retains the `_call_engine` **fallback** — the literal cell is unmet, and the block's own comment calls that fallback "exactly what RLW-2 removed from the run path" |
+| NEWS-1 | 4 | the 20-weight component stops printing NA | `news_score()` accepts `materiality` (`:906`) and declares it caller-supplied; **every call site passes none** (`analysis_tools.py:7209`, `reporting.py:1620`, `quant_scorecard.py:368`) |
+| the two mislabelled producer strings | 4 | the strings match the producers | `crowd_ratio`'s string is fixed; the `persistence` declaration still cites `sentiment.decayed_weight:91` **while its own note says it no longer cites that half** — self-contradictory (`news_score.py:194-201`) |
+
+**Phase 0's two residual nits** (outside the rows §3 names): `CompositeTradeScore.md:240` still reads
+"the N-deflation question is open (decision 12)" with no marker — the same dangling reference §3.1
+corrected at §3.5 — and `ScoreUniverse.md:503`'s Appendix-A citation still says "the
+`donchian_channel:413` gap". Both are corrected in the same round as this audit.
+
+**The other direction — documents that now under-report the tree.** `RiskScore.md` §8.1/§8.2 still mark
+ABSENT nine quantities that Phases 1-2 built and tested: §2.4/§2.5 σ20/§60
+(`book_risk.py::volatility_window_ratio:1489`), §3.3/§3.4 downside/upside beta
+(`strategies/regime.py::upside_downside_beta:1871`), §6.4 Sterling (`book_risk.py::sterling_ratio:1547`),
+§9.4/§9.5 + §10 the loss-frequency family (`book_risk.py::loss_frequency_family:1582`), §23
+momentum reversal (`book_risk.py::momentum_reversal:1666`), §34 `P(R<0)` (`book_risk.py::prob_loss:1464`),
+§58 tail-adjusted return (`book_risk.py::_tail_adjusted_return:1697`), §63 the nonlinear penalty
+(`book_risk.py::_nonlinear_risk_penalty:1825`) and §68 liquidity-adjusted CVaR
+(`book_risk.py::_liquidity_adjusted_cvar:1732`) — each exercised in `tests/test_risk_scalars.py`.
+Three of them stay underscore-private, awaiting a leaf that holds both inputs.
+
+**What this audit does not say.** Every row above still respects the constraints the phases were run
+under: no fabricated number, no gate or size changed, and each absent quantity carries its reason. The
+defect is in the *reporting* of the round, not in the work — a phase is not done because most of its
+rows are.
+
+---
+
 ## 13. What is *not* in this plan
 
 The readers' "already done, or not an item" sections list roughly sixty claims the

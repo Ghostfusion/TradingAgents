@@ -437,7 +437,23 @@ since the doc's §1/§3 were written, the *current* line is cited.
 
 **Every ABSENT row, with the smallest honest producer.** None of these is a
 defect in the engine; each is a quantity the library specifies and no module
-computes.
+computes. [CORRECTED 2026-09-26 (audit): **the closing clause is stale for nine of
+the rows below** — Phases 1-2 built the quantity, and only §8.1's status column and
+this backlog table were never re-read. Built and tested since: §2.4/§2.5 σ20/σ60
+(`book_risk.py::volatility_window_ratio:1489`), §3.3/§3.4 downside/upside beta
+(`strategies/regime.py::upside_downside_beta:1871`), §6.4 Sterling
+(`book_risk.py::sterling_ratio:1547`), §9.4/§9.5 and §10 the loss-frequency family
+(`book_risk.py::loss_frequency_family:1582`), §23 momentum reversal
+(`book_risk.py::momentum_reversal:1666`), §34 `P(R<0)`
+(`book_risk.py::prob_loss:1464`), §58 tail-adjusted return
+(`book_risk.py::_tail_adjusted_return:1697`), §63 the nonlinear penalty
+(`book_risk.py::_nonlinear_risk_penalty:1825`) and §68 liquidity-adjusted CVaR
+(`book_risk.py::_liquidity_adjusted_cvar:1732`) — each exercised in
+`tests/test_risk_scalars.py`, and the last three stay underscore-private awaiting a
+leaf that holds both inputs. Still genuinely ABSENT, and named as such here: §33
+stop-hit probability, §48 cash runway, §50/§51 segment concentration, §52 FX
+exposure, §54 commodity beta — of these only §50/§51 is data-blocked (no
+segment-revenue store).]
 
 | Library section | Quantity | Smallest honest producer |
 | --- | --- | --- |

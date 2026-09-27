@@ -237,7 +237,7 @@ binding invariant or a recorded owner decision).
 | 6 | Two composites: `OpportunityScore = f(evidence)`; `TradeScore = f(OpportunityScore, RiskScore)` | **CONTRADICTS** the owner's `opportunity_score` decision (Q1) on the name, and invariant 18 on the shape | §3.4 |
 | 7 | `RiskMultiplier = RiskScore / 100` | **PRESENT, in the other layer** — and moving it inside the composite double-counts `K` | §3.4 |
 | 8 | `CTS = OpportunityScore × RiskAdjustment × ConfidenceAdjustment` | **ABSENT** as a score shape; **CONTRADICTS** the four-outputs rule and the printed-coverage rule | §3.5 |
-| 9 | Coverage-adjusted confidence divides by 100 and multiplies | **ABSENT** — `coverage` is a printed qualifier; the N-deflation question is open (decision 12) | §3.5 |
+| 9 | Coverage-adjusted confidence divides by 100 and multiplies | **ABSENT** — `coverage` is a printed qualifier; the N-deflation question is open (decision 12) [CORRECTED 2026-09-26: the reference dangles — `IMPLEMENTATION_PLAN.md` §13 Q12 is the semivariance measure. The coverage/N-deflation question is this document's §6 Q3 (answered 2026-09-26) plus owner Q4's label; see §3.5's correction.] | §3.5 |
 | 10 | News / Sentiment / Social / Analyst revisions / Options / Flows as context, not core | **PRESENT** for News and Sentiment (invariant 17); the rest are leaves, not engines | §2.2, `NewsScore.md` §8 |
 | 11 | A 7-engine `OpportunityScore` weighting `Valuation` and `Event` | **ABSENT / CONTRADICTS** — `ValuationScore` has no producer at all; `EventScore` has no composite by decision | §3.3 |
 | 12 | Nonlinear composite: `Σ wᵢSᵢ + Σ_{i<j} γᵢⱼ SᵢSⱼ` | **ABSENT**; needs measurement, and breaks recomputable attribution | §3.7 |
