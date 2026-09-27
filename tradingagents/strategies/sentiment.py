@@ -32,6 +32,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from tradingagents.strategies.news_relevance import is_official as _is_official
+from tradingagents.strategies.text_factors import (
+    NEGATIVE_WORDS as _TEXT_NEGATIVE_WORDS,
+    POSITIVE_WORDS as _TEXT_POSITIVE_WORDS,
+)
 
 
 def sentiment_velocity(sentiment_series: list, window: int = 5) -> float | None:
@@ -164,6 +168,607 @@ def sentiment_dynamics(
             "second copy of ar1_phi; the canonical direction stays "
             "sentiment_velocity's OLS slope (owner Q4); "
             f"n={n} usable observation(s), floor {floor}"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SENT-7 - raw-NLP layer: a local, DECLARED negation/intensifier rule engine
+# ---------------------------------------------------------------------------
+# The aspect taxonomy the library's Layer 1 also names is explicitly out of
+# scope (VENDOR_ONLY): it needs a vendor aspect model the repo does not hold.
+# What is built here is the negation/intensifier half only, over text already
+# fetched. ``text_factors.lm_tone`` stays unigram-only and untouched; this layer
+# sits beside it and applies a context rule to its own token stream.
+#
+# Every table and threshold below is a DECLARED POLICY (a rule the engine states
+# and applies), not a fitted estimate. No vendor call, no config key.
+
+#: DECLARED POLICY: how many tokens BEFORE a polarity term a negation may reach.
+#: Three is the short-window negator convention ("not a strong result"); a
+#: negation outside this window does not flip the term.
+NEGATION_WINDOW = 3
+
+#: DECLARED POLICY: the negation vocabulary. A token in this set within
+#: ``NEGATION_WINDOW`` tokens before a polarity term flips its sign (an odd
+#: count flips, an even count cancels). These are negators, not diminishers.
+NEGATION_TOKENS = frozenset(
+    {
+        "not", "no", "never", "none", "nobody", "nothing", "neither", "nor",
+        "cannot", "can't", "won't", "don't", "doesn't", "didn't", "isn't",
+        "aren't", "wasn't", "weren't", "without", "lacks", "lack", "lacking",
+    }
+)
+
+#: DECLARED POLICY: intensifier multipliers, applied to a polarity term the
+#: modifier precedes inside the window. Values are stated, not fitted.
+INTENSIFIER_MULTIPLIERS = {
+    "very": 1.5, "extremely": 2.0, "highly": 1.5, "significantly": 1.5,
+    "strongly": 1.5, "substantially": 1.5, "particularly": 1.25,
+    "especially": 1.25, "increasingly": 1.25, "sharply": 1.5,
+}
+
+#: DECLARED POLICY: diminisher multipliers, same application rule.
+DIMINISHER_MULTIPLIERS = {
+    "slightly": 0.5, "somewhat": 0.5, "marginally": 0.5, "mildly": 0.5,
+    "moderately": 0.75, "partly": 0.75, "partially": 0.75, "fairly": 0.75,
+}
+
+_NLP_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
+
+
+def negation_adjusted_polarity(
+    text: str, *, window: int = NEGATION_WINDOW
+) -> dict:
+    """Negation/intensifier-adjusted polarity over already-fetched text (SENT-7).
+
+    Reads the text the caller already holds (an article headline/body, a filing
+    paragraph) and a local, entirely declared rule engine - no vendor call, no
+    aspect taxonomy (that half is VENDOR_ONLY). The lexicons are the module's
+    read-only import of ``text_factors.POSITIVE_WORDS`` / ``NEGATIVE_WORDS``;
+    this layer is unigram-plus-context and leaves ``text_factors.lm_tone``
+    untouched.
+
+    Returns ``{"polarity", "positive_terms", "negative_terms", "negated_terms",
+    "intensified_terms", "n_tokens", "window", "basis"}``. ``polarity`` is the
+    mean per-term contribution: each term is +1 (positive) or -1 (negative),
+    multiplied by its intensifier/diminisher, and sign-flipped when an odd
+    number of ``NEGATION_TOKENS`` sits in the ``window`` tokens before it. It
+    returns ``polarity=None`` plus a ``reason`` when the text holds no polarity
+    term - absence of signal is not neutrality.
+    """
+    tokens = _NLP_WORD_RE.findall(str(text or "").lower())
+    contributions: list[float] = []
+    pos = neg = flipped = intensified = 0
+    for i, tok in enumerate(tokens):
+        if tok in _TEXT_POSITIVE_WORDS:
+            base = 1.0
+        elif tok in _TEXT_NEGATIVE_WORDS:
+            base = -1.0
+        else:
+            continue
+        preceding = tokens[max(0, i - int(window)) : i]
+        neg_count = sum(1 for t in preceding if t in NEGATION_TOKENS)
+        mult = 1.0
+        for t in reversed(preceding):
+            if t in INTENSIFIER_MULTIPLIERS:
+                mult = INTENSIFIER_MULTIPLIERS[t]
+                break
+            if t in DIMINISHER_MULTIPLIERS:
+                mult = DIMINISHER_MULTIPLIERS[t]
+                break
+        contribution = base * mult
+        if neg_count % 2 == 1:
+            contribution = -contribution
+            flipped += 1
+        if mult != 1.0:
+            intensified += 1
+        contributions.append(contribution)
+        if base > 0:
+            pos += 1
+        else:
+            neg += 1
+    if not contributions:
+        return {
+            "polarity": None,
+            "positive_terms": 0,
+            "negative_terms": 0,
+            "negated_terms": 0,
+            "intensified_terms": 0,
+            "n_tokens": len(tokens),
+            "window": int(window),
+            "reason": "no lexicon polarity term matched in the text",
+        }
+    polarity = sum(contributions) / len(contributions)
+    return {
+        "polarity": round(polarity, 6),
+        "positive_terms": pos,
+        "negative_terms": neg,
+        "negated_terms": flipped,
+        "intensified_terms": intensified,
+        "n_tokens": len(tokens),
+        "window": int(window),
+        "basis": (
+            "per-term polarity = sign(lexicon) * modifier-multiplier * "
+            "(-1 if odd negation count in the previous NEGATION_WINDOW tokens); "
+            "polarity = mean per-term contribution; lexicons = "
+            "text_factors.POSITIVE_WORDS/NEGATIVE_WORDS; negation window and "
+            "multiplier tables are DECLARED POLICY (not fitted)"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SENT-9 - volume / attention set (library §114, §137, §138, §139, §140)
+# ---------------------------------------------------------------------------
+# Pure arithmetic over share/count vectors the caller already holds. No
+# threshold is fitted; the only policy is the refusal floor.
+
+#: DECLARED POLICY: a Gini over a share vector needs at least this many items to
+#: be a distribution; below it the measure refuses rather than fabricate.
+GINI_MIN_ITEMS = 2
+
+
+def effective_sample_size(weights: list) -> dict:
+    """Kish effective sample size ``N_eff = (Σw)²/Σw²`` (SENT-9, §114).
+
+    Reads the per-item weights the caller already holds (the relevance/decay
+    weights ``aggregate_weighted_sentiment`` builds, or plain counts).
+    Non-positive and non-finite weights are dropped - a zero weight contributes
+    nothing and must not inflate the sum. Returns ``{"n_eff", "n", "sum_w",
+    "sum_w2", "basis"}``, or ``n_eff=None`` plus a ``reason`` when no positive
+    weight is present. Equal weights give ``N_eff = n``.
+    """
+    vals: list[float] = []
+    for w in weights or []:
+        try:
+            f = float(w)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f) and f > 0:
+            vals.append(f)
+    if not vals:
+        return {
+            "n_eff": None, "n": 0, "sum_w": 0.0, "sum_w2": 0.0,
+            "reason": "no positive finite weight",
+        }
+    sw = sum(vals)
+    sw2 = sum(w * w for w in vals)
+    return {
+        "n_eff": round(sw * sw / sw2, 6),
+        "n": len(vals),
+        "sum_w": round(sw, 6),
+        "sum_w2": round(sw2, 6),
+        "basis": (
+            "N_eff = (Σw)²/Σw² (Kish, library §114); equal weights -> n; "
+            f"n={len(vals)} positive weight(s)"
+        ),
+    }
+
+
+def herfindahl_index(values: list) -> dict:
+    """HHI share concentration ``Σ (v_i/Σv)²`` (SENT-9, §137).
+
+    Reads a non-negative per-source/per-item count or share vector the caller
+    already holds; shares are renormalised internally, so passing raw counts is
+    fine. Returns ``{"hhi", "n", "effective_n", "basis"}``. One item gives
+    ``hhi = 1.0``; equal items give ``1/n``. ``effective_n = 1/hhi`` is the
+    inverse-HHI number of equally-sized items.
+    """
+    vals: list[float] = []
+    for v in values or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f) and f >= 0:
+            vals.append(f)
+    total = sum(vals)
+    if not vals or total <= 0:
+        return {
+            "hhi": None, "n": len(vals), "effective_n": None,
+            "reason": "no positive share to concentrate",
+        }
+    hhi = sum((v / total) ** 2 for v in vals)
+    return {
+        "hhi": round(hhi, 6),
+        "n": len(vals),
+        "effective_n": round(1.0 / hhi, 6) if hhi > 0 else None,
+        "basis": (
+            "HHI = Σ share² over the renormalised non-negative vector "
+            "(library §137); one item -> 1.0, equal items -> 1/n; "
+            f"n={len(vals)}"
+        ),
+    }
+
+
+def gini_coefficient(values: list) -> dict:
+    """Gini coefficient over a non-negative share vector (SENT-9, §138).
+
+    Reads a non-negative per-source/per-item vector the caller already holds.
+    Returns ``{"gini", "n", "mean", "basis"}``; an equal vector gives
+    ``gini = 0.0`` exactly, and a single item gives 0.0 (perfect equality).
+    ``None`` plus a ``reason`` when empty or the total is zero.
+    """
+    vals = sorted(float(v) for v in values or [] if v is not None)
+    vals = [v for v in vals if math.isfinite(v) and v >= 0]
+    if len(vals) < GINI_MIN_ITEMS:
+        return {
+            "gini": None, "n": len(vals), "mean": None,
+            "reason": f"need at least {GINI_MIN_ITEMS} non-negative items",
+        }
+    total = sum(vals)
+    if total <= 0:
+        return {
+            "gini": None, "n": len(vals), "mean": 0.0,
+            "reason": "all values are zero",
+        }
+    n = len(vals)
+    num = sum((2 * (i + 1) - n - 1) * v for i, v in enumerate(vals))
+    return {
+        "gini": round(num / (n * total), 6),
+        "n": n,
+        "mean": round(total / n, 6),
+        "basis": (
+            "Gini = Σ_i (2i - n - 1) x_i / (n Σx) over the sorted vector "
+            "(library §138); an equal vector is 0.0"
+        ),
+    }
+
+
+def source_breadth(counts) -> dict:
+    """Source breadth / independence over per-source counts (SENT-9, §139/§140).
+
+    Reads a mapping ``{source: count}`` (the per-source mention counts the
+    aggregation already holds, e.g. from ``_article_url``'s host) or any
+    iterable of counts. ``breadth`` is the unique/total ratio (§139);
+    ``independence`` is ``1 - HHI`` over the source shares (§140's independence
+    = one minus concentration); ``hhi`` is that concentration. **A single source
+    is a real, low-breadth answer, not a refusal**: with one source
+    ``breadth = 1/total`` (small), ``independence = 0.0``, and
+    ``single_source=True`` states it. Returns ``{"n_sources", "total",
+    "breadth", "independence", "hhi", "single_source", "basis"}``, or
+    ``reason`` when no positive count exists.
+    """
+    items = counts.items() if isinstance(counts, dict) else enumerate(counts or [])
+    clean: list[float] = []
+    for _src, c in items:
+        try:
+            f = float(c)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f) and f > 0:
+            clean.append(f)
+    if not clean:
+        return {
+            "n_sources": 0, "total": 0.0, "breadth": None,
+            "independence": None, "hhi": None, "single_source": False,
+            "reason": "no positive per-source count",
+        }
+    total = sum(clean)
+    n_src = len(clean)
+    hhi = sum((c / total) ** 2 for c in clean)
+    basis = (
+        "breadth = n_sources/total (library §139); independence = 1 - HHI over "
+        "source shares (§140); "
+        + (
+            "only one source present: this is a low-breadth answer, not a "
+            "refusal (independence 0.0, breadth 1/total)"
+            if n_src == 1
+            else "multiple sources present"
+        )
+        + f"; n_sources={n_src}, total={round(total, 6)}"
+    )
+    return {
+        "n_sources": n_src,
+        "total": round(total, 6),
+        "breadth": round(n_src / total, 6),
+        "independence": round(1.0 - hhi, 6),
+        "hhi": round(hhi, 6),
+        "single_source": n_src == 1,
+        "basis": basis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# SENT-10 - relative-normalisation set: asymmetry split + event study
+# ---------------------------------------------------------------------------
+# The robust-z, percentile and sentiment-beta legs already exist elsewhere, so
+# they are not rebuilt here. These two are the absent transforms.
+
+#: DECLARED POLICY: the event study needs at least this many pre-event
+#: observations to form the baseline abnormal value; below it it refuses.
+EVENT_STUDY_MIN_BASELINE = 1
+
+
+def sentiment_asymmetry(scores, weights=None) -> dict:
+    """Upside vs downside sentiment contribution (SENT-10, §103/§104).
+
+    Reads a per-item polarity series already held (the ``-1..1`` per-article or
+    per-day scores) plus optional non-negative weights. ``upside`` is the
+    weighted mean of the positive part, ``downside`` the weighted mean of the
+    magnitude of the negative part, and ``asymmetry = (upside - downside) /
+    (upside + downside)`` in ``-1..1``; a symmetric series gives ``0.0``.
+    Returns ``{"upside", "downside", "asymmetry", "n", "basis"}``, or
+    ``asymmetry=None`` plus a ``reason`` when no item is scored.
+    """
+    raw = list(scores or [])
+    wts = list(weights) if weights is not None else None
+    pairs: list[tuple[float, float]] = []
+    for i, s in enumerate(raw):
+        if s is None:
+            continue
+        try:
+            f = float(s)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(f):
+            continue
+        w = 1.0
+        if wts is not None and i < len(wts):
+            try:
+                w = float(wts[i])
+            except (TypeError, ValueError):
+                w = 1.0
+        if not math.isfinite(w) or w <= 0:
+            w = 1.0
+        pairs.append((f, w))
+    wsum = sum(w for _, w in pairs)
+    if not pairs or wsum <= 0:
+        return {
+            "upside": None, "downside": None, "asymmetry": None, "n": len(pairs),
+            "reason": "no scored item with positive weight",
+        }
+    upside = sum(w * max(f, 0.0) for f, w in pairs) / wsum
+    downside = sum(w * max(-f, 0.0) for f, w in pairs) / wsum
+    denom = upside + downside
+    asymmetry = (upside - downside) / denom if denom > 0 else 0.0
+    return {
+        "upside": round(upside, 6),
+        "downside": round(downside, 6),
+        "asymmetry": round(asymmetry, 6),
+        "n": len(pairs),
+        "basis": (
+            "asymmetry = (upside - downside)/(upside + downside); upside = "
+            "weighted mean of max(s,0), downside = weighted mean of max(-s,0) "
+            "(library §103/§104); a symmetric series -> 0.0; "
+            f"n={len(pairs)} scored item(s)"
+        ),
+    }
+
+
+def event_study(
+    series, event_index, *, window: int = 3, baseline: float | None = None
+) -> dict:
+    """Mean cumulative abnormal value around an event window (SENT-10, §128).
+
+    Reads a per-day series the caller already holds (the daily sentiment or
+    return series) and an ``event_index`` into it. The baseline is the mean of
+    the pre-event estimation window ``series[:event_index]`` unless ``baseline``
+    is passed; the event window is ``series[event_index:event_index + window]``.
+    Returns ``{"car", "mean_car", "baseline", "window", "event_index", "n_pre",
+    "abnormal", "basis"}``: ``abnormal`` is each window value minus the
+    baseline, ``car`` is its cumulative sum, and ``mean_car = car/window``.
+    ``None`` fields plus a ``reason`` when the window does not fit or a value is
+    non-finite - a non-finite value is refused rather than dropped, because the
+    indices must stay aligned with the series.
+    """
+    try:
+        idx = int(event_index)
+        w = int(window)
+    except (TypeError, ValueError):
+        return {
+            "car": None, "mean_car": None, "baseline": None, "window": None,
+            "event_index": None, "n_pre": None, "abnormal": None,
+            "reason": "event_index and window must be integers",
+        }
+    vals: list[float] = []
+    for v in series or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return {
+                "car": None, "mean_car": None, "baseline": None, "window": w,
+                "event_index": idx, "n_pre": None, "abnormal": None,
+                "reason": "series holds a non-numeric value; indices must align",
+            }
+        if not math.isfinite(f):
+            return {
+                "car": None, "mean_car": None, "baseline": None, "window": w,
+                "event_index": idx, "n_pre": None, "abnormal": None,
+                "reason": "series holds a non-finite value; indices must align",
+            }
+        vals.append(f)
+    if w < 1:
+        return {
+            "car": None, "mean_car": None, "baseline": None, "window": w,
+            "event_index": idx, "n_pre": None, "abnormal": None,
+            "reason": "window must be at least 1",
+        }
+    if idx < 0 or idx + w > len(vals):
+        return {
+            "car": None, "mean_car": None, "baseline": None, "window": w,
+            "event_index": idx, "n_pre": len(vals), "abnormal": None,
+            "reason": "event window does not fit inside the series",
+        }
+    if baseline is None:
+        if idx < EVENT_STUDY_MIN_BASELINE:
+            return {
+                "car": None, "mean_car": None, "baseline": None, "window": w,
+                "event_index": idx, "n_pre": idx, "abnormal": None,
+                "reason": (
+                    f"need at least {EVENT_STUDY_MIN_BASELINE} pre-event "
+                    "observation(s) for the baseline"
+                ),
+            }
+        pre = vals[:idx]
+        base = sum(pre) / len(pre)
+    else:
+        try:
+            base = float(baseline)
+        except (TypeError, ValueError):
+            return {
+                "car": None, "mean_car": None, "baseline": None, "window": w,
+                "event_index": idx, "n_pre": idx, "abnormal": None,
+                "reason": "baseline must be numeric",
+            }
+        if not math.isfinite(base):
+            return {
+                "car": None, "mean_car": None, "baseline": None, "window": w,
+                "event_index": idx, "n_pre": idx, "abnormal": None,
+                "reason": "baseline must be finite",
+            }
+    abnormal = [v - base for v in vals[idx : idx + w]]
+    car = sum(abnormal)
+    return {
+        "car": round(car, 6),
+        "mean_car": round(car / w, 6),
+        "baseline": round(base, 6),
+        "window": w,
+        "event_index": idx,
+        "n_pre": idx,
+        "abnormal": [round(a, 6) for a in abnormal],
+        "basis": (
+            "abnormal_t = series_t - baseline; baseline = mean(series[:event_index]) "
+            "unless supplied; car = Σ abnormal over the event window; "
+            "mean_car = car/window (library §128); refusal floors are DECLARED POLICY"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SENT-11 - uncertainty model and the output map
+# ---------------------------------------------------------------------------
+# ONE uncertainty model, closed-form, over the daily series the engine already
+# holds; plus the Φ/logistic/tanh output map to a Confidence in 0-1.
+
+#: DECLARED POLICY: the entropy histogram grid over the pinned -1..1 sentiment
+#: score scale, and the point floor below which the model refuses.
+SENTIMENT_ENTROPY_BINS = 10
+SENTIMENT_ENTROPY_MIN_POINTS = 5
+SENTIMENT_SCORE_RANGE = 1.0
+
+#: DECLARED POLICY: the admissible output maps.
+SENTIMENT_OUTPUT_MAPS = ("phi", "logistic", "tanh")
+
+
+def sentiment_uncertainty(
+    series, *, bins: int = SENTIMENT_ENTROPY_BINS
+) -> dict:
+    """Closed-form entropy uncertainty over the daily sentiment series (SENT-11).
+
+    THE one uncertainty model this module adds. ``series`` is the chronological
+    daily sentiment the engine already holds (``daily_sentiment_sma``'s
+    ``score`` column). It is a closed-form Shannon entropy over a histogram of
+    the pinned ``-1..1`` score scale rather than the repo's HMM/Kalman helpers,
+    because ``regime.hmm_filtered_regime`` needs OHLC + 252 bars and
+    ``statistical_kalman.kalman_spread`` needs a second series, while the daily
+    score series is what is actually held here - no new call, no new input.
+
+    Returns ``{"entropy", "entropy_norm", "uncertainty", "confidence",
+    "concentration", "n", "bins", "basis"}``: ``entropy = -Σ p ln p`` (nats),
+    ``entropy_norm = entropy/ln(bins)`` is ``H*`` in 0-1, ``uncertainty = H*``
+    and ``confidence = 1 - H*`` (library §24). ``None`` fields plus a ``reason``
+    below the declared point floor.
+    """
+    vals: list[float] = []
+    for v in series or []:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            vals.append(f)
+    if len(vals) < SENTIMENT_ENTROPY_MIN_POINTS:
+        return {
+            "entropy": None, "entropy_norm": None, "uncertainty": None,
+            "confidence": None, "concentration": None, "n": len(vals),
+            "bins": int(bins),
+            "reason": (
+                f"{len(vals)} point(s) < SENTIMENT_ENTROPY_MIN_POINTS="
+                f"{SENTIMENT_ENTROPY_MIN_POINTS}"
+            ),
+        }
+    k = max(2, int(bins))
+    counts = [0] * k
+    span = 2.0 * SENTIMENT_SCORE_RANGE
+    for f in vals:
+        idx = int((f + SENTIMENT_SCORE_RANGE) / span * k)
+        idx = min(k - 1, max(0, idx))
+        counts[idx] += 1
+    n = len(vals)
+    entropy = 0.0
+    concentration = 0.0
+    for c in counts:
+        if c <= 0:
+            continue
+        p = c / n
+        entropy -= p * math.log(p)
+        concentration = max(concentration, p)
+    h_max = math.log(k)
+    h_star = entropy / h_max if h_max > 0 else 0.0
+    h_star = min(1.0, max(0.0, h_star))
+    return {
+        "entropy": round(entropy, 6),
+        "entropy_norm": round(h_star, 6),
+        "uncertainty": round(h_star, 6),
+        "confidence": round(1.0 - h_star, 6),
+        "concentration": round(concentration, 6),
+        "n": n,
+        "bins": k,
+        "basis": (
+            "closed-form Shannon entropy H = -Σ p ln p over the pinned -1..1 "
+            f"score histogram with {k} equal bins; H* = H/ln(bins); "
+            "uncertainty = H*, confidence = 1 - H* (library §24); "
+            "bins/floor are DECLARED POLICY; the HMM/Kalman helpers are not "
+            "reused because they need OHLC+252 bars or a second series"
+        ),
+    }
+
+
+def sentiment_output_map(raw, *, kind: str = "tanh") -> dict:
+    """Map a signed raw value to a Confidence in 0-1 (SENT-11, §149-§151).
+
+    ``kind`` is ``"phi"`` (standard-normal CDF), ``"logistic"`` or ``"tanh"``;
+    all three send 0 -> 0.5 and are monotone in the raw value. The returned dict
+    carries the transform's NAME and the RAW value beside the mapped Confidence
+    (``{"map", "raw", "confidence", "basis"}``) so a reader can see which
+    transform was applied. An unknown kind or a non-finite raw gives
+    ``confidence=None`` plus a ``reason``.
+    """
+    try:
+        z = float(raw)
+    except (TypeError, ValueError):
+        return {
+            "map": kind, "raw": None, "confidence": None,
+            "reason": "raw must be numeric",
+        }
+    if not math.isfinite(z):
+        return {
+            "map": kind, "raw": None, "confidence": None,
+            "reason": "raw must be finite",
+        }
+    k = str(kind or "").lower()
+    if k == "phi":
+        c = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    elif k == "logistic":
+        c = 1.0 / (1.0 + math.exp(-z))
+    elif k == "tanh":
+        c = 0.5 * (1.0 + math.tanh(z))
+    else:
+        return {
+            "map": k, "raw": round(z, 6), "confidence": None,
+            "reason": f"unknown map {kind!r}; choose one of {SENTIMENT_OUTPUT_MAPS}",
+        }
+    return {
+        "map": k,
+        "raw": round(z, 6),
+        "confidence": round(c, 6),
+        "basis": (
+            f"confidence = {k}(raw) in 0-1; raw={round(z, 6)} carried beside the "
+            "map name so the transform applied is visible (library §149-§151)"
         ),
     }
 
@@ -1070,6 +1675,24 @@ __all__ = [
     "sentiment_velocity",
     "sentiment_dynamics",
     "SENTIMENT_DYNAMICS_MIN_POINTS",
+    "negation_adjusted_polarity",
+    "NEGATION_WINDOW",
+    "NEGATION_TOKENS",
+    "INTENSIFIER_MULTIPLIERS",
+    "DIMINISHER_MULTIPLIERS",
+    "effective_sample_size",
+    "herfindahl_index",
+    "gini_coefficient",
+    "source_breadth",
+    "GINI_MIN_ITEMS",
+    "sentiment_asymmetry",
+    "event_study",
+    "EVENT_STUDY_MIN_BASELINE",
+    "sentiment_uncertainty",
+    "sentiment_output_map",
+    "SENTIMENT_ENTROPY_BINS",
+    "SENTIMENT_ENTROPY_MIN_POINTS",
+    "SENTIMENT_OUTPUT_MAPS",
     "mention_volume",
     "consensus_overlap",
     "decayed_weight",

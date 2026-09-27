@@ -525,8 +525,8 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 106 | Fibonacci retracement | 5 | built — `swing.fib_levels:295`; `value_dip.fib_retrace_entry:904` |
 | 107 | Donchian channels | 4 | built — `technical_factors.donchian_channel:467` |
 | 108 | Keltner Channels | 4 | built — `technical_factors.keltner_channel:439` |
-| 109 | Keltner/Bollinger squeeze | 2 | ABSENT |
-| 110 | TTM-style squeeze momentum | 2 | ABSENT |
+| 109 | Keltner/Bollinger squeeze | 2 | built — `technical_factors.squeeze_momentum` (BB inside KC + the release flag vs the prior bar's ATR) [CORRECTED 2026-09-27: `TECH-7`/`TECH-12`'s remaining leg.] |
+| 110 | TTM-style squeeze momentum | 2 | built — the same producer's `momentum`/`direction` at the release (the §30 ATR-normalised move, since this item gives no formula) [CORRECTED 2026-09-27: the formula choice is declared in the module docstring.] |
 | 111 | Aroon | 3 | built — `technical_factors.aroon:667` |
 | 112 | TRIX | 4 | built — `extended_indicators.trix:173` |
 | 113 | DPO | 1 | ABSENT |
@@ -545,9 +545,9 @@ different engine owns it (master rule 3). **Formulas** is the count of
 | 126 | Composite TechnicalScore | 1 | built — `strategies/technical_score.py::technical_score`; leaf `agents/utils/analysis_tools.py::get_technical_score:5856` |
 | 127 | Redundancy control (not 100 indicators voting) | 0 | ABSENT — no indicator-correlation producer; nearest `consensus.agreement_score:14` is sentiment-rating dispersion |
 | 128 | Recommended indicator clusters | 1 | PARTIAL — `technical_score.CATEGORY_COMPONENTS` (nine categories; the library's setup-quality cluster absent) |
-| 129 | Technical State | 1 | PARTIAL — advisory band labels `technical_score.TECH_BANDS` → `score_engine.band_label:123`; the named seven-state enum absent |
-| 130 | Technical acceleration | 2 | ABSENT |
-| 131 | Technical disagreement | 2 | ABSENT |
+| 129 | Technical State | 1 | built — `technical_score.technical_state` (the library's state names, from five directional legs + ADX) [CORRECTED 2026-09-27: `TECH-23`; states the library does not name are recorded as unbound rather than invented.] |
+| 130 | Technical acceleration | 2 | built — `technical_score.technical_acceleration` returns velocity (this item's first difference), acceleration (the second) and jerk (the third), naming the divergence [CORRECTED 2026-09-27: the ticket asked for the second difference; the library calls the second `TechnicalJerk`.] |
+| 131 | Technical disagreement | 2 | built — `technical_score.technical_disagreement` over the category sub-scores, returning the inputs it compared [CORRECTED 2026-09-27: `TECH-23`.] |
 | 132 | Technical coverage | 2 | built — `technical_score.technical_score` returns `coverage`/`floor`; `score_engine.coverage_floor:53` |
 | 133 | Recommended architecture | 1 | PARTIAL — realised as `strategies/technical_score.py` (nine categories + composite + coverage); no acceleration/disagreement node |
 

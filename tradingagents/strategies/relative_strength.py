@@ -263,6 +263,87 @@ def relative_strength_report(
     }
 
 
+def _window_return(closes: list, window: int) -> float | None:
+    """``closes[-1] / closes[-(window+1)] - 1``, or None below ``window + 1``."""
+    if not closes or len(closes) < int(window) + 1:
+        return None
+    first = closes[-(int(window) + 1)]
+    if first in (0, None):
+        return None
+    return closes[-1] / first - 1.0
+
+
+def relative_strength_vs_sector(
+    stock: list,
+    sector: list,
+    *,
+    window: int = 20,
+    benchmark: list | None = None,
+) -> dict:
+    """The per-stock RS leg measured against its SECTOR ETF (TECH-19).
+
+    The owner's decision (`MASTER_PLAN.md` §5 TECH-19) is that the **sector ETF
+    is the primary relative-strength reference**: a stock that merely tracks a
+    rising sector is not a leader, and only the sector leg can say so - the
+    benchmark leg cannot distinguish "good company" from "good sector".
+
+    ``stock`` and ``sector`` are close series handed in by the caller; nothing is
+    fetched (the SPDR series are already held in-process - the caller resolves the
+    label with `dataflows.yfinance_sector.fetch_sector` +
+    `strategies.sector_rank.sector_group_of`, then reads the ETF's bars). The
+    quantity is the ``window``-day return of the stock minus the sector's, i.e.
+    the same excess `sector_screener` reads (`_rel_outperformance`, same default
+    window), promoted to one public producer so a screen row and a leaf line are
+    one number.
+
+    ``benchmark`` is optional and reported BESIDE the sector leg, never
+    subtracted from it: two references, two numbers, no blended index.
+
+    Returns ``{"excess", "stock_return", "sector_return", "window", "n",
+    "benchmark_excess", "withheld", "basis"}``. ``excess`` is ``None`` with the
+    reason when either series carries fewer than ``window + 1`` closes - never a
+    fabricated ``0.0`` (a flat sector-relative read and a missing one are
+    different facts).
+    """
+    w = max(1, int(window))
+    stock_ret = _window_return(stock, w)
+    sector_ret = _window_return(sector, w)
+    bench_ret = _window_return(benchmark, w) if benchmark else None
+    n = min(len(stock or []), len(sector or [])) if stock and sector else 0
+    if stock_ret is None or sector_ret is None:
+        withheld = (
+            f"{w}+ closes needed on both legs "
+            f"(stock {len(stock or [])}, sector {len(sector or [])})"
+        )
+        return {
+            "excess": None,
+            "stock_return": stock_ret,
+            "sector_return": sector_ret,
+            "window": w,
+            "n": n,
+            "benchmark_excess": None,
+            "withheld": withheld,
+            "basis": f"sector-relative strength unmeasurable: {withheld}",
+        }
+    excess = stock_ret - sector_ret
+    basis = (
+        f"sector-relative excess over {w} bar(s): stock {stock_ret:+.4%} - sector "
+        f"{sector_ret:+.4%} = {excess:+.4%} (n={n})"
+    )
+    if bench_ret is not None:
+        basis += f"; vs benchmark {bench_ret:+.4%} (reported beside, never blended)"
+    return {
+        "excess": excess,
+        "stock_return": stock_ret,
+        "sector_return": sector_ret,
+        "window": w,
+        "n": n,
+        "benchmark_excess": (stock_ret - bench_ret) if bench_ret is not None else None,
+        "withheld": None,
+        "basis": basis,
+    }
+
+
 __all__ = [
     "align_tail",
     "rs_series",
@@ -273,4 +354,5 @@ __all__ = [
     "RS_BREAKDOWN_LOOKBACK",
     "divergence",
     "relative_strength_report",
+    "relative_strength_vs_sector",
 ]

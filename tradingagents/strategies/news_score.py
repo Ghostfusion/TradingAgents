@@ -873,6 +873,449 @@ def guidance_change_score(rows) -> dict:
     }
 
 
+# --- Regulatory / legal tag classifier (NEWS-5) ---------------------------- #
+#
+# The DECLARED tag -> engine-category vocabulary. The three vendor surfaces that
+# already hand tags back and this engine currently drops are folded into one map:
+# Benzinga `/v2/news` `channels[]` (with its `importance_rank`), EODHD `tags[]`
+# (with its `sentiment{polarity,neg,neu,pos}`) and Alpha Vantage per-article
+# `topics[]`. A tag absent from this table is IGNORED, never defaulted - an
+# unrecognised tag set therefore refuses (`read = None`) rather than scoring a
+# neutral number. Values are `NEWS_CATEGORY_ORDER` category names.
+
+TAG_CATEGORIES: dict[str, str] = {
+    # regulatory & legal (the 5% category this producer exists for)
+    "legal": "regulatory_legal",
+    "lawsuit": "regulatory_legal",
+    "litigation": "regulatory_legal",
+    "class action": "regulatory_legal",
+    "settlement": "regulatory_legal",
+    "fine": "regulatory_legal",
+    "penalty": "regulatory_legal",
+    "regulatory": "regulatory_legal",
+    "regulation": "regulatory_legal",
+    "antitrust": "regulatory_legal",
+    "compliance": "regulatory_legal",
+    "investigation": "regulatory_legal",
+    "sec investigation": "regulatory_legal",
+    "subpoena": "regulatory_legal",
+    "sanctions": "regulatory_legal",
+    "indictment": "regulatory_legal",
+    "probe": "regulatory_legal",
+    "violation": "regulatory_legal",
+    "consent decree": "regulatory_legal",
+    "recall": "regulatory_legal",
+    "fraud": "regulatory_legal",
+    "whistleblower": "regulatory_legal",
+    "doj": "regulatory_legal",
+    "ftc": "regulatory_legal",
+    "fda": "regulatory_legal",
+    "patent": "regulatory_legal",
+    "court": "regulatory_legal",
+    "ruling": "regulatory_legal",
+    # corporate events
+    "m&a": "corporate_events",
+    "mergers and acquisitions": "corporate_events",
+    "merger": "corporate_events",
+    "acquisition": "corporate_events",
+    "takeover": "corporate_events",
+    "partnership": "corporate_events",
+    "contract": "corporate_events",
+    "product launch": "corporate_events",
+    "buyback": "corporate_events",
+    "dividend": "corporate_events",
+    "spin off": "corporate_events",
+    "ipo": "corporate_events",
+    "restructuring": "corporate_events",
+    "bankruptcy": "corporate_events",
+    # earnings & guidance
+    "earnings": "earnings_guidance",
+    "guidance": "earnings_guidance",
+    "revenue": "earnings_guidance",
+    "eps": "earnings_guidance",
+    "outlook": "earnings_guidance",
+    "forecast": "earnings_guidance",
+    "preannouncement": "earnings_guidance",
+    # analyst & rating changes
+    "analyst": "analyst_rating",
+    "rating": "analyst_rating",
+    "upgrade": "analyst_rating",
+    "downgrade": "analyst_rating",
+    "price target": "analyst_rating",
+    "initiation": "analyst_rating",
+    # macro & industry
+    "macro": "macro_industry",
+    "geopolitical": "macro_industry",
+    "tariff": "macro_industry",
+    "interest rate": "macro_industry",
+    "inflation": "macro_industry",
+    "recession": "macro_industry",
+    "industry": "macro_industry",
+    "economy macro": "macro_industry",
+    "economy monetary": "macro_industry",
+    "financial markets": "macro_industry",
+    # fundamental impact
+    "margin": "fundamental_impact",
+    "cost": "fundamental_impact",
+    "cash flow": "fundamental_impact",
+    "debt": "fundamental_impact",
+}
+
+#: Benzinga `importance_rank` is 1 (most important) .. 5 (least). Declared as a
+#: 0-1 severity factor for `tag_category_read`; an unknown or absent rank is 1.0
+#: (no discount). It is NOT a fitted estimate.
+IMPORTANCE_SEVERITY: dict[int, float] = {1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}
+
+
+def _normalise_tag(raw) -> str | None:
+    """A vendor tag/topic/channel to its vocabulary key.
+
+    Lower-cased, ``_`` and ``-`` folded to spaces and whitespace collapsed (so
+    Alpha Vantage's ``mergers_and_acquisitions`` and ``economy_macro`` reach
+    their table keys); ``None`` when empty.
+    """
+    text = str(raw or "").strip().lower()
+    if not text:
+        return None
+    out = []
+    for ch in text:
+        out.append(" " if ch in "_-" else ch)
+    return " ".join("".join(out).split()) or None
+
+
+def tag_category_read(tags, *, importance_rank=None, polarity=None) -> dict:
+    """The event-tag classifier over the vocabulary vendors already return (NEWS-5).
+
+    Reads the tag surface this engine currently drops: Benzinga ``/v2/news``
+    ``channels[]`` (plus its ``importance_rank``), EODHD ``tags[]`` (plus its
+    ``sentiment.polarity``) and Alpha Vantage per-article ``topics[]``. Each
+    normalised tag is looked up in the DECLARED ``TAG_CATEGORIES`` table, which
+    maps it to one of the engine's own category names (``NEWS_CATEGORY_ORDER``).
+
+    ``read`` is a 0-1 scaled read = ``(matched / n) * severity``: the share of
+    the supplied tags that map to a known category, times a severity factor from
+    ``importance_rank`` (Benzinga's 1=most .. 5=least via ``IMPORTANCE_SEVERITY``;
+    1.0 when not supplied). ``category`` is the mapped category carrying the most
+    tags (ties broken by ``NEWS_CATEGORY_ORDER``), and ``categories`` carries the
+    per-category tag lists.
+
+    A tag set with NO recognised tag **refuses**: ``read`` and ``category`` are
+    ``None`` with a ``reason`` naming the unknown tags - never a neutral score.
+    ``polarity`` (EODHD's per-article sentiment, -1..1) is carried back verbatim
+    as context only and does not enter ``read``: this producer measures the event
+    class, not the vendor's tone (`NewsScore.md` §0.3).
+
+    Returns ``{"read", "category", "categories", "tags_used", "unrecognised",
+    "n_tags", "importance_rank", "polarity", "reason", "basis"}``.
+    """
+    if isinstance(tags, str):
+        tags = [tags]
+    keys: list[tuple[str, str]] = []
+    for t in tags or []:
+        key = _normalise_tag(t)
+        if key is not None:
+            keys.append((key, str(t)))
+    if not keys:
+        return {
+            "read": None, "category": None, "categories": {}, "tags_used": [],
+            "unrecognised": [], "n_tags": 0, "importance_rank": importance_rank,
+            "polarity": polarity,
+            "reason": "no tags supplied to classify",
+            "basis": "tag_category_read: empty tag set, so no read",
+        }
+    by_cat: dict[str, list[str]] = {}
+    used: list[str] = []
+    unknown: list[str] = []
+    for key, raw in keys:
+        cat = TAG_CATEGORIES.get(key)
+        if cat is None:
+            unknown.append(raw)
+        else:
+            by_cat.setdefault(cat, []).append(raw)
+            used.append(raw)
+    if not by_cat:
+        return {
+            "read": None, "category": None, "categories": {}, "tags_used": [],
+            "unrecognised": sorted(set(unknown)), "n_tags": len(keys),
+            "importance_rank": importance_rank, "polarity": polarity,
+            "reason": (
+                "unrecognised tag set: "
+                + ", ".join(sorted(set(unknown)) or ["<none>"])
+                + " (known tags: " + str(len(TAG_CATEGORIES)) + ")"
+            ),
+            "basis": (
+                "tag_category_read: no supplied tag maps to a known category, so "
+                "the read is withheld rather than defaulted to a neutral score"
+            ),
+        }
+    matched = sum(len(v) for v in by_cat.values())
+    n = len(keys)
+    try:
+        rank = int(importance_rank) if importance_rank is not None else None
+    except (TypeError, ValueError):
+        rank = None
+    severity = IMPORTANCE_SEVERITY.get(rank, 1.0) if rank is not None else 1.0
+    read = (matched / n) * severity
+    order = {name: i for i, name in enumerate(NEWS_CATEGORY_ORDER)}
+    category = min(by_cat, key=lambda c: (-len(by_cat[c]), order.get(c, len(order))))
+    categories = {c: sorted(by_cat[c]) for c in by_cat}
+    return {
+        "read": round(read, 6),
+        "category": category,
+        "categories": categories,
+        "tags_used": sorted(used),
+        "unrecognised": sorted(set(unknown)),
+        "n_tags": n,
+        "importance_rank": rank,
+        "polarity": polarity,
+        "reason": None,
+        "basis": (
+            f"tag_category_read: {matched} of {n} tag(s) mapped to "
+            f"{len(by_cat)} categor{'y' if len(by_cat) == 1 else 'ies'} "
+            f"({', '.join(sorted(by_cat))}); dominant category {category}; "
+            f"read = (matched/n) * severity = ({matched}/{n}) * {severity:g}; "
+            "severity from the DECLARED IMPORTANCE_SEVERITY table (1.0 without an "
+            "importance_rank); polarity carried as context only, not scored"
+        ),
+    }
+
+
+# --- Industry shock (NEWS-7) ----------------------------------------------- #
+
+
+def industry_shock(stock_returns, sector_returns, *, window=None) -> dict:
+    """The sector-relative abnormal move over the news window (NEWS-7).
+
+    ``stock_returns`` is the target's own series of per-period simple returns
+    over the window; ``sector_returns`` is the matching series for the name's
+    sector ETF - the SPDR closes the repo already holds in-process
+    (`sector_rank.SPDR_SECTORS` / the ``closes_map`` `sector_rank.rank_sectors`
+    and `rank_sectors_multifactor` consume), differenced to returns by the
+    caller. The two series are paired from the tail; the shorter bounds the
+    window and ``window`` keeps only the last N pairs.
+
+    ``excess_t = stock_t - sector_t``; ``abnormal`` is ``sum(excess)`` over the
+    window (the sector-relative move), ``mean_excess`` its per-period average,
+    and ``z`` standardises the window move by the window's OWN dispersion:
+    ``abnormal / (sigma_excess * sqrt(n))``, ``None`` when ``sigma_excess == 0``
+    (a perfectly tracked pair has no scale to standardise by). Stock and sector
+    moving identically gives ``abnormal == 0.0`` exactly; the stock
+    outperforming gives a positive read.
+
+    Returns ``{"abnormal", "mean_excess", "z", "sigma", "n", "window", "reason",
+    "basis"}``; unusable input refuses with ``abnormal=None`` and the reason,
+    never a 0.
+    """
+    def _refuse(reason: str) -> dict:
+        return {
+            "abnormal": None, "mean_excess": None, "z": None, "sigma": None,
+            "n": 0, "window": window, "reason": reason,
+            "basis": f"industry_shock: {reason}",
+        }
+
+    try:
+        s = [float(x) for x in (stock_returns or [])]
+        b = [float(x) for x in (sector_returns or [])]
+    except (TypeError, ValueError):
+        return _refuse("return series must be numeric")
+    if any(not math.isfinite(x) for x in s + b):
+        return _refuse("return series carries a non-finite value")
+    n = min(len(s), len(b))
+    if window and int(window) > 0:
+        n = min(n, int(window))
+    if n < 1:
+        return _refuse("fewer than one paired return")
+    s, b = s[-n:], b[-n:]
+    excess = [si - bi for si, bi in zip(s, b, strict=True)]
+    total = sum(excess)
+    mean = total / n
+    sigma = (sum((e - mean) ** 2 for e in excess) / n) ** 0.5
+    z = total / (sigma * math.sqrt(n)) if sigma > 1e-12 else None
+    return {
+        "abnormal": round(total, 6),
+        "mean_excess": round(mean, 6),
+        "z": round(z, 6) if z is not None else None,
+        "sigma": round(sigma, 6),
+        "n": n,
+        "window": int(window) if window and int(window) > 0 else None,
+        "reason": None,
+        "basis": (
+            f"industry_shock: abnormal = sum(stock - sector) = {total:+.6f} over "
+            f"{n} period(s); mean_excess = {mean:+.6f}; z = abnormal / "
+            f"(sigma*sqrt(n)) with sigma = window dispersion = {sigma:.6f}"
+            + (" (None: the pair tracks perfectly, sigma = 0)" if z is None else "")
+            + "; sector-relative move, not breadth"
+        ),
+    }
+
+
+# --- Novelty similarity + duplicate weight (NEWS-9) ------------------------ #
+
+
+def duplicate_weight(similarity) -> float:
+    """The duplicate-suppression weight ``W_dup`` of the library §8.
+
+    ``W_dup = 1 - similarity`` clamped to [0, 1]: an exact duplicate (similarity
+    1) is fully suppressed (weight 0), a first-seen article (similarity 0) keeps
+    full weight 1. A non-numeric input returns 1.0 - an absent similarity
+    suppresses nothing.
+    """
+    try:
+        s = float(similarity)
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.0, min(1.0, 1.0 - s))
+
+
+#: The O(n^2) similarity pass runs only over this many articles; the list is
+#: truncated to its last ``max_articles`` (oldest -> newest) before the pairwise
+#: work, so the cost is bounded and the result stays deterministic.
+NOVELTY_MAX_ARTICLES = 200
+
+
+def _tokens(title) -> list[str]:
+    """The token list of a headline, over its normalised syndication key."""
+    key = _normalise_headline(title)
+    return key.split() if key else []
+
+
+def _tfidf_vectors(docs, idf) -> list[dict]:
+    """Term-frequency x inverse-document-frequency vectors for each token list."""
+    vecs = []
+    for toks in docs:
+        tf: dict[str, int] = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        vecs.append({t: c * idf.get(t, 1.0) for t, c in tf.items()})
+    return vecs
+
+
+def _cosine(a, b) -> float:
+    """Cosine similarity of two sparse tf-idf dicts; 0.0 when either is empty."""
+    if not a or not b:
+        return 0.0
+    common = set(a) & set(b)
+    dot = sum(a[t] * b[t] for t in common)
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def headline_similarity(a, b) -> float | None:
+    """TF-IDF cosine similarity in [0, 1] between two headlines (NEWS-9).
+
+    Dependency-free: each headline is tokenised through the module's own
+    `_normalise_headline` syndication key, the tokens are weighted by a smoothed
+    inverse document frequency over the PAIR (``idf = ln((1+N)/(1+df)) + 1``,
+    ``N = 2``), and the cosine of the two vectors is returned. Two identical
+    (normalised) headlines score exactly 1.0; two headlines sharing no token
+    score 0.0. Returns ``None`` when both headlines are empty.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta and not tb:
+        return None
+    df: dict[str, int] = {}
+    for t in set(ta) | set(tb):
+        df[t] = (1 if t in ta else 0) + (1 if t in tb else 0)
+    idf = {t: math.log((1 + 2) / (1 + d)) + 1.0 for t, d in df.items()}
+    va, vb = _tfidf_vectors([ta, tb], idf)
+    return round(_cosine(va, vb), 6)
+
+
+def weighted_novelty(articles, *, window=None, max_articles=NOVELTY_MAX_ARTICLES) -> dict:
+    """The weighted-novelty product: first-seen share diminished by similarity (NEWS-9).
+
+    ``articles`` is the same list `news_novelty` accepts - dicts carrying
+    ``title``/``headline`` and an optional ``timestamp``/``time_published`` ISO
+    string, or plain headline strings. ``window`` (days, relative to the latest
+    timestamp) is applied exactly as in ``news_novelty``; ``max_articles`` caps
+    the O(n^2) pairwise pass, keeping the LAST ``max_articles`` in the given
+    (oldest -> newest) order.
+
+    For each article ``i`` the maximum TF-IDF cosine similarity to an EARLIER
+    article is ``sim_i`` (0.0 for the first), and the duplicate-suppression
+    weight is ``W_dup_i = 1 - sim_i`` (library §8). ``weighted_novelty`` =
+    ``sum_i first_seen_i * W_dup_i / n``: the first-seen share reduced by
+    similarity, so two near-duplicates score below two distinct headlines even
+    when both keys are exact-distinct (the effect `news_novelty`'s count cannot
+    see).
+
+    Returns ``{"weighted_novelty", "first_seen_share", "w_dup", "similarity",
+    "n", "window", "max_articles", "capped", "reason", "basis"}``; an empty set
+    refuses with ``weighted_novelty=None`` and a reason, never a 0.
+    """
+    rows = []
+    for art in articles or []:
+        if isinstance(art, dict):
+            title = art.get("title") or art.get("headline")
+            ts = art.get("timestamp") or art.get("time_published")
+        else:
+            title, ts = art, None
+        key = _normalise_headline(title)
+        if key is None:
+            continue
+        rows.append({"key": key, "tokens": key.split(), "ts": _parse_ts(ts)})
+    if not rows:
+        return {
+            "weighted_novelty": None, "first_seen_share": None, "w_dup": None,
+            "similarity": [], "n": 0, "window": window,
+            "max_articles": max_articles, "capped": False,
+            "reason": "no usable headline in the article set",
+            "basis": "weighted_novelty: empty article set, so no read",
+        }
+    stamps = [r["ts"] for r in rows if r["ts"] is not None]
+    if window and int(window) > 0 and stamps:
+        cutoff = max(stamps) - int(window) * 86400.0
+        rows = [r for r in rows if r["ts"] is None or r["ts"] >= cutoff]
+    cap = int(max_articles) if max_articles and int(max_articles) > 0 else NOVELTY_MAX_ARTICLES
+    capped = len(rows) > cap
+    rows = rows[-cap:]
+    n = len(rows)
+    df: dict[str, int] = {}
+    for r in rows:
+        for t in set(r["tokens"]):
+            df[t] = df.get(t, 0) + 1
+    idf = {t: math.log((1 + n) / (1 + d)) + 1.0 for t, d in df.items()}
+    vecs = _tfidf_vectors([r["tokens"] for r in rows], idf)
+    seen: set[str] = set()
+    sims: list[float] = []
+    wdups: list[float] = []
+    first_seen = 0
+    weighted = 0.0
+    for i, r in enumerate(rows):
+        sim = max((_cosine(vecs[i], vecs[j]) for j in range(i)), default=0.0)
+        w = duplicate_weight(sim)
+        fs = 1 if r["key"] not in seen else 0
+        if fs:
+            first_seen += 1
+        seen.add(r["key"])
+        sims.append(round(sim, 6))
+        wdups.append(round(w, 6))
+        weighted += fs * w
+    return {
+        "weighted_novelty": round(weighted / n, 6),
+        "first_seen_share": round(first_seen / n, 6),
+        "w_dup": round(sum(wdups) / n, 6),
+        "similarity": sims,
+        "n": n,
+        "window": int(window) if window and int(window) > 0 else None,
+        "max_articles": cap,
+        "capped": capped,
+        "reason": None,
+        "basis": (
+            f"weighted_novelty = sum_i first_seen_i * W_dup_i / n over {n} "
+            f"article(s) = {weighted / n:.6f}; first_seen_share = "
+            f"{first_seen / n:.6f}; mean W_dup = {sum(wdups) / n:.6f} with "
+            "W_dup_i = 1 - max TF-IDF cosine to an earlier article (library §8); "
+            "similarity is TF-IDF cosine over the module's own headline key, no "
+            f"new dependency; pairwise pass capped at max_articles={cap}"
+            + (" (list was capped)" if capped else "")
+        ),
+    }
+
+
 # --- Alignment ------------------------------------------------------------- #
 
 
@@ -1049,6 +1492,14 @@ __all__ = [
     "news_confidence",
     "corporate_events_score",
     "guidance_change_score",
+    "TAG_CATEGORIES",
+    "IMPORTANCE_SEVERITY",
+    "tag_category_read",
+    "industry_shock",
+    "duplicate_weight",
+    "NOVELTY_MAX_ARTICLES",
+    "headline_similarity",
+    "weighted_novelty",
     "align_components",
     "news_score",
     "component_weight_share",

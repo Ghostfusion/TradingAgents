@@ -2,16 +2,21 @@
 
 import math
 
+import pytest
+
 from tradingagents.strategies.relative_strength import (
     align_tail,
     divergence,
     relative_strength_report,
+    relative_strength_vs_sector,
     rs_breakdown,
     rs_position,
     rs_series,
     rs_trend,
     slope_pct,
 )
+
+pytestmark = pytest.mark.timeout(600)
 
 
 def _uptrend(n: int = 260, start: float = 100.0, step: float = 0.5) -> list:
@@ -195,3 +200,46 @@ def test_rs_breakdown_reads_unmeasured_legs_as_none_not_false():
     short = rs_breakdown([1.0, 2.0])  # a single prior observation
     assert short["new_low"] is False  # measured: above the only prior bar
     assert short["lower_high"] is None  # unmeasured: one bar has no two halves
+
+
+# --- TECH-19: the SECTOR leg (`relative_strength_vs_sector`) ---------------
+
+
+def test_the_sector_leg_is_the_return_excess_over_the_sector_etf():
+    """A stock merely tracking its sector scores 0, not 'leading'."""
+    stock = [100.0 + i for i in range(30)]
+    # the SAME percentage path at a different price level - not the same shape
+    # in points, which is a different (and wrong) fixture
+    sector = [2.0 * x for x in stock]
+    out = relative_strength_vs_sector(stock, sector, window=20)
+    # the same percentage path -> the excess is exactly zero, not merely small
+    assert out["excess"] == pytest.approx(0.0, abs=1e-12)
+    assert out["withheld"] is None
+
+
+def test_outperformance_over_the_sector_is_positive_and_measured():
+    flat_sector = [100.0] * 30
+    # the rise must sit INSIDE the 5-bar window, or the window return is 0
+    rising_stock = [100.0] * 25 + [110.0, 120.0, 130.0, 140.0, 150.0]
+    out = relative_strength_vs_sector(rising_stock, flat_sector, window=5)
+    assert out["sector_return"] == pytest.approx(0.0)
+    assert out["excess"] > 0
+    assert out["excess"] == pytest.approx(rising_stock[-1] / rising_stock[-6] - 1.0)
+
+
+def test_a_short_series_refuses_rather_than_scoring_zero():
+    out = relative_strength_vs_sector([1.0, 2.0], [1.0, 2.0], window=20)
+    assert out["excess"] is None
+    assert "closes needed" in out["withheld"]
+
+
+def test_the_benchmark_leg_is_reported_beside_and_never_blended():
+    stock = [100.0] * 9 + [110.0] * 21
+    sector = [100.0] * 30
+    bench = [100.0] * 9 + [105.0] * 21
+    out = relative_strength_vs_sector(stock, sector, window=5, benchmark=bench)
+    assert out["excess"] == pytest.approx(out["stock_return"] - out["sector_return"])
+    assert out["benchmark_excess"] is not None
+    # the sector leg is untouched by the benchmark's presence
+    without = relative_strength_vs_sector(stock, sector, window=5)
+    assert without["excess"] == pytest.approx(out["excess"])

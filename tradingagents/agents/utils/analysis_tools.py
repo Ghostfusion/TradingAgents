@@ -609,7 +609,7 @@ def _fmt_metric(v, spec: str) -> str:
 def get_relative_strength(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
-    """Relative-strength line vs the market benchmark (deterministic).
+    """Relative-strength line vs the market benchmark AND vs the sector ETF (deterministic).
 
     Computes the stock/benchmark ratio series (benchmark_ticker, default SPY)
     and its 63-day established-trend slope, its position vs its own high
@@ -617,12 +617,19 @@ def get_relative_strength(
     RS backing). Call this before any 'strong vs the market / outperforming
     the index / leading sector' claim.
 
+    The line also carries the **sector-relative** leg (TECH-19): the ticker's
+    sector label resolved to its SPDR ETF, and the 20-bar return excess over
+    that ETF. The sector leg is what separates 'great company' from 'great
+    sector', and it is the primary RS reference by the owner's decision - quote
+    `vs_sector_etf` before any 'leader in its sector' claim.
+
     Args:
         ticker: the single ticker symbol (e.g. "AAPL").
 
     Returns:
         Compact verdict line: leading / uptrend / lagging / diverging /
-        unknown with the slope and divergence flags.
+        unknown with the slope and divergence flags, plus the sector-relative
+        excess (or 'n/a' with the reason the label or series was unavailable).
     """
     closes = _ohlcv(ticker).get("closes") or []
     bench = _benchmark_closes()
@@ -637,7 +644,7 @@ def get_relative_strength(
 
         r = relative_strength_report(closes, bench)
         bd = r.get("breakdown") or {}
-        return (
+        line = (
             f"relative_strength {ticker}: verdict={r.get('verdict')} "
             f"rs={_txt(r.get('rs'))} slope_63d_pct={_txt(r.get('slope_pct'))} "
             f"uptrend={r.get('uptrend')} near_high={r.get('near_high')} "
@@ -647,6 +654,38 @@ def get_relative_strength(
             f"rs_vs_63d_low={_fmt_pct(bd.get('dist_from_low'))} "
             f"context: {r.get('context')}"
         )
+        # TECH-19: the SECTOR leg, measured against the SPDR ETF that owns the
+        # ticker's sector label. The owner's decision is that the sector ETF is
+        # the primary RS reference - a stock merely tracking a rising sector is
+        # not a leader, and the benchmark leg cannot see that. The label comes
+        # from `yfinance_sector.fetch_sector` (a provider label, NOT GICS) and
+        # the ETF from the repo's own SPDR map; an unmapped label says so rather
+        # than falling back to the benchmark.
+        try:
+            from tradingagents.dataflows.yfinance_sector import fetch_sector
+            from tradingagents.strategies.relative_strength import (
+                relative_strength_vs_sector,
+            )
+            from tradingagents.strategies.sector_rank import sector_group_of
+
+            etf = sector_group_of(fetch_sector(ticker))
+            sector_closes = _ohlcv(etf).get("closes") if etf else None
+            if etf and sector_closes:
+                sec = relative_strength_vs_sector(closes, sector_closes, benchmark=bench)
+                line += f" | vs_sector_etf={etf}"
+                if sec.get("excess") is None:
+                    line += f" excess_20d=n/a ({sec.get('withheld')})"
+                else:
+                    line += (
+                        f" excess_20d={sec['excess']:+.2%} (stock "
+                        f"{sec['stock_return']:+.2%} vs sector "
+                        f"{sec['sector_return']:+.2%})"
+                    )
+            else:
+                line += " | vs_sector_etf=n/a (sector label unmapped)"
+        except Exception as exc:  # noqa: BLE001 - advisory leg, never fatal
+            line += f" | vs_sector_etf=n/a ({type(exc).__name__})"
+        return line
     except Exception as exc:  # noqa: BLE001
         return f"relative strength unavailable for {ticker}: {exc}"
 
@@ -2342,7 +2381,17 @@ def get_constituent_cap_weights(
 def get_regime_components(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
-    "Drill into why the regime label says what it does: vol_pct, trend, choppiness, label."
+    """Drill into why the regime label says what it does: vol_pct, trend, choppiness, label.
+
+    Three sections follow the label, all measurement-only (none of them moves it):
+    the market-level **depth** reads over the run's shared S&P 500 panel
+    (`RegimeScore.md` §8.1 groups 1-2), the **index readers** for SPY / QQQ / IWM
+    (REG-4 - market-level trend is what keeps `RegimeScore` from being a second
+    `TechnicalScore`), and the **regime state** block (REG-16/REG-17): the HMM
+    transition read and the §96 confidence/state metadata, emitted BESIDE the
+    score rather than multiplied into it. Returns 'n/a' with the producer's own
+    reason wherever a read cannot be measured - never a 0.
+    """
     try:
         from tradingagents.strategies.regime import (
             choppiness,
@@ -2472,6 +2521,75 @@ def get_regime_components(
                 )
     except Exception:  # noqa: BLE001 - depth reads are advisory; the label stands
         depth = []
+    # REG-4 / REG-16 / REG-17 (`MASTER_PLAN.md` §5): the three market-level
+    # reads whose producers existed and were called by nothing but their own
+    # module. Each is a BESIDE-the-score output by the owner's own rule (§96
+    # forbids folding the state block into the number), so they render as their
+    # own line after the depth block, and none of them moves the label above.
+    state: list[str] = []
+    try:
+        from tradingagents.strategies.regime import (
+            hmm_filtered_regime as _hmm_filtered,
+            hmm_transition_read as _hmm_transition,
+            index_trend_reads as _index_trends,
+            regime_state_metadata as _state_metadata,
+        )
+
+        # REG-4: three separately-labelled index reads from ONE producer. The
+        # labels are the printed ones, and no cross-index mean is formed - the
+        # owner's cross-index weights do not exist (`RegimeScore.md` §4).
+        series_by_index = {
+            label: (_ohlcv(label).get("closes") or [])
+            for label in ("SPY", "QQQ", "IWM")
+        }
+        reads = _index_trends({k: v for k, v in series_by_index.items() if v})
+        for label in sorted(reads["reads"]):
+            entry = reads["reads"][label]
+            if entry.get("trend") is None:
+                state.append(f"index {label}: n/a ({entry.get('withheld')})")
+            else:
+                state.append(
+                    f"index {label} trend={entry['trend']:+.4f} "
+                    f"above_sma={entry['above_sma']} sma{entry['sma_window']}"
+                )
+        # REG-16 / REG-17: ONE HMM fit (the same producer call shape the other
+        # regime-conditioned leaf uses: n_states=2, closes for OHLC) feeding both
+        # the transition read and the §96 block, so the two cannot disagree.
+        result = (
+            _hmm_filtered(closes, closes, closes, closes, n_states=2)
+            if len(closes) >= 260
+            else None
+        )
+        trans = _hmm_transition(result)
+        if trans.get("persistence") is None:
+            state.append(f"hmm transition: n/a ({trans.get('withheld')})")
+        else:
+            state.append(
+                f"hmm state={trans['state']}/{trans['n_states']} "
+                f"persistence={trans['persistence']:.4f} "
+                f"P(leave)={trans['leave_probability']:.4f} "
+                f"next={trans['next_state_probs']} "
+                f"expected_duration={trans['expected_duration']}"
+            )
+        if isinstance(result, dict):
+            meta = _state_metadata(
+                result.get("probs") or [],
+                scores=closes,
+                transmat=(result.get("params") or {}).get("transmat"),
+            )
+            fields = (
+                "entropy", "entropy_normalized", "confidence", "stability",
+                "change", "velocity", "acceleration", "surprise",
+            )
+            rendered = ", ".join(
+                f"{name}={meta[name]:.4f}"
+                if isinstance(meta.get(name), (int, float))
+                else f"{name}={meta.get(name)}"
+                for name in fields
+            )
+            state.append(f"state metadata: {rendered}")
+    except Exception:  # noqa: BLE001 - beside-the-score reads are advisory
+        state = []
     chop_txt = f"{chop:.2f}" if chop is not None else "n/a (insufficient history)"
     # vol_pct is None when the series is too short to percentile (a fabricated
     # 0.5 was the old behaviour and is the defect WP-4 fixed) - the same guard
@@ -2480,6 +2598,8 @@ def get_regime_components(
     line = f"regime {ticker}: vol_pct={vol_txt} trend={trend:.4f} chop={chop_txt} label={label}"
     if depth:
         line += "\n  market depth: " + "; ".join(depth)
+    if state:
+        line += "\n  regime state: " + "; ".join(state)
     return line
 
 
@@ -3453,10 +3573,15 @@ def get_gamma_profile(
     before any 'the stock is pinned / trending / at a structural wall'
     claim. Advisory — walls/zero-gamma are market-structure heuristics, not
     support/resistance guarantees. Degrades to unavailable without a chain.
+
+    It also ranks the **top |GEX| strikes** as explicit price levels with their
+    signed distance from spot (RISK-5): the walls say where the gamma is, the
+    levels say how far the biggest ones sit from the last price.
     """
     try:
         from tradingagents.strategies.derivatives_gamma import (
             gamma_regime,
+            gex_levels,
             gex_per_strike,
         )
 
@@ -3475,6 +3600,18 @@ def get_gamma_profile(
         for wall in ("call_wall", "put_wall"):
             v = prof.get(wall)
             lines.append(f"- {wall.replace('_', ' ')}: {v if v is not None else 'n/a'}")
+        # RISK-5: the ranked top-|GEX| strikes as explicit levels with their
+        # distance from spot - the wall strikes above say WHERE the gamma is;
+        # this says how far each of the biggest ones sits from the last price.
+        levels = gex_levels(prof, spot)
+        if levels["levels"]:
+            rendered = ", ".join(
+                f"{lv['strike']:,.2f} ({lv['signed']:+,.0f}, {lv['distance']:+.2%})"
+                for lv in levels["levels"]
+            )
+            lines.append(f"- top |GEX| levels (strike, signed gamma, vs spot): {rendered}")
+        else:
+            lines.append(f"- top |GEX| levels: n/a ({levels['withheld']})")
         lines.append("- note: market-structure heuristic, not a price law")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - advisory, never blocks

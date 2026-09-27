@@ -354,7 +354,7 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 7 | TF-IDF-weighted sentiment | 2 | ABSENT — no TF-IDF anywhere in the five modules |
 | 8 | Financial-domain dictionary score | 1 | built (variant) — `text_factors.lm_tone:121` over the LM seed lists (`DICTIONARY_VERSION:41`); denominator is `/words`, not `/(P+N)` |
 | 9 | Financial phrase scoring | 2 | ABSENT — no phrase lexicon; `text_factors.lm_tone:121` is unigram-only |
-| 10 | Negation adjustment | 2 | ABSENT — no negation pass in `text_factors.py` |
+| 10 | Negation adjustment | 2 | built — `sentiment.negation_adjusted_polarity` (declared K=3 negation window + intensifier/diminisher multiplier tables over the LM word lists) [CORRECTED 2026-09-27: `SENT-7`'s negation/intensifier half; the aspect taxonomy remains VENDOR_ONLY.] |
 | 11 | Negation-window formula | 2 | ABSENT |
 | 12 | Intensifier adjustment | 1 | ABSENT |
 | 13 | Diminisher adjustment | 1 | ABSENT |
@@ -447,8 +447,8 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 100 | Sentiment-price disagreement | 2 | built — `confirmation_quadrant:330` (the two `diverge-*` cells) |
 | 101 | Sentiment elasticity | 2 | ABSENT |
 | 102 | Sentiment-to-volatility relationship | 2 | ABSENT |
-| 103 | Sentiment asymmetry | 4 | ABSENT |
-| 104 | Negative sentiment amplification | 1 | ABSENT |
+| 103 | Sentiment asymmetry | 4 | built — `sentiment.sentiment_asymmetry` (upside vs downside contribution split, 0 for a symmetric series) [CORRECTED 2026-09-27: `SENT-10`.] |
+| 104 | Negative sentiment amplification | 1 | PARTIAL — the asymmetry ratio is reported; the amplification EXPONENT is still open [CORRECTED 2026-09-27: `SENT-10` built the split, not a power.] |
 | 105 | Sentiment saturation | 1 | ABSENT — `score_engine.align:69` is a clamped linear ramp, not tanh |
 | 106 | Sentiment threshold | 2 | PARTIAL — `sentiment_score.SENTIMENT_BANDS:274` labels, not an `I(S>θ)` gate |
 | 107 | Dynamic threshold | 1 | ABSENT |
@@ -458,9 +458,9 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 111 | Sentiment momentum × breadth | 1 | ABSENT |
 | 112 | Sentiment conviction × volume | 1 | ABSENT — no interaction term; sign contradicts the code (see §8.4) |
 | 113 | Sentiment intensity × dispersion | 1 | ABSENT |
-| 114 | Effective sentiment sample size | 1 | ABSENT — no `N_eff`; `sentiment_dispersion:209` carries an item count, not Kish's |
+| 114 | Effective sentiment sample size | 1 | built — `sentiment.effective_sample_size` (Kish `(Σw)²/Σw²`) [CORRECTED 2026-09-27: `SENT-9`.] |
 | 115 | Sentiment coverage | 1 | PARTIAL — `score_engine.coverage_floor:53` / `combine:134` coverage is a **weight** fraction, not `N_eff/N_target` |
-| 116 | Confidence adjusted sentiment | 1 | ABSENT |
+| 116 | Confidence adjusted sentiment | 1 | PARTIAL — `sentiment.sentiment_output_map` maps a raw read through a named Φ/logistic/tanh to a 0-1 confidence, returned beside the raw [CORRECTED 2026-09-27: `SENT-11`'s output map.] |
 | 117 | Bayesian sentiment | 4 | ABSENT |
 | 118 | Bayesian shrinkage | 2 | ABSENT |
 | 119 | Kalman-filter sentiment | 3 | ABSENT |
@@ -472,7 +472,7 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 125 | Sentiment autocorrelation | 2 | ABSENT |
 | 126 | Sentiment cross-correlation with returns | 1 | built — `sentiment_research.sentiment_lead_lag:172` (≡ §88/§90, see §8.3) |
 | 127 | Sentiment lead/lag | 1 | built — `sentiment_research.sentiment_lead_lag:172` (`lag_days` over `±max_lags`) |
-| 128 | Sentiment event study | 2 | ABSENT — no CAR producer |
+| 128 | Sentiment event study | 2 | built — `sentiment.event_study` (mean abnormal read over a declared pre-window baseline) [CORRECTED 2026-09-27: `SENT-10`.] |
 | 129 | Sentiment-adjusted expected return | 2 | PARTIAL — `multi_horizon_sentiment_regression:157` gives the β, not the fitted `E[R]` |
 | 130 | Sentiment residual | 1 | built — `sentiment_research.residualize_sentiment:383` |
 | 131 | Market sentiment index | 3 | PARTIAL — `sentiment_research._cross_section:336` builds per-date cross-sections; no explicit MSI |
@@ -481,10 +481,10 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 134 | Sector sentiment | 1 | built — `sentiment_research.sector_neutral_z:346` (sector means) |
 | 135 | Sector-relative sentiment | 1 | built — `sentiment_research.sector_neutral_z:346` (≡ §83, see §8.3) |
 | 136 | Sentiment dispersion across stocks | 1 | PARTIAL — `sentiment_research._cross_section:336` gives the cross-section; no explicit std |
-| 137 | Sentiment concentration | 1 | ABSENT — no HHI |
-| 138 | Gini coefficient of sentiment participation | 1 | ABSENT |
-| 139 | Source breadth | 1 | ABSENT — no unique/total source ratio |
-| 140 | Sentiment independence | 2 | ABSENT |
+| 137 | Sentiment concentration | 1 | built — `sentiment.herfindahl_index` [CORRECTED 2026-09-27: `SENT-9`.] |
+| 138 | Gini coefficient of sentiment participation | 1 | built — `sentiment.gini_coefficient` [CORRECTED 2026-09-27: `SENT-9`.] |
+| 139 | Source breadth | 1 | built — `sentiment.source_breadth` (`1/total` for a single source: a real low-breadth answer, not a refusal) [CORRECTED 2026-09-27: `SENT-9`.] |
+| 140 | Sentiment independence | 2 | built — `sentiment.source_breadth`'s `independence` leg [CORRECTED 2026-09-27: `SENT-9`; only Stocktwits is wired, so the breadth is measured over one source until a second joins.] |
 | 141 | Complete item-level sentiment formula | 1 | ABSENT — the six-factor product needs confidence, entity relevance, source reliability and independence, of which only time decay exists |
 | 142 | Complete aggregate sentiment formula | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:845` is the weighted mean, with none of the four non-decay factors |
 | 143 | Multi-horizon sentiment | 7 | PARTIAL — `sentiment_research.multi_horizon_sentiment_regression:264` for research; `daily_sentiment_sma:511` for the 7-day horizon |

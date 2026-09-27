@@ -85,7 +85,7 @@ third (the score) must not become a fourth.
 | Component | Weight | Status | Producer (module.function:line) | Output key | Direction | Scale/units | Gap |
 | --- | --: | --- | --- | --- | --- | --- | --- |
 | Market trend | 20 | PARTIAL | regime.trend_strength:130; regime_state.regime_trend:65; regime.regime_gate_read:850 | Path A: regime label / context; Path B: labels.trend + trend.score; gate: fast_downtrend, above_sma200, sma50_rising | higher price vs SMA = favourable | Path A ratio (P/SMA - 1, signed); Path B (EMA20-EMA50)/ATR14, label threshold +/-1.0 | Only the analysed ticker is measured; SPY only as benchmark (_benchmark_closes:302 -> benchmark_ticker, default SPY). QQQ/IWM ABSENT. |
-| Trend -> SPY/QQQ/IWM index trend | sub | ABSENT | none | - | - | - | No index-trend producer; grepped (spy|qqq|iwm).*trend and index_closes (the latter appears only inside regime_gate_read:178). |
+| Trend -> SPY/QQQ/IWM index trend | sub | built 2026-09-27 | `regime.index_trend_reads:1787` over `_ohlcv` per index, emitted by `analysis_tools.get_regime_components` | P/SMA-1 per index | higher = index above trend | signed ratio + `above_sma` | three separately-labelled reads, no cross-index mean (the owner's weights do not exist)  [CORRECTED 2026-09-27: `REG-4` closed; live SPY +7.91%, QQQ +11.99%, IWM +2.75%, all above their 200-bar SMA.] |
 | Trend -> 200-SMA / 50-SMA state | sub | SCORABLE | regime._sma:844 used by regime_gate_read:178 | above_sma200, sma50_rising | above and rising = favourable | boolean | - |
 | Volatility regime | 20 | PARTIAL | regime.realized_vol:39; regime.vol_percentile:59; regime_state.regime_vol_ratio:92; rotation.vol_cones:123; volatility_models.ewma_vol:397, garch11_fit:226 | Path A: vol_pct (internal, not returned by the leaf); Path B: labels.volatility + volatility.ratio; vol_cap_factor input | high vol = risk-increasing | percentile 0-1; ATR ratio = ATR14/median(ATR14); vol_cones = annualized + p25/p50/p75 | VIX has no producer beyond a raw FRED series: no VIX percentile, no VIX term structure. **[CORRECTED 2026-09-26]** Both now exist as RegimeScore legs: the VIX percentile (`agents/utils/analysis_tools.py::_vix_percentile_read:9449`, leg `vix_percentile`) and the VIX9D/VIX3M term structure (`dataflows/cboe.py::vix_term_structure:282`, wired in `agents/utils/analysis_tools.py::_regime_components:6442`, leg `vix_term_structure`). The equity-IV slope remains a different object and is never substituted. |
 | Volatility -> VIX level | sub | PARTIAL | dataflows.fred.get_macro_value:181 with alias vix -> VIXCLS at fred.py:68; leaf get_macro_indicators:9 | rendered FRED table (no numeric key) | high = risk-increasing | index points (level) | Raw level only, news-tool-only, no percentile. **[CORRECTED 2026-09-26]** A percentile now exists (`agents/utils/analysis_tools.py::_vix_percentile_read:9449`, leg `vix_percentile`), so the FRED table is no longer the only surface. |
@@ -317,12 +317,12 @@ changing?" and "what regime are we in?" are different dimensions.
 | 43 | Chow Test | 1 | ABSENT | No Chow producer; smallest honest one is `statistical._ols_resid:92`. |
 | 44 | Bayesian Change Point | 2 | built | `regime.bocpd:1327`. |
 | 45 | Hidden Markov Model | 4 | built | `regime.hmm_regime:743`, `hmm_filtered_regime:545`. |
-| 46 | Markov Transition Probability | 1 | PARTIAL | `regime._hmm_canonical:497` carries the transition matrix; the probability is not surfaced. |
-| 47 | Regime Persistence | 2 | PARTIAL | HMM expected duration not surfaced; `regime.hmm_regime:743` gives states only. |
+| 46 | Markov Transition Probability | 1 | built — `regime.hmm_transition_read:2092` reads `params.transmat` [CORRECTED 2026-09-27: `REG-16` closed 2026-09-27: emitted by `analysis_tools.get_regime_components`; live MSFT persistence 0.9023 at state 0/2.] |
+| 47 | Regime Persistence | 2 | built — the same producer's `persistence` and `expected_duration` (`1/(1-A[i][i])`, None for an absorbing row) [CORRECTED 2026-09-27: live `[10.24, 1.89]` bars.] |
 | 48 | Regime Entropy | 3 | PARTIAL | `complexity.permutation_entropy:19` is a price-series entropy, not a regime-probability entropy. |
 | 49 | Regime Confidence | 1 | ABSENT | No producer; smallest honest one is `regime.hmm_filtered_regime:545`. |
 | 50 | Regime Stability | 1 | ABSENT | No producer. |
-| 51 | Regime Transition Probability | 2 | ABSENT | No producer; smallest honest one is `regime._hmm_canonical:497`. |
+| 51 | Regime Transition Probability | 2 | built — `hmm_transition_read`'s `next_state_probs` (row `s` of `A**horizon`) and `leave_probability` [CORRECTED 2026-09-27: `REG-16`.] |
 | 52 | Regime Momentum | 1 | ABSENT | No producer. |
 | 53 | Regime Acceleration | 1 | ABSENT | No producer. |
 | 54 | Regime Trend | 2 | ABSENT | No producer. |
@@ -367,7 +367,7 @@ changing?" and "what regime are we in?" are different dimensions.
 | 93 | Sample-Size Confidence | 1 | PARTIAL | Floors exist (`tail_risk` `MIN_OBS`, `covariance_models.SPECTRAL_MIN_OBS:189` = 30) but no confidence functional. |
 | 94 | Data Freshness Decay | 1 | elsewhere | `sentiment.decayed_weight` (`strategies/sentiment.py:92`). |
 | 95 | Factor-Weighted Confidence | 1 | ABSENT | No producer. |
-| 96 | Regime Score with Confidence | 4 | PARTIAL | The engine prints score, coverage, band and the two path labels separately (the library's preferred non-multiplied form) but emits no confidence number. |
+| 96 | Regime Score with Confidence | 4 | PARTIAL — `regime.regime_state_metadata:2177` now emits entropy/entropy_normalized/confidence/stability/change/velocity/acceleration/surprise BESIDE the score [CORRECTED 2026-09-27: `REG-17` closed 2026-09-27: the block is emitted by `get_regime_components` and deliberately NOT multiplied into the number, per this item's own rule.] |
 | 97 | Regime Score Change | 1 | ABSENT | No producer. |
 | 98 | Regime Score Velocity | 1 | ABSENT | No producer. |
 | 99 | Regime Score Acceleration | 1 | ABSENT | No producer. |

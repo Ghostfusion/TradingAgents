@@ -5,6 +5,7 @@ import pytest
 
 from tradingagents.strategies.derivatives_gamma import (
     gamma_regime,
+    gex_levels,
     gex_per_strike,
     max_pain,
     opex_dates,
@@ -189,3 +190,36 @@ def test_max_pain_refuses_to_invent_a_pin():
         {"strike": 110.0, "oi": 0.0, "side": "put"},
     ]) is None
     assert max_pain([{"strike": "x", "oi": "y"}, {"strike": 1.0, "oi": 2.0}]) is None
+
+
+# --- RISK-5: the ranked levels, not only the walls --------------------------
+
+
+def test_gex_levels_rank_by_absolute_gamma_and_carry_distance_to_spot():
+    """A wall strike alone does not say how far away it is; a LEVEL does."""
+    # 90 and 110 both have contributions, the far-dated 110 call dwarfs the rest
+    rows, spot, T = _rows(call_oi=100.0, put_oi=10.0, strikes=(90.0, 110.0))
+    rows.append({"strike": 130.0, "iv": 0.3, "oi": 5000.0, "side": "call"})
+    prof = gex_per_strike(rows, spot, T)
+    out = gex_levels(prof, spot, top_n=2)
+
+    assert out["withheld"] is None
+    assert len(out["levels"]) == 2
+    # the largest |signed| contribution leads, and it is the 130 call
+    assert out["levels"][0]["strike"] == 130.0
+    assert out["levels"][0]["side"] == "call"
+    # distance is signed: a strike ABOVE spot is positive, BELOW is negative
+    stems = {lv["strike"]: lv["distance"] for lv in out["levels"]}
+    assert stems[130.0] == pytest.approx(0.30)
+    # shares are of the total ABSOLUTE contribution and never exceed 1
+    assert 0.0 < out["levels"][0]["share"] <= 1.0
+    assert sum(lv["share"] for lv in out["levels"]) <= 1.0
+
+
+def test_gex_levels_refuse_without_a_spot_or_a_contribution():
+    rows, spot, T = _rows()
+    prof = gex_per_strike(rows, spot, T)
+    assert gex_levels(prof, None)["levels"] == []
+    assert "no spot" in gex_levels(prof, None)["withheld"]
+    empty = gex_levels({"contributions": {}}, spot)
+    assert empty["levels"] == [] and "no per-strike" in empty["withheld"]

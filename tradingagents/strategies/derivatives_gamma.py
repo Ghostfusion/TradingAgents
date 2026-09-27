@@ -102,6 +102,74 @@ def gex_per_strike(
     }
 
 
+def gex_levels(profile: dict | None, spot: float | None, *, top_n: int = 5) -> dict:
+    """The ranked top-|GEX| strikes as explicit PRICE LEVELS with distance-to-spot (RISK-5).
+
+    `gex_per_strike` already returns the per-strike ``contributions`` beside the
+    walls; nothing ranked them or related them to spot, so a reader got a wall
+    strike with no idea how far away it sits. This is levels, not a score: each
+    entry is an explicit strike, its signed dealer gamma, its share of the total
+    absolute contribution, and its signed distance from spot
+    (``strike / spot - 1``, so a level below spot is negative).
+
+    Returns ``{"levels", "spot", "top_n", "total_abs", "withheld", "basis"}``.
+    ``levels`` is ``[]`` with the ``withheld`` reason when the profile carries no
+    usable contribution or spot is missing - never an invented level.
+    """
+    every: list[dict] = []
+    for side in ("call", "put"):
+        for row in ((profile or {}).get("contributions") or {}).get(side) or []:
+            if not isinstance(row, dict) or row.get("strike") is None:
+                continue
+            signed = row.get("signed")
+            if signed is None:
+                continue
+            every.append({"strike": float(row["strike"]), "signed": float(signed), "side": side})
+    if not every:
+        return {
+            "levels": [],
+            "spot": spot,
+            "top_n": int(top_n),
+            "total_abs": None,
+            "withheld": "no per-strike contribution in the profile (empty or absent chain)",
+            "basis": "GEX levels unmeasurable: no per-strike contribution",
+        }
+    if spot is None or float(spot) <= 0:
+        return {
+            "levels": [],
+            "spot": spot,
+            "top_n": int(top_n),
+            "total_abs": None,
+            "withheld": "no spot to measure distance-to-spot against",
+            "basis": "GEX levels unmeasurable: no spot",
+        }
+    s = float(spot)
+    total_abs = sum(abs(x["signed"]) for x in every)
+    ranked = sorted(every, key=lambda x: abs(x["signed"]), reverse=True)[: max(1, int(top_n))]
+    levels = [
+        {
+            "strike": x["strike"],
+            "signed": x["signed"],
+            "side": x["side"],
+            "share": (abs(x["signed"]) / total_abs) if total_abs else None,
+            "distance": x["strike"] / s - 1.0,
+        }
+        for x in ranked
+    ]
+    return {
+        "levels": levels,
+        "spot": s,
+        "top_n": max(1, int(top_n)),
+        "total_abs": round(total_abs, 2),
+        "withheld": None,
+        "basis": (
+            f"top {len(levels)} |GEX| strike level(s) of {len(every)} contribution(s) "
+            f"against spot {s:,.2f} (distance = strike/spot - 1, signed; share of the "
+            f"total absolute dealer gamma {total_abs:,.2f})"
+        ),
+    }
+
+
 def gamma_regime(gamma: float | None) -> str | None:
     """Short vs long dealer-gamma regime (advisory; None when unknown)."""
     if gamma is None:
@@ -223,6 +291,7 @@ def opex_note(status: dict) -> str | None:
 
 __all__ = [
     "gex_per_strike",
+    "gex_levels",
     "gamma_regime",
     "opex_dates",
     "opex_status",

@@ -32,6 +32,7 @@ that measurement has one thing to move.
 
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 from .score_engine import align, band_label, combine, coverage_floor
@@ -395,7 +396,240 @@ def category_weight_share(weights: dict | None = None) -> dict[str, float]:
     return {k: v / total for k, v in w.items()}
 
 
+# --- The §129-§131 state readers -------------------------------------------
+#
+# §129/§130/§131 name `TechnicalState`, `TechnicalAcceleration`/`Jerk` and
+# `TechnicalDispersion`/`Agreement` but give none of them a formula (§8.3
+# defect 10 of `docs/scores/TechnicalScore.md`), so the mapping each reader
+# applies is this engine's declared policy - the position `TECH_BANDS` already
+# occupies - while every constant is printed so a measurement can move it.
+
+#: §129's seven state names, verbatim (`Strategies/scores/technical_score.md`
+#: lines 2576-2582). The library names all seven; none is unbound.
+TECHNICAL_STATES: tuple[str, ...] = (
+    "STRONG_UPTREND",
+    "UPTREND",
+    "WEAK_UPTREND",
+    "NEUTRAL",
+    "WEAK_DOWNTREND",
+    "DOWNTREND",
+    "STRONG_DOWNTREND",
+)
+
+#: §129's `f(MAAlignment, MASlope, ADX, MACD, Structure)` split into the four
+#: legs whose SIGN carries the direction; `adx` is the magnitude, read apart.
+_STATE_DIRECTIONAL_LEGS: tuple[str, ...] = (
+    "ma_alignment", "ma_slope", "macd", "structure",
+)
+
+#: ADX at/above which a fully-aligned leg set is called `STRONG_*` rather than
+#: the plain direction (Wilder's conventional 25). An engine-declared edge.
+STRONG_TREND_ADX = 25.0
+
+#: Ceiling of the population std of a vector bounded to ``[0, 100]``: half the
+#: entries at each edge give ``(100 - 0)/2 = 50``. §131's `NormalizedDispersion`
+#: divides by a normaliser it never fixes; this is the one §131 implies.
+_DISAGREEMENT_SCALE = 50.0
+
+
+def technical_state(legs: dict, *, adx: float | None = None,
+                    strong_adx: float = STRONG_TREND_ADX) -> dict:
+    """§129's seven-state ``TechnicalState`` from the five factors it names.
+
+    Reads the factors §129's ``TrendState = f(MAAlignment, MASlope, ADX, MACD,
+    Structure)`` names, supplied by the caller (no producer in this engine
+    computes a state). Each of the four **directional** legs (``ma_alignment``,
+    ``ma_slope``, ``macd``, ``structure``) is reduced to its sign (``+1`` /
+    ``0`` / ``-1``); ``adx`` is the trend-strength magnitude, taken from the
+    ``adx`` keyword or, if that is absent, from ``legs["adx"]`` when present.
+
+    The net sign count maps to §129's enum::
+
+        net  +4 (adx >= strong_adx)    -> STRONG_UPTREND     net  0      -> NEUTRAL
+        net  +4 (weaker adx) or +3     -> UPTREND            net  -1/-2  -> WEAK_DOWNTREND
+        net  +1 or +2                  -> WEAK_UPTREND       net  -3     -> DOWNTREND
+                                                             net  -4     -> STRONG_DOWNTREND
+                                                                            (if adx >= strong_adx),
+                                                                            else DOWNTREND
+
+    The seven names are §129's own (``Strategies/scores/technical_score.md``
+    lines 2576-2582); **none is unbound** — the library names all seven. §129
+    gives the mapping function ``f`` no formula, so the sign-count rule and
+    ``strong_adx`` are this engine's declared policy, not a library formula.
+    ``STRONG_UPTREND`` and ``STRONG_DOWNTREND`` cannot be reached without a
+    numeric ``adx``: strength is undefined without it.
+
+    Returns ``{"state", "net", "direction", "legs_compared", "adx",
+    "strong_adx", "reason"}``. ``reason`` is a string and ``state`` is ``None``
+    when no directional leg carries a usable reading — never a fabricated
+    ``NEUTRAL``.
+    """
+    out = {
+        "state": None, "net": None, "direction": None, "legs_compared": [],
+        "adx": None, "strong_adx": float(strong_adx), "reason": None,
+    }
+    src = legs if isinstance(legs, dict) else {}
+    signs: dict[str, int] = {}
+    for name in _STATE_DIRECTIONAL_LEGS:
+        value = src.get(name)
+        if value is None:
+            continue
+        try:
+            fv = float(value)
+        except (TypeError, ValueError):
+            continue
+        signs[name] = 1 if fv > 0 else (-1 if fv < 0 else 0)
+    if not signs:
+        out["reason"] = (
+            "no directional leg among ma_alignment/ma_slope/macd/structure: "
+            "state unmeasured"
+        )
+        return out
+    adx_val = adx if adx is not None else src.get("adx")
+    try:
+        adx_val = float(adx_val) if adx_val is not None else None
+    except (TypeError, ValueError):
+        adx_val = None
+    net = sum(signs.values())
+    strong = adx_val is not None and adx_val >= float(strong_adx)
+    if net >= 4 and strong:
+        state = "STRONG_UPTREND"
+    elif net >= 3:
+        state = "UPTREND"
+    elif net >= 1:
+        state = "WEAK_UPTREND"
+    elif net == 0:
+        state = "NEUTRAL"
+    elif net >= -2:
+        state = "WEAK_DOWNTREND"
+    elif net >= -3:
+        state = "DOWNTREND"
+    elif strong:
+        state = "STRONG_DOWNTREND"
+    else:
+        state = "DOWNTREND"
+    out.update({
+        "state": state,
+        "net": net,
+        "direction": "up" if net > 0 else ("down" if net < 0 else "flat"),
+        "legs_compared": [n for n in _STATE_DIRECTIONAL_LEGS if n in signs],
+        "adx": adx_val,
+    })
+    return out
+
+
+def technical_acceleration(series, n: int = 1) -> dict:
+    """Second difference of a composite/indicator series (§130).
+
+    Reads a numeric ``series`` — a history of ``technical_score``'s ``"score"``
+    (the composite) or of any single indicator the caller has recorded — and
+    differences it with an ``n``-step lag:
+
+    * ``velocity`` — ``x_t - x_{t-n}``, the quantity §130 writes as
+      ``TechnicalAcceleration = TechnicalScore_t - TechnicalScore_{t-n}``.
+    * ``acceleration`` — ``x_t - 2 x_{t-n} + x_{t-2n}``, the second difference
+      (this module's acceleration read; §130 names the same expression
+      ``TechnicalJerk``).
+    * ``jerk`` — the third difference ``accel_t - accel_{t-n}``; ``None`` until
+      ``3n + 1`` observations exist.
+
+    A flat series gives ``acceleration == 0``; a convex one a positive second
+    difference. Returns ``{"acceleration", "velocity", "jerk", "n",
+    "observations", "reason"}`` with the three numbers ``None`` and ``reason``
+    a string when fewer than ``2n + 1`` usable observations exist (never a
+    fabricated 0).
+    """
+    lag = int(n)
+    out = {
+        "acceleration": None, "velocity": None, "jerk": None,
+        "n": lag, "observations": 0, "reason": None,
+    }
+    vals = [float(v) for v in (series or []) if v is not None]
+    out["observations"] = len(vals)
+    if lag < 1 or len(vals) < 2 * lag + 1:
+        out["reason"] = (
+            f"fewer than {2 * max(lag, 1) + 1} usable observations at lag "
+            f"n={lag}: acceleration unmeasured"
+        )
+        return out
+    velocity = vals[-1] - vals[-1 - lag]
+    accel = vals[-1] - 2.0 * vals[-1 - lag] + vals[-1 - 2 * lag]
+    jerk = None
+    if len(vals) >= 3 * lag + 1:
+        prev_accel = vals[-1 - lag] - 2.0 * vals[-1 - 2 * lag] + vals[-1 - 3 * lag]
+        jerk = accel - prev_accel
+    out.update({
+        "acceleration": round(accel, 6),
+        "velocity": round(velocity, 6),
+        "jerk": round(jerk, 6) if jerk is not None else None,
+        "reason": None,
+    })
+    return out
+
+
+def technical_disagreement(categories) -> dict:
+    """§131 dispersion / agreement across the category sub-scores.
+
+    Reads the per-category 0-100 scores — either the ``"categories"`` mapping
+    of a ``technical_score(...)`` result (each value a sub-dict carrying
+    ``"score"``) or a plain ``{category: score}`` mapping — and reports how far
+    apart the measured categories are. Only non-``None`` scores enter;
+    ``compared`` names exactly which inputs were used, because §0.4/§6.5 make
+    redundancy control mandatory before the weights are trusted.
+
+    * ``dispersion`` — the population standard deviation of the compared scores.
+    * ``disagreement`` — ``dispersion / 50`` (§131's ``NormalizedDispersion``;
+      50 is the largest population std a vector bounded to ``[0, 100]`` can
+      have — half the entries at each edge). A fully agreeing vector gives
+      ``0``; one split half at ``0`` and half at ``100`` gives ``1``.
+    * ``agreement`` — ``1 - disagreement`` (§131's ``TechnicalAgreement``).
+
+    Returns ``{"disagreement", "agreement", "dispersion", "scale", "compared",
+    "n", "reason"}`` with the numbers ``None``, ``compared`` empty and
+    ``reason`` a string when fewer than two measured sub-scores were supplied.
+    """
+    out = {
+        "disagreement": None, "agreement": None, "dispersion": None,
+        "scale": _DISAGREEMENT_SCALE, "compared": [], "n": 0, "reason": None,
+    }
+    src = None
+    if isinstance(categories, dict):
+        inner = categories.get("categories")
+        src = inner if isinstance(inner, dict) else categories
+    scores: dict[str, float] = {}
+    for name, value in (src or {}).items():
+        if isinstance(value, dict):
+            value = value.get("score")
+        if value is None:
+            continue
+        try:
+            scores[str(name)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    if len(scores) < 2:
+        out["compared"] = sorted(scores)
+        out["n"] = len(scores)
+        out["reason"] = (
+            "fewer than 2 measured category sub-scores: dispersion unmeasured"
+        )
+        return out
+    vals = list(scores.values())
+    mean = sum(vals) / len(vals)
+    dispersion = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals))
+    disagreement = dispersion / _DISAGREEMENT_SCALE
+    out.update({
+        "disagreement": round(disagreement, 6),
+        "agreement": round(1.0 - disagreement, 6),
+        "dispersion": round(dispersion, 6),
+        "compared": sorted(scores),
+        "n": len(vals),
+    })
+    return out
+
+
 __all__ = [
+    "TECHNICAL_STATES",
+    "STRONG_TREND_ADX",
     "CATEGORY_WEIGHTS",
     "CATEGORY_ORDER",
     "CATEGORY_COMPONENTS",
@@ -411,4 +645,7 @@ __all__ = [
     "category_score",
     "technical_score",
     "category_weight_share",
+    "technical_state",
+    "technical_acceleration",
+    "technical_disagreement",
 ]

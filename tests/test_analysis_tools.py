@@ -214,10 +214,34 @@ def test_relative_strength_verdict_present():
     with mock.patch(
         "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
         side_effect=_ohlcv_df({"AAPL": closes, "SPY": mkt}),
+    ), mock.patch(
+        # the sector leg resolves the ticker's sector label over a vendor chain:
+        # stub it, or this offline test reaches the network
+        "tradingagents.dataflows.yfinance_sector.fetch_sector",
+        return_value=None,
     ):
         out = T.get_relative_strength.invoke({"ticker": "AAPL"})
     assert "relative_strength AAPL:" in out
     assert "verdict=" in out
+    # an unmapped label says so; it never silently falls back to the benchmark
+    assert "vs_sector_etf=n/a (sector label unmapped)" in out
+
+
+def test_relative_strength_reports_the_sector_etf_leg():
+    """TECH-19: the sector leg is measured against the SPDR ETF, separately."""
+    closes = _uptrend(260)  # +0.5/bar
+    flat = [100.0] * 260
+    with mock.patch(
+        "tradingagents.agents.utils.analysis_tools._load_ohlcv_df",
+        side_effect=_ohlcv_df({"AAPL": closes, "SPY": flat, "XLK": flat}),
+    ), mock.patch(
+        "tradingagents.dataflows.yfinance_sector.fetch_sector",
+        return_value="Technology",
+    ):
+        out = T.get_relative_strength.invoke({"ticker": "AAPL"})
+    assert "vs_sector_etf=XLK" in out
+    assert "excess_20d=" in out
+    assert "excess_20d=n/a" not in out
 
 
 def test_relative_strength_no_benchmark():
@@ -827,6 +851,10 @@ def test_regime_components_uses_ohlcv(monkeypatch):
         "opens": _uptrend(260),
     }
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    # REG-16/17 run a real Baum-Welch fit when the history is long enough; the
+    # fitted HMM is not what this test is about, and its producer has its own
+    # tests. Pin it to "unavailable" so this stays a fast, offline read.
+    _pin_hmm_unavailable(monkeypatch)
     out = T.get_regime_components.invoke({"ticker": "AAPL"})
     assert "label=" in out
     assert "vol_pct=" in out
@@ -835,8 +863,69 @@ def test_regime_components_uses_ohlcv(monkeypatch):
 def test_regime_components_short_history_degrades(monkeypatch):
     fake = {"closes": [100.0, 101.0], "opens": [], "highs": [], "lows": [], "volumes": []}
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    _pin_hmm_unavailable(monkeypatch)
     out = T.get_regime_components.invoke({"ticker": "AAPL"})
     assert "not enough price history" in out
+
+
+def _pin_hmm_unavailable(monkeypatch):
+    """No real HMM fit inside a leaf test (see `test_regime_components_*`)."""
+    from tradingagents.strategies import regime as _regime_mod
+
+    monkeypatch.setattr(_regime_mod, "hmm_filtered_regime", lambda *a, **k: None)
+
+
+def test_regime_components_emits_the_index_reads_and_the_state_block(monkeypatch):
+    """REG-4 / REG-16 / REG-17: the three producers that were called by nothing
+    but their own module now reach a reader, each as its own line."""
+    from tradingagents.strategies import regime as _regime_mod
+
+    fake = {
+        "closes": _uptrend(300),
+        "highs": _uptrend(300),
+        "lows": _uptrend(300),
+        "volumes": [100] * 300,
+        "opens": _uptrend(300),
+    }
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    monkeypatch.setattr(
+        _regime_mod,
+        "hmm_filtered_regime",
+        lambda *a, **k: {
+            "probs": [[0.7, 0.3], [0.6, 0.4]],
+            "last": {"state": 0},
+            "params": {"transmat": [[0.9, 0.1], [0.2, 0.8]]},
+        },
+    )
+    out = T.get_regime_components.invoke({"ticker": "AAPL"})
+
+    assert "regime state:" in out
+    # REG-4: one read per index, labelled, never an invented cross-index mean
+    for label in ("SPY", "QQQ", "IWM"):
+        assert f"index {label} trend=" in out
+    # REG-16: the transition probability and the expected durations
+    assert "persistence=0.9000" in out
+    assert "expected_duration=" in out
+    # REG-17: the beside-the-score metadata block
+    assert "state metadata:" in out
+    assert "entropy=" in out and "confidence=" in out and "surprise=" in out
+
+
+def test_regime_components_reports_an_unmeasurable_state_block_not_a_zero(monkeypatch):
+    """A refused HMM prints the producer's reason; it never fabricates a state."""
+    fake = {
+        "closes": _uptrend(300),
+        "highs": _uptrend(300),
+        "lows": _uptrend(300),
+        "volumes": [100] * 300,
+        "opens": _uptrend(300),
+    }
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker: fake)
+    _pin_hmm_unavailable(monkeypatch)
+    out = T.get_regime_components.invoke({"ticker": "AAPL"})
+
+    assert "hmm transition: n/a (" in out
+    assert "persistence=" not in out
 
 
 def test_the_realized_vol_leg_ranks_the_window_that_ends_today(monkeypatch):

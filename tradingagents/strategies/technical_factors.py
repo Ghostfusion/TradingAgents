@@ -357,6 +357,7 @@ __all__ = [
     "mean_reversion_z",
     "volume_depth",
     "atr_depth",
+    "squeeze_momentum",
     "parabolic_sar",
     "elder_thermometer",
     "aroon",
@@ -1407,5 +1408,124 @@ def atr_depth(highs, lows, closes, short: int = 14, long: int = 50,
             if (atr_pct is not None and prev_pct is not None) else None
         ),
         "reason": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Keltner/Bollinger squeeze momentum (library §109/§110): the TTM squeeze leg
+# that no producer in the repo emitted. Both band pairs already exist
+# (`keltner_channel` above; the Bollinger construction `bollinger_bandwidth`
+# and `value_dip.bollinger_pct_b` both use), so this is arithmetic over the
+# closes the caller already holds plus the ATR `keltner_channel` needs.
+# ---------------------------------------------------------------------------
+
+#: §110 names the momentum histogram but gives no formula; the library's own
+#: §30 `ATRMove = (C_t - C_{t-n})/ATR_n` is used as the directional leg instead
+#: (a named, already-specified quantity), with the sign reported.
+_SQUEEZE_MOM_WINDOW = 12
+
+
+def squeeze_momentum(closes, atr_value=None, bb_window: int = 20,
+                     bb_k: float = 2.0, kc_n: int = 20, kc_mult: float = 2.0,
+                     mom_window: int = _SQUEEZE_MOM_WINDOW,
+                     atr_prev: float | None = None) -> dict:
+    """Keltner/Bollinger squeeze, its release, and momentum at the release.
+
+    Reads the same ``closes`` series the module's band producers take plus the
+    ATR scalar ``keltner_channel`` needs (optionally the prior bar's ATR for the
+    release read). The squeeze flag is §109's condition - the Bollinger band
+    pair sits **inside** the Keltner pair:
+
+        ``bb_upper < kc_upper`` **and** ``bb_lower > kc_lower``
+
+    The Bollinger pair is the population-standard-deviation construction
+    ``bollinger_bandwidth`` uses (``mid +/- bb_k * sd`` over ``bb_window``);
+    the Keltner pair is :func:`keltner_channel` itself (``kc_n``, ``kc_mult``).
+
+    * ``squeeze`` - §109's flag on the latest bar.
+    * ``release`` - ``True`` when the flag was set on the prior bar and is clear
+      now (the compression ending); ``None`` with ``release_reason`` when the
+      prior bar's channel cannot be measured (no positive ``atr_prev``, or too
+      few closes). Never fabricated.
+    * ``momentum`` / ``direction`` - §110's ``MomentumHistogram`` leg. The
+      library names it without a formula, so the signed §30 ``ATRMove =
+      (C_t - C_{t-mom_window})/ATR_n`` is reported; ``direction`` is
+      ``"bullish"`` / ``"bearish"`` / ``"none"`` (the §110 "compression without
+      directional confirmation" case is momentum exactly zero).
+    * ``bb_upper`` / ``bb_lower`` / ``kc_upper`` / ``kc_lower`` - the band
+      levels the flag compared, so the read is checkable.
+
+    ``reason`` is a string when ``closes`` is shorter than
+    ``max(bb_window, kc_n, mom_window + 1)`` or either band pair is
+    unmeasurable (no positive ATR / ``keltner_channel`` returned ``None``);
+    no field is ever a fabricated 0.
+    """
+    empty = {
+        "squeeze": None, "release": None, "momentum": None, "direction": None,
+        "bb_upper": None, "bb_lower": None, "kc_upper": None, "kc_lower": None,
+        "reason": None, "release_reason": None,
+    }
+    need = max(int(bb_window), int(kc_n), int(mom_window) + 1)
+    if (not closes or int(bb_window) < 2 or int(kc_n) < 1
+            or int(mom_window) < 1 or len(closes) < need):
+        return {**empty, "reason": (
+            f"fewer than {need} closes: squeeze unmeasured"
+        )}
+    try:
+        atr = float(atr_value) if atr_value is not None else None
+    except (TypeError, ValueError):
+        atr = None
+    if atr is None or atr <= 0.0:
+        return {**empty, "reason": "no positive ATR supplied: channel unmeasured"}
+
+    vals = [float(c) for c in closes]
+    kc = keltner_channel(vals, atr, n=int(kc_n), k=float(kc_mult))
+    if kc["upper"] is None or kc["lower"] is None:
+        return {**empty, "reason": "Keltner channel unmeasurable: squeeze not read"}
+
+    from .value_dip import bollinger_pct_b
+
+    bb = bollinger_pct_b(vals, window=int(bb_window), k=float(bb_k))
+    if bb is None or bb["upper"] is None or bb["lower"] is None:
+        return {**empty, "reason": "Bollinger bands unmeasurable: squeeze not read"}
+
+    squeeze = bool(bb["upper"] < kc["upper"] and bb["lower"] > kc["lower"])
+    momentum = (vals[-1] - vals[-1 - int(mom_window)]) / atr
+    direction = "bullish" if momentum > 0 else ("bearish" if momentum < 0 else "none")
+
+    release = None
+    release_reason = None
+    prev_need = need + 1
+    try:
+        atr_p = float(atr_prev) if atr_prev is not None else None
+    except (TypeError, ValueError):
+        atr_p = None
+    if len(vals) < prev_need or atr_p is None or atr_p <= 0.0:
+        release_reason = (
+            "no positive prior-bar ATR (or too few closes): release not measurable"
+        )
+    else:
+        kc_p = keltner_channel(vals[:-1], atr_p, n=int(kc_n), k=float(kc_mult))
+        bb_p = bollinger_pct_b(vals[:-1], window=int(bb_window), k=float(bb_k))
+        if (kc_p["upper"] is None or kc_p["lower"] is None
+                or bb_p is None or bb_p["upper"] is None or bb_p["lower"] is None):
+            release_reason = "prior-bar channel unmeasurable: release not measurable"
+        else:
+            prev_squeeze = bool(
+                bb_p["upper"] < kc_p["upper"] and bb_p["lower"] > kc_p["lower"]
+            )
+            release = bool(prev_squeeze and not squeeze)
+
+    return {
+        "squeeze": squeeze,
+        "release": release,
+        "momentum": round(momentum, 6),
+        "direction": direction,
+        "bb_upper": round(bb["upper"], 6),
+        "bb_lower": round(bb["lower"], 6),
+        "kc_upper": round(kc["upper"], 6),
+        "kc_lower": round(kc["lower"], 6),
+        "reason": None,
+        "release_reason": release_reason,
     }
 
