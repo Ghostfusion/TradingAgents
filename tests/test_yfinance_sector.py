@@ -256,3 +256,99 @@ def test_fetch_sector_keeps_the_vendor_sector_key_ahead_of_industry():
         mock.patch("yfinance.Ticker", side_effect=_no_yf),
     ):
         assert ys.fetch_sector("AAPL") == "Financial Services"
+
+
+# --- fetch_rating_actions: the structured, grade-preserving sibling --------
+
+
+def _grade_frame():
+    """A yfinance-1.5.x-shaped upgrades_downgrades frame (GradeDate = index)."""
+    from datetime import datetime, timedelta
+
+    import pandas as pd
+
+    now = datetime.now()
+    df = pd.DataFrame(
+        {
+            "Firm": ["Morgan", "Goldman", "Stale"],
+            "ToGrade": ["Buy", "Sell", "Hold"],
+            "FromGrade": ["Hold", "Hold", None],
+            "Action": ["up", "down", "up"],
+        },
+        index=[now, now - timedelta(days=5), now - timedelta(days=400)],
+    )
+    df.index.name = "GradeDate"
+    return df
+
+
+def test_fetch_rating_actions_rows_newest_first_and_windowed():
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    class _T:
+        upgrades_downgrades = _grade_frame()
+
+    with mock.patch("yfinance.Ticker", return_value=_T()):
+        rows = ys.fetch_rating_actions("AAPL", days=60)
+    assert rows is not None and len(rows) == 2  # stale 400d row dropped
+    assert [r["firm"] for r in rows] == ["Morgan", "Goldman"]  # newest first
+    assert set(rows[0]) == {"date", "firm", "action", "to_grade", "from_grade"}
+    assert rows[0]["to_grade"] == "Buy"
+    assert rows[0]["from_grade"] == "Hold"
+    assert rows[1]["action"] == "down"
+
+
+def test_fetch_rating_actions_none_on_failure(monkeypatch):
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    def boom(t):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr("yfinance.Ticker", boom)
+    assert ys.fetch_rating_actions("AAPL") is None
+
+
+def test_fetch_rating_actions_empty_frame_is_none():
+    import pandas as pd
+
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    class _T:
+        upgrades_downgrades = pd.DataFrame()
+
+    with mock.patch("yfinance.Ticker", return_value=_T()):
+        assert ys.fetch_rating_actions("AAPL") is None
+
+
+def test_fetch_rating_actions_empty_window_is_empty_list():
+    from datetime import datetime, timedelta
+
+    import pandas as pd
+
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    old = datetime.now() - timedelta(days=400)
+    df = pd.DataFrame(
+        {"Firm": ["Old"], "ToGrade": ["Buy"], "FromGrade": [None], "Action": ["up"]},
+        index=[old],
+    )
+    df.index.name = "GradeDate"
+
+    class _T:
+        upgrades_downgrades = df
+
+    with mock.patch("yfinance.Ticker", return_value=_T()):
+        assert ys.fetch_rating_actions("AAPL", days=60) == []
+
+
+def test_revision_actions_reads_the_grade_date_index():
+    """Regression: yfinance 1.5.x indexes upgrades_downgrades by ``GradeDate``,
+    so the date is the iterrows index, not a column. The old reader asked only
+    for ``ActionDate``/``date`` and therefore counted zero on every real frame."""
+    from tradingagents.dataflows import yfinance_sector as ys
+
+    class _T:
+        upgrades_downgrades = _grade_frame()
+
+    with mock.patch("yfinance.Ticker", return_value=_T()):
+        res = ys.fetch_revision_actions("AAPL", days=60)
+    assert res == {"up": 1, "down": 1, "net": 0}

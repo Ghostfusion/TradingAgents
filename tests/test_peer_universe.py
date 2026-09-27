@@ -78,13 +78,28 @@ def test_explicit_tickers_skip_symbol_list(monkeypatch):
 
 def test_financials_skip_statement_fetch(monkeypatch):
     def boom(*a, **k):
-        raise AssertionError("statement fetch must not run when financials are supplied")
+        raise AssertionError("the statement fetch must be skipped")
 
     _patch_fetch(monkeypatch, boom)
     _patch_sector(monkeypatch, lambda t: "Technology")
 
     out = resolve_peer_universe(tickers=["AAA"], financials={"AAA": _fin()})
     assert out["tickers"] == ["AAA"]
+
+
+def test_resolver_returns_the_financials_each_panel_row_was_built_from(monkeypatch):
+    """A caller can run a producer over the SAME statement, not a re-fetch.
+
+    `fundamental_score`'s engine-derived DCF (FUND-21) reads this key; a name
+    that produced no panel row is absent from it, so the map and the panel
+    agree by construction.
+    """
+    _patch_fetch(monkeypatch, lambda t, d: _fin())
+    _patch_sector(monkeypatch, lambda t: "Technology")
+
+    out = resolve_peer_universe(tickers=["AAA", "BBB"], current_date="2026-01-01")
+    assert set(out["financials"]) == set(out["metrics"]) == {"AAA", "BBB"}
+    assert out["financials"]["AAA"]["revenue"] is not None
 
 
 def test_per_name_failure_is_counted(monkeypatch):

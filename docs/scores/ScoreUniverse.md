@@ -94,7 +94,7 @@ numbers are inside the named symbol.
 | 4 | Analyst / Consensus (Consensus, Target Upside, Dispersion) | **ELSEWHERE** for 4.1, **ABSENT** for 4.2–4.3 | `strategies/consensus.py::weighted_consensus:32`, `::rating_to_number:8`, `::agreement_score:14`; `agents/utils/analysis_tools.py::get_consensus:2359` | Consensus is built as a continuous stance in [-1,1], not the survey's count fraction; **no target-price upside and no target-price dispersion producer** |
 | 5 | Sentiment (news, social, momentum, divergence) | **PRESENT** / **PARTIAL** | `strategies/sentiment_score.py::sentiment_score:455`; `strategies/sentiment.py::aggregate_weighted_sentiment:626`, `::daily_sentiment_sma:511`, `::compute_social_scores:273`, `::sentiment_velocity:25`; `strategies/sentiment_score.py::confirmation_quadrant:330` | News tone, momentum and social tone are built; **engagement weighting is not** (an LLM instruction, not a producer); divergence exists as a 4-label quadrant, not a z-difference |
 | 6 | News / Event (intensity, novelty, event impact, catalyst) | **ELSEWHERE** / **PRESENT** / **PARTIAL** / **ABSENT** | `strategies/sentiment.py::mention_volume:43`; `strategies/news_score.py::news_novelty:215`; `strategies/event_state.py::imminence:349`; `strategies/catalyst.py::implied_move_from_history:111` | Intensity is built but wired as *attention*, not as a neutral leg; novelty built; **no `P × M` product**; **no signed catalyst score** |
-| 7 | Technical (Trend, Breakout, Mean-Reversion, RS, Trend Quality) | **PRESENT** / **PARTIAL** | `strategies/technical_score.py::technical_score:276` (categories `trend`, `breakout`, `mean_reversion`, `relative_strength`); `strategies/regime_state.py::regime_relative:127`; `strategies/relative_strength.py::relative_strength_report:214`; `strategies/regime.py::trend_strength:130` | Trend and RS built; Breakout's canonical value is unreachable (`donchian_channel:413` returns `None`); the engine's mean-reversion set differs from the survey's; TrendConsistency has no producer |
+| 7 | Technical (Trend, Breakout, Mean-Reversion, RS, Trend Quality) | **PRESENT** / **PARTIAL** | `strategies/technical_score.py::technical_score:276` (categories `trend`, `breakout`, `mean_reversion`, `relative_strength`); `strategies/regime_state.py::regime_relative:127`; `strategies/relative_strength.py::relative_strength_report:214`; `strategies/regime.py::trend_strength:130` | Trend and RS built; Breakout's canonical value is unreachable (`donchian_channel:413` returns `None`); the engine's mean-reversion set differs from the survey's; TrendConsistency has no producer **[CORRECTED 2026-09-26: stale — `strategies/technical_factors.py::donchian_channel:413` takes `closes` and computes `breakout_up`/`breakout_dn` against `breakout_ref_up`/`breakout_ref_dn`, and two callers pass it (`agents/utils/analysis_tools.py:1364`, `strategies/value_dip.py:1555`). The residual gap is narrower: `technical_score`'s `breakout` category (`strategies/technical_score.py:47` weight, components `:184-187` = `vcp_candidate`/`near_breakout`/`pullback_candidate`/`trigger_candle`) never consumes the Donchian value. `MASTER_PLAN.md` DOC-1.]** |
 | 8 | Regime (trend, volatility, risk-on/off, HMM) | **PRESENT** / **PARTIAL** | `strategies/regime.py::hmm_filtered_regime:545`, `::hmm_regime:743`, `::vol_percentile:59`; `strategies/regime_state.py::regime_vol_ratio:92`, `::regime_trend:65`; `strategies/regime_score.py::regime_score:265`; `strategies/regime_performance.py::macro_regime:76` | HMM filtered probabilities built (not surfaced into `RegimeScore`); vol regime built with an ATR-ratio estimator, not `σ_short/σ_long`; risk-on/off built without commodities |
 | 9 | Market Breadth (A/D ratio, A/D line, thrust, % above SMA) | **PARTIAL** / **ABSENT** / **PRESENT** | `strategies/market_breadth.py::market_breadth:114`; `agents/utils/analysis_tools.py::_market_breadth_read:375`; `strategies/sector_breadth.py::mcclellan_read:213` | `% above SMA` (20/50/200) is fully built and market-wide; `ad_ratio` is a **net** ratio, not the survey's adv/dec; **no cumulative A/D line**; thrust exists per sector, not market-wide |
 | 10 | Relative Strength / Leadership (benchmark-relative, sector-relative, relative momentum) | **PRESENT** / **PARTIAL** | `strategies/regime_state.py::regime_relative:127`; `strategies/sector_screener.py::_rel_outperformance:248`; `strategies/rotation.py::relative_rotation:43`; `strategies/sector_breadth.py::rrg_heading:286` | Benchmark-relative is built — **and is the same formula as §7's Relative Strength**, listed twice; sector-relative is built inside the sector screen; stock-minus-**sector** momentum has no producer |
@@ -176,7 +176,7 @@ from the investment score"* — is the repo's own four-output discipline
 
 | System | What exists | What is missing |
 | --- | --- | --- |
-| §7 Breakout | `technical_score`'s `breakout` category (10 %), VCP/pullback/trigger producers | the price-breakout **value**: `strategies/technical_factors.py::donchian_channel:413` returns `None` and no caller derives it (`README.md` §3.1 defect 3) |
+| §7 Breakout | `technical_score`'s `breakout` category (10 %), VCP/pullback/trigger producers | the price-breakout **value**: `strategies/technical_factors.py::donchian_channel:413` returns `None` and no caller derives it (`README.md` §3.1 defect 3) **[CORRECTED 2026-09-26: both halves stale — `donchian_channel` takes `closes` and computes `breakout_up`/`breakout_dn` (`breakout_ref_up`/`breakout_ref_dn` are the prior-window levels it is checked against), and two callers pass it (`agents/utils/analysis_tools.py:1364`, `strategies/value_dip.py:1555`). What is still missing is the consumption: `technical_score`'s `breakout` category reads only `vcp_candidate`/`near_breakout`/`pullback_candidate`/`trigger_candle` (`strategies/technical_score.py:184-187`), never the Donchian value. `MASTER_PLAN.md` DOC-1.]** |
 | §7 Trend Quality | `strategies/regime.py::trend_strength:130` | TrendConsistency, and the product `TQS = strength × consistency` — nearest built analogue is `strategies/rotation.py::clenow_momentum:89` |
 | §8 Regime | `strategies/regime.py::hmm_filtered_regime:545` (filtered `P(Regime_k \| obs)`) | the wiring into `RegimeScore` — `RegimeScore.md` §104 row 46 records it PARTIAL |
 | §9 Breadth | `% above 20/50/200` market-wide | the survey's adv/dec ratio (the tree's `ad_ratio` is net), a cumulative A/D line, and a market-wide thrust |
@@ -209,7 +209,7 @@ from the investment score"* — is the repo's own four-output discipline
 * **§20 AI adoption / AI threat** — nothing; no canonical quantitative reference
   exists either (the survey's own text calls them thematic).
 * **§22 Economic sensitivity** — no per-name macro beta. The only "beta" slot in
-  the system, `BookState.net_beta`, is a dead field (`README.md` §3.1 defect 5).
+  the system, `BookState.net_beta`, is a dead field (`README.md` §3.1 defect 5). **[CORRECTED 2026-09-26: the slot is unpopulated, not unproduced — `strategies/book_risk.py::net_beta:177` computes the book beta and `strategies/cross_section.py:470-471` emits it as `net_beta_raw`/`net_beta`; what is missing is the wire — no production `BookState(...)` construction (`../TradingExecution/signald/risk/state.py:82`) passes it, so the executor field stays `None`. `MASTER_PLAN.md` DOC-20.]**
 * **§23 ESG** — nothing, and the survey's hierarchy gives it no slot.
 
 ---
@@ -381,7 +381,7 @@ thing that does not exist; nothing here is an estimate of effort.
 | Level ROIC / reinvestment / TSY (§18) | incremental ROIC, dividends, repurchase spend | `roic(nopat, ic)`, reinvestment rate, `DY + BY − IssuanceYield` | needs a level-ROIC convention declared | **Q1** |
 | Moat (§19) | loss-of-moat proxy, patent activity | margin stability, market share, pricing power | vendor-blocked (`value_dip.py:964`) | **Q1** |
 | AI adoption / threat (§20) | theme mentions | a text/exposure classifier | no canonical reference exists | **Q1** |
-| Economic sensitivity (§22) | FRED series are reachable | a per-name OLS on aligned macro series | a stated window; the `net_beta` slot is dead | **Q1** |
+| Economic sensitivity (§22) | FRED series are reachable | a per-name OLS on aligned macro series | a stated window; the `net_beta` slot is dead **[CORRECTED 2026-09-26: unpopulated, not unproduced — `strategies/book_risk.py::net_beta:177` produces the book beta and `strategies/cross_section.py:470-471` emits it; the missing part is the executor `BookState` wire, see §4]** | **Q1** |
 | ESG (§23) | none | an ESG vendor row | absent; the survey's own hierarchy has no slot | **Q1** |
 | Governance (§24) | ownership HHI | board/related-party/auditor/turnover/compensation | filing-blocked | **Q1** |
 | Dilution + buyback quality (§25–§26) | share-count change, repurchase spend | `DilutionRate`, `BuybackYield`, `CapitalAllocationQuality` | Piotroski's `f_eq` must be re-pointed or declared a cross-check | **Q2** |
@@ -408,17 +408,61 @@ thing that does not exist; nothing here is an estimate of effort.
 * **Q3 — the meta layer.** Do you want the cross-engine agreement read (§31) and
   the multi-model consensus/dispersion pair (§29)? The first needs a new producer
   over `quant_scorecard`'s engine vector; the second has no ensemble to feed it.
+  **[ANSWERED 2026-09-26: yes — as a LAYER beside the engines, never as a tenth
+  engine.** *"How much do the engines agree, how much do they disagree, and how
+  reliable is the aggregate?"* is a different question from *"what does each
+  information source say?"*, and the owner's formulas are in `MASTER_PLAN.md` §2.1
+  (D6). The layer is **strictly downstream** — *"avoid engine → meta → engine …
+  that creates circularity"*. The multi-model pair (§29) stays **data-blocked**:
+  the repo runs one model per role, so there is no `M` to average; the shape is
+  specified and the plumbing is not built speculatively.]**
 * **Q4 — `Conviction` (§32).** Build it as a **separate** object — which is the
   only reading that avoids counting `K` and `R` twice — with the risk term written
   `Risk/100` and `BaseSignal` explicitly *not* `TradeScore`?
+  **[ANSWERED 2026-09-26, and this survey's formula is SUPERSEDED:
+  `Conviction = AgreementScore × EvidenceConfidence` (0-100), with no
+  `BaseSignal` and no risk term** — the survey's
+  `BaseSignal × DataConfidence × Agreement × (1 − Risk)` is replaced, which also
+  removes the `(1 − Risk)` direction problem D-1 recorded (risk is a gate, per
+  D3, not a multiplier inside a conviction). The object is a meta-property, so it
+  lives in the meta layer.]**
 * **Q5 — does any survey system become a tenth engine?** If so it needs the full
   set: a gate, a leaf, an `ENGINE_GATES`/`ENGINE_TOOLS` entry, a
   `default_config.py` key, a doc, and the web-app sync (`trading_web`'s five
   surfaces). The 24-name hierarchy implies at most 11 secondary engines and 4
   meta-scores; the survey's own advice is not to build them all.
+  **[ANSWERED 2026-09-26: not automatically — and the criterion is stated.** The
+  owner's test is not *"does this produce a number?"* (almost anything can) but
+  *"does it represent a sufficiently distinct economic information dimension that
+  deserves independent lifecycle, coverage, attribution, validation and
+  configuration?"*, with **orthogonality as the diagnostic**:
+  `Orthogonality = 1 − |Corr(SurveyScore, ExistingScores)|`. A survey correlating
+  **0.94** with `SentimentScore` does not need an engine of its own; one near
+  **0** has an argument. The owner's own examples of systems that *could* qualify
+  are positioning, options flow, institutional flow, capital-flow pressure,
+  supply-chain stress, AI adoption and alternative data — judged one at a time,
+  never as a batch. **Consequence for this document: every `UNIV-*` gap below
+  stays a component or a diagnostic, and the gate/leaf/registry/config/doc/web
+  plumbing is NOT built speculatively.** The orthogonality measurement is a
+  Phase 3 (panel) row, since it is a correlation like every other one.]**
 * **Q6 — `MomentumScore`.** It is one of the survey's nine *core* engines and has
   no library, while `MarketScore` — which has a library — is not one of the 24
   names. Which one is the core slot for the stock's own market behaviour?
+  **[ANSWERED 2026-09-26: `MomentumScore`.** *"Momentum is a characteristic of the
+  security's own return behavior"*, while `MarketScore` describes the **broader
+  market's** behaviour — so the core slot is `MomentumScore`, and `MarketScore`
+  is the market-level engine D1 defines. The legs the owner names for it: price
+  momentum `MOM_n = P_t/P_{t−n} − 1` at 5/21/63/126/252, risk-adjusted
+  `RAMOM = R_n/σ_n`, relative momentum `R_stock − R_benchmark`, sector-relative
+  `R_stock − R_sector`, acceleration `MOM_short − MOM_long`, consistency
+  `N_positive_periods/N_periods` and persistence `N_positive_returns/N`. The
+  ownership matrix that comes with the answer is in `MASTER_PLAN.md` §2.1 (D7)
+  and it is the *arbitration* invariant 8 needed: RSI/MACD/%B/ATR/ADX/MA-crossovers
+  stay `TechnicalScore`'s; the 12-1 return and the multi-horizon/relative/
+  acceleration legs become `MomentumScore`'s; S&P and Nasdaq momentum, breadth and
+  advance/decline are `MarketScore`'s; VIX is `MarketScore` or `RegimeScore`
+  *depending on definition* — the one row the answer deliberately leaves for the
+  build.]**
 * **Q7 — the survey's naming.** Do you want the tree's names to follow the survey
   (`EarningsScore`, `FlowScore`, `OptionsScore`, `BreadthScore`,
   `RelativeStrengthScore`, `QualityScore`, `CrowdingScore`) for the components

@@ -124,6 +124,10 @@ RAMPS: dict[str, tuple[float, float]] = {
     # max pain: how far spot sits from the monthly pin, in ATRs. Closer
     # is the mean-reverting read, so lower_better.
     "max_pain_dist_atr": (0.0, 2.0),
+    # Donchian breakout persistence: signed net share of the last N closes
+    # beyond the prior-window reference levels (persistence_up - persistence_dn),
+    # in [-1, 1]. higher_better.
+    "breakout_persistence": (-1.0, 1.0),
 }
 
 
@@ -186,6 +190,11 @@ COMPONENTS: dict[str, Component] = {
         _c("near_breakout", "breakout", "higher_better", "swing.vcp_setup:326"),
         _c("pullback_candidate", "breakout", "higher_better", "swing.pullback_setup:156"),
         _c("trigger_candle", "breakout", "higher_better", "value_dip.trigger_candle:625"),
+        # The Donchian breakout STATE (technical_factors.donchian_channel:
+        # breakout_up/dn + persistence_up/dn) until now reached no category. Fed
+        # via ``values`` or the ``donchian`` keyword of ``technical_score``.
+        _c("breakout_persistence", "breakout", "higher_better",
+           "technical_factors.donchian_channel (persistence_up - persistence_dn)"),
         # mean reversion (8)
         _c("stoch_rsi", "mean_reversion", "higher_better", "technical_factors.stoch_rsi:283", "NON-MONOTONIC"),
         _c("rsi2", "mean_reversion", "higher_better", "technical_factors.rsi2:315", "NON-MONOTONIC"),
@@ -273,9 +282,33 @@ def category_score(category: str, aligned: dict, *, min_coverage=CATEGORY_MIN_CO
     return res
 
 
+def _donchian_breakout(donchian) -> float | None:
+    """Signed Donchian breakout-persistence read in [-1, 1], or None.
+
+    Fed by ``technical_factors.donchian_channel``. The primary read is the net
+    persistence ``persistence_up - persistence_dn`` (the share of the last N
+    closes beyond the prior-window reference levels, §43/§44); when the channel
+    exposed no persistence but did expose the breakout flags, the flag sign is
+    used (``+1`` up / ``-1`` down / ``0`` neither). A dict with neither returns
+    ``None`` so the component stays absent — never a neutral 0.
+    """
+    if not isinstance(donchian, dict):
+        return None
+    pu = donchian.get("persistence_up")
+    pd = donchian.get("persistence_dn")
+    if pu is not None or pd is not None:
+        return (float(pu) if pu is not None else 0.0) - (float(pd) if pd is not None else 0.0)
+    up = donchian.get("breakout_up")
+    dn = donchian.get("breakout_dn")
+    if up is None and dn is None:
+        return None
+    return (1.0 if up else 0.0) - (1.0 if dn else 0.0)
+
+
 def technical_score(
     values: dict,
     *,
+    donchian: dict | None = None,
     weights: dict | None = None,
     min_coverage=COMPOSITE_MIN_COVERAGE,
     category_min_coverage=CATEGORY_MIN_COVERAGE,
@@ -285,6 +318,14 @@ def technical_score(
     ``values`` is ``{component: raw value}`` over the components declared in
     ``COMPONENTS``; anything absent is ``NA`` and is reported, never scored as 0.
 
+    ``donchian`` is the optional ``technical_factors.donchian_channel`` output.
+    When supplied and ``values`` does not already carry ``breakout_persistence``,
+    the Donchian breakout state is turned into that component (net persistence,
+    ``persistence_up - persistence_dn``) so the breakout category can measure it.
+    Keyword-only and defaulted to ``None``, so every pre-existing caller is
+    unchanged. A caller may instead pass ``values["breakout_persistence"]``
+    directly.
+
     ``weights`` overrides the owner's category weights; ``None`` uses them, and
     the basis prints which vector was used. The composite renormalises over the
     categories that produced a score, so a category that could not be measured
@@ -293,7 +334,12 @@ def technical_score(
     Returns ``{"score", "coverage", "categories", "components", "aligned",
     "bands", "weights", "status", "withheld", "basis"}``.
     """
-    aligned = align_components(values)
+    merged = dict(values or {})
+    if "breakout_persistence" not in merged:
+        breakout = _donchian_breakout(donchian)
+        if breakout is not None:
+            merged["breakout_persistence"] = breakout
+    aligned = align_components(merged)
     cats = {
         cat: category_score(cat, aligned, min_coverage=category_min_coverage)
         for cat in CATEGORY_ORDER
@@ -323,7 +369,7 @@ def technical_score(
         "categories": cats,
         "components": {
             name: {
-                "raw": (values or {}).get(name),
+                "raw": merged.get(name),
                 "aligned": aligned.get(name),
                 "direction": COMPONENTS[name].direction,
                 "category": COMPONENTS[name].category,

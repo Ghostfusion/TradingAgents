@@ -67,13 +67,35 @@ def _quantile(sorted_vals: list[float], q: float) -> float:
     return s[lo_i] * (1.0 - frac) + s[hi_i] * frac
 
 
-def cross_sectional_z(values) -> dict | None:
+def cross_sectional_z(values, *, robust: bool = False) -> dict | None:
     """Cross-sectionally standardize a list: ``(x_i - mean) / std``.
 
     Returns ``{"z": [..], "mean": float, "std": float}`` or None when there
     are fewer than 2 finite observations or zero std. Sign and scale match
     the cookbook's ``z_i = (x_i - mu) / sigma`` factor scores.
+
+    ``robust=True`` routes the standardisation to the median/MAD form
+    (``strategies/ratios.robust_z``, library §23: ``(X - median) /
+    (1.4826 * MAD)``), so an outlier-heavy factor is standardised on a
+    dispersion an outlier cannot move. In that mode ``mean``/``std`` report the
+    robust location/scale (the median and ``1.4826 * MAD``) and the result is
+    refused below 3 finite observations or with a zero MAD. **The default path
+    is byte-identical**: no engine passes ``robust=True``, so no score moves.
     """
+    if robust:
+        from tradingagents.strategies.ratios import MAD_SCALE, robust_z
+
+        vals = _clean(values)
+        if len(vals) < 3:
+            return None
+        med = _quantile(sorted(vals), 0.5)
+        mad = _quantile(sorted(abs(v - med) for v in vals), 0.5)
+        if mad <= 0:
+            return None
+        z = robust_z(vals)
+        if all(v is None for v in z):
+            return None
+        return {"z": z, "mean": med, "std": MAD_SCALE * mad}
     vals = _clean(values)
     if len(vals) < 2:
         return None

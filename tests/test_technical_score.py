@@ -477,3 +477,61 @@ def test_run_card_block_degrades_without_costing_the_card(monkeypatch) -> None:
     monkeypatch.setattr(at, "_ohlcv", _boom)
     block = _run_card_technical_score("TEST", {"enable_technical_score": True})
     assert block["score"] is None and "bars unavailable" in block["unavailable"]
+
+
+# --------------------------------------------------------------------------
+# the Donchian breakout component (UNIV-BREAKOUT: the Phase-1 wiring row)
+# --------------------------------------------------------------------------
+
+
+def test_breakout_persistence_is_declared_in_the_breakout_category() -> None:
+    assert "breakout_persistence" in COMPONENTS
+    assert COMPONENTS["breakout_persistence"].category == "breakout"
+    assert "breakout_persistence" in CATEGORY_COMPONENTS["breakout"]
+    assert "breakout_persistence" in RAMPS
+    assert "donchian_channel" in COMPONENTS["breakout_persistence"].producer
+
+
+def test_breakout_persistence_ramp_is_signed() -> None:
+    assert align_components({"breakout_persistence": 1.0})["breakout_persistence"] == 100.0
+    assert align_components({"breakout_persistence": -1.0})["breakout_persistence"] == 0.0
+    assert align_components({"breakout_persistence": 0.0})["breakout_persistence"] == pytest.approx(50.0)
+
+
+def test_donchian_kwarg_feeds_the_component_without_changing_existing_callers() -> None:
+    vals = _full_values()
+    out = technical_score(vals, donchian={"persistence_up": 0.8, "persistence_dn": 0.2})
+    assert out["components"]["breakout_persistence"]["raw"] == pytest.approx(0.6)
+    assert out["aligned"]["breakout_persistence"] == pytest.approx(80.0)
+    plain = technical_score(vals)
+    assert plain["components"]["breakout_persistence"]["raw"] is None
+    assert plain["aligned"]["breakout_persistence"] is None
+
+
+def test_donchian_flag_only_dict_still_feeds_the_component() -> None:
+    out = technical_score(
+        _full_values(), donchian={"breakout_up": True, "breakout_dn": False}
+    )
+    assert out["components"]["breakout_persistence"]["raw"] == 1.0
+    assert out["aligned"]["breakout_persistence"] == 100.0
+
+
+def test_donchian_absence_keeps_the_component_absent_never_neutral() -> None:
+    out = technical_score(_full_values(), donchian={"upper": 10.0, "lower": 1.0})
+    assert out["aligned"]["breakout_persistence"] is None
+    assert "breakout_persistence" not in out["measured"]
+
+
+def test_donchian_persistence_moves_the_breakout_category() -> None:
+    vals = {k: v for k, v in _full_values().items()
+            if COMPONENTS[k].category == "breakout"}
+    up = technical_score(vals, donchian={"persistence_up": 0.9, "persistence_dn": 0.0})
+    dn = technical_score(vals, donchian={"persistence_up": 0.0, "persistence_dn": 0.9})
+    assert up["categories"]["breakout"]["score"] > dn["categories"]["breakout"]["score"]
+
+
+def test_explicit_breakout_value_wins_over_the_donchian_kwarg() -> None:
+    vals = dict(_full_values())
+    vals["breakout_persistence"] = -1.0
+    out = technical_score(vals, donchian={"persistence_up": 1.0, "persistence_dn": 0.0})
+    assert out["components"]["breakout_persistence"]["raw"] == -1.0

@@ -40,7 +40,7 @@ byte-identical restore across all three source files. Engine suite **4973 passed
 
 **Still open (not part of §11).** `format_engine_detail`'s Level 2 deterministic
 render into `write_report_tree` (`ResearchLayerWiring.md` §4.2) remains unbuilt;
-the prompt route is landed, that is its deterministic twin.
+the prompt route is landed, that is its deterministic twin. [CORRECTED 2026-09-26: this note is stale — `format_engine_detail`'s Level 2 deterministic render **is BUILT, in two surfaces**, matching `ResearchLayerWiring.md` §4.2's own status line, which this sentence contradicted. (1) **Report-level:** `tradingagents/reporting.py`'s level-2 block calls `format_engine_detail(snapshot)` and appends the `"## IVc. Engine score detail (advisory)"` section to `complete_report.md`, restricted to the engines `ENGINE_SECTIONS` assigns to no analyst (`regime`, `risk`, `trade`) so one engine cannot reach one report twice. (2) **Per-analyst:** `reporting.py`'s per-analyst block calls `report_hygiene.engine_report_section(analyst_key, ticker, trade_date, cfg, snapshot)`, rendering the owning analyst's engines into `1_analysts/*.md` (`report_hygiene.engine_report_section` calls `format_engine_detail`). Contradiction to record: this note and the item prose call the report-level surface "§V" at `reporting.py` ~`:1807`; verified against the tree the heading is **"## IVc. Engine score detail (advisory)"** at `:2218`, and "## V. Portfolio Manager Decision" is the portfolio heading. Line numbers are deliberately omitted in this note: `reporting.py` is under concurrent edit by other workstreams, so the symbols above (verified 2026-09-26) are the durable evidence.]
 
 Specifies how the eight score engines become **mandatory and deterministic**, and
 how their results — score, coverage, and supporting measurements — are **supplied
@@ -110,8 +110,8 @@ rest of the design rests on — **the measurement is already non-discretionary**
 
 **The placement of each engine's result is already a single table.** The engine
 ownership map (`f2755c2`) made `quant_scorecard.ENGINE_SECTIONS`
-(`tradingagents/strategies/quant_scorecard.py:119`) the one source of truth, with
-the tool binding and the prompt fragment **derived** from it rather than restated:
+(`tradingagents/strategies/quant_scorecard.py:127`) the one source of truth, with
+the tool binding and the prompt fragment **derived** from it rather than restated: [CORRECTED 2026-09-26: the prose citation read `quant_scorecard.py:119`; the definition site is `:127` (`quant_scorecard.py:127` — `ENGINE_SECTIONS: dict[str, str | None] = {`), which this section's own table below already stated. The table was right; the prose was stale.]
 
 | Symbol | Site | Role |
 |---|---|---|
@@ -121,7 +121,7 @@ the tool binding and the prompt fragment **derived** from it rather than restate
 | `ENGINE_SECTIONS` | `quant_scorecard.py:127` | engine -> its report section (`None` = report-level) |
 | `ANALYST_SECTIONS` | `quant_scorecard.py:139` | the four analyst sections |
 | `engines_for_analyst` | `quant_scorecard.py:142` | the derived ownership query |
-| `engine_score_tools` | `tradingagents/agents/toolsets.py:450` | the derived **tool binding** |
+| `engine_score_tools` | `tradingagents/agents/toolsets.py:450` | the derived **tool binding** [CORRECTED 2026-09-26: **removed** — the symbol was deleted in Phase 2 with `_SCORE_TOOL_BY_NAME` and `_enabled` (build record at the head of this document), and a repo-wide search finds no occurrence in the tree; `toolsets.py:450` now sits inside `news_tools()`'s binding list. Retained as the record of the pre-Phase-2 binding; the surviving derived surface is `engine_score_block` below.] |
 | `engine_score_block` | `tradingagents/agents/utils/report_hygiene.py:77` | the derived **prompt fragment** |
 
 So the placement contract exists. **This document specifies the delivery contract
@@ -129,7 +129,7 @@ that sits on top of it.**
 
 ---
 
-## 3. The three discretionary surfaces that remain
+## 3. The three discretionary surfaces that remain [CORRECTED 2026-09-26: **two** remain — §3.1's surface is gone (`engine_score_tools` was deleted in Phase 2; see the note there).]
 
 Enumerated against the tree, not assumed.
 
@@ -147,7 +147,7 @@ sentiment     owned=('sentiment',)          bound_as_tools=['get_sentiment_score
 
 **A tool the model may decline does not satisfy the invariant.** The model can
 conclude *"TechnicalScore looks sufficient, I will skip the others"* — which is
-precisely the discretion this design removes.
+precisely the discretion this design removes. [CORRECTED 2026-09-26: stale — `engine_score_tools` **no longer exists**: Phase 2 deleted it with `_SCORE_TOOL_BY_NAME` and `_enabled` (build record at the head of this document) and a repo-wide search finds no occurrence. The engine result is therefore not a callable tool on any analyst surface; `toolsets.py:460` is gone with the symbol (the binding block at `toolsets.py:368-419` is `news_tools()`). Retained as the record of the state this design removed.]
 
 ### 3.2 Raw tool selection is still model-driven
 
@@ -454,7 +454,7 @@ meant to remove.
 **Resolution specified here:** under the manifest, the **supplied block is
 authoritative**. An engine that the block already supplies is **not** also bound
 as a discretionary tool. The tool binding remains only for an engine the block
-does not supply.
+does not supply. [CORRECTED 2026-09-26: retained as the record; it is **resolved**. Phase 2 dropped all eight engine-score bindings, so `engine_score_tools` no longer exists and the two-routes-to-one-number shape cannot recur — the supplied block is the only route.]
 
 ---
 
@@ -486,7 +486,7 @@ Make the manifest explicit in code (a derived tuple, not a literal list) and
 > mechanisms, not LLM-facing analytical tools*, so **all eight** bindings go. The
 > earlier scope is retained here as the record; the wider rule supersedes it.
 
-- **Touches:** `toolsets.engine_score_tools` (`toolsets.py:460`),
+- **Touches:** `toolsets.engine_score_tools` (`toolsets.py:460`), [CORRECTED 2026-09-26: executed — this phase deleted the symbol; `toolsets.engine_score_tools` and the `toolsets.py:460` site are absent from the tree.]
   `quant_scorecard.engines_for_analyst` (`quant_scorecard.py:142`).
 - **Scope:** all eight — `get_fundamental_score`, `get_technical_score`,
   `get_regime_score`, `get_risk_score`, `get_sentiment_score`, `get_news_score`,

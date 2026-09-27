@@ -41,6 +41,36 @@ def _fnum(v):
         return None
 
 
+def _series_values(v):
+    """A canonical annual series: the list itself, or a ``{"values": [...]}`` entry.
+
+    ``statement_parsing.fetch_ticker`` stores a series as a bare list of floats
+    (``annual_series`` returns ``{"values", "years", "periods"}`` and the caller
+    keeps only ``values``), while a caller that passes ``annual_series``' own
+    dict through ``financials=`` keeps the entry. Both shapes are accepted here
+    so the panel reads either without iterating a dict's keys.
+    """
+    if isinstance(v, dict):
+        v = v.get("values")
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return v
+
+
+def _ordered_series(series, scalar):
+    """An ordered series for ``capex_quality_read``: the series, else ``[scalar]``.
+
+    The producer takes the annual series oldest-first (``_num_seq`` iterates
+    it); a panel that holds only the newest period still supplies a one-point
+    series, which the producer reads for its ``_last``-based keys and refuses
+    for its CAGR keys. An absent leg is ``[]``, never a zero.
+    """
+    vals = _series_values(series)
+    if isinstance(vals, (list, tuple)) and len(vals) > 0:
+        return list(vals)
+    return [] if scalar is None else [scalar]
+
+
 # The metric keys the score engine's sub-scores read that the round-3 quality
 # panel does not carry. Opt-in (`include_score_metrics`), because adding them to
 # the default panel would change the quality composite's own `coverage["of"]`
@@ -74,17 +104,20 @@ def _panel_from_fin(ticker: str, fin: dict, *, include_score_metrics: bool = Fal
     F / M / Z / GP-A / NOA come from ``screen_ticker`` (values as it returns
     them); O and the accruals ratio from ``strategies.normalized`` (there is no
     ``screen_ticker`` output for those). A metric that is unavailable for the
-    name is simply absent from its dict. ``capex_quality`` is not computed here
-    because it needs the annual series the single statement fetch does not
-    carry.
+    name is simply absent from its dict. ``rev_cagr5`` is not computed here:
+    it needs six annual periods and the statement fetch carries ~4-5 (see the
+    factor's own schema record, defect D-5).
 
     ``include_score_metrics`` adds the factors the `FundamentalScore` sub-scores
     consume and the quality panel does not carry - the valuation/profitability
     ratio block (`strategies/ratios.compute_ratios`, the one producer of those
-    keys), ``screen_ticker``'s own earnings yield and growth legs, and the
-    Zmijewski X. It is **opt-in** because the quality composite's published
-    coverage and droplist are computed over the panel's key set: adding keys to
-    the default panel would change a row that must not move.
+    keys), ``screen_ticker``'s own earnings yield and growth legs, the
+    Zmijewski X, and the CapEx-quality read's ``fcf_yield`` (defect D-5: the
+    panel holds the canonical operating_cashflow/capex/market_cap the producer
+    needs, so the factor is supplied instead of declared NA). It is **opt-in**
+    because the quality composite's published coverage and droplist are computed
+    over the panel's key set: adding keys to the default panel would change a
+    row that must not move.
     """
     from tradingagents.dataflows.statement_parsing import screen_ticker
     from tradingagents.strategies.normalized import accruals_ratio, ohlson_o_score
@@ -130,6 +163,32 @@ def _panel_from_fin(ticker: str, fin: dict, *, include_score_metrics: bool = Fal
         zx = zmijewski_score(ni, ta, tl, ca, cl).get("score")
         if zx is not None:
             out["zmijewski_x"] = zx
+        # D-5: `fcf_yield` (VS) is the CapEx-quality read's own key, and the
+        # panel holds every leg it needs - the canonical operating_cashflow /
+        # capex / market_cap, plus whatever annual series the fetch attached
+        # (the producer reads only the latest period for this key, the series
+        # just keeps the named producer the one producer). `rev_cagr5` is NOT
+        # supplied: `_cagr(rev, min_span=5)` needs six annual periods and the
+        # statement fetch carries ~4-5, so supplying it would let a declared
+        # factor inflate FGS's floor while never scoring (see the schema).
+        from tradingagents.strategies.capex_quality import capex_quality_read
+
+        cap_read = capex_quality_read(
+            revenue=_ordered_series(
+                fin.get("revenue_series"), _latest(fin.get("revenue"))
+            ),
+            ocf=_ordered_series(
+                fin.get("operating_cashflow_series"),
+                _latest(fin.get("operating_cashflow")),
+            ),
+            capex=_ordered_series(fin.get("capex_series"), _latest(fin.get("capex"))),
+            nopat=_ordered_series(
+                fin.get("net_income_series"), _latest(fin.get("net_income"))
+            ),
+            market_cap=_latest(fin.get("market_cap")),
+        )
+        if cap_read.get("fcf_yield") is not None:
+            out["fcf_yield"] = cap_read["fcf_yield"]
 
     o = ohlson_o_score(
         total_assets=ta,
@@ -202,7 +261,11 @@ def resolve_peer_universe(
 
     Returns:
         ``{"tickers": [...], "n": int, "metrics": {ticker: {metric: value}},
-        "sectors": {ticker: label}, "dropped": {reason: count}, "basis": str}``.
+        "sectors": {ticker: label}, "financials": {ticker: canonical fin},
+        "dropped": {reason: count}, "basis": str}``. ``financials`` is the
+        statement each panel row was built from (the caller's ``financials=``
+        entry or the fetch), so a caller can run a producer over the same
+        statement instead of fetching it a second time.
     """
     from tradingagents.dataflows.statement_parsing import fetch_ticker
     from tradingagents.dataflows.yfinance_sector import fetch_sector
@@ -252,50 +315,63 @@ def resolve_peer_universe(
             try:
                 fin = fetch_ticker(name, current_date)
             except Exception:  # noqa: BLE001 - per-name failure, never raised
-                return name, None, None, "statement_fetch_failed"
+                return name, None, None, None, "statement_fetch_failed"
         if not fin:
-            return name, None, None, "no_statement"
+            return name, None, None, None, "no_statement"
         try:
             panel = _panel_from_fin(
                 name, fin, include_score_metrics=include_score_metrics
             )
         except Exception:  # noqa: BLE001
-            return name, None, None, "panel_error"
+            return name, None, None, None, "panel_error"
         if not panel:
-            return name, None, None, "no_metrics"
+            return name, None, None, None, "no_metrics"
         try:
             sector = fetch_sector(name)
         except Exception:  # noqa: BLE001
             sector = None
         if not sector:
-            return name, panel, None, "sector_unavailable"
-        return name, panel, sector, None
+            return name, fin, panel, None, "sector_unavailable"
+        return name, fin, panel, sector, None
 
     metrics: dict = {}
     sectors: dict = {}
+    financials_out: dict = {}
     if names:
         with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
             futures = [pool.submit(_work, n) for n in names]
             for fut in as_completed(futures):
-                name, panel, sector, reason = fut.result()
+                name, fin, panel, sector, reason = fut.result()
                 if reason is not None:
                     _drop(reason)
                     continue
                 metrics[name] = panel
                 sectors[name] = sector
+                if isinstance(fin, dict):
+                    financials_out[name] = fin
 
     resolved = sorted(metrics)
     basis = (
         f"peer universe: {source}; resolved {len(resolved)}/{len(names)} names "
         f"with statements + sector; metrics f/m/z/o/gp_a/noa/accruals via "
-        f"screen_ticker + normalized (capex_quality omitted: needs the annual "
-        f"series); workers={workers}; universe={universe}"
+        f"screen_ticker + normalized; "
+        + (
+            "score-metric extension ON (ratios block + earnings-yield/growth "
+            "legs + zmijewski_x + capex_quality_read['fcf_yield'])"
+            if include_score_metrics
+            else "score-metric extension off"
+        )
+        + f"; workers={workers}; universe={universe}"
     )
     return {
         "tickers": resolved,
         "n": len(resolved),
         "metrics": metrics,
         "sectors": sectors,
+        # The canonical financials each panel row was built from, so a caller
+        # can run a producer over the SAME statement the panel used rather than
+        # re-fetching it (fundamental_score's engine-derived DCF, FUND-21).
+        "financials": financials_out,
         "dropped": dropped,
         "basis": basis,
     }

@@ -1900,7 +1900,18 @@ def write_report_tree(
     # or where the authoritative engine result appears". The prompt route alone
     # could not carry it for the sentiment analyst, whose structured schema
     # (`agents/schemas.py::SentimentReport`) has no field for an engine result.
-    _engine_snapshot = final_state.get("quant_scorecard")
+    # The run's ONE snapshot, read in the same view the card and §IVc read.
+    # `_scorecard_snapshot_for_report` fills the event row from the catalyst
+    # overlay the run stamped, which the pre-graph snapshot cannot hold. Reading
+    # the raw stored snapshot here made an enabled EventState print `NA` in the
+    # analyst's own section while §IVc and the card printed it measured - one
+    # document carrying two numbers for one engine (`RLW-1`).
+    try:
+        _engine_snapshot = _scorecard_snapshot_for_report(
+            final_state, cfg, calendars=event_calendars
+        )
+    except Exception:  # noqa: BLE001 - advisory; never break the report
+        _engine_snapshot = final_state.get("quant_scorecard")
     _engine_ticker = final_state.get("company_of_interest") or ""
     _engine_date = final_state.get("trade_date") or final_state.get("end_date")
     for key, name, analyst_key in (
@@ -2147,7 +2158,13 @@ def write_report_tree(
             # gate / plan card / risk snapshot) that the 5 decision agents were
             # given, so the report reader sees the hard numbers under the debate.
             cc = final_state.get("computed_decision_context") or ""
-            if cc and "Trade plan card" in cc:
+            # The scorecard block is prepended INSIDE `cc`
+            # (`trading_graph._compiled_decision_context`), so gating this
+            # section on the trade-plan card's own string dropped the scorecard
+            # from the human report whenever that card was absent - the two are
+            # unrelated sections of one string (`RLW-5`). `cc` being non-empty
+            # is the whole test: the gate decides whether the block exists.
+            if cc:
                 sections.append(f"## IVa. Computed Decision Context (advisory)\n\n{cc}\n")
             # WP-12/P12-9: the quant/LLM risk-disagreement flag, surfaced to the
             # human reviewer (§5). Emitted only when the two sides actually
@@ -2174,20 +2191,39 @@ def write_report_tree(
             # the run already computed; adds no producer.
             try:
                 from tradingagents.strategies.quant_scorecard import (
+                    ENGINE_SECTIONS,
                     format_engine_detail,
                 )
 
-                snapshot = _scorecard_snapshot_for_report(
-                    final_state, cfg, calendars=event_calendars
-                )
-                if snapshot:
-                    detail = format_engine_detail(snapshot)
+                # §12 acceptance #8, "No engine reaches one report twice": an
+                # engine whose `ENGINE_SECTIONS` entry names an analyst is
+                # rendered ONCE, in that analyst's own section, together with its
+                # category → measurement chain (`engine_report_section`).
+                # Repeating all eight here printed the same engine twice in one
+                # document - and, before the snapshot was shared, with two
+                # different numbers (`SCC-5`).
+                if _engine_snapshot:
+                    report_level = {
+                        name: entry
+                        for name, entry in (
+                            _engine_snapshot.get("engines") or {}
+                        ).items()
+                        if ENGINE_SECTIONS.get(name) is None
+                    }
+                    detail = format_engine_detail(
+                        {**_engine_snapshot, "engines": report_level}
+                    )
                     if detail:
                         sections.append(
                             "## IVc. Engine score detail (advisory)\n\n"
-                            "Each engine's categories beside the measurements they "
-                            "came from, so the composite can be recomputed rather "
-                            "than trusted. Where a component is **non-monotonic** "
+                            "The **report-level engines** (`regime`, `risk`, "
+                            "`trade` - the ones `ENGINE_SECTIONS` assigns to no "
+                            "analyst) with their categories beside the "
+                            "measurements they came from, so the composite can be "
+                            "recomputed rather than trusted. The engines that own "
+                            "an analyst report print the same chain inside that "
+                            "section of part I: one engine reaches this document "
+                            "once. Where a component is **non-monotonic** "
                             "(RSI, stochastic, StochRSI, RSI2, Williams %R, "
                             "Bollinger %b, MFI, the Elder thermometer) the raw and "
                             "aligned values are shown with the mapping note: a high "

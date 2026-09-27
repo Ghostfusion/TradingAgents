@@ -840,12 +840,15 @@ def test_regime_components_short_history_degrades(monkeypatch):
 
 
 def test_the_realized_vol_leg_ranks_the_window_that_ends_today(monkeypatch):
-    """A stride that stops at the last whole window must not drop the newest bars.
+    """The ranked set must end at the newest bar, and be every window `[i-21:i]`.
 
-    `range(window, len(bench) + 1, window)` ends at the last multiple of 21, so a
-    320-bar benchmark history ranked `bench[294:315]` and printed a percentile up
-    to 20 bars stale. The leg appends the current window instead of relying on the
-    stride.
+    This started as the fix for a stride that ended at the last whole multiple of
+    21, so a 320-bar history ranked `bench[294:315]` and printed a percentile up
+    to 20 bars stale. The stride was then replaced outright
+    (`MASTER_PLAN.md` README-5 / REG-3): the leg now ranks **every** window
+    ending at or before the newest bar, so the latest member is always
+    `bench[-21:]` and the rank is drawn from the whole history rather than from
+    ~15 samples.
     """
     from tradingagents.strategies import regime as regime_mod
 
@@ -876,8 +879,9 @@ def test_the_realized_vol_leg_ranks_the_window_that_ends_today(monkeypatch):
         "the window ranked as 'latest' does not end at the newest bar: "
         f"{windows[-1][-1]} != {closes[-1]}"
     )
-    assert len(windows) == 320 // 21 + 1, (
-        "the stride's windows plus the current one are expected, nothing else"
+    assert len(windows) == len(closes) - 21 + 1, (
+        "every window ending at or before the newest bar is ranked (overlapping "
+        "windows, step 1), not a stride"
     )
 
 

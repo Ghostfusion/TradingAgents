@@ -8,7 +8,6 @@ from tradingagents.strategies.contract import (
 from tradingagents.strategies.sentiment import (
     decayed_weight,
     surprise_velocity,
-    weighted_sentiment,
 )
 
 
@@ -59,24 +58,6 @@ def test_contract_agreement_scales():
 def test_decay_weight_halflife():
     assert decayed_weight(0.0) == pytest.approx(1.0)
     assert decayed_weight(7.0) == pytest.approx(0.5)
-
-
-def test_weighted_sentiment_labels_and_age():
-    msgs = [
-        {"label": "bullish", "age_days": 0},  # +1, weight 1
-        {"label": "bearish", "age_days": 28},  # -1, weight 0.0625
-    ]
-    w = weighted_sentiment(msgs)
-    assert w is not None and w > 0.5  # fresh bull dominates
-    assert weighted_sentiment([]) is None
-
-
-def test_weighted_sentiment_credibility():
-    msgs = [
-        {"score": 0.9, "age_days": 0, "credibility": 100.0},
-        {"score": -0.8, "age_days": 0, "credibility": 1.0},
-    ]
-    assert weighted_sentiment(msgs) > 0  # high-cred bull wins
 
 
 def test_surprise_velocity_zscore():

@@ -158,7 +158,9 @@ def observability_for(field: str) -> str | None:
 
     What can be stated from this repo's own producers: the DSL's market columns
     are known at session close, and every ``FACTOR_SCHEMA`` factor is
-    statement-derived and therefore known at its filing date - except the one
+    filing-derived and therefore known at its filing date - a statement factor
+    at the 10-K/10-Q filing date, a Form-4 insider factor at the Form-4 filing
+    date (the ``insider_*`` records, ``availability=NA``) - except the
     caller-supplied price field (``dcf_upside``), whose price is known at
     session close like any other quote.
     """
@@ -178,6 +180,12 @@ def observability_for(field: str) -> str | None:
 # and its score-metric extension), so the schema and the data agree by
 # construction. `formula` names the ONE producer; where the panel renames a
 # producer's own key, the mapping is recorded in the formula string.
+#
+# Exception, recorded rather than hidden: the six ``insider_*`` records carry
+# ``availability=NA`` and no panel key at all - `docs/scores/FundamentalScore.md`
+# §2.10 declares the category, the producers live outside the engine, and
+# ``defect D-16`` is closed by declaring that state instead of leaving the
+# category empty (or deleting a category the source weights at 2.00).
 
 FACTOR_SCHEMA: dict[str, FactorSpec] = {
     s.factor: s
@@ -251,7 +259,12 @@ FACTOR_SCHEMA: dict[str, FactorSpec] = {
         _spec(
             "rev_cagr5",
             "Growth",
-            "capex_quality_read['rev_cagr5'] (5-year revenue CAGR)",
+            "capex_quality_read['rev_cagr5'] (5-year revenue CAGR) - NOT carried "
+            "by the peer panel (fix D-5): the panel's statement fetch holds ~4-5 "
+            "annual periods and the producer needs 6 (capex_quality._cagr's "
+            "min_span=5); the SEC XBRL series that clears the bar is opt-in "
+            "(statement_parsing.fetch_ticker(with_sec_series=True)) and the panel "
+            "resolver does not request it",
             1,
             "strategies/capex_quality.py",
             availability=NA,
@@ -323,15 +336,18 @@ FACTOR_SCHEMA: dict[str, FactorSpec] = {
         _spec(
             "fcf_yield",
             "Valuation",
-            "capex_quality_read['fcf_yield'] = free_cash_flow / market_cap",
+            "capex_quality_read['fcf_yield'] = free_cash_flow / market_cap, "
+            "supplied by peer_universe._panel_from_fin from the canonical "
+            "operating_cashflow/capex/market_cap it holds (fix D-5)",
             1,
             "strategies/capex_quality.py",
-            availability=NA,
         ),
         _spec(
             "val_z",
             "Valuation",
-            "value_dip historical percentile of the name's own multiple (val_z)",
+            "value_dip.valuation_z_read:122 - NOT carried by the peer panel "
+            "(fix D-5): the panel holds ONE statement per name, never the "
+            "name's own per-period multiple series the z needs (min_n=4)",
             -1,
             "strategies/value_dip.py",
             availability=NA,
@@ -339,9 +355,14 @@ FACTOR_SCHEMA: dict[str, FactorSpec] = {
         _spec(
             "dcf_upside",
             "Valuation",
-            "caller-supplied price / fair value, scaled by fundamental_score.dcf_confidence",
+            "DCF upside, the FV-basis margin of safety (fair value - price) / "
+            "fair value; caller-supplied, or engine-derived by "
+            "fundamental_score.fundamental_score_for_ticker from dcf.compute_dcf "
+            "/ cycle_dcf.perpetuity_value over normalized_cycle_fcf; scaled by "
+            "fundamental_score.dcf_confidence",
             1,
-            "caller (confidence grade D - docs/scores/FundamentalScore.md §3.3)",
+            "caller / strategies/dcf.py + strategies/cycle_dcf.py "
+            "(confidence grade D - docs/scores/FundamentalScore.md §3.3)",
         ),
         # --- Balance Sheet (liquidity / leverage) ---------------------------
         _spec(
@@ -386,6 +407,83 @@ FACTOR_SCHEMA: dict[str, FactorSpec] = {
             "normalized.zmijewski_score(net_income, total_assets, total_liabilities)",
             -1,
             "strategies/normalized.py",
+        ),
+        # --- Insider Activity -----------------------------------------------
+        #
+        # `docs/scores/FundamentalScore.md` §2.10 declares this category (2.00 of
+        # the ten-category vector), and `defect D-16` recorded that nothing fed
+        # it: no record carried the category, no sub-score read it. The six
+        # factors below close that as the schema's own `availability=NA` rule
+        # says to: the producers exist but OUTSIDE the engine (a vendor insider
+        # endpoint, never a peer-panel column), so they are declared with the
+        # honest reason and excluded - never proxied and never scored as 0.
+        #
+        # They deliberately enter NO `SUBSCORE_FACTORS` entry: the engine's four
+        # sub-scores are FQS/FGS/VS/FRS (`docs/scores/FundamentalScore.md` §3.1)
+        # and none of them is an insider category, so adding these to one would
+        # silently enlarge that sub-score's declared factor count and move its
+        # coverage floor. Declared-not-fed is the honest state until an insider
+        # sub-score exists.
+        _spec(
+            "insider_net_buying",
+            "Insider Activity",
+            "finnhub.get_insider_activity_finnhub:422 (net change, shares) or "
+            "massive.get_form4_insider_massive:625 (net open-market $) - NOT "
+            "carried by the peer panel: no insider column is fetched on the "
+            "panel path",
+            1,
+            "dataflows/finnhub.py / dataflows/massive.py",
+            availability=NA,
+        ),
+        _spec(
+            "insider_buy_sell_ratio",
+            "Insider Activity",
+            "IBS = buys / (buys + sells) from the same Form-4 counts - NOT "
+            "carried by the peer panel: both legs are printed by the Massive "
+            "path, the ratio has no panel column",
+            1,
+            "dataflows/massive.py",
+            availability=NA,
+        ),
+        _spec(
+            "insider_open_market_buying",
+            "Insider Activity",
+            "massive.get_form4_insider_massive:625 open-market transaction-code "
+            "filter (P/S; grants and exercises excluded) - NOT carried by the "
+            "peer panel: no insider column on the panel path",
+            1,
+            "dataflows/massive.py",
+            availability=NA,
+        ),
+        _spec(
+            "insider_selling_acceleration",
+            "Insider Activity",
+            "slope of the sell-only net-change halves (finnhub.get_insider_"
+            "activity_finnhub:452 prints the net-change halves, not a sell-only "
+            "slope) - NOT carried by the peer panel",
+            -1,
+            "dataflows/finnhub.py",
+            availability=NA,
+        ),
+        _spec(
+            "insider_executive_participation",
+            "Insider Activity",
+            "aggregation of the Form-4 roles tagged (director|officer|owner) by "
+            "massive.get_form4_insider_massive:625 - NOT carried by the peer "
+            "panel: roles are returned per row, never aggregated to a metric",
+            1,
+            "dataflows/massive.py",
+            availability=NA,
+        ),
+        _spec(
+            "insider_ownership_change",
+            "Insider Activity",
+            "12-month net share change from finnhub.get_insider_activity_"
+            "finnhub:422 - NOT carried by the peer panel, and not normalised by "
+            "shares outstanding/float even off-panel",
+            1,
+            "dataflows/finnhub.py",
+            availability=NA,
         ),
     )
 }

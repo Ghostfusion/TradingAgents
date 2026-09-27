@@ -203,7 +203,11 @@ def get_global_news_gdelt(curr_date: str, look_back_days: int | None = None,
 def get_gdelt_tone_series(ticker: str, look_back_days: int = 7) -> str:
     """Daily GDELT tone timeline for a ticker (avg tone per day) over the
     trailing ``look_back_days``. A computed sentiment series the sentiment
-    analyst can cite (trend + latest)."""
+    analyst can cite (trend + latest).
+
+    Values stay on GDELT's **native** tone scale (-100..100) and the header says
+    so: this is a raw timeline, not the normalised -1..1 series
+    (``get_news_sentiment_gdelt``), and the two must never be compared."""
     end = datetime.now()
     start = end - timedelta(days=look_back_days + 1)
     s = start.strftime("%Y-%m-%d")
@@ -230,7 +234,10 @@ def get_gdelt_tone_series(ticker: str, look_back_days: int = 7) -> str:
             per_day[date].append(float(parts[0]))
     if not per_day:
         return f"gdelt tone unavailable for {ticker}: tone fields missing"
-    lines = [f"gdelt tone series {ticker} (avg per day, trailing {look_back_days}d):"]
+    lines = [
+        f"gdelt tone series {ticker} (avg per day, GDELT native tone -100..100, "
+        f"trailing {look_back_days}d; not comparable to a -1..1 EODHD tone):"
+    ]
     for day in sorted(per_day)[-look_back_days:]:
         vals = per_day[day]
         avg = sum(vals) / len(vals)
@@ -248,7 +255,16 @@ def _is_num(v) -> bool:
 
 
 def _sentiment_points_gdelt(ticker: str, start_date: str, end_date: str) -> list[dict] | None:
-    """Daily GDELT native-tone means -> ``[{date, score, n}]`` (tone is -100..100)."""
+    """Daily GDELT **native**-tone means -> ``[{date, score, n}]`` (score -100..100).
+
+    The unit travels with the caller: this is GDELT's own scale, NOT the
+    canonical -1..1 of the EODHD/Alpha Vantage feeds. A consumer that renders or
+    compares the series must normalise first (`_gdelt_unit_points`, i.e.
+    ``strategies.sentiment_score.normalise_sentiment(score, "gdelt")``); a
+    consumer that tags the scale (``analysis_tools._sentiment_points_with_source``
+    -> ``source="gdelt"``) lets the engine's one scale table do it. Never compare
+    a raw value from here with an EODHD ``sma_7d``: it is ~100x.
+    """
     articles = _gdelt_get(
         {
             "query": _fmt_name(ticker),
@@ -275,8 +291,38 @@ def _sentiment_points_gdelt(ticker: str, start_date: str, end_date: str) -> list
     ]
 
 
+_GDELT_TRANSFORM = "native tone -100..100 divided by 100 via sentiment_score.normalise_sentiment"
+
+
+def _gdelt_unit_points(points: list[dict]) -> list[dict]:
+    """GDELT native-tone points -> the canonical unit scale (-1..1).
+
+    Reuses ``strategies.sentiment_score.normalise_sentiment`` (the engine's one
+    scale table, the same mapping ``SCALE_TABLE["gdelt"]`` pins) rather than a
+    second one, so a GDELT ``sma_7d``/``innovation`` is directly comparable to an
+    EODHD/Alpha Vantage one. A point the engine cannot read is dropped, never
+    replaced with 0 (``NA != 0``).
+    """
+    from tradingagents.strategies.sentiment_score import normalise_sentiment
+
+    out: list[dict] = []
+    for p in points or []:
+        unit = normalise_sentiment(p.get("score"), "gdelt")
+        if unit["value"] is None:
+            continue
+        out.append({"date": p["date"], "score": unit["value"], "n": p.get("n")})
+    return out
+
+
 def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str:
-    """Daily news-tone series (GDELT native tone, -100..100) + 7-day SMA."""
+    """Daily news-tone series on the canonical unit scale (-1..1) + 7-day SMA.
+
+    GDELT delivers its tone on -100..100 while the EODHD/Alpha Vantage feeds that
+    share this route deliver -1..1, so the native series is normalised
+    (``_gdelt_unit_points``, i.e. ``sentiment_score.normalise_sentiment(_, "gdelt")``)
+    **before** it is aggregated. The transform is named in the returned text so a
+    reader can never compare a GDELT ``sma_7d`` with an unnormalised EODHD one.
+    """
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
     points = _sentiment_points_gdelt(ticker, start_date, end_date)
@@ -285,13 +331,22 @@ def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str
             f"gdelt sentiment unavailable for {ticker}: no tone coverage "
             f"between {start_date} and {end_date} (GDELT keeps ~3 months)"
         )
+    unit_points = _gdelt_unit_points(points)
+    if not unit_points:
+        return (
+            f"gdelt sentiment unavailable for {ticker}: tone present but "
+            f"unreadable on the native -100..100 scale"
+        )
     from tradingagents.strategies.sentiment import daily_sentiment_sma
 
-    series = daily_sentiment_sma(points, window=7) or [
+    series = daily_sentiment_sma(unit_points, window=7) or [
         {"date": p["date"], "score": p["score"], "sma_7d": None, "innovation": None, "n": p["n"]}
-        for p in points
+        for p in unit_points
     ]
-    lines = [f"## {ticker} Daily News Tone — GDELT (native tone -100..100)", ""]
+    lines = [
+        f"## {ticker} Daily News Tone — GDELT (unit scale -1..1; {_GDELT_TRANSFORM})",
+        "",
+    ]
     lines.append("| date | tone | sma_7d | innovation | articles |")
     lines.append("| --- | --- | --- | --- | --- |")
     for r in series:
@@ -305,7 +360,7 @@ def get_news_sentiment_gdelt(ticker: str, start_date: str, end_date: str) -> str
     # leak reached AMZN news.md prose via the EODHD sibling, 2026-09-14).
     tone = f"{latest['score']:.4f}" if latest["score"] is not None else "n/a"
     sma = f"{latest['sma_7d']:.4f}" if latest["sma_7d"] is not None else "n/a"
-    tail = ["", f"- latest tone {tone}, 7d SMA {sma}"]
+    tail = ["", f"- latest tone {tone}, 7d SMA {sma} (unit scale -1..1; {_GDELT_TRANSFORM})"]
     if latest.get("innovation") is not None:
         tail.append(f"- latest tone innovation {latest['innovation']:+.2f}")
     return "\n".join(lines + tail)

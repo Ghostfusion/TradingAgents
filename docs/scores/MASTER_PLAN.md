@@ -101,6 +101,36 @@ difficulty and impact put it in, with both sources named.
 ## 2. The decision gates
 
 Nine decisions block work elsewhere. The first five block the most.
+**All nine were answered by the owner on 2026-09-26** — the answers are §2.1 and
+the questions they answer are kept verbatim in §2.2 as the record. Nothing in this
+plan now waits on an owner decision except the narrower §9 rows.
+
+### 2.1 The owner's answers, 2026-09-26
+
+The owner's framing, which the five answers follow from:
+
+> **Individual engines measure dimensions of evidence. Composite Trade Score
+> measures the attractiveness of combining those dimensions for a trade. Risk
+> gates constrain whether that opportunity can actually be acted upon.**
+> `EngineScore` — what does this evidence dimension say?
+> `CompositeTradeScore` — what does the combined quantitative evidence say about
+> the trade setup? `DecisionGate` — is taking the trade permitted under the
+> current constraints? **Those should not be collapsed into one number.**
+
+| # | Answer | What it settles |
+| --- | --- | --- |
+| **D1** | **Three separate engines with an explicit ownership rule.** `TechnicalScore` = *what is this security doing?* (RSI, MACD, stochastic, Bollinger %B, ATR, ADX, MA distance and crossover, price and volume momentum, price structure, breakouts, support/resistance, trend strength, the security's own relative momentum). `MarketScore` = *what is the market doing around this security?* (index trend and momentum, market and sector breadth, advance/decline, new highs/lows, market volatility, credit conditions, market liquidity, cross-asset confirmation, index relative strength, participation). `RegimeScore` = *what statistical/economic state is the environment in?* (bull/bear, volatility, risk-on/off, liquidity, inflation, growth, monetary-policy, correlation, trend and crisis regimes). The three may legitimately all read bullish **because they are not duplicates**. | MKT-1 is **answered**: MKT-2 (market-wide breadth) goes to `MarketScore`; MKT-3's acceptance criterion is §1's rule made falsifiable; MKT-4–MKT-8, MKT-9–MKT-14 and VAL/D1-adjacent rows unblock. `RegimeScore`'s built `breadth` leg is a **state input** read from the same `market_breadth` producer `MarketScore` would score — one producer, two readers, per D2's rule |
+| **D2** | **`ValuationScore` is its own engine; `FundamentalScore` consumes and attributes it, never re-derives it.** *"Calculate valuation once. Attribute it twice if necessary, but don't calculate it twice."* `FundamentalScore = w_Q·Quality + w_G·Growth + w_B·BalanceSheet + w_C·CashFlow + w_V·Valuation` where `V = ValuationScore`, so a DCF cannot reach the composite through two independent-looking paths | VAL-1 and FUND-20 are **answered**: VAL-2 (the allocation weight), VAL-3 (the floor), VAL-5 (the historical-position quantity is `ValuationScore`'s) follow from it; `FundamentalScore.valuation_subscore` becomes the **consumption** of `ValuationScore`, not a second producer of the multiples. The migration is Phase 7 (VAL-8 first), and until it lands the overlap is latent, not double-counted (no `ValuationScore` producer exists) |
+| **D3** | **Keep the weighted mean; do not multiply by `RiskScore`.** The composite stays `0.40 F + 0.25 T + 0.15 R + 0.20 K` (acceptance case → **76.25** in the owner's arithmetic, 76.75 in the built code's alignment) because a product hides where the number came from and destroys leg attribution — *"you're building a research/audit-oriented quantitative engine, not merely an opaque ranking model."* One naming change: define `K = RiskScore` explicitly and state that **`RiskScore` is an input to the composite while the hard risk gates stay outside it** — `CompositeTradeScore ≠ RiskGate`, so a composite of 84 beside a `RiskGate = REJECT` is a valid pair | CTS-1 is **answered**: no multiplicative risk leg, invariant 18 unamended. The printed block, the coefficients and `COMPOSITE_MIN_COVERAGE` stay as built. **`RiskScore` is a composite input, not a gate** is now stated in the composite's own document (§6 Q1, amended) |
+| **D4** | **No system becomes a tenth engine automatically.** The criterion is not "does it produce a number" but *"does it represent a sufficiently distinct economic information dimension that deserves independent lifecycle, coverage, attribution, validation and configuration?"*, tested by orthogonality (`1 − |Corr(SurveyScore, ExistingScores)|`): a survey correlating 0.94 with `SentimentScore` does not need an engine; one near 0 has an argument. Candidates that *could* qualify (positioning, options flow, institutional flow, capital-flow pressure, supply-chain stress, AI adoption, alternative data) are judged by that test, one at a time | UNIV-NEWENGINE is **answered and deferred**: every `UNIV-*` gap stays a component or a diagnostic. The gate/leaf/`ENGINE_GATES`/config/doc/web-surface plumbing set is **not** built speculatively. The orthogonality diagnostic becomes a Phase 3 measurement row (it needs the panel, like every other correlation) |
+| **D5** | *(The built block already publishes three of the four the answer asks for: each leg prints `value (raw)`, the composite prints `coverage X%`, and `trade_score`'s own `basis` prints `coverage X% over N of 4`. **Confidence** is the one that does not exist yet — Phase 7.)* **Coverage does not deflate the score.** `80 × 0.50 = 40` says "the stock is bearish" when what is known is "the available evidence is bullish but incomplete". Instead shrink toward neutral — `Score_adjusted = 50 + Coverage^γ · (Score_raw − 50)`, `0 ≤ Coverage ≤ 1` (γ controls the penalty; γ = 1 with `Score_raw` 80 at 50% coverage → **65**) — and **publish the four numbers separately**: `Score_raw`, `Coverage`, `Confidence`, `N / total`, so a reader sees *"strong measured signal, incomplete evidence"* rather than missing data read as negative evidence | CTS-3 and MF-7 are **answered**: coverage stays a printed qualifier, and the adjusted form is a **shrink toward 50**, never a multiplier. The built "the reader must see both" rule already satisfies the display half; the confidence-adjusted producer is a Phase 7 row (CTS-1/CTS-9), and `Δ = 50`-centred shrinkage must be tested where the raw score is below 50 as well as above |
+
+| **D6** | **A meta layer exists — as a LAYER, not a tenth or eleventh engine.** *"Agreement, model consensus, dispersion and conviction are meta-properties of the scorecard, not new evidence engines."* The engines answer *what does each dimension say?*; the meta layer answers *how much do they agree, and how reliable is the aggregate?* The owner's formulas: centre each engine (`x_i = (Score_i − 50)/50`), then `Agreement = |Σ wᵢxᵢ / Σ wᵢ|`, `Dispersion = √(Σ wᵢ(xᵢ − x̄)² / Σ wᵢ)` with `x̄ = Σ wᵢxᵢ / Σ wᵢ` (the owner's own worked contrast: two portfolios with a similar weighted mean and completely different dispersion must not carry the same confidence), `AgreementScore = 100·e^(−k·Dispersion)` (preferred over `100(1−D)` because it handles extreme dispersion smoothly), multi-model `Consensus = (1/M)Σ dⱼ` with `dⱼ ∈ [−1,+1]` and `ModelDispersion = Std(d)`, and **`Conviction = AgreementScore × EvidenceConfidence`** (or `Agreement × Coverage × DataQuality`), 0-100 — *"this makes conviction explainable."* **The meta layer is strictly DOWNSTREAM: no engine reads it** (*"avoid engine → meta → engine … that creates circularity"*) | **UNIV-AGREE, UNIV-META and CTS-8/UNIV-CONVICTION are answered.** Build `engine_agreement(scores)` over the engine vector to the formulas above (with the `< 2 engines` refusal and no `0` for `None` that UNIV-AGREE already required). **`Conviction` is `AgreementScore × EvidenceConfidence`, NOT the survey's `BaseSignal × DataConfidence × Agreement × (1 − Risk)`** — the survey's version is superseded: there is no `BaseSignal` leg and no risk term (risk is a gate, per D3). `UNIV-MODELCONS` stays **data-blocked**: the repo runs one model per role, so `Consensus`/`ModelDispersion` have no ensemble to measure — the *shape* is specified and the plumbing is not built speculatively |
+| **D7** | **`MomentumScore` is a distinct CORE engine.** *"TechnicalScore should own indicators; MomentumScore owns cross-horizon return/momentum characteristics; MarketScore owns market-level behavior."* Its legs: price momentum `MOM_n = P_t/P_{t−n} − 1` for 5/21/63/126/252; risk-adjusted `RAMOM = R_n/σ_n`; relative `R_stock − R_benchmark`; sector-relative `R_stock − R_sector`; acceleration `MOM_short − MOM_long`; consistency `N_positive_periods / N_periods`; persistence `N_positive_returns / N`. The ownership matrix that follows: RSI, MACD, Bollinger %B, ATR, ADX and MA crossovers → `TechnicalScore`; **the 12-1 month return, multi-horizon returns, relative momentum and momentum acceleration → `MomentumScore`**; S&P/Nasdaq momentum, market breadth and advance/decline → `MarketScore`; VIX → `MarketScore` or `RegimeScore` **depending on definition** (the one row the answer leaves to be fixed when built); volatility/risk-on-off/liquidity regimes → `RegimeScore` | **UNIV-MOMSLOT is answered: `MomentumScore`.** `MarketScore` is a *market-level* engine, not the momentum slot. **Consequence to record and not act on yet:** `technical_score`'s built `momentum` category (weight 18) holds legs (12-1 return, multi-horizon, relative strength) that this matrix assigns to `MomentumScore`; the migration is a **Phase 7 re-cut** (build `MomentumScore`, then move the legs and re-cut `technical_score`'s weights with the owner), never a silent change |
+| **D8** | **Fresh intraday event information may modify SIZING, only through a strictly bounded channel.** It never rewrites `EventScore` or the composite: *"CTS 82 / EventScore 76 / IntradayEventRisk HIGH / RiskGate CAUTION / PositionMultiplier 0.35"* — the longer-lived quantitative thesis and the fresh event risk stay distinct. The mechanism: an `IntradayEventState` beside the structural event score, feeding an **Event Risk Overlay** and then the position size, with a bounded multiplier `M_event = e^(−k·R_event)`, `0 ≤ M_event ≤ 1`, applied as `PositionSize = BaseSize × M_event` (*"an intraday event can reduce exposure without contaminating the fundamental score architecture"*). The **latency contract is named explicitly**: record `event_timestamp`, `source_timestamp`, `ingestion_timestamp`, `processing_timestamp`, `decision_timestamp`; publish `Latency = Decision − Event` **and** `DataAge = Decision − Source`; freshness is `e^(−λ·DataAge)` — an event stamped 10:02:01 must not read "fresh" at 15:55 because the system *retrieved* it then | **EVT-6 is answered with a contract to implement, not a question.** It is a Phase 7 build (a new sizing input with max-age, provenance, idempotency and fail-closed behaviour), and the ordering rule is the answer's own: sizing only, never the score. The timestamps and both ages are part of the artifact, not optional logging |
+| **D9** | **Freeze the existing renderer and `basis` strings.** *"InternalScoreModel ≠ ReportContract"* — a new internal calculation renders through the existing contract unless the change is a deliberate **version migration**, and the one exception is a string whose **semantics are factually wrong**, which is a contract change (`basis_v1`/`basis_v2` or a `report_schema_version`), *"not ordinary refactoring"* | **RLW-3 is answered: no change to the seven engine renderers or the `basis` tails.** The freeze is now the documented rule for every future engine. This round's *semantic* corrections (the five stale printed provenance strings and the mislabelled producer declarations) fall under the exception and were fixed **with** the versioned-contract note rather than silently — a later reader must be able to see that the string changed because it was wrong, not because the maths moved |
+
+### 2.2 The questions, as they were asked
 
 | # | Decision | Blocks | Source |
 | --: | --- | --- | --- |
@@ -264,6 +294,57 @@ Nothing promotes a weight, a status or a composite rung without this phase. It i
 the plan's spine: `RESEARCH_ONLY` is the state of every vector until a measurement
 exists.
 
+### 6.1 Measured 2026-09-26 — the wide EDGAR panel (MF-1 and MF-2, done)
+
+The run that was missing exists. `scripts/score_panel.py` built **30 trading dates
+(2026-08-06 … 2026-09-17) × 150 names** on the SEC EDGAR XBRL fundamentals leg —
+**150 companyfacts requests**, one per filer, reused across every date (30 dates
+fetched, no cache hits) — into a separate cache root so the old price-only panels
+are untouched:
+
+```
+py -3.12 scripts/score_panel.py --dates 2026-08-06,...,2026-09-17 \
+    --symbols-file ~/.tradingagents/cache/panel_universe_sample.txt \
+    --cache-dir ~/.tradingagents/cache/panels_edgar
+```
+
+| Reading | Before | Now |
+| --- | --- | --- |
+| panel status / floors | `OK` on the price-only leg | **`OK`**, 30 dates, 150 names, 150 metrics |
+| `fundamental_score` measured | **0** of 28 declared | **24** of 28 |
+| `technical_score` measured | — | 40 of 42 |
+| redundancy matrix | `n_pairs: 0` | **`n_pairs: 2006`** over 64 metrics |
+| FCF-yield cluster block | no pairs (MF-2's exact gap) | **6 pairs over 5 members** (`fcf_yield`, `price_to_free_cash_flow`, `price_to_cash_flow`, `earnings_yield`, `val_z`) |
+| technical trend/momentum/RS block | — | 136 pairs over 17 members |
+
+**What this does and does not mean.** MF-1 and MF-2 are met on their own
+verification (`n_measured > 0` with a panel label of `OK`; the FCF-yield cluster
+reports `n_pairs > 0`), and the fundamental factors are now *measurable* rather
+than vendor-blocked — one month, one market, 150 names is still a **diagnostic**,
+not a validation, exactly as `MEASUREMENT_FINDINGS.md` §5 says. No weight was
+promoted: every vector stays `RESEARCH_ONLY`, and MF-4/MF-6/`FUND-24`/`RLW-4`
+still need the evidenced ladder.
+
+`scripts/score_panel_eval.py` (PLAN-4) is built and evaluates the cached panels
+with the **sector** and **regime** robustness splits (PLAN-6/MF-3) and the
+**technical-category correlation matrix** (TECH-24, measured: status `ADVISORY`,
+36 pairs, `relative_strength`/`breadth` withheld with their reason on a
+single-date panel). Both splits are **mechanism-complete and label-blocked**, and
+the run says so rather than guessing: a sector split needs a per-name sector
+label (the repo's static map is sector-name → ETF, not ticker → sector, and the
+bulk path carries no per-name vendor call — `MEASUREMENT_FINDINGS.md` §5 already
+predicted exactly this), and a regime split needs a market-level regime series per
+date, which `RegimeScore` does not yet persist. `--sector-map`/`--regime-map`
+accept a caller-supplied mapping today.
+
+**Still open in this phase**: MF-5 (9 of 11 `news_score` components on the live
+per-symbol path), MF-8 (`risk_score`/`sentiment_score` panel path — structurally
+blocked by data shape: position/book-level and per-symbol vendor reads), MF-6 (the
+momentum-redundancy reduction, which edits a declared owner table and needs the
+owner's signature), PLAN-5 (a gate-on tree on which `report_verify.py` and
+`verify_sweep.py` both exit 0 — needs a full gate-on run, which is an ask-first
+action), and RLW-4 (`Movement` needs a vector at the `VALIDATED` rung).
+
 | id | Item | Source | D | I | Verification |
 | --- | --- | --- | --: | --: | --- |
 | MF-1 / PLAN-1 | Run the **wide** SEC EDGAR XBRL panel across the date range so the fundamental factors stop reading `n_measured: 0` (one wide date exists: 286 names, EDGAR basis, 221 with fundamentals) | `MEASUREMENT_FINDINGS.md` §4/§7; `IMPLEMENTATION_PLAN.md` §3.2 | 2 | 5 | `n_measured > 0` with a panel label of `OK` |
@@ -330,7 +411,29 @@ statement** that no vendor publishes the input.
 
 ## 9. Phase 6 — the owner decisions (`DECISION`)
 
-§2 lists the nine gates. The remaining decisions are cheaper and narrower:
+**Five of the nine gates were answered on 2026-09-26 (§2.1), and those answers
+also settle several rows below.** Settled, with the reading they take from the
+answer:
+
+| Row | Now settled as | By |
+| --- | --- | --- |
+| **MKT-2** market-wide breadth | `MarketScore` owns the scored dimension; `RegimeScore` keeps the breadth *regime* as a state input over the same producer | D1 |
+| **MKT-5** short interest / IV / insider / gaps | **Consumed as stated dependencies**, never re-derived — each already has a named producer and owner | D1 |
+| **MKT-6** per-name vs market-wide | Market/index-level rows (the owner's own list is all market-level), joined to the name as its exposure; a per-name twin is not built | D1 |
+| **VAL-4** who supplies `dcf_upside` | `ValuationScore` **owns** the DCF; the caller-supplied-supplier column is a pre-cutover state | D2 |
+| **VAL-5** the historical-position quantity | `ValuationScore`'s (`val_z`), not a second `FundamentalScore` producer | D2 |
+| **VAL-6** the confidence output shape | A **separate published field**, never folded into the score | D5 |
+| **VAL-2** the research-allocation weight | Settlement in kind: `ValuationScore` enters the composite **through `FundamentalScore`'s valuation weight** (`w_V`), not as a seventh line — the number for `w_V` still needs the owner | D2 |
+| **CTS-3** coverage as multiplier or qualifier | Shrink toward 50 (`50 + Coverage^γ(Score_raw − 50)`), four numbers published separately; γ still needs a number | D5 |
+| **UNIV-NEWENGINE** | Not built speculatively; the orthogonality diagnostic decides, one system at a time | D4 |
+
+**Still open, and genuinely requiring the owner**: `MKT-3` (the acceptance
+criterion), `MKT-7` (MarketScore's weight and gate name), `MKT-8` (one convention
+per quantity), `VAL-3` (the coverage floor), `CTS-2`, `CTS-5`, `CTS-6`, `CTS-7`
+(the new objects and the V1 vector), `README-3`, `RLW-3`/D9 (the frozen
+renderer strings), `SCC-4`, `PLAN-8`, `PLAN-9`, `PLAN-11`, `REG-20`, and the
+owner-file rows `TECH-25/26`, `REG-21/22`, `RISK-25/26`. The remaining decisions
+are otherwise cheaper and narrower:
 
 | id | Item | D | I | Source |
 | --- | --- | --- | --: | --: | --- |
@@ -363,6 +466,16 @@ statement** that no vendor publishes the input.
 ---
 
 ## 10. Phase 7 — what the decisions unlock (`WORK`, D4-5, I4-5)
+
+**Unblocked 2026-09-26 for D1/D2/D3-dependent rows**: `MKT-*` (build `MarketScore`
+over the market-around-the-name rows), `VAL-8`/`VAL-9`/`VAL-11`/`VAL-20` (build
+`ValuationScore` as the valuation producer, then cut `FundamentalScore`'s
+valuation leg over to consuming it — module first, `VS` second), and `CTS-1`/
+`CTS-9` (the composite keeps its weighted mean; the *new* work the answers add is
+the coverage-shrink producer of D5 and the explicit `RiskScore`-is-an-input,
+gates-are-outside statement). Rows still waiting on an answer: `CTS-8`/`UNIV-AGREE`
+(D6), `EVT-6` (D8), `FUND-11`/`FUND-12` (need the measurement layer), and
+`UNIV-NEWENGINE` (D4 settled it: not built speculatively).
 
 | id | Item | Depends on | D | I |
 | --- | --- | --- | --: | --: |

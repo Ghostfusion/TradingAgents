@@ -178,6 +178,30 @@ resolved here** - each is an OPEN question for the owner in the new document's �
 because invariant 8 (one quantity -> one authoritative producer) cannot be
 satisfied by both readings at once.
 
+**[ANSWERED 2026-09-26 — the owner resolved all three, and invariant 8 is
+satisfied by ONE producer read twice rather than by a shared calculation.**
+(a) `TechnicalScore`, `MarketScore` and `RegimeScore` are three separate engines
+answering three different questions — *what is this security doing?*, *what is the
+market doing around this security?*, *what statistical/economic state is the
+environment in?* — so momentum, relative strength, volatility and breadth are not
+contested: the security's own version belongs to `TechnicalScore`, the
+market/index version to `MarketScore`, the state version to `RegimeScore`, and
+where a producer is genuinely shared (`market_breadth`) it is **computed once and
+read twice with each reader's dependency named** (`MarketScore.md` §7 Q1 =>
+[ANSWERED], §7 Q2 => [ANSWERED]). (b) `ValuationScore` becomes its own engine and
+`FundamentalScore` **consumes** it — *"calculate valuation once, attribute it
+twice if necessary, but don't calculate it twice"* — so the multiples cannot reach
+the composite through two independent-looking paths (`ValuationScore.md` §7 Q1 =>
+[ANSWERED]; the migration order is the module first, then the `VS` cutover, and
+nothing is counted twice today because no `ValuationScore` producer exists yet).
+(c) The composite keeps its weighted mean with no multiplicative risk leg — *"you
+are building a research/audit-oriented quantitative engine, not merely an opaque
+ranking model"* — with `RiskScore` an **input** and the hard gates **outside** it
+(`CompositeTradeScore.md` §6 Q1 => [ANSWERED], §6 Q3 => [ANSWERED]: coverage
+**shrinks toward 50** rather than deflating, and the four numbers publish
+separately). The full answers and their consequences are `MASTER_PLAN.md` §2.1.
+**No decision of this set is now open that blocks a Phase 0-4 item.**
+
 One naming collision to keep straight while reading the set: `MarketScore` in
 §1.1 above is the owner's *hypothetical single composite* - the thing the four
 separate numbers exist to avoid (`MarketScore = 63`) - while
@@ -599,7 +623,7 @@ from them is in that document**; this is the ledger.
 | D-7 | **The leaf scores the wall clock, the card scores the run date.** `_trade_score_engines` called `fundamental_score_for_ticker(ticker)` with no date — so `fundamental_score_for_ticker` fell back to `datetime.now()` (`strategies/fundamental_score.py:550`) — while `_run_card_fundamental_score` passes `pm_decision.trade_date` | measured on MSFT for the documented `batch.py --date 2026-07-22` invocation (`batch.py:5`): leaf **`66.25`**, card **`62.50`**, identical basis string and `panel_n=9` | **one vector, two numbers on two surfaces** — and the leaf was the wrong one: it scored a July decision against September's peer panel | **FIXED** (`_trade_score_engines` gained `current_date`, mirrored from the sibling `get_fundamental_score`; two regression tests fail before the fix) |
 | D-8 | **The D-6 class is not closed.** `_trade_score_engines` computes all four engines unconditionally, while `_run_card_trade_score` reads each engine from the sibling card block — which exists only when **that engine's own gate** is on | `agents/utils/analysis_tools.py::_trade_score_engines` vs `reporting.py::_run_card_trade_score` | with `enable_trade_score` on and any sub-gate off, the leaf and the card print **different composites** | **FIXED** (`P12-5`, 2026-09-18): both readers now take their four values from the run's snapshot through `quant_scorecard.engine_scores`, so one rule decides for all three surfaces. Fails-before proof by executing the pre-`P12-5` assembly from git: leaf **`84.55`** (risk `74.0` measured with its gate off) vs card **`87.19`**; both **`87.19`** after |
 | D-9 | **A gate-on `enable_sentiment_score` is unreachable by any agent.** `sentiment_tools()` and `analyst_toolset("sentiment")` exist, but no ToolNode is built for the sentiment key | `graph/trading_graph.py:343-345` builds `market, news, fundamentals` only; `tests/test_tool_binding_single_source.py:50` asserts exactly that set; `agents/toolsets.py:533-538` records it as deliberate | the sentiment score can be computed and never read — so the scorecard must carry it through the snapshot, not an analyst's tool path | **deliberate, not a defect** — but it bounds the design |
-| D-10 | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books at `docs/implementation_plan_defect_audit.md:51`, whose line references (`:605`, `:2208`) have drifted | the independent-consensus termination contour never fires; debates run to the cap | **pre-existing, open, outside this workstream** |
+| D-10 | **The structured debate's consensus exit is dead.** `structured_debate.py:644` reads `ds.get("independent_agreement")`; nothing writes that key — `independent_agreement` is computed as a local in `trading_graph.py:1770-1788` and never stored | already on the books at `docs/implementation_plan_defect_audit.md:51`, whose line references (`:605`, `:2208`) have drifted | the independent-consensus termination contour never fires; debates run to the cap | **pre-existing, open, outside this workstream** **[CORRECTED 2026-09-26: FIXED — `agents/researchers/structured_debate.py:634` now writes `INDEPENDENT_AGREEMENT` (via `_section_agreement:652`, delegating to `agents/utils/independent_vote.py::independent_agreement:206`) and `:707` reads it into `termination_check`; `strategies/decision_packet.py:806-853` consumes the same agreement. The row's `structured_debate.py:644` read and the "computed as a local and never stored" evidence are both stale. `MASTER_PLAN.md` DOC-7.]** |
 | D-11 | **The compiled context's `catalyst_window` can never be `True`.** `_compiled_decision_context` is called with `init_agent_state` **before** `graph.invoke` (`graph/trading_graph.py:645-647`), and `create_initial_state` sets no `strategy_overlays` (`graph/propagation.py`). The only writer of that key is `overlays.apply_overlay_to_state` (`overlays.py:178`), called from `_apply_strategy_overlays` **after** the graph (`trading_graph.py:686`). So `cat_snap` at `trading_graph.py:1275` is always `None` and `catalyst_window` is always `False` | 160 persisted runs carry `strategy_overlays`; **15** hold a snapshot whose own reader (`pre_market.catalyst_window_read`) says the window is **active** (`scale` 0.25/0.6, verdicts `earnings-window`/`fed-catalyst`); all 19 printed `catalyst_window=` occurrences in the report corpus read `False`; executed on NFLX 2026-09-15 (`fed-catalyst`, `scale` 0.6) the context printed `verdict=tradable pass=True reasons=['volatility contained + no fast downtrend + no catalyst']`, where the snapshot implies `verdict=catalyst-window pass=False reasons=['catalyst window open']` | the context **asserts "no catalyst"** for runs whose own snapshot says a catalyst window is open — a false positive assertion reaching ten prompt sites, not an honest `NA` | **FIXED 2026-09-18 (owner decision — `ResearchLayerWiring.md` §6.6).** The `2c05701` "FIXED" claim for defect 16 (§3.2) was wrong; this is the real close. Resolved as **row 2**: the gate keeps its explicit `catalyst_window` argument and the pre-graph context supplies **none** — the snapshot is **not** moved earlier and the printed context is **not** the sole consumer. `regime.regime_gate_read`'s axis is now **tri-state** (`bool \| None = None`): `None` = the caller supplied no event fact, reported **unmeasured**, never coerced to `False`, and the reasons no longer claim "no catalyst". The context prints `catalyst_window=unavailable_pre_graph`. The **veto is not reinstated**, so the 2026-09-17 `RegimeScore → EventScore` boundary stands. Failing-first: both new tests reproduce the exact false string against the pre-fix code |
 
 **Two stale claims on this seam, both corrected in the same pass.** They are the
@@ -723,7 +747,7 @@ and `enable_score_eval_rows` already gates the IC harness
 until the vector is validated, and the **preservation** of the composite's printed
 `basis` contract, whose purpose line goes on the new surface instead. **All three
 are design decisions for `WP-12`, which is not yet built; none of them changes a
-shipped string.** D3 was answered twice — the first answer was implemented in
+shipped string.** **[CORRECTED 2026-09-26: stale — `WP-12` is built: `graph/trading_graph.py:724-754` builds the `quant_scorecard` snapshot into `init_agent_state["quant_scorecard"]`, and it reaches four analyst prompts (`agents/analysts/fundamentals_analyst.py:337`, `agents/analysts/market_analyst.py:324`, `agents/analysts/news_analyst.py:173`, `agents/analysts/sentiment_analyst.py:168`), plus `agents/utils/report_hygiene.py:115-341`, `agents/researchers/structured_debate.py:31` and `agents/utils/agent_states.py:101`. `MASTER_PLAN.md` DOC-7.]** D3 was answered twice — the first answer was implemented in
 `02145fe` and reverted on the second — and §9.1 records both, because the reversal
 is part of the seam's history.
 

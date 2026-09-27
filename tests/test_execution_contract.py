@@ -246,6 +246,51 @@ def test_an_out_of_range_score_is_flagged_by_the_verifier(tmp_path):
     assert codes == ["invalid_opportunity_score"]
 
 
+def test_the_opportunity_score_reason_ships_beside_the_null(tmp_path):
+    # PLAN-3: the slot is empty by decision, so the artifact carries the
+    # producer-owned sentence that says why - the score itself stays null.
+    doc = _emit(tmp_path)
+    reason = doc["opportunity_score_reason"]
+
+    assert doc["opportunity_score"] is None
+    assert isinstance(reason, str)
+    assert reason.strip()
+    assert reason == ec.OPPORTUNITY_SCORE_REASON
+
+
+def test_the_opportunity_score_reason_is_stable_across_runs(tmp_path):
+    first = _emit(tmp_path / "a")["opportunity_score_reason"]
+    second = _emit(tmp_path / "b")["opportunity_score_reason"]
+
+    assert first == second == ec.OPPORTUNITY_SCORE_REASON
+
+
+def test_the_opportunity_score_reason_reads_as_a_decision_not_an_error():
+    reason = ec.OPPORTUNITY_SCORE_REASON
+
+    assert "not by failure" in reason
+    assert "error" not in reason.lower()
+    assert "\n" not in reason
+
+
+def test_a_missing_opportunity_score_reason_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc.pop("opportunity_score_reason")
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["missing_field"]
+
+
+def test_a_non_string_opportunity_score_reason_is_flagged(tmp_path):
+    doc = _emit(tmp_path)
+    doc["opportunity_score_reason"] = 0
+    ec.seal(doc)
+
+    codes = [p["code"] for p in ec.integrity_problems(doc, now=datetime.now(timezone.utc))]
+    assert codes == ["invalid_opportunity_score_reason"]
+
+
 # --------------------------------------------------------------------------
 # T6 - the executor's reserved keys are not the producer's to set
 # --------------------------------------------------------------------------

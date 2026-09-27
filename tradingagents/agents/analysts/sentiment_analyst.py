@@ -164,7 +164,10 @@ def create_sentiment_analyst(llm, backup_llm=None, config=None):
             # §13.1: the full scorecard rides beside the owned engine - it is
             # supplied text either way, which is the only route into a prompt
             # that binds no tools.
-            engine_block=engine_score_block("sentiment", ticker, end_date, cfg)
+            engine_block=engine_score_block(
+                "sentiment", ticker, end_date, cfg,
+                snapshot=state.get("quant_scorecard"),
+            )
             + scorecard_context_block(ticker, end_date, cfg, state.get("quant_scorecard")),
         )
 

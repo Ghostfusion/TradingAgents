@@ -327,7 +327,11 @@ def create_fundamentals_analyst(llm, backup_llm=None, config=None):
                 # The FundamentalScore engine belongs to THIS report (the
                 # ownership map: fundamental -> fundamentals).
                 + engine_score_block(
-                    "fundamentals", state["company_of_interest"], current_date, config
+                    "fundamentals",
+                    state["company_of_interest"],
+                    current_date,
+                    config,
+                    snapshot=state.get("quant_scorecard"),
                 )
                 # §13.1: the full scorecard beside the owned engine.
                 + scorecard_context_block(

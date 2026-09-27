@@ -508,6 +508,25 @@ Written now so a future implementation cannot land without them:
   multiplicative: reading **(a)** (`K` leaves the weighted legs, invariant 18
   amended, attribution redesigned) or reading **(b)** (`K` stays and is also
   multiplied — which invariants 11 and 15 forbid as written)?
+  **[ANSWERED 2026-09-26: keep the weighted mean; no multiplication.** The
+  owner's reasoning is attribution: a product *"becomes difficult to interpret and
+  attribution becomes difficult"*, and this is *"a research/audit-oriented
+  quantitative engine, not merely an opaque ranking model"*. The accepted form is
+  unchanged — `0.40 F + 0.25 T + 0.15 R + 0.20 K` — and with the owner's own
+  acceptance case it reads `0.40(90) + 0.25(85) + 0.15(80) + 0.20(40) = 76.25`,
+  which the built code prints as **76.75** because `RiskScore` is aligned
+  `higher_is_better` (100 = low risk) before it enters; the alignment is the
+  engine's, and the arithmetic above uses the raw leg values. **Invariant 18 is not
+  amended.** Two shape rules follow and are now stated: **(1)** `K = RiskScore` is an
+  **input to the composite**, and the **hard risk gates remain outside it** —
+  `CompositeTradeScore ≠ RiskGate`, so a composite of 84 beside a
+  `RiskGate = REJECT` is a valid, meaningful pair: *"the quantitative evidence
+  indicates a strong opportunity, but portfolio/risk constraints prohibit adding
+  exposure."* **(2)** the three objects are named and kept distinct —
+  `EngineScore` (*what does this evidence dimension say?*), `CompositeTradeScore`
+  (*what does the combined quantitative evidence say about the trade setup?*) and
+  `DecisionGate` (*is taking the trade permitted?*) — and *"those should not be
+  collapsed into one number."* `MASTER_PLAN.md` §2.1.]**
 * **Q2 — the name `OpportunityScore`.** The note's `OpportunityScore` and
   `execution_contract.opportunity_score()` are the same words for different
   objects; the slot is producer-owned and stays `None` (your Q1). Is a *second*,
@@ -517,6 +536,34 @@ Written now so a future implementation cannot land without them:
   number contradicts "the reader must see both" and the four-outputs rule. This is
   the score panel's open N-deflation question with a specific proposed answer
   attached.
+  **[ANSWERED 2026-09-26: neither a multiplier nor a silent qualifier — coverage
+  SHRINKS THE SCORE TOWARD 50, and the parts are published separately.** The
+  owner's objection to deflation is semantic: with `RawScore = 80` at 50% coverage,
+  `80 × 0.50 = 40` says *"the stock is bearish"*, when what is known is *"the
+  available evidence is bullish, but incomplete"* — *"those are fundamentally
+  different statements."* The accepted form is
+
+  $$Score_{adjusted} = 50 + Coverage^{\gamma}\,(Score_{raw} - 50),\quad 0 \le Coverage \le 1$$
+
+  with γ controlling the penalty (γ = 1 gives 65 from the case above), and the
+  report publishes **four** numbers rather than one:
+
+  ```text
+  Composite Trade Score: 80     (Score_raw)
+  Coverage:              50%
+  Confidence:            42%
+  N:                     5 / 10
+  ```
+
+  *"Strong measured signal, incomplete evidence"* is then readable by the model
+  without missing data being read as negative evidence. Consequences: the
+  "reader must see both" rule **stays** (it was never the thing to supersede — the
+  multiplier was); the shrunk value is a **new, separate output**, never a
+  replacement for the raw score; γ and the confidence recipe are declared
+  parameters that need their own record (module rule 3) before they are used; and
+  the shrink must be tested **below 50 as well as above** (a 20 at half coverage
+  moves toward 50, not away). `MASTER_PLAN.md` §2.1; the producer is Phase 7's
+  CTS-1/CTS-9.]**
 * **Q4 — standardization.** Do you want a cross-sectional z composite (today only
   computable in the validation panel), or does the 0-100 band convention stay?
 * **Q5 — interactions.** Is measuring `γᵢⱼ` in scope for Phase C/E, or does the
@@ -534,6 +581,23 @@ Written now so a future implementation cannot land without them:
   want it built — which needs a cross-engine agreement read and a data-confidence
   read, neither of which exists — and with the risk leg written `RiskScore/100`
   (this repo's 100 = favourable convention) rather than the survey's `(1 − Risk)`?
+  **[ANSWERED 2026-09-26 — the object is wanted, and the survey's formula is
+  SUPERSEDED.** The owner's meta layer is *"meta-properties of the scorecard, not
+  new evidence engines"*, and its Conviction is
+
+  $$Conviction = AgreementScore \times EvidenceConfidence$$
+
+  (or `Agreement × Coverage × DataQuality`), normalised 0-100 — *"this makes
+  conviction explainable."* **There is no `BaseSignal` leg and no risk term**: the
+  survey's `BaseSignal × DataConfidence × Agreement × (1 − Risk)` is replaced, so
+  the `(1 − Risk)` direction question this row asks is **moot** — risk is a gate
+  (D3), not a multiplier inside a conviction. `AgreementScore` comes from the meta
+  layer's own cross-engine agreement (`Agreement = |Σ wᵢxᵢ/Σ wᵢ|` over centred
+  engines, `Dispersion = √(Σ wᵢ(xᵢ−x̄)²/Σ wᵢ)`,
+  `AgreementScore = 100·e^(−k·Dispersion)`); `EvidenceConfidence` is the
+  data-quality/coverage read the fundamental engine already computes. The meta
+  layer is **downstream only** — no engine reads it. `MASTER_PLAN.md` §2.1 (D6);
+  the build is Phase 7's `CTS-8`/`UNIV-AGREE`.]**
 
 ---
 

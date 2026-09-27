@@ -20,15 +20,12 @@ Screens (from ``strategies/Math.md``):
 * Net-Net: market cap < 2/3 * (current assets - total liabilities).
 * Fraud / bankruptcy guards: Beneish M-Score, Altman Z-Score.
 
-Two of those rows are **not implemented** and no column carries them:
-**Return on Capital** (no invested-capital denominator is built on this path;
-only the 3-year incremental ROIC exists, in ``strategies/capex_quality.py``)
-and **Shareholder Yield** (the canonical ``share_buybacks`` and
-``debt_repayment`` keys have no reader, so the buyback and debt-reduction legs
-are missing - the dividend leg alone would print a wrong number under that
-name). They are recorded as wiring gaps in
-``docs/scores/FundamentalScore.md`` §3.6 rather than shipped as
-an "n/a" column. Every other row above is computed.
+**Return on Capital** and **Shareholder Yield** are now computed by
+``strategies/ratios.py`` (``return_on_capital``: EBIT / invested capital,
+``invested_capital = total_debt + total_equity - cash``; ``shareholder_yield``:
+dividend yield + gross buyback yield from ``share_buybacks`` / market cap) and
+carried on the ``ROC`` / ``SY`` columns. Both are None-honest: an absent input
+prints "n/a", never a substituted zero. Every other row above is computed.
 
 The screener never fabricates: a missing line item makes the corresponding
 screen "n/a" rather than a guessed number.
@@ -81,6 +78,13 @@ from tradingagents.dataflows.statement_parsing import (  # noqa: E402,F401
     screen_ticker,
 )
 
+# FUND-23: the Return-on-Capital and Shareholder-Yield columns' producers
+# (one implementation each - the same functions the ratio leaf renders).
+from tradingagents.strategies.ratios import (  # noqa: E402
+    return_on_capital,
+    shareholder_yield,
+)
+
 #: This screen's report-file prefix inside the shared screens folder
 #: (``screener/``). ``value_score_screen.py`` writes its own prefix there, and
 #: each screen's cleanup deletes only its own kind - see ``save_watchlist``.
@@ -127,6 +131,8 @@ _WATCHLIST_LEGEND = (
     ("EpsYoY", "diluted EPS year-over-year growth"),
     ("RevYoY", "revenue year-over-year growth"),
     ("ROE", "return on equity (net income / equity)"),
+    ("ROC", "return on capital = EBIT / invested capital (invested capital = total debt + equity - cash; higher = better)"),
+    ("SY", "shareholder yield = dividend yield + gross buyback yield (share repurchases / market cap)"),
     ("Sec", "sector name"),
     ("SecRank", "sector rank within its 11-SPDR group (T# = top-3)"),
     ("RevUp", "net analyst revisions (up - down)"),
@@ -298,7 +304,7 @@ def _watchlist_markdown(results: list) -> str:
         "L1Px", "VWAP1m", "1mVol",
         "NEV/EBIT", "PE5Y",
         "TrendPB", "Breakout",
-        "EpsYoY", "RevYoY", "ROE",
+        "EpsYoY", "RevYoY", "ROE", "ROC", "SY",
         "Sec", "SecRank", "RevUp", "Inst",
         "Swing", "RS", "Stp", "T2",
         "VCP", "Brk",
@@ -334,6 +340,8 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("eps_yoy"), "{:.1%}"),
             cell(r.get("revenue_yoy"), "{:.1%}"),
             cell(r.get("roe"), "{:.1%}"),
+            cell(r.get("return_on_capital"), "{:.1%}"),
+            cell(r.get("shareholder_yield"), "{:.1%}"),
             cell(r.get("sector")), sec_rank,
             cell(r.get("rev_net"), "{:+d}"), cell(r.get("inst_latest_pp"), "{:+.1f}"),
             flag(r.get("scan_c")), cell(r.get("swing_rs") or "n/a"),
@@ -2106,6 +2114,14 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("skip %s: market cap %.2fB < floor", ticker, cap / 1e9)
                 continue
             row = screen_ticker(ticker, fin)
+            # FUND-23: the two Magic-Formula screens the docstring used to mark
+            # "not implemented". Producers live in ``strategies/ratios.py``
+            # (shared with the ratio leaf); an absent input leaves the column
+            # "n/a" - the screens are never guessed.
+            _roc = return_on_capital(fin)
+            _sy = shareholder_yield(fin)
+            row["return_on_capital"] = _roc["return_on_capital"]
+            row["shareholder_yield"] = _sy["shareholder_yield"]
             # Phase-1 growth / structure gates - applied only when the metric
             # is MEASURED (missing data keeps the row: "n/a", never fabricated).
             if (

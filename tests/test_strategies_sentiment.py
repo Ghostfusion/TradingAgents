@@ -1,12 +1,10 @@
-"""Phase 6 unit tests: sentiment velocity, mention spike, seed consensus."""
+"""Phase 6 unit tests: sentiment velocity, mention spike, daily series."""
 
 import pytest
 
 from tradingagents.strategies.sentiment import (
     aggregate_daily_sentiment,
-    blended_score,
     consensus_overlap,
-    consensus_verdict,
     daily_sentiment_sma,
     mention_volume,
     sentiment_velocity,
@@ -38,18 +36,6 @@ def test_consensus_overlap():
     assert consensus_overlap(["buy", "buy", "hold"]) == pytest.approx(2 / 3)
     assert consensus_overlap(["buy", "sell"]) == 0.5
     assert consensus_overlap([]) is None
-
-
-def test_consensus_needs_threshold():
-    assert consensus_verdict(["buy", "buy", "sell"]) == "buy"
-    assert consensus_verdict(["buy", "sell", "hold"]) == "mixed"
-
-
-def test_blend_respects_weights():
-    out = blended_score({"sent": 0.8, "value": 0.2}, {"sent": 1.0, "value": 3.0})
-    # (0.8*1 + 0.2*3)/4 = 0.35
-    assert out == pytest.approx(0.35)
-    assert blended_score({}) == 0.0
 
 
 # --- News-sentiment daily series (News_Sentiment.md §1) ---

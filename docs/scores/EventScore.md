@@ -17,7 +17,7 @@ His reason for adding it is explicit and is this document's governing constraint
 it should exist **before `NewsScore` is allowed to influence
 `opportunity_score`**.
 
-Status: **built (2026-09-18); gate off by default.** `strategies/event_state.py` is the engine (`imminence`, `event_components`, `forward_calendar`), `get_event_state` its leaf and `enable_event_state` its membership switch. Occurrence producers exist for **4 of 7** event families (§1); the hard block exists and is the engine's only event-triggered fail-closed path (§0.3). **Unmeasured** (vendor gate).
+Status: **built (2026-09-18); gate off by default.** `strategies/event_state.py` is the engine (`imminence`, `event_components`, `forward_calendar`), `get_event_state` its leaf and `enable_event_state` its membership switch. Occurrence producers exist for **4 of 7** event families (§1) **[CORRECTED 2026-09-26: stale — the code marks **5 of 7** `SCORABLE` (`strategies/event_state.py::FAMILY_AVAILABILITY:107`; `product_clinical` gained the pdufa.bio producer on 2026-09-18), which §9's own delta already records. The availability table, not this line, is authoritative]**; the hard block exists and is the engine's only event-triggered fail-closed path (§0.3). **Unmeasured** (vendor gate).
 
 ---
 
@@ -101,13 +101,13 @@ EventScore has no weight table in code; every producer is a multiplier, a day-co
 
 | Event family | Producer (`module.function:line`) | Lead time / horizon | Scale returned | Hard block? | Direction | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| Earnings — next print (imminence) | `catalyst.next_earnings` (`tradingagents/strategies/catalyst.py:90`) | entries at/after trade_date, `lookahead_days=60` | dict `{date, days_until:int, eps_estimate, eps_actual}` | no | higher `days_until` = farther = safer | SCORABLE |
+| Earnings — next print (imminence) | `catalyst.next_earnings` (`tradingagents/strategies/catalyst.py:90`) | entries at/after trade_date, `lookahead_days=60` | dict `{date, days_until:int, eps_estimate, eps_actual}` | no | higher `days_until` = farther = safer | SCORABLE. **[CORRECTED 2026-09-26: stale — `next_earnings`' default `lookahead_days` is now `_EARNINGS_LOOKAHEAD_DAYS = 95` (`catalyst.py:37`), and that constant is both the default and the fetch's forward span, so the returned dict gained a `basis` key naming the window (`catalyst.py:130`) and a print past the fetched edge returns `None` (unmeasured), never a silent "no earnings". Note: `event_state.HORIZONS["earnings"] = 60.0` is the engine's separate **scoring** horizon, a declared choice that is unchanged — the producer sees further than the engine scores.]** |
 | Earnings — snapshot leg | `catalyst.build_catalyst_snapshot` (`catalyst.py:219`, earnings branch `:265`) | `catalyst_window_days` default 5 (`default_config.py:791`) | multiplies `scale` by `catalyst_risk_penalty` | YES at `:284` | lower scale = risk-increasing | SCORABLE |
 | Earnings — last surprise / side | `catalyst.last_earnings_surprise` (`catalyst.py:70`); `events.surprise_score` (`events.py:17`); `events.drift_side` (`events.py:26`) | most recent report in calendar | `{surprise: ratio, side: 'beat' \| 'miss', date}`; surprise = (act-est)/\|est\| | no | beat = favourable | SCORABLE |
 | Earnings — implied move (exposure) | `catalyst.implied_move_from_history` (`catalyst.py:111`) | latest history row | fraction (`predict_vola_ratio_newest/100`) | no | larger = more risk | SCORABLE |
 | Earnings — risk multiplier | `events.catalyst_risk_penalty` (`events.py:53`) | none (implied vs baseline) | multiplier <=1 (0.5 when unknown; `1/(1+3r)`) | no | lower = more risk | SCORABLE |
 | Earnings — PEAD entry | `events.post_earnings_play` (`events.py:112`); `events.gap_up_qualifies` (`:63`) | print + 4 bars | verdict `setup/consolidating/no-gap/no-data` | no | setup = favourable | SCORABLE |
-| Earnings — position mult by side | `events.position_mult_by_side` (`events.py:37`) | none | 1.0 beat / 0.5 miss / 0.0 flat, cap 1.5 | no | higher = favourable | PARTIAL (catalyst arg inert, see §3 D4) |
+| Earnings — position mult by side | `events.position_mult_by_side` (`events.py:37`) | none | 1.0 beat / 0.5 miss / 0.0 flat, cap 1.5 | no | higher = favourable | PARTIAL (catalyst arg inert, see §3 D4). **[FIXED 2026-09-26: the catalyst arg is live — `events.py:47` now reads `event_scale = float(catalyst) if 0.0 < float(catalyst) <= 1.0 else 1.0`, so the 0..1 scale `get_catalyst_scale` supplies scales the multiplier; the old `catalyst > 1` test (which no caller could satisfy) is gone. Status is now SCORABLE.]** |
 | Macro (CPI/FOMC/payrolls) imminence | `catalyst.macro_imminence` (`catalyst.py:123`) | `window_days=3`; `star=='HIGH'` filter | `{count_high:int, min_days:int \| None}` | no | imminent = risk-increasing | SCORABLE |
 | Fed — next FOMC | `catalyst.fed_imminence` (`catalyst.py:142`) | `window_days=14` default; snapshot passes `catalyst_fed_window_days`=10 | `{days_until:int, modal_prob:%, modal_range:str}` | no | modal hike = risk-increasing | SCORABLE |
 | Fed — direction label | `catalyst.fed_direction` (`catalyst.py:184`) | none | `HOLD`/`HIKE`/`CUT`/`n/a` | no | hike = risk-increasing | SCORABLE |
@@ -188,8 +188,8 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 - **D1 — dead `implied_move_pct` key (exposure never scaled) — **FIXED 2026-09-17, `2c05701`**.** `graph/trading_graph.py:966` reads `(catalyst_snapshot or {}).get("implied_move_pct")`, but the producer emits `"implied_move"` (`strategies/catalyst.py:352`) and never `implied_move_pct`. So `contract.build_position_contract`'s `(1 - implied_move_pct)` de-risk (`strategies/contract.py:262-267`) is unreachable. Reader sees a report whose implied-move sizing is documented but never applied; only the `scale` fold moves size.
 - **D2 — premarket hard block unreachable from its leaf — **FIXED 2026-09-17, `2c05701`**.** `analysis_tools.py:6682-6689` calls `pre_market.review_decision(...)` without `catalyst_snapshot=`, while `strategies/pre_market.py:239` reads it to raise the earnings-window REJECT (and `:246` the REVISE). The leaf therefore can only REJECT/REVISE on gap and re-anchor caps, never on an open earnings window.
 - **D3 — `regime_gate_read.catalyst_window` always False — **FIXED 2026-09-18 (owner decision; master §3.5 D-11, `ResearchLayerWiring.md` §6.6)**.** `strategies/regime.py:261` blocks when `catalyst_window` is set. The `2c05701` change fed it from `state["strategy_overlays"]["catalyst"]` inside `_compiled_decision_context`, but that function is called with `init_agent_state` *before* `graph.invoke` (`graph/trading_graph.py:645-647`) while the overlay is stamped *after* the graph (`:686`) — so the key was always absent and the derived flag always `False`. **Resolved as row 2 of §6.4, NOT by feeding the flag:** the axis is now **tri-state** (`catalyst_window: bool | None = None`) — `None` means the caller supplied no event fact and is reported **unmeasured** rather than coerced to `False`; the gate neither vetoes nor claims "no catalyst", and its trailer reads "volatility contained + no fast downtrend (catalyst window not measured)". `_compiled_decision_context` supplies **none** and prints `catalyst_window=unavailable_pre_graph`; `value_dip_tools.get_value_dip_setup`, which passed an explicit `False` it never measured, now supplies none too. The veto is **deliberately not fed** — event authority is `EventScore`'s — so this is now a *recorded decision* rather than a dead wire, and the axis can no longer read as a measured clear. Failing-first: both new tests in `tests/test_strategies_regime.py` reproduce the exact false string against the pre-fix code.
-- **D4 — `events.position_mult_by_side` catalyst arg inert.** `events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, but the only caller documents `catalyst` as `0..1` (`analysis_tools.py:2272` "catalyst scale 0..1") and `get_catalyst_scale` supplies <=1. `event_scale` is therefore always 1.0; the multiplier is only 1.0 (beat) / 0.5 (miss).
-- **D5 — `get_earnings_calendar` param named backward for a forward query.** The leaf arg is `look_back_days` "Days to look back" (`analyst_data_tools.py:33`), but the finnhub adapter queries `[curr_date, curr_date + look_back_days]` forward (`dataflows/finnhub.py:195-196`). A caller setting it small truncates the forward window.
+- **D4 — `events.position_mult_by_side` catalyst arg inert.** `events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, but the only caller documents `catalyst` as `0..1` (`analysis_tools.py:2272` "catalyst scale 0..1") and `get_catalyst_scale` supplies <=1. `event_scale` is therefore always 1.0; the multiplier is only 1.0 (beat) / 0.5 (miss). **[FIXED 2026-09-26: `events.py:47` now reads `event_scale = float(catalyst) if 0.0 < float(catalyst) <= 1.0 else 1.0` — the 0..1 scale is consumed (and a value outside `(0, 1]` is treated as "no catalyst" rather than extrapolated), so the arg is no longer inert. This defect is closed.]**
+- **D5 — `get_earnings_calendar` param named backward for a forward query.** The leaf arg is `look_back_days` "Days to look back" (`analyst_data_tools.py:33`), but the finnhub adapter queries `[curr_date, curr_date + look_back_days]` forward (`dataflows/finnhub.py:195-196`). A caller setting it small truncates the forward window. **[FIXED 2026-09-26: the param is now `look_ahead_days` ("Days to look AHEAD from curr_date; omit for a 30-day window") at `analyst_data_tools.py:33`, matching the `[curr_date, curr_date + look_ahead_days]` forward query; the rename is recorded in `dataflows/finnhub.py:196-198`. This defect is closed.]**
 
 #
 
@@ -202,7 +202,7 @@ No single function currently separates occurrence from exposure: `scale` and `ca
 | FDA / clinical decisions | a forward PDUFA / trial-readout calendar | **YES as of 2026-09-18** — `dataflows/event_calendars.py::fda_calendar_rows` (pdufa.bio `/api/v1/events`, free and keyless) | **BUILT**: `forward_calendar('product' \| 'clinical')`, announced-day rows only |
 | Court decisions | a litigation/docket calendar | **NO — the chosen source cannot answer.** CourtListener is a filing archive: its docket endpoints need a token and its anonymous search exposes only `dateArgued`/`dateFiled`/`dateTerminated`, all backward-looking (`event_calendars.COURT_REASON`) | none; the family answers **MISSING**, never `not_applicable` |
 | Investor day / product launch | a company-events calendar | **NO — DROPPED by owner decision 2026-09-18**: no free source exists, and the one priced source was declined (`event_calendars.INVESTOR_DAY_REASON`) | none; the nearest producers are `get_corporate_actions` (dividends/splits) and `get_ipos` (`moomoo_extra_tools.py:178`) |
-| Earnings imminence > 60d | horizon beyond `next_earnings.lookahead_days=60` (`catalyst.py:90`), fetch window +95d (`catalyst.py:493`) | YES (fetch is wider than the read) | raise `lookahead_days`; no new adapter |
+| Earnings imminence > 60d | horizon beyond `next_earnings.lookahead_days=60` (`catalyst.py:90`), fetch window +95d (`catalyst.py:493`) | YES (fetch is wider than the read) | raise `lookahead_days`; no new adapter. **[CORRECTED 2026-09-26: DONE — `_EARNINGS_LOOKAHEAD_DAYS = 95` (`catalyst.py:37`) is now both `next_earnings`' default and the fetch's forward span, so the 60-95d window is already readable; no adapter change is needed. The engine's scoring horizon stays 60d by declared choice.]** |
 | Scalar 0-1 imminence | normalization of existing day-counts | YES — raw counts already returned | pure `clamp(1 - days_until/horizon, 0, 1)` over `next_earnings.days_until` / `macro_imminence.min_days` / `fed_imminence.days_until` / `opex_status.days_to_next`; no new fetch |
 | Hard block for macro/Fed/OPEX | a rule to close on imminent non-earnings events | YES (calendar fetched) | extend `build_catalyst_snapshot` (`catalyst.py:280`) to set `hard_block` from `macro_imminence.min_days` / `fed_imminence.days_until` against a configured window |
 | Weights / composite | any EventScore band or weight structure | NO — every producer is a multiplier or gate; no 0-100 score anywhere | needs (a) per-family imminence 0-1, (b) per-family impact/severity, (c) NA!=0 handling; nothing exists to reuse |
@@ -371,7 +371,7 @@ answers are here.
 
 1. **Does the owner want a 0-100 `EventScore`, or the structured event state of
    §5.3?** The staged spec recommends the engine *before* NewsScore is allowed to
-   influence `opportunity_score` — a gate-shaped role, which the state satisfies and a score does not. **CLOSED 2026-09-17 (plan §13 Q7): the structured state is the deliverable** — no 0-100 `EventScore`.
+   influence `opportunity_score` — a gate-shaped role, which the state satisfies and a score does not. **CLOSED 2026-09-17 (plan §13 Q7): the structured state is the deliverable** — no 0-100 `EventScore`. **[CORRECTED 2026-09-26: this CLOSED claim is contradicted by the code — `strategies/event_state.py::event_state:586` returns a 0-100 `score` (equal weights over the seven families, `EVENT_BANDS`, `status=RESEARCH_ONLY`), so a 0-100 `EventScore` **does** exist. This is recorded as an OPEN item (**EVT-1**, `docs/scores/MASTER_PLAN.md` §open-items: "Supply a per-family impact/severity weight vector for the 0-100 score the code emits with equal weights, or decide to remove the score"), NOT as a fixed defect.]**
 2. **Should macro/Fed/OPEX be able to hard-block?** Today only earnings can
    (`catalyst.py:280-288`). Extending it is a **fail-closed behaviour change**
    that would start rejecting trades the engine currently takes; it needs the owner's explicit decision, not a default. **CLOSED 2026-09-17 (plan §13 Q7): not extended** — only earnings may hard-block, and a test pins it.
@@ -407,6 +407,36 @@ certainly not "a negative event".
 2026-09-17 it had no document home.** It is recorded here because `EventScore`
 owns the event risk; it is **not** an engine-internal question and it does not
 change any decision above.
+
+**ANSWERED 2026-09-26 — yes, but only through a strictly bounded, separately
+authorised channel, and the latency contract is now specified.**
+
+The owner's rule: fresh intraday information **may modify sizing; it never
+rewrites `EventScore` or the composite.** The shape to build:
+
+```text
+CTS                 82      (unchanged - the longer-lived thesis)
+EventScore          76      (unchanged - the structural event score)
+IntradayEventRisk   HIGH    (a separate real-time state)
+RiskGate            CAUTION
+PositionMultiplier  0.35
+```
+
+i.e. `IntradayEventState` → an **Event Risk Overlay** → the position size, with a
+bounded multiplier `M_event = e^(−k·R_event)`, `0 ≤ M_event ≤ 1`, applied as
+`PositionSize = BaseSize × M_event`. *"An intraday event can reduce exposure
+without contaminating the fundamental score architecture."*
+
+The **latency and data-quality contract** the answer names, to be implemented
+rather than logged opportunistically: record `event_timestamp`,
+`source_timestamp`, `ingestion_timestamp`, `processing_timestamp` and
+`decision_timestamp`; publish both `Latency = DecisionTimestamp − EventTimestamp`
+and `DataAge = DecisionTimestamp − SourceTimestamp`; freshness is
+`e^(−λ · DataAge)` — **an event stamped 10:02:01 must not read "fresh" at 15:55
+merely because the system retrieved it then.** Provenance/confidence, idempotency
+(the executor's `signals/` dedup key) and fail-closed behaviour are part of the
+contract, exactly as the paragraphs below already required. `MASTER_PLAN.md`
+§2.1 (D8); the build is Phase 7's `EVT-6`.
 
 **The question.** When an event lands *during* the session (a print, a headline, a
 halt), may that fresh information **modify sizing** - and under what latency and
@@ -460,7 +490,7 @@ producer — `dataflows/event_calendars.py::fda_calendar_rows:171` — on 2026-0
 §1's own table already carries that row as `SCORABLE`. The library adds **no family**
 — its taxonomy (line 1: M&A, management changes, capital actions, geopolitical events)
 is broader still and maps onto none of the seven — so the 4-vs-5 count is a
-doc-internal drift, ledgered here rather than silently rewritten.
+doc-internal drift, ledgered here rather than silently rewritten. **[CORRECTED 2026-09-26: the Status line has now been corrected to **5 of 7**; §1's per-family ledger rows are unchanged.]**
 
 **Delta against §5.3.** §5.3's Layer 3 ("the score, only if the owner wants one") and
 §7 Q1 (CLOSED: "no 0-100 `EventScore`") are now behind the code: `event_state` at
@@ -536,7 +566,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 39 | Time-Decay Weight | 2 | ABSENT | none |
 | 40 | Event Recency Score | 1 | ABSENT | none |
 | 41 | Catalyst Proximity | 2 | BUILT | `event_state.imminence:349` (linear clamp, not `e^-ld`/`1/(1+d)`) |
-| 42 | Event Horizon Score | 1 | PARTIAL | `event_state.HORIZONS:60` per family (declared for 3 families) |
+| 42 | Event Horizon Score | 1 | PARTIAL | `event_state.HORIZONS:66` per family (declares **7** families: earnings, macro, fed, opex, product_clinical, court, investor_day). **[CORRECTED 2026-09-26: the `HORIZONS:60` line ref and the "declared for 3 families" count were both stale — `event_state.py::HORIZONS:66` declares 7.]** |
 | 43 | Event Duration | 1 | ABSENT | none |
 | 44 | Event Conviction | 1 | ABSENT | none |
 | 45 | Source Reliability | 2 | ABSENT | nearest: `event_calendars.ATTRIBUTION:68` (provenance string, not a score) |

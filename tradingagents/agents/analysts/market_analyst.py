@@ -311,7 +311,11 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                 # The TechnicalScore engine belongs to THIS report (the
                 # ownership map: technical -> market). Supplied, not offered.
                 + engine_score_block(
-                    "market", state["company_of_interest"], current_date, config
+                    "market",
+                    state["company_of_interest"],
+                    current_date,
+                    config,
+                    snapshot=state.get("quant_scorecard"),
                 )
                 # §13.1: every analyst receives the FULL scorecard, not only the
                 # engine it owns, so it never infers the weight of regime and

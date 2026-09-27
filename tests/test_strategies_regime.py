@@ -71,9 +71,19 @@ def test_choppiness_is_none_when_unmeasurable():
 
 
 def test_regime_label_moves_with_the_trend_on_the_default_path():
-    """Regression for the dead chop branch: with vol_pct in the middle band
-    (the common case) the label used to be `neutral` whatever the trend was,
-    because overlays passed a literal chop of 0.4 against a 0.30 default."""
+    """Regression for the dead chop branch, restated for the measured vol leg.
+
+    The old expectation here (``down["regime"] == "bear"``) WAS REG-1's defect:
+    the 3-valued ``vol_pct`` proxy pinned a 60-251-bar tape at 0.5, and for a
+    252+ tape it moved only on a 1.5x / 0.5x vol ratio, so this monotone ramp
+    read 0.5 and the label could only come from the chop leg. With the measured
+    percentile the falling ramp's latest window is the MAXIMUM of its own window
+    distribution (``vol_pct`` ~ 0.996), so the volatility leg legitimately
+    outranks the trend and ``high_vol`` is the correct new outcome; the rising
+    ramp's latest window is the minimum and its trend leg still fires ``bull``.
+    The contract the test is for is unchanged: the two tapes must not share a
+    label, and ``basis`` must record the move off the legacy read.
+    """
     from tradingagents.strategies.overlays import build_strategy_overlays
 
     cfg = {"enable_strategy_overlays": True}
@@ -81,7 +91,10 @@ def test_regime_label_moves_with_the_trend_on_the_default_path():
     down = build_strategy_overlays(cfg, _trend_closes(step=-0.05))
     assert up is not None and down is not None
     assert up["regime"] != down["regime"]
-    assert up["regime"] == "bull" and down["regime"] == "bear"
+    assert up["regime"] == "bull"
+    assert down["regime"] == "high_vol"
+    assert down["vol_pct"] is not None and down["vol_pct"] >= 0.75
+    assert "moved the label" in down["basis"]
 
 
 def test_chop_threshold_sits_on_the_producers_own_scale():

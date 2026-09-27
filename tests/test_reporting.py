@@ -152,15 +152,33 @@ def test_iv_a_computed_decision_context_surfaces_in_report(tmp_path):
     assert "verdict=clean" in report
 
 
-def test_iv_a_omitted_without_plan_card(tmp_path):
-    """No plan card in the context -> the IVa section is not emitted."""
+def test_iv_a_follows_the_context_not_a_string_inside_it(tmp_path):
+    """The section is gated on the context's existence, not on a plan card.
+
+    It used to be emitted only when the compiled context happened to contain the
+    trade-plan card's own text, so a run whose context carried the quant
+    scorecard (which IS prepended into that same string) but no plan card lost
+    the scorecard from the human report **with the master gate on** - the model
+    may interpret an engine result, but the reader was shown nothing. The gate is
+    now `cc` being non-empty (`MASTER_PLAN.md` RLW-5), so:
+    """
     state = {
         **_state(verdict="PASS"),
         "computed_decision_context": "Computed decision context: unavailable.",
     }
-    path = write_report_tree(state, "TST", tmp_path)
-    report = path.read_text(encoding="utf-8")
-    assert "## IVa. Computed Decision Context" not in report
+    report = write_report_tree(state, "TST", tmp_path).read_text(encoding="utf-8")
+    # A context that says it is unavailable is still PRINTED: a reader is told,
+    # rather than silently shown nothing.
+    assert "## IVa. Computed Decision Context" in report
+    assert "Computed decision context: unavailable." in report
+
+    # An empty context emits no section at all (there is nothing to point at).
+    empty = {
+        **_state(verdict="PASS"),
+        "computed_decision_context": "",
+    }
+    report_empty = write_report_tree(empty, "TST", tmp_path).read_text(encoding="utf-8")
+    assert "## IVa. Computed Decision Context" not in report_empty
 
 
 def _full_state():

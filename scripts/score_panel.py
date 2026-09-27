@@ -109,6 +109,12 @@ MIN_PAIRS = 10
 OOS_TRAIN_FRAC = 0.7
 #: Below this spread dispersion the deflated Sharpe divides by float noise.
 DSR_MIN_DISPERSION = 1e-12
+#: A robustness split (sector / regime) is a SUBSET of the panel, so it needs a
+#: declared floor of its own: at least this many names in the labelled
+#: cross-section and this many labelled cross-sections. Below either, the split
+#: is withheld with the reason - never printed as a number.
+SPLIT_MIN_NAMES = 20
+SPLIT_MIN_PERIODS = 5
 
 # --- The status vocabulary (master section 1.4 / plan section 6) -------------
 #
@@ -1576,6 +1582,358 @@ def category_findings(engine: str, registry: dict, factors: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Robustness splits - the sector and regime cuts (PLAN-6 / MF-3)
+# ---------------------------------------------------------------------------
+#
+# `IMPLEMENTATION_PLAN.md` section 7 names the sector and regime splits in the
+# WP-10 deliverable list, and `MEASUREMENT_FINDINGS.md` section 5 records them as
+# not emitted. The label axes come from OUTSIDE the panel - the panel is a
+# per-name price/component cross-section and carries neither a per-name sector
+# nor a per-date regime read - so they are INJECTABLE, and with no label for a
+# name/date the split is withheld with that reason rather than guessed. The
+# default sector axis is the repo's own static curated constituent map (no
+# vendor call); the regime axis has no static default, so a caller must supply
+# one or the split stays ``UNMEASURED`` with the reason.
+
+#: The repo's static sector map is derived once per process: it is declared
+#: constants in `sector_rank`, not a measurement and not a fetch.
+_STATIC_SECTOR_CACHE: dict[str, str] | None = None
+
+
+def _static_sector_map() -> dict[str, str]:
+    """``{ticker: SPDR sector group}`` from the repo's curated constituent lists.
+
+    Inverts ``sector_rank.SECTOR_CONSTITUENTS`` (industry ETF -> curated member
+    tickers) and maps each industry ETF to its parent SPDR **sector** group via
+    ``sector_rank.INDUSTRY_ETFS``. Both are declared constants, so this makes no
+    vendor call and no network read. The lists are a curated core, not a full
+    universe: a name outside them gets no label, and the caller withholds its
+    split rather than bucketing it under a guess.
+    """
+    global _STATIC_SECTOR_CACHE
+    if _STATIC_SECTOR_CACHE is not None:
+        return _STATIC_SECTOR_CACHE
+    out: dict[str, str] = {}
+    try:
+        from tradingagents.strategies.sector_rank import (
+            INDUSTRY_ETFS,
+            SECTOR_CONSTITUENTS,
+            SPDR_SECTORS,
+        )
+
+        parent = {etf: INDUSTRY_ETFS[etf][0] for etf in INDUSTRY_ETFS}
+        for etf, members in SECTOR_CONSTITUENTS.items():
+            label = parent.get(etf) or (etf if etf in SPDR_SECTORS else None)
+            if not label:
+                continue
+            for ticker in members:
+                out.setdefault(str(ticker).upper(), str(label))
+    except Exception:  # noqa: BLE001 - an absent map is a finding, not a crash
+        out = {}
+    _STATIC_SECTOR_CACHE = out
+    return out
+
+
+def sector_labels(tickers, *, sector_of=None) -> dict[str, str]:
+    """A ``{ticker: sector label}`` map, from an override or the repo's own data.
+
+    ``sector_of`` may be a mapping or a callable ``ticker -> label | None``. With
+    it ``None`` the repo's static curated constituent map supplies the labels the
+    tree can prove without a fetch; a name the map does not cover gets no label
+    and leaves the split's denominator rather than landing in a guessed bucket.
+    """
+    out: dict[str, str] = {}
+    for t in tickers or []:
+        code = str(t).upper()
+        if not code:
+            continue
+        if sector_of is None:
+            label = _static_sector_map().get(code)
+        elif callable(sector_of):
+            label = sector_of(code)
+        else:
+            label = sector_of.get(code) or sector_of.get(str(t))
+        if label:
+            out[code] = str(label)
+    return out
+
+
+def regime_labels(dates, *, regime_of=None) -> dict[str, str]:
+    """A ``{date: regime label}`` map, from an override (the panel has none).
+
+    The panel is a per-name cross-section: no market-level regime series travels
+    with it. ``regime_of`` (a mapping or a callable ``date -> label | None``) is
+    the caller's own regime read - one value per date - and a date it does not
+    label simply gets no bucket. With no override every date is unlabelled and
+    the regime split is withheld with the reason, never guessed.
+    """
+    out: dict[str, str] = {}
+    for d in dates or []:
+        key = str(d)
+        if regime_of is None:
+            continue
+        label = regime_of(key) if callable(regime_of) else regime_of.get(key)
+        if label:
+            out[key] = str(label)
+    return out
+
+
+def _group_scores(scores: dict, label_of) -> dict[str, dict]:
+    """``{date: {ticker: value}}`` -> ``{label: {date: {ticker: value}}}``.
+
+    ``label_of(date, ticker) -> label | None``. A ``None`` label drops the
+    observation: an unlabelled cell cannot be bucketed, and dropping it is the
+    only honest alternative to guessing which bucket it belongs to.
+    """
+    out: dict[str, dict] = {}
+    for date, row in (scores or {}).items():
+        for ticker, value in (row or {}).items():
+            if value is None:
+                continue
+            label = label_of(str(date), str(ticker))
+            if label is None:
+                continue
+            out.setdefault(str(label), {}).setdefault(str(date), {})[str(ticker)] = value
+    return out
+
+
+def robustness_split(scores: dict, panels: dict, label_of, *, holding: int,
+                     n_buckets: int, min_names: int = SPLIT_MIN_NAMES,
+                     min_periods: int = SPLIT_MIN_PERIODS) -> dict:
+    """One factor's per-label rank IC, with thin labels withheld and their reason.
+
+    Reuses the harness row the main panel uses
+    (``alpha_health.score_evaluation_rows``) over the labelled subset, so the
+    split's IC is the same statistic as the factor's own. A label whose subset is
+    below ``min_names`` in its thinnest cross-section or ``min_periods``
+    cross-sections is ``available: False`` with the observed counts and the
+    reason - never a number.
+    """
+    groups = _group_scores(scores, label_of)
+    out: dict[str, dict] = {}
+    for label in sorted(groups):
+        sub = groups[label]
+        n_periods = len(sub)
+        n_names = max((len(r) for r in sub.values()), default=0)
+        if n_periods < int(min_periods) or n_names < int(min_names):
+            out[label] = {
+                "available": False,
+                "n_periods": n_periods,
+                "n_names": n_names,
+                "mean_rank_ic": None,
+                "ic_ir": None,
+                "ic_label": None,
+                "reason": (
+                    f"{n_periods} labelled cross-section(s) / {n_names} name(s) in "
+                    f"the thinnest < min_periods={int(min_periods)} / "
+                    f"min_names={int(min_names)}; the split is withheld rather than "
+                    "printed as a number"
+                ),
+            }
+            continue
+        prices = to_prices(panels, sorted(sub))
+        rows = alpha_health.score_evaluation_rows(
+            sub, prices, holding=holding, n_buckets=n_buckets,
+            min_names=int(min_names), min_obs=max(2, int(min_periods)),
+        )
+        ic = rows.get("ic") or {}
+        out[label] = {
+            "available": bool(ic.get("available")),
+            "n_periods": rows.get("n_dates"),
+            "n_names": n_names,
+            "mean_rank_ic": ic.get("mean_rank_ic"),
+            "ic_ir": ic.get("ic_ir"),
+            "ic_label": alpha_health.ic_label(ic.get("mean_rank_ic")),
+            "reason": (ic.get("reason") if not ic.get("available") else None),
+        }
+    return out
+
+
+def panel_splits(factor_scores: dict, panels: dict, *, dates, sector_of=None,
+                 regime_of=None, holding: int = 5, n_buckets: int = 10,
+                 min_names: int = SPLIT_MIN_NAMES,
+                 min_periods: int = SPLIT_MIN_PERIODS) -> dict:
+    """The sector and regime robustness blocks over every measured factor.
+
+    ``factor_scores`` is ``{factor: {date: {ticker: value}}}`` (each factor's own
+    harness input). The two axes group by name (sector) and by date (regime); a
+    block with no labels at all is ``UNMEASURED`` with the reason, and a thin
+    label inside a labelled block is withheld per ``robustness_split``.
+    """
+    names = sorted({str(t) for d in dates for t in (panels.get(d) or {})})
+    axes = {
+        "sector": {
+            "labels": sector_labels(names, sector_of=sector_of),
+            "label_of": (lambda d, t, m: m.get(t)),
+            "source": (
+                "caller-supplied map/callable" if sector_of is not None else
+                "repo static curated constituent map "
+                "(strategies/sector_rank.SECTOR_CONSTITUENTS -> SPDR parent)"
+            ),
+            "empty_reason": (
+                "no name on this panel carries a sector label - the repo's static "
+                "curated constituent map does not cover this universe and no "
+                "--sector map was supplied, so the split is withheld rather than "
+                "guessed"
+            ),
+            "counts": (lambda labels: {
+                lab: sum(1 for v in labels.values() if v == lab)
+                for lab in sorted(set(labels.values()))
+            }),
+        },
+        "regime": {
+            "labels": regime_labels(dates, regime_of=regime_of),
+            "label_of": (lambda d, t, m: m.get(d)),
+            "source": (
+                "caller-supplied map/callable" if regime_of is not None else
+                "none (the panel carries no market-level regime series)"
+            ),
+            "empty_reason": (
+                "no date carries a regime label - the panel is a per-name "
+                "cross-section and carries no market-level regime read, so a "
+                "regime series must be supplied; the split is withheld rather "
+                "than guessed"
+            ),
+            "counts": (lambda labels: {
+                lab: sum(1 for v in labels.values() if v == lab)
+                for lab in sorted(set(labels.values()))
+            }),
+        },
+    }
+    blocks: dict[str, dict] = {}
+    for axis, spec in axes.items():
+        labels = spec["labels"]
+        block: dict = {
+            "status": "UNMEASURED" if not labels else STATUS_ADVISORY,
+            "label_source": spec["source"],
+            "n_labels": len(set(labels.values())),
+            "n_labelled": {"names": len(labels)} if axis == "sector" else {"dates": len(labels)},
+            "label_counts": spec["counts"](labels) if labels else {},
+            "floors": {"min_names": int(min_names), "min_periods": int(min_periods)},
+            "reason": (spec["empty_reason"] if not labels else None),
+            "factors": {},
+            "basis": (
+                "per-factor rank IC over the labelled subset, computed by the "
+                "same harness row the factor's own statistics use "
+                "(alpha_health.score_evaluation_rows); a label below the split "
+                "floors is withheld with its reason, never printed as a number"
+            ),
+        }
+        if labels:
+            get_label = spec["label_of"]
+            for factor, scores in sorted(factor_scores.items()):
+                block["factors"][factor] = robustness_split(
+                    scores, panels, (lambda d, t, m=labels, g=get_label: g(d, t, m)),
+                    holding=holding, n_buckets=n_buckets,
+                    min_names=min_names, min_periods=min_periods,
+                )
+        blocks[axis] = block
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# TECH-24 - the technical category correlation matrix
+# ---------------------------------------------------------------------------
+
+
+def technical_category_matrix(panels: dict, dates, *, registry: dict | None = None,
+                              min_pairs: int = MIN_PAIRS) -> dict:
+    """Pairwise correlation of ``technical_score``'s nine CATEGORY sub-scores.
+
+    The panel's metrics are COMPONENT names, so each ``(date, ticker)`` row is
+    mapped through the engine's OWN declared tables - ``technical_score.
+    align_components`` then ``technical_score.category_score`` - and the
+    resulting category scores are correlated with the same pairwise machinery the
+    component matrix uses. The component-level matrix stays beside it
+    (``report["redundancy"]``), which is the point of the measurement: 50% of the
+    weight sits on categories whose components are correlated by construction.
+
+    When the engine module or its declared tables are unavailable, or no panel
+    row carries a component set the engine can score, the matrix is reported
+    ``UNMEASURED`` with the reason rather than approximated.
+    """
+    entry = (registry or engine_registry()).get("technical_score") or {}
+    base = {
+        "engine": "technical_score",
+        "min_pairs": int(min_pairs),
+        "pairs": {},
+        "n_pairs": 0,
+        "categories": [],
+        "n_observations": 0,
+        "basis": (
+            "pairwise Spearman (reported) and Pearson (beside it) over the shared "
+            "(date, ticker) observations of the nine category sub-scores; each "
+            "category is the engine's own `category_score` over its aligned "
+            "components, not a re-derived formula"
+        ),
+    }
+    if not entry.get("available"):
+        return {**base, "status": "UNMEASURED",
+                "reason": entry.get("reason") or "technical_score is unavailable"}
+    try:
+        mod = _import_module("tradingagents.strategies.technical_score")
+    except Exception as exc:  # noqa: BLE001 - absence is a finding
+        return {**base, "status": "UNMEASURED",
+                "reason": f"{type(exc).__name__}: {exc}"}
+    categories = [str(c) for c in (getattr(mod, "CATEGORY_WEIGHTS", {}) or {})]
+    components = getattr(mod, "COMPONENTS", {}) or {}
+    if not categories or not components:
+        return {**base, "status": "UNMEASURED",
+                "reason": ("technical_score declares no CATEGORY_WEIGHTS / "
+                           "COMPONENTS table this layer can read")}
+
+    observations: dict = {}
+    per_category: dict[str, int] = dict.fromkeys(categories, 0)
+    for date in dates:
+        for ticker, row in (panels.get(date) or {}).items():
+            if not isinstance(row, dict):
+                continue
+            values = {k: v for k, v in row.items()
+                      if k in components and _num(v) is not None}
+            if not values:
+                continue
+            try:
+                aligned = mod.align_components(values)
+                scores = {c: (mod.category_score(c, aligned) or {}).get("score")
+                          for c in categories}
+            except (KeyError, ValueError, TypeError):
+                # A row the engine's own tables cannot score is one skipped
+                # observation, never a fabricated one.
+                continue
+            present = {c: float(s) for c, s in scores.items() if _num(s) is not None}
+            if not present:
+                continue
+            observations[f"{date}|{ticker}"] = present
+            for c in present:
+                per_category[c] += 1
+
+    if not observations:
+        return {**base, "status": "UNMEASURED",
+                "categories": categories, "per_category_observations": per_category,
+                "reason": ("no panel row carries a technical component set the "
+                           "engine's own tables can score into a category")}
+
+    matrix = redundancy_matrix(observations, categories, min_pairs=min_pairs)
+    withheld = sorted(c for c in categories if per_category[c] < int(min_pairs))
+    return {
+        **base,
+        "status": STATUS_ADVISORY,
+        "categories": categories,
+        "n_observations": len(observations),
+        "n_measured": matrix["n_measured"],
+        "n_pairs": matrix["n_pairs"],
+        "pairs": matrix["pairs"],
+        "per_category_observations": per_category,
+        "withheld_categories": {
+            c: (f"{per_category[c]} observation(s) < min_pairs={int(min_pairs)}; "
+                "the category leaves the matrix rather than correlating on too few")
+            for c in withheld
+        },
+        "reason": None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
 
@@ -1595,12 +1953,19 @@ def evaluate_panel(
     seed: int = 0,
     n_boot: int = 500,
     engines=None,
+    sector_of=None,
+    regime_of=None,
+    split_min_names: int = SPLIT_MIN_NAMES,
+    split_min_periods: int = SPLIT_MIN_PERIODS,
 ) -> dict:
     """Measure every declared factor/component over the cached panel.
 
     Pure over ``panels`` (no network). Emits per-factor statistics, the
-    redundancy matrix with its two named blocks, the per-engine findings and the
-    weight vector - which is ``None`` whenever the panel is below the
+    redundancy matrix with its two named blocks, the **sector and regime
+    robustness splits** (``sector_of`` / ``regime_of`` are the injectable label
+    axes; with none supplied the split is ``UNMEASURED`` with the reason), the
+    **technical category correlation matrix** (TECH-24), the per-engine findings
+    and the weight vector - which is ``None`` whenever the panel is below the
     cross-section floors.
     """
     registry = registry or engine_registry()
@@ -1632,6 +1997,7 @@ def evaluate_panel(
     n_trials = max(1, len(tested))
 
     factors: dict[str, dict] = {}
+    factor_scores: dict[str, dict] = {}
     for factor in sorted(declared):
         scores = to_scores(panels, dates, factor)
         if not scores:
@@ -1646,6 +2012,7 @@ def evaluate_panel(
                 ),
             }
             continue
+        factor_scores[factor] = scores
         stats = factor_statistics(
             scores, prices, holding=holding, n_buckets=n_buckets, n_trials=n_trials,
             min_names=min_names, min_obs=min_obs, train_frac=train_frac,
@@ -1745,6 +2112,17 @@ def evaluate_panel(
     status = alpha_health.cross_section_status(
         [len(panels.get(d) or {}) for d in dates]
     )
+
+    # --- PLAN-6 / MF-3: the sector and regime robustness splits -----------
+    robustness = panel_splits(
+        factor_scores, panels, dates=dates, sector_of=sector_of, regime_of=regime_of,
+        holding=holding, n_buckets=n_buckets,
+        min_names=split_min_names, min_periods=split_min_periods,
+    )
+
+    # --- TECH-24: the technical category correlation matrix ---------------
+    technical_categories = technical_category_matrix(panels, dates)
+
     weight_vector = {
         "produced": bool(status["status"] == alpha_health.CROSS_SECTION_OK),
         "status": STATUS_RESEARCH_ONLY,
@@ -1780,19 +2158,24 @@ def evaluate_panel(
             "min_names": int(min_names), "min_obs": int(min_obs),
             "train_frac": float(train_frac), "cpcv_splits": int(cpcv_splits),
             "embargo": int(embargo), "seed": int(seed), "n_boot": int(n_boot),
+            "split_min_names": int(split_min_names),
+            "split_min_periods": int(split_min_periods),
         },
         "harness_gate": HARNESS_GATE,
         "factors": factors,
         "redundancy": {**matrix, "blocks": blocks},
+        "robustness": robustness,
+        "technical_categories": technical_categories,
         "family": family,
         "engines": per_engine,
         "weight_vector": weight_vector,
         "basis": (
             "the measurement layer of the score set: the panel's own cost and "
             "coverage, the harness rows per factor, the OOS split and the "
-            "multiple-testing checks, the redundancy matrix and the per-engine "
-            "finding. No weight is invented and no gate, size or SCORE_BAND is "
-            "read (docs/scores/IMPLEMENTATION_PLAN.md section 7)"
+            "multiple-testing checks, the redundancy matrix, the sector/regime "
+            "robustness splits, the technical category correlation matrix and "
+            "the per-engine finding. No weight is invented and no gate, size or "
+            "SCORE_BAND is read (docs/scores/IMPLEMENTATION_PLAN.md section 7)"
         ),
         "allowed": allowed,
     }
@@ -1923,7 +2306,8 @@ def render_text(report: dict, build: dict | None = None) -> str:
         lines.append(
             f"- {factor} [{row.get('engine')}/{row.get('category')}]: "
             f"n={row.get('n_observations')} "
-            + (f"rank_ic={ic.get('mean_rank_ic')} ic_ir={ic.get('ic_ir')} "
+            + (f"IC={ic.get('mean_pearson_ic')} rank_ic={ic.get('mean_rank_ic')} "
+               f"ic_ir={ic.get('ic_ir')} "
                f"({row.get('ic_label')})" if ic.get("available") else
                f"IC withheld - {ic.get('reason')}")
         )
@@ -1965,6 +2349,49 @@ def render_text(report: dict, build: dict | None = None) -> str:
             )
         lines.append(f"    {block.get('reason')}")
     fam = report.get("family") or {}
+    lines.append("")
+    lines.append("## Robustness splits (sector / regime)")
+    robustness = report.get("robustness") or {}
+    for axis, block in robustness.items():
+        lines.append(
+            f"- {axis}: {block.get('status')} - {block.get('n_labels')} label(s) "
+            f"from {block.get('label_source')}; floors {block.get('floors')}"
+        )
+        if block.get("reason"):
+            lines.append(f"    withheld - {block['reason']}")
+            continue
+        lines.append(f"    label counts: {block.get('label_counts')}")
+        for factor, split in sorted((block.get("factors") or {}).items()):
+            for label, rec in sorted(split.items()):
+                if rec.get("available"):
+                    lines.append(
+                        f"    {factor} [{label}]: rank_ic={rec.get('mean_rank_ic')} "
+                        f"ic_ir={rec.get('ic_ir')} ({rec.get('ic_label')}) "
+                        f"n={rec.get('n_periods')}x{rec.get('n_names')}"
+                    )
+                else:
+                    lines.append(
+                        f"    {factor} [{label}]: withheld - {rec.get('reason')}")
+    tc = report.get("technical_categories") or {}
+    lines.append("")
+    lines.append("## Technical category correlations (TECH-24)")
+    lines.append(
+        f"- status {tc.get('status')}; {tc.get('n_measured')} of "
+        f"{len(tc.get('categories') or [])} categor(ies) measured over "
+        f"{tc.get('n_observations')} observation(s), {tc.get('n_pairs')} pair(s)")
+    if tc.get("reason"):
+        lines.append(f"    withheld - {tc['reason']}")
+    for c, reason in sorted((tc.get("withheld_categories") or {}).items()):
+        lines.append(f"    {c}: withheld - {reason}")
+    strongest = sorted(
+        ({"pair": k, **v} for k, v in (tc.get("pairs") or {}).items()),
+        key=lambda r: -abs(r.get("spearman") or 0.0),
+    )[:8]
+    for pair in strongest:
+        lines.append(
+            f"    {pair['pair']}: rho={pair['spearman']} n={pair['n']}"
+            + (" [redundant]" if pair.get("redundant") else "")
+        )
     lines.append("")
     lines.append("## Family multiple testing")
     lines.append(f"- pbo: {fam.get('pbo')}")
@@ -2011,6 +2438,22 @@ def _read_list(path: str | None, inline: str | None) -> list[str]:
     return out
 
 
+def read_label_map(path: str | None) -> dict | None:
+    """``{key: label}`` from a JSON file, or ``None`` when no path is given.
+
+    The sector/regime robustness axes come from outside the panel, so a manual
+    run supplies them as JSON: ``{ticker: sector}`` or ``{date: regime}``. A
+    non-object payload is refused rather than coerced.
+    """
+    if not path:
+        return None
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: expected a JSON object of {{key: label}}")
+    return {str(k): str(v) for k, v in data.items() if v}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dates", default=None, help="comma-separated trading dates")
@@ -2037,12 +2480,20 @@ def main(argv: list[str] | None = None) -> int:
                         help="read cached panels; no fetch of any kind")
     parser.add_argument("--cost-only", action="store_true",
                         help="print the API-call estimate for the universe and exit")
+    parser.add_argument("--sector-map", default=None,
+                        help=("JSON {ticker: sector} for the sector robustness "
+                              "split; default: the repo's static curated map"))
+    parser.add_argument("--regime-map", default=None,
+                        help=("JSON {date: regime} for the regime robustness "
+                              "split; the panel carries no regime series"))
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
     cache_dir = args.cache_dir or default_cache_dir()
     dates = [d[:10] for d in _read_list(args.dates_file, args.dates)]
     universe = _read_list(args.symbols_file, args.symbols)
+    sector_of = read_label_map(args.sector_map)
+    regime_of = read_label_map(args.regime_map)
     if args.cost_only:
         est = estimate_cost(len(universe), chunk_size=args.chunk_size)
         payload = {
@@ -2089,6 +2540,7 @@ def main(argv: list[str] | None = None) -> int:
         panels, dates=dates, holding=args.holding, n_buckets=args.buckets,
         train_frac=args.train_frac, cpcv_splits=args.cpcv_splits,
         embargo=args.embargo, seed=args.seed, n_boot=args.n_boot,
+        sector_of=sector_of, regime_of=regime_of,
     )
 
     if args.json:
@@ -2145,11 +2597,19 @@ __all__ = [
     "MIN_PAIRS",
     "OOS_TRAIN_FRAC",
     "REDUNDANT_ABS_CORR",
+    "SPLIT_MIN_NAMES",
+    "SPLIT_MIN_PERIODS",
     "STATUS_ADVISORY",
     "STATUS_RESEARCH_ONLY",
     "claim_interval",
     "evaluate_panel",
     "factor_statistics",
+    "panel_splits",
+    "read_label_map",
+    "regime_labels",
+    "robustness_split",
+    "sector_labels",
+    "technical_category_matrix",
     "multiple_testing",
     "observation_matrix",
     "period_series",

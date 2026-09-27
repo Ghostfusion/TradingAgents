@@ -266,7 +266,7 @@ prerequisites for factors in §2:
 | Level ROIC (NOPAT / invested capital) | `invested_capital = debt + equity − cash` is already built per year at `agents/utils/value_dip_tools.py:435-513` but consumed only as the denominator of the 3-year ΔIC; a local `roic` is computed at `value_dip_tools.py:1342` and passed into `earnings_power_value(..., roic=...)` for an excess-ROIC check, never rendered | small — the level is a division away |
 | Gross margin, current + prior | computed and stored at `dataflows/statement_parsing.py:841`; consumed by Piotroski (`f_dmargin`), Beneish (GMI) and the C-score; **no leaf renders it** | small — expose an existing value |
 | Interest coverage | canonical alias `"interest_expense"` exists (`statement_parsing.py:105`) and is named in the `quantitative_scores.py` vocabulary docstring (`:32`); **no code reads the key** (grep: those two mentions are the only hits in `tradingagents/` + `scripts/`) | small — pure wiring |
-| Working capital / assets | `canonical["working_capital"]` is built at `statement_parsing.py:1134-1139` with provenance; consumed only inside Altman X1 and Ohlson WCTA | small |
+| Working capital / assets | `canonical["working_capital"]` is built at `statement_parsing.py:1134-1139` with provenance; consumed only inside Altman X1 and Ohlson WCTA. **[CORRECTED 2026-09-26: the line reference is wrong — it conflates two sites. `statement_parsing.py:1134` is the `fin["gross_margin"] = {"current": gm, "prior": gm_p}` assignment (`dataflows/statement_parsing.py:1130-1134`), not working capital; the derivation `canonical["working_capital"] = current_assets − current_liabilities` (with provenance) is built at `dataflows/statement_parsing.py:1504-1509` (assignment at `:1508`), as this document's own §4.1 §7 already states.]** | small |
 | Debt growth (numeric) | only the Piotroski `f_dlever` boolean exists | small |
 | Asset growth (numeric) | only `overpriced_score` C6's `>0.10` boolean | small |
 | Receivable-days / inventory-days | DSRI is an internal Beneish input; the C-score's C2/C3 are booleans | small |
@@ -404,7 +404,7 @@ existing implementation.
 | 66 | Quick ratio | 0.50 | **C** | `ratios.compute_ratios:207` |
 | 67 | Cash / debt | 1.00 | **A** | `cash_ratio` is cash/**current liabilities** — a different ratio |
 | 68 | Net cash yield | 0.50 | **A** | — |
-| 69 | Working capital / assets | 0.50 | **P** | `canonical["working_capital"]` (`statement_parsing.py:1134`), internal to Altman/Ohlson |
+| 69 | Working capital / assets | 0.50 | **P** | `canonical["working_capital"]` (`statement_parsing.py:1134`), internal to Altman/Ohlson. **[CORRECTED 2026-09-26: cite `statement_parsing.py:1504-1509` — `:1134` is the `fin["gross_margin"]` assignment]** |
 | 70 | Debt growth | 0.50 | **P** | boolean only (`piotroski_f_score_detailed` `f_dlever`) |
 | 71 | Debt service capacity (OCF/debt) | 1.00 | **A** | Ohlson FUTL (`normalized.py:179`) never leaves the O-score |
 
@@ -752,7 +752,15 @@ Every row is a **wiring** job unless stated; §1.3 gives the evidence.
 Explicitly **not** in Phase A: deferred revenue (#79, no canonical key and
 `revenue` deliberately excludes unearned labels), debt-maturity risk (#100, no
 maturity data), capital-employed turnover (#85, no definition in the repo),
-Dechow-Dichev (#unreachable as currently wired).
+Dechow-Dichev (#unreachable as currently wired). [CORRECTED 2026-09-26: the
+Dechow-Dichev AQ is **built and reachable**, not deferred.
+`tradingagents/strategies/earnings_quality.py:115` defines `DD_MIN_PERIODS = 8`
+and `:118` defines `dechow_dichev_aq`; the leaf
+`tradingagents/agents/utils/analysis_tools.py:7207` fetches the SEC XBRL series
+(`fetch_ticker(..., with_sec_series=True)`) that feeds it — exactly the fix §1.4
+defect #4 records as FIXED. Only the "unreachable as currently wired" clause is
+stale; it remains a §3.6 build item only insofar as it is not yet a panel
+factor.]
 
 ---
 
@@ -1146,6 +1154,20 @@ concrete: FGS declares three factors, one of them is NA by construction, so
 runs on `revenue_yoy` + `eps_yoy` alone. This is a schema-versus-producer
 inconsistency inside the engine that the library's §4 makes visible; it is not a
 library defect.
+
+**[CORRECTED 2026-09-26: the count is three, not one.]**
+`tradingagents/strategies/factor_schema.py` declares `availability=NA` for
+`rev_cagr5` (`:257`), `fcf_yield` (`:329`) and `val_z` (`:337`) — three schema
+factors, not the single `rev_cagr5` this section names. A run of
+`fundamental_score.factor_gap_report()` at HEAD returns FGS `NA: [rev_cagr5]` and
+VS `NA: [fcf_yield, val_z]` (the "VS NA: [fcf_yield, val_z]" run). All three
+producers exist and are leafed — `capex_quality_read['rev_cagr5']` /
+`['fcf_yield']` (`capex_quality.py:52,247`) and the value_dip historical
+percentile (`val_z`) — so the **D-5 consequence** follows: the printed coverage
+denominator counts these as `NA` and therefore understates what the engine could
+measure. The schema's `NA` records an unwired panel path, not a missing quantity.
+(The `:251` citation above is the spec block's opening line; the `availability`
+marker is at `:257`.)
 
 **C13 — net debt sign.** §8: `NetDebt = TotalDebt − Cash`. The only place the
 quantity is rendered is the DCF bridge line

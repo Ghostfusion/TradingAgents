@@ -1,13 +1,25 @@
-"""Phase 6 - alternative-data velocity & analyst consensus.
+"""Phase 6 - alternative-data velocity, dynamics and positioning.
 
-- sentiment_velocity(series): rate of change in sentiment (e.g. daily
-  polarity means) over a small window - catching accelerating interest.
-- mention_spike(series, recent, history): ratio of recent mentions to
-  baseline; flags news/social heat.
-- consensus_over_seeds(verdicts): majority threshold over N LLM samples
-  (FLAG-trader style diversified reasoning; used when analysts run with
-  multiple seeds).
-- agree_rate(verdicts) helper: fraction of seeds in the majority bucket.
+- ``sentiment_velocity(series)``: the OLS slope of sentiment over the recent
+  window (per day) - the canonical direction and rate (owner Q4). It is never
+  replaced by a second 20-day delta producer.
+- ``sentiment_dynamics(series)``: the additions beside that slope - the
+  three-point second difference, the AR(1) ``phi`` and its half-life, the
+  mean-reversion speed and the lag-1 persistence (library §65/§75/§122-§125).
+- ``mention_volume(series, recent)``: the ratio of recent mentions to the
+  historic per-day baseline - the ATTENTION leg, never summed with tone.
+- ``crowd_ratio(bullish, bearish, neutrals)``: the bull/bear ratio. Its band is
+  a percentile over the name's OWN history once enough history exists, with the
+  display-only 40/60 constants as the documented fallback.
+- ``aggregate_daily_sentiment`` / ``aggregate_weighted_sentiment`` /
+  ``daily_sentiment_sma`` / ``weighted_rolling_sentiment``: the per-day series
+  the score engines read.
+
+The three dead seams the SentimentScore review named (``weighted_sentiment``,
+``blended_score``, ``consensus_verdict``) were deleted rather than kept: no
+production path can reach any of them (the recency/credibility blend is
+``aggregate_weighted_sentiment``'s job, the seed consensus has no multi-seed
+run, and the verdict blend has no caller).
 """
 
 from __future__ import annotations
@@ -40,6 +52,122 @@ def sentiment_velocity(sentiment_series: list, window: int = 5) -> float | None:
     return sum((xi - xm) * (yi - ym) for xi, yi in zip(x, sample, strict=True)) / den
 
 
+#: The floor below which ``sentiment_dynamics`` refuses to measure. Three points
+#: are the minimum for the second difference; five is the smallest sample on
+#: which an AR(1) regression and a lag-1 correlation are not noise. Declared
+#: here so the refusal is a stated policy rather than a silent one.
+SENTIMENT_DYNAMICS_MIN_POINTS = 5
+
+
+def _ols_slope(xs: list[float], ys: list[float]) -> float | None:
+    """OLS slope of ``ys`` on ``xs``, or None when it is undefined."""
+    n = len(xs)
+    if n < 2:
+        return None
+    xm = sum(xs) / n
+    ym = sum(ys) / n
+    den = sum((x - xm) ** 2 for x in xs)
+    if den <= 1e-12:
+        return None
+    return sum((x - xm) * (y - ym) for x, y in zip(xs, ys, strict=True)) / den
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    """Pearson correlation of ``xs`` and ``ys``, or None when either is flat."""
+    n = len(xs)
+    if n < 2:
+        return None
+    xm = sum(xs) / n
+    ym = sum(ys) / n
+    dx = sum((x - xm) ** 2 for x in xs)
+    dy = sum((y - ym) ** 2 for y in ys)
+    if dx <= 1e-12 or dy <= 1e-12:
+        return None
+    return sum((x - xm) * (y - ym) for x, y in zip(xs, ys, strict=True)) / (dx * dy) ** 0.5
+
+
+def sentiment_dynamics(
+    series: list, *, min_points: int = SENTIMENT_DYNAMICS_MIN_POINTS
+) -> dict | None:
+    """The dynamics beyond the slope, over one sentiment series (SENT-8).
+
+    ``series`` is the chronological daily sentiment the engine already holds
+    (the ``score`` column of ``daily_sentiment_sma``); ``None`` entries are
+    dropped, and a non-finite value is dropped too. Owner Q4 fixes
+    ``sentiment_velocity``'s OLS slope as the canonical direction, so these are
+    ADDITIONS beside it, never a replacement.
+
+    Returns ``{"second_difference", "ar1_phi", "half_life",
+    "mean_reversion_speed", "persistence", "n", "min_points", "basis"}``, or
+    ``None`` below ``min_points`` usable observations (the stated floor).
+
+    The four quantities, each with its library section and estimator:
+
+    - ``second_difference`` = ``S_t - 2 S_{t-1} + S_{t-2}``, the three-point
+      second difference (§65), the discrete acceleration of sentiment.
+    - ``ar1_phi`` = the OLS slope of ``S_t`` on ``S_{t-1}`` in
+      ``S_t = c + phi S_{t-1}`` (§75, §122). ``None`` when the lagged series is
+      flat (no slope is defined).
+    - ``half_life`` = ``-ln2 / ln|phi|`` (§75, §124), in the same per-period
+      unit as the series. ``None`` unless ``0 < |phi| < 1`` - a phi of 1 is a
+      random walk (no decay) and ``|phi| > 1`` is explosive, so neither has a
+      half-life.
+    - ``mean_reversion_speed`` = the OLS slope ``kappa`` of ``dS_t`` on
+      ``(mu - S_{t-1})`` in ``dS_t = kappa (mu - S_{t-1}) + e`` (§123), with
+      ``mu`` the sample mean. Positive means sentiment pulls back toward its
+      mean.
+    - ``persistence`` = the lag-1 autocorrelation ``Corr(S_t, S_{t-1})`` (§125).
+      This is the correlation form, deliberately NOT a second copy of the AR(1)
+      slope ``ar1_phi`` (§122's "persistence coefficient" is that same phi):
+      one quantity has one producer (master rule 15).
+    """
+    vals: list[float] = []
+    for v in series or []:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            vals.append(f)
+    floor = max(3, int(min_points))
+    if len(vals) < floor:
+        return None
+    n = len(vals)
+    lag_x, lag_y = vals[:-1], vals[1:]
+    second = vals[-1] - 2.0 * vals[-2] + vals[-3]
+    phi = _ols_slope(lag_x, lag_y)
+    half_life = None
+    if phi is not None and 1e-12 < abs(phi) < 1.0:
+        half_life = -math.log(2.0) / math.log(abs(phi))
+    mu = sum(vals) / n
+    mr = _ols_slope(
+        [mu - v for v in lag_x],
+        [lag_y[i] - lag_x[i] for i in range(len(lag_x))],
+    )
+    persistence = _pearson(lag_x, lag_y)
+    return {
+        "second_difference": round(second, 6),
+        "ar1_phi": round(phi, 6) if phi is not None else None,
+        "half_life": round(half_life, 4) if half_life is not None else None,
+        "mean_reversion_speed": round(mr, 6) if mr is not None else None,
+        "persistence": round(persistence, 6) if persistence is not None else None,
+        "n": n,
+        "min_points": floor,
+        "basis": (
+            "second_difference = S_t-2S_{t-1}+S_{t-2} (library §65); "
+            "ar1_phi = OLS slope of S_t on S_{t-1} (§75/§122); "
+            "half_life = -ln2/ln|phi| (§75/§124, requires 0<|phi|<1); "
+            "mean_reversion_speed = OLS slope of dS_t on (mu-S_{t-1}) (§123); "
+            "persistence = lag-1 autocorrelation Corr(S_t,S_{t-1}) (§125), not a "
+            "second copy of ar1_phi; the canonical direction stays "
+            "sentiment_velocity's OLS slope (owner Q4); "
+            f"n={n} usable observation(s), floor {floor}"
+        ),
+    }
+
+
 def mention_volume(history: list, recent: int = 1) -> float | None:
     """Recent mentions vs historic per-day baseline (ratio, >=1 hot)."""
     if not history:
@@ -63,69 +191,11 @@ def consensus_overlap(verdicts: list, threshold: float = 0.5) -> float | None:
     return top / len(verdicts)
 
 
-def consensus_verdict(verdicts: list, threshold: float = 0.5):
-    """Majority verdict if it clears the threshold, else 'mixed'."""
-    if not verdicts:
-        return None
-    agree = consensus_overlap(verdicts, threshold)
-    if agree is None or agree < threshold:
-        return "mixed"
-    counts: dict = {}
-    for v in verdicts:
-        counts[v] = counts.get(v, 0) + 1
-    return max(counts, key=counts.get)
-
-
-def blended_score(verdict_map: dict, weights: dict = None) -> float:
-    """Blend numeric scores (e.g. sentiment -1..1) by weights -> [-1, 1]."""
-    names = [k for k, v in verdict_map.items() if v is not None]
-    if not names:
-        return 0.0
-    if weights is None:
-        weights = dict.fromkeys(names, 1.0)
-    total = sum(weights.get(n, 1.0) * verdict_map[n] for n in names)
-    weight_sum = sum(weights.get(n, 1.0) for n in names)
-    return total / weight_sum if weight_sum else 0.0
-
-
 def decayed_weight(age_days: float, half_life: float = 7.0) -> float:
     """Exponential freshness weight: 0.5 after one half-life."""
     if age_days < 0:
         return 0.0
     return 0.5 ** (age_days / half_life)
-
-
-def _score_from_label(label):
-    text = (label or "").strip().lower()
-    if text in ("bullish", "positive", "buy", "long"):
-        return 1.0
-    if text in ("bearish", "negative", "sell", "short"):
-        return -1.0
-    if text in ("neutral", "hold", "flat", ""):
-        return 0.0
-    return None
-
-
-def weighted_sentiment(messages: list) -> float | None:
-    """Recency- and credibility-weighted mean sentiment in [-1, 1]."""
-    total_w = 0.0
-    acc = 0.0
-    for m in messages or []:
-        score = m.get("score")
-        if score is None:
-            score = _score_from_label(m.get("label"))
-        if score is None:
-            continue
-        try:
-            score = float(score)
-        except (TypeError, ValueError):
-            continue
-        if not -1.0 <= score <= 1.0:
-            continue
-        weight = decayed_weight(m.get("age_days", 0.0)) * max(0.0, float(m.get("credibility", 1.0)))
-        acc += score * weight
-        total_w += weight
-    return acc / total_w if total_w > 0 else None
 
 
 def surprise_velocity(
@@ -156,17 +226,138 @@ def score_from_counts(bullish: int, bearish: int, unlabeled: int = 0) -> float |
 
 # Display-only crowd bands (TradingSim bull/bear survey convention). They never
 # gate a decision: the survey source itself warns extremes persist for months.
+# They are now the DOCUMENTED FALLBACK: when the name has enough of its own
+# crowd-ratio history the band is a percentile of that history (owner Q5).
 _CROWD_BULL = 60.0
 _CROWD_BEAR = 40.0
 
+#: Percentile thresholds are CONFIGURATION, not hard-coded methodology (owner
+#: Q5): the 20/80 split is the default and is overridable per call.
+_CROWD_PCT_LOW = 20.0
+_CROWD_PCT_HIGH = 80.0
 
-def crowd_ratio(bullish, bearish, neutrals: int = 0) -> dict | None:
-    """Bull/bear ratio ``B/(B+BE)*100`` with display-only 40/60 bands.
+#: Below this many prior crowd ratios there is no distribution to rank against,
+#: so the 40/60 constants are used instead - with the method named in the basis.
+_CROWD_MIN_HISTORY = 20
+
+
+def crowd_band_percentile(
+    ratio,
+    history,
+    *,
+    low_pct: float = _CROWD_PCT_LOW,
+    high_pct: float = _CROWD_PCT_HIGH,
+    min_history: int = _CROWD_MIN_HISTORY,
+) -> dict:
+    """Rank a crowd ratio inside the name's OWN history, or fall back to 40/60.
+
+    ``ratio`` is today's ``crowd_ratio`` value (0-100); ``history`` is the
+    name's prior ratios, oldest -> newest (the per-name baseline the store at
+    ``_crowd_baseline_file`` accumulates). ``percentile`` is the share of the
+    history at or below ``ratio`` (0-100).
+
+    The band is ``crowded-bullish`` at or above ``high_pct``, ``crowded-bearish``
+    at or below ``low_pct``, ``neutral`` between them. **Below ``min_history``
+    prior ratios the percentile is not measurable**, so the band falls back to
+    the display-only 40/60 constants and the basis says which method was used:
+    a percentile over three points would be a fabricated rank, and the constants
+    are the documented fallback (owner Q5), not a silent substitute.
+
+    Returns ``{"ratio", "percentile", "band", "method", "n_history",
+    "thresholds", "basis"}``. ``method`` is ``"percentile"``,
+    ``"constant-fallback"`` (too little history), or ``"unavailable"`` (no
+    ratio to band). ``thresholds`` carries the configuration actually used.
+    """
+    thresholds = {
+        "low_pct": float(low_pct),
+        "high_pct": float(high_pct),
+        "min_history": int(min_history),
+    }
+    hist: list[float] = []
+    for v in history or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            hist.append(f)
+    if ratio is None:
+        return {
+            "ratio": None,
+            "percentile": None,
+            "band": None,
+            "method": "unavailable",
+            "n_history": len(hist),
+            "thresholds": thresholds,
+            "basis": "no crowd ratio to band (the producer returned None)",
+        }
+    r = float(ratio)
+    if len(hist) < thresholds["min_history"]:
+        band = (
+            "crowded-bullish" if r >= _CROWD_BULL
+            else "crowded-bearish" if r <= _CROWD_BEAR
+            else "neutral"
+        )
+        return {
+            "ratio": r,
+            "percentile": None,
+            "band": band,
+            "method": "constant-fallback",
+            "n_history": len(hist),
+            "thresholds": thresholds,
+            "basis": (
+                f"{len(hist)} prior ratio(s) held, {thresholds['min_history']} "
+                "needed for a percentile of this name's own history; fell back to "
+                "the display-only 40/60 constants (never a gate)"
+            ),
+        }
+    pct = round(sum(1 for h in hist if h <= r) / len(hist) * 100.0, 4)
+    band = (
+        "crowded-bullish" if pct >= thresholds["high_pct"]
+        else "crowded-bearish" if pct <= thresholds["low_pct"]
+        else "neutral"
+    )
+    return {
+        "ratio": r,
+        "percentile": pct,
+        "band": band,
+        "method": "percentile",
+        "n_history": len(hist),
+        "thresholds": thresholds,
+        "basis": (
+            f"percentile of this name's own crowd-ratio history: {pct:.1f} of "
+            f"{len(hist)} prior ratio(s); bands <= {thresholds['low_pct']:g} "
+            f"crowded-bearish / >= {thresholds['high_pct']:g} crowded-bullish "
+            "(thresholds are configuration, owner Q5; never a gate)"
+        ),
+    }
+
+
+def crowd_ratio(
+    bullish,
+    bearish,
+    neutrals: int = 0,
+    *,
+    history=None,
+    low_pct: float = _CROWD_PCT_LOW,
+    high_pct: float = _CROWD_PCT_HIGH,
+    min_history: int = _CROWD_MIN_HISTORY,
+) -> dict | None:
+    """Bull/bear ratio ``B/(B+BE)*100`` with percentile-or-fallback bands.
 
     Neutrals are excluded from the denominator (the source's convention).
-    ``B+BE == 0`` returns None - never a 50 fallback. Returns
-    ``{"ratio", "net_share", "band", "basis"}`` (``basis`` names the source and
-    the display-only caveat) or None when the ratio is undefined.
+    ``B+BE == 0`` returns None - never a 50 fallback.
+
+    ``history`` is the name's own prior crowd ratios (oldest -> newest). When it
+    holds at least ``min_history`` values the band is a **percentile of that
+    history** (``crowd_band_percentile``); otherwise the display-only 40/60
+    constants are the documented fallback and ``band_method`` says so. The
+    percentile thresholds are configuration (owner Q5), never hard-coded
+    methodology.
+
+    Returns ``{"ratio", "net_share", "band", "percentile", "band_method",
+    "basis"}`` (``basis`` names the source and the display-only caveat) or None
+    when the ratio is undefined.
     """
     b = max(0, int(bullish or 0))
     be = max(0, int(bearish or 0))
@@ -174,21 +365,21 @@ def crowd_ratio(bullish, bearish, neutrals: int = 0) -> dict | None:
     if denom <= 0:
         return None
     ratio = round(b / denom * 100.0, 4)
-    if ratio >= _CROWD_BULL:
-        band = "crowded-bullish"
-    elif ratio <= _CROWD_BEAR:
-        band = "crowded-bearish"
-    else:
-        band = "neutral"
+    banded = crowd_band_percentile(
+        ratio, history, low_pct=low_pct, high_pct=high_pct, min_history=min_history
+    )
     return {
         "ratio": ratio,
         "net_share": score_from_counts(b, be),
-        "band": band,
+        "band": banded["band"],
+        "percentile": banded["percentile"],
+        "band_method": banded["method"],
         "basis": (
             "crowd ratio = bullish/(bullish+bearish)*100 from crowd counts "
-            "(StockTwits/Reddit); neutrals excluded; bands >=60 crowded-bullish / "
-            "<=40 crowded-bearish are display-only (not validated; the survey "
-            "source warns extremes persist for months) and never a gate; "
+            "(StockTwits/Reddit); neutrals excluded; "
+            + banded["basis"]
+            + "; the bands are display-only (not validated; the survey source "
+            "warns extremes persist for months) and never a gate; "
             f"neutrals={max(0, int(neutrals or 0))} excluded from the denominator"
         ),
     }
@@ -270,14 +461,40 @@ def _baseline_file(cache_dir, ticker) -> str:
     return str(root / f"sentiment_baseline_{safe}.jsonl")
 
 
+def _crowd_baseline_file(cache_dir, ticker) -> str:
+    """Per-name crowd-RATIO history, the distribution the percentile ranks in.
+
+    A separate file from ``_baseline_file``: that one holds the signed sentiment
+    score ``surprise_velocity`` z-scores, while the crowd percentile needs the
+    0-100 bull/bear ratio series (a different unit and a different question).
+    """
+    root = Path(cache_dir or "~/.tradingagents").expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    safe = ticker.replace(".", "_").upper()
+    return str(root / f"crowd_baseline_{safe}.jsonl")
+
+
+def _read_float_history(path) -> list[float]:
+    """One float per non-blank line; unparseable lines are skipped, not zeroed."""
+    out: list[float] = []
+    if Path(path).exists():
+        for ln in Path(path).read_text(encoding="utf-8").splitlines():
+            if ln.strip():
+                with contextlib.suppress(ValueError):
+                    out.append(float(ln))
+    return out
+
+
 def compute_social_scores(
     ticker: str, cache_dir: str | None = None, limit: int = 30, record: bool = True
 ) -> dict | None:
     """Deterministic score + surprise velocity from StockTwits counts.
 
     Persists a rolling score baseline per ticker so ``surprise_velocity`` can
-    z-score today's sentiment vs its own history. Returns None on any failure
-    (the caller degrades silently).
+    z-score today's sentiment vs its own history, and a rolling crowd-RATIO
+    baseline so ``crowd_ratio``'s band can be a percentile of the name's own
+    history (owner Q5) instead of only the 40/60 constants. Returns None on any
+    failure (the caller degrades silently).
 
     ``record`` controls the APPEND to that baseline, and it is the fix for a
     double-write: this function has two callers in one run - the sentiment
@@ -286,7 +503,9 @@ def compute_social_scores(
     and the second call's ``surprise_velocity`` was z-scored against a history
     that already contained today's value. The prefetch is the designated
     RECORDER (``record=True``); every other caller is a READER and passes
-    ``record=False``, so the baseline advances exactly once per run.
+    ``record=False``, so the baseline advances exactly once per run. The crowd
+    ratio follows the same rule: it is read before today's value is appended, so
+    today never ranks inside its own baseline.
     """
     try:
         from tradingagents.dataflows.stocktwits import stocktwits_counts
@@ -299,17 +518,17 @@ def compute_social_scores(
         if score is None:
             return None
         path = _baseline_file(cache_dir, ticker)
-        history = []
-        if Path(path).exists():
-            for ln in Path(path).read_text(encoding="utf-8").splitlines():
-                if ln.strip():
-                    with contextlib.suppress(ValueError):
-                        history.append(float(ln))
+        history = _read_float_history(path)
         velocity = surprise_velocity(score, history[-30:])
         if record:
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(f"{score}\n")
-        crowd = crowd_ratio(bull, bear, neutrals=unlabeled)
+        crowd_path = _crowd_baseline_file(cache_dir, ticker)
+        crowd_history = _read_float_history(crowd_path)
+        crowd = crowd_ratio(bull, bear, neutrals=unlabeled, history=crowd_history)
+        if record and crowd is not None and crowd.get("ratio") is not None:
+            with open(crowd_path, "a", encoding="utf-8") as fh:
+                fh.write(f"{crowd['ratio']}\n")
         n_bull = max(0, int(bull or 0))
         n_bear = max(0, int(bear or 0))
         n_unl = max(0, int(unlabeled or 0))
@@ -642,13 +861,18 @@ def aggregate_weighted_sentiment(
     (``unweighted``), the relevance-weighted generalisation (``weighted`` =
     ``sum(w*s)/sum(w)`` with ``w = (relevance/100) * 2^(-age/HL) *
     official_boost``), the article count (``n``), the neutral share
-    (``|s| < neutral_eps``), the weighted population ``dispersion`` and a
-    ``basis`` line. Syndicated duplicates are dropped by normalised headline
-    before counting, and the close-time -> next-session bucketing is kept.
-    ``weighted`` is None below ``min_n`` so a single-article day is never read
-    as a consensus. Returns rows chronologically, or None when no article has a
-    usable score. Equal weights (no relevance, ``official_boost=1.0``, decay
-    off) make ``weighted`` identical to ``unweighted``.
+    (``|s| < neutral_eps``), the positive share (``bull_share``: the fraction of
+    the day's accepted, scored articles with ``s > +neutral_eps`` - strictly
+    above the SAME epsilon the row reports, so "positive" means the same thing
+    here as "not neutral" does, and ``n`` is the denominator), the weighted
+    population ``dispersion`` and a ``basis`` line. Syndicated duplicates are
+    dropped by normalised headline before counting, and the close-time ->
+    next-session bucketing is kept. ``weighted`` is None below ``min_n`` so a
+    single-article day is never read as a consensus; ``bull_share`` is None -
+    never 0 - when the day has no accepted scored article. Returns rows
+    chronologically, or None when no article has a usable score. Equal weights
+    (no relevance, ``official_boost=1.0``, decay off) make ``weighted``
+    identical to ``unweighted``.
     """
     if not articles:
         return None
@@ -727,6 +951,11 @@ def aggregate_weighted_sentiment(
                 "n": n,
                 "neutral_share": round(
                     sum(1 for s in scores if abs(s) < float(neutral_eps)) / n, 4
+                ),
+                "bull_share": (
+                    round(sum(1 for s in scores if s > float(neutral_eps)) / n, 4)
+                    if n
+                    else None
                 ),
                 "dispersion": dispersion["dispersion"] if dispersion else None,
                 "eps": float(neutral_eps),
@@ -839,15 +1068,15 @@ def weighted_rolling_sentiment(
 
 __all__ = [
     "sentiment_velocity",
+    "sentiment_dynamics",
+    "SENTIMENT_DYNAMICS_MIN_POINTS",
     "mention_volume",
     "consensus_overlap",
-    "consensus_verdict",
-    "blended_score",
     "decayed_weight",
-    "weighted_sentiment",
     "surprise_velocity",
     "score_from_counts",
     "crowd_ratio",
+    "crowd_band_percentile",
     "sentiment_dispersion",
     "compute_social_scores",
     "computed_sentiment_line",

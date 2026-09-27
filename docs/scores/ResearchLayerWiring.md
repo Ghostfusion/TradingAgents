@@ -101,6 +101,17 @@ debate agent can cite a number and have it deterministically verified.**
 > registry *and* — because `reporting.py:1701-1703` renders the same string as
 > report section `IVa` — the human report. One producer, three readers.
 
+**[FIXED 2026-09-26 — the third reader was gated on an unrelated string
+(`RLW-5`).]** The section that renders this string into the human report lived
+behind `if cc and "Trade plan card" in cc:` — the trade-plan card's own text
+inside the same string. A run whose compiled context carried the scorecard block
+but no trade-plan card therefore lost the scorecard from `complete_report.md`
+with the master gate **on**, which is precisely the "the model may interpret an
+engine result" invariant failing silently. The condition is now `if cc:` (the
+gate decides whether the block exists; the card no longer decides whether the
+human reader sees it), and the block itself is read once, before section I, so
+the per-analyst sections, `IVc` and the card all read one snapshot.
+
 ### 1.3 The gap, per engine
 
 | Engine | In `computed_decision_context` | Reachable by a debate agent | Reachable by an analyst's LLM (gate on) |
@@ -238,6 +249,19 @@ The trade-off, stated plainly:
 | **Pre-graph (recommended)** | the engines fetch their own data before the analysts run; a slow engine can delay a run | the debate's number and the report's number are provably one number; the evidence the debate reasons over is the evidence the report shows |
 | Post-analysts (a second node) | needs a new node, a new edge, and a second "is it built yet" check in every consumer | the engines could read the analysts' already-fetched data | 
 | Per-consumer (today) | each consumer recomputes; two consumers can disagree | none — this is the defect |
+
+**[CORRECTED 2026-09-26: the prompt block was one of the recomputing consumers
+(`RLW-2`).]** `report_hygiene.engine_score_block` called `_call_engine(...)` —
+it re-ran the analyst's owned engine — while its own docstring claimed the result
+was "PRE-COMPUTED and handed over", so the prompt's owned-engine number and the
+scorecard block's number for the same engine came from two producers (and the
+event engine's could differ, because the leaf fetches its own catalyst snapshot).
+It now takes `snapshot=state["quant_scorecard"]` from all four analysts and
+renders the owned engine's line from that snapshot through the **same** helper the
+report section uses (`_engine_summary_line`), so the prompt's number, the
+report's number and the card's number are one number. The no-snapshot path keeps
+the direct call as a documented caller-bug fallback; the run path no longer
+reaches it.
 
 The pre-graph cost is **not new spending**: the leaf and the card each pay that
 fetch today. Doing it once is cheaper than the status quo.
@@ -919,6 +943,20 @@ D3 - freeze the existing report contract
 So the four `unchanged` rows above are **open future questions, not decisions**.
 The reasoning behind D3 would apply to them equally, but deciding them here would
 be exactly the scope creep D3 exists to prevent.
+
+**[ANSWERED 2026-09-26 — the freeze holds, and it is now the general rule
+(`D9`).]** The owner's principle: **`InternalScoreModel ≠ ReportContract`** — a new
+internal calculation renders through the existing contract, and the four rows
+above stay frozen. The one exception is a string whose **semantics are factually
+wrong**: that is a *contract change*, versioned (`basis_v1`/`basis_v2`, or a
+`report_schema_version`), *"not ordinary refactoring"*. Two consequences for this
+document: (1) the seven engine renderers and the `basis` tails below/above are
+frozen — a future engine's new maths must not reword them; (2) this round's stale
+printed provenance strings and mislabelled producer declarations were corrected
+**under the exception**, because they named a producer that did not produce the
+number (a false statement, not a rephrasing) — and the correction is recorded as
+a semantic fix in each module's own docstring so a later reader can tell why the
+text changed. `MASTER_PLAN.md` §2.1 (D9).
 
 The concrete sites those two middle rows name, so the open question is actionable
 rather than abstract:

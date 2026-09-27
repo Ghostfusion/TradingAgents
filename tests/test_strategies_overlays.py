@@ -97,11 +97,12 @@ def test_fold_sentiment_scales_when_ic_clears_floor():
     overlay = {"position_scale": 1.0, "context": ""}
     out = fold_sentiment_into_overlay(
         overlay,
-        {"rank_ic": 0.05, "innovation": 0.3, "sma_7d": 0.4, "source": "eodhd"},
+        {"self_lead_lag": 0.05, "innovation": 0.3, "sma_7d": 0.4, "source": "eodhd"},
         min_ic=0.02,
     )
     assert out["position_scale"] == pytest.approx(1.2, abs=1e-3)
     assert out["news_sentiment"]["source"] == "eodhd"
+    assert out["news_sentiment"]["self_lead_lag"] == 0.05
     assert "news-sentiment scale" in out["context"]
 
 
@@ -110,7 +111,7 @@ def test_fold_sentiment_neutral_below_ic_floor():
 
     overlay = {"position_scale": 1.0, "context": ""}
     out = fold_sentiment_into_overlay(
-        overlay, {"rank_ic": 0.01, "innovation": 0.3, "source": "eodhd"}
+        overlay, {"self_lead_lag": 0.01, "innovation": 0.3, "source": "eodhd"}
     )
     assert out["position_scale"] == 1.0
     assert out["news_sentiment"]["scale"] == 1.0
@@ -139,7 +140,7 @@ def test_graph_sentiment_read_returns_context(monkeypatch):
     read = ta._sentiment_factor_read("AAPL", closes)
     assert read is not None
     assert read["source"] == "eodhd"
-    assert abs(read["rank_ic"]) >= 0.02
+    assert abs(read["self_lead_lag"]) >= 0.02
     assert read["innovation"] is not None
 
 
@@ -151,5 +152,78 @@ def test_graph_sentiment_read_off_returns_none():
     cfg["enable_sentiment_factor"] = False
     ta = TradingAgentsGraph(debug=False, config=cfg)
     assert ta._sentiment_factor_read("AAPL", [100.0] * 120) is None
+
+
+def _read_with_feed(monkeypatch, *, eodhd=None, av=None, gdelt=None):
+    """Construct the graph with the fold on and stub the three feeds."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    cfg = DEFAULT_CONFIG.copy()
+    cfg["enable_sentiment_factor"] = True
+    ta = TradingAgentsGraph(debug=False, config=cfg)
+    for target, feed in (
+        ("tradingagents.dataflows.eodhd._sentiment_points_eodhd", eodhd),
+        (
+            "tradingagents.dataflows.alpha_vantage_news._sentiment_points_alpha_vantage",
+            av,
+        ),
+        ("tradingagents.dataflows.gdelt._sentiment_points_gdelt", gdelt),
+    ):
+        monkeypatch.setattr(target, lambda *a, _v=feed, **k: _v)
+    return ta
+
+
+def test_graph_sentiment_read_all_sources_empty_returns_none(monkeypatch):
+    """The read degrades only when EVERY feed in the chain is empty (SENT-13)."""
+    ta = _read_with_feed(monkeypatch)
+    assert ta._sentiment_factor_read("AAPL", [100.0] * 120) is None
+
+
+def test_graph_sentiment_read_falls_back_and_normalises_gdelt(monkeypatch):
+    """EODHD/AV empty -> GDELT answers, and its native -100..100 tone is
+    normalised to the unit scale on arrival, so the reported ``sma_7d`` is
+    comparable to an EODHD one instead of ~100x it (SENT-12/SENT-13)."""
+    rng = np.random.default_rng(7)
+    closes = list(100.0 * np.cumprod(1 + rng.normal(0.001, 0.02, 120)))
+    fwd = [closes[i + 3] / closes[i] - 1.0 for i in range(90)]
+    # Native GDELT tone: -100..100, a planted 3-day predictive tilt.
+    gdelt_points = [
+        {
+            "date": f"2026-05-{1 + i // 30:02d}",
+            "score": float(100.0 * (5.0 * fwd[i] + rng.standard_normal())),
+            "n": 2,
+        }
+        for i in range(90)
+    ]
+    ta = _read_with_feed(monkeypatch, gdelt=gdelt_points)
+    read = ta._sentiment_factor_read("AAPL", closes)
+    assert read is not None
+    assert read["source"] == "gdelt"
+    assert read["sma_7d"] is not None
+    # Unit scale: a native ~100 tone must not survive as a ~100 value.
+    assert abs(read["sma_7d"]) < 1.0
+    assert abs(read["self_lead_lag"]) >= 0.02
+
+
+def test_graph_sentiment_read_reports_self_lead_lag_not_rank_ic(monkeypatch):
+    """The statistic is a single-name self-correlation, not a cross-sectional
+    IC: the key is ``self_lead_lag`` and there is no ``rank_ic`` alias."""
+    rng = np.random.default_rng(5)
+    closes = list(100.0 * np.cumprod(1 + rng.normal(0.001, 0.02, 120)))
+    fwd = [closes[i + 3] / closes[i] - 1.0 for i in range(90)]
+    points = [
+        {
+            "date": f"2026-05-{1 + i // 30:02d}",
+            "score": float(5 * fwd[i] + rng.standard_normal()),
+            "n": 2,
+        }
+        for i in range(90)
+    ]
+    ta = _read_with_feed(monkeypatch, eodhd=points)
+    read = ta._sentiment_factor_read("AAPL", closes)
+    assert read is not None
+    assert set(read) == {"self_lead_lag", "innovation", "sma_7d", "source"}
+    assert "rank_ic" not in read
 
 

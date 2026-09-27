@@ -118,9 +118,17 @@ def test_the_label_moves_when_the_trend_moves() -> None:
     assert (up, down) == ("bull", "bear")
 
 
-def test_the_trend_moves_through_the_real_overlay_path_at_vol_pct_half() -> None:
-    """The same clause through `overlays.build_strategy_overlays`, whose own
-    volatile leg pins ``vol_pct`` at 0.5 for every 60-251-bar history."""
+def test_the_trend_moves_through_the_real_overlay_path() -> None:
+    """The same clause through `overlays.build_strategy_overlays`.
+
+    The old docstring here said the volatile leg "pins ``vol_pct`` at 0.5 for
+    every 60-251-bar history" - that WAS REG-1's defect, and it is gone: the
+    percentile is measured over the tape's own overlapping windows. This
+    multiplicative fixture has (near-)zero dispersion across its windows, so the
+    volatility leg is not asserted and the chop leg still moves the label with
+    the trend. The additive ramp where the vol leg DOES dominate is covered by
+    `test_strategies_regime.py::test_regime_label_moves_with_the_trend_on_the_default_path`.
+    """
     from tradingagents.strategies.overlays import build_strategy_overlays
 
     cfg = {"enable_strategy_overlays": True, "volatility_estimator": "close"}
@@ -589,29 +597,39 @@ def test_vol_percentile_returns_none_with_a_reason_when_it_cannot_measure() -> N
 
 
 def test_vol_percentile_still_ranks_a_measurable_history() -> None:
-    """The fix must not turn the producer into a permanent None."""
+    """The fix must not turn the producer into a permanent None.
+
+    REG-3's convention: the rank counts windows STRICTLY below the latest over
+    ``n``, so the ceiling is ``(n-1)/n`` - the loudest latest window sits at
+    5 of 6, not at the old self-inclusive 6 of 6.
+    """
     quiet = [_noisy(30, sigma=0.001, seed=i) for i in range(5)]
     loud = quiet + [_noisy(30, sigma=0.05, seed=99)]
     ranked = vol_percentile(loud, current_window=21)
-    assert ranked is not None and 0.0 < ranked <= 1.0
-    assert ranked == pytest.approx(1.0)  # the loudest window is the latest
+    assert ranked is not None and 0.0 < ranked < 1.0
+    assert ranked == pytest.approx(5 / 6)  # the loudest window is the latest
     read = vol_percentile_read(loud, current_window=21)
-    assert read["percentile"] == pytest.approx(1.0)
+    assert read["percentile"] == pytest.approx(5 / 6)
     assert read["reason"] is None
     assert read["windows"] == 6
     assert "percentile of 6 trailing window(s)" in read["basis"]
 
 
 def test_the_defect_fix_is_the_only_thing_that_moved_in_the_producer() -> None:
-    """The rank itself is unchanged: the same history still ranks the same way
-    (the latest window sits at 2 of 3, strictly between the two older ones)."""
+    """The rank is the strictly-below count over ``n``, floor 0 (REG-3).
+
+    The latest window sits strictly between the two older ones, so exactly one
+    window is strictly below it: 1 of 3. The self-inclusive ``<=`` this replaced
+    counted the latest window against itself and read 2 of 3, which floored the
+    printed value at ``1/n``.
+    """
     hist = [
         _noisy(30, sigma=0.001, seed=1),
         _noisy(30, sigma=0.05, seed=2),
         _noisy(30, sigma=0.003, seed=3),
     ]
     pct = vol_percentile(hist, current_window=21)
-    assert pct == pytest.approx(2 / 3)
+    assert pct == pytest.approx(1 / 3)
     assert math.isclose(vol_percentile_read(hist)["percentile"], pct, rel_tol=1e-12)
 
 

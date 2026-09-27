@@ -612,12 +612,37 @@ built. These are the master's §6 requirements instantiated for this engine.
    view and TechnicalScore as the *setup* view — permitted only if every shared
    producer is named as a stated dependency and neither re-derives the other's
    number (master rule 3). This document does not resolve it.
+   **[ANSWERED 2026-09-26 by the owner: three separate engines, none above the
+   others, each with a stated question it answers.** `TechnicalScore` = *"what is
+   this security doing?"* — RSI, MACD, stochastic, Bollinger %B, ATR, ADX, moving-
+   average distance and crossover, price and volume momentum, price structure,
+   breakouts, support/resistance, trend strength, **the security's own relative
+   momentum**. `MarketScore` = *"what is the market doing around this security?"* —
+   index trend and momentum, **market and sector breadth**, advance/decline, new
+   highs/lows, market volatility, credit conditions, market liquidity, cross-asset
+   confirmation, **index relative strength**, market participation. `RegimeScore`
+   = *"what statistical/economic state is the environment in?"* — bull/bear,
+   volatility, risk-on/off, liquidity, inflation, growth, monetary-policy,
+   correlation, trend and crisis regimes. The owner's words: *"the three scores can
+   therefore legitimately all be bullish without being duplicates."* **This is a
+   reading (a)-shaped resolution with one addition** — `TechnicalScore` keeps its
+   built categories (`Trend 20 / Momentum 18 / RS 12 / Volatility 5 / Breadth 5`,
+   unchanged), and `MarketScore` is built from the *market-around-the-name* rows
+   so its momentum, RS and breadth are index- and market-level rather than the
+   security's own. The invariant-8 reading is the owner's D2 rule applied here too:
+   where a producer is genuinely shared (`market_breadth`), it is **computed once
+   and read twice**, with each reader's dependency named. `MASTER_PLAN.md` §2.1.]**
 2. **Breadth and the market regime: MarketScore or `RegimeScore`?** The library's
    own §139 gives breadth and market regime to MarketScore *and* the breadth
    regime, correlation regime and VIX regime to RegimeScore. `RegimeScore` is
    built (`regime_score.py::regime_score:265`) and owns the market-wide
    environment; a market-wide breadth producer (missing today, §94-§102) would be
    its sixth/seventh leg. Which engine owns it?
+   **[ANSWERED 2026-09-26: `MarketScore` owns market-wide breadth** (its §94-§102
+   rows are the scoring dimension); `RegimeScore` keeps the breadth *regime* as a
+   **state** input over the same producer. One producer, two readers — the same
+   rule the owner stated for valuation (*"calculate it once, attribute it twice"*).
+   `regime_score.breadth` is not moved and not duplicated.]**
 3. **Does MarketScore implement the 140-section library or a clustered subset?**
    The library answers its own question (§140: clusters, not ~130 independent
    votes) and then lists 140 sections. Is the acceptance criterion "every section

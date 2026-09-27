@@ -10,6 +10,14 @@ buy and its swing exit:
   ADX / DI   - Wilder Average Directional Index trend-strength filter
   Chandelier - trailing stop = highest high - k x ATR (in swing.py instead)
 
+The depth reads at the end of the module (library §7/§8/§21-§25/§28-§30/
+§43-§48/§58/§59/§80/§91/§101-§104) expose the level / slope / ratio form of
+series the indicators above already build: the OBV level and slope, the
+range position inside the Donchian channel, the SMA20/SMA100 legs, the MACD
+line/signal/histogram with their one-bar changes, the Bollinger-bandwidth
+family, a per-series mean-reversion z, the volume spike/trend/breakout
+confirmation and the ATR ratio/movement/acceleration.
+
 Every function is pure and returns None on missing/invalid input (the
 no-fabrication rule). No network, no state.
 """
@@ -52,6 +60,45 @@ def _roc(value: float | None, prev: float | None) -> float | None:
     if value is None or prev is None or prev == 0:
         return None
     return float(value) / float(prev) - 1.0
+
+
+def _ols_slope(values: list) -> float | None:
+    """Least-squares slope per step of ``values`` (x = 0..n-1).
+
+    The library's ``Slope(series, n)``. None with fewer than two usable
+    observations. Used on series whose mean is not a usable denominator (OBV
+    crosses zero), so the mean-normalised ``relative_strength.slope_pct``
+    convention is not applicable.
+    """
+    vals = [float(v) for v in values if v is not None]
+    n = len(vals)
+    if n < 2:
+        return None
+    xbar = (n - 1) / 2.0
+    ybar = sum(vals) / n
+    sxx = sum((i - xbar) ** 2 for i in range(n))
+    if sxx <= 0:
+        return None
+    return sum((i - xbar) * (v - ybar) for i, v in enumerate(vals)) / sxx
+
+
+def _pct_rank(window: list, value: float) -> float | None:
+    """Share of ``window`` at or below ``value`` (the empirical rank used by
+    ``compression.atr_compression_read``: the window minimum reads
+    ``1/len(window)``, not 0). None on an empty window."""
+    vals = [float(v) for v in window if v is not None]
+    if not vals:
+        return None
+    return sum(1 for v in vals if v <= value) / len(vals)
+
+
+def _p95(values: list) -> float | None:
+    """Nearest-rank 95th percentile of ``values`` (library §58's denominator)."""
+    vals = sorted(float(v) for v in values if v is not None)
+    if not vals:
+        return None
+    idx = min(len(vals) - 1, max(0, math.ceil(0.95 * len(vals)) - 1))
+    return vals[idx]
 
 
 def kst(
@@ -302,7 +349,14 @@ __all__ = [
     "williams_r",
     "keltner_channel",
     "donchian_channel",
+    "range_position",
     "obv_divergence",
+    "sma_legs",
+    "macd_depth",
+    "bollinger_bandwidth",
+    "mean_reversion_z",
+    "volume_depth",
+    "atr_depth",
     "parabolic_sar",
     "elder_thermometer",
     "aroon",
@@ -420,22 +474,53 @@ def donchian_channel(highs, lows, n: int = 20, closes=None) -> dict:
     the bar it belongs to. ``breakout_ref_up`` / ``breakout_ref_dn`` are those
     prior-window levels, so the flag is checkable against the printed numbers.
 
-    ``closes`` is optional: without it the flags stay ``None`` (the levels are
-    still returned). Every in-repo caller passes it.
+    Depth of the same read (library §43/§44): ``persistence_up`` /
+    ``persistence_dn`` are the share of the last ``n`` closes that stayed
+    beyond ``breakout_ref_up`` / ``breakout_ref_dn`` (0..1, the observation
+    window so far), and ``false_breakout_up`` / ``false_breakout_dn`` flag a
+    close that had cleared the reference level earlier in the window but is
+    back inside it on the latest bar - a failed breakout, not a breakout.
+
+    ``closes`` is optional: without it the flags and the persistence reads stay
+    ``None`` (the levels are still returned) and ``breakout_reason`` says why.
+    ``reason`` is a string only when the levels themselves cannot be measured.
+    Every in-repo caller passes ``closes``.
     """
     if len(highs) < n or len(lows) < n:
-        return {"upper": None, "lower": None, "mid": None, "breakout_up": None,
-                "breakout_dn": None, "breakout_ref_up": None, "breakout_ref_dn": None}
+        return {
+            "upper": None, "lower": None, "mid": None,
+            "breakout_up": None, "breakout_dn": None,
+            "breakout_ref_up": None, "breakout_ref_dn": None,
+            "persistence_up": None, "persistence_dn": None,
+            "false_breakout_up": None, "false_breakout_dn": None,
+            "reason": f"fewer than {n} highs/lows: channel unmeasured",
+            "breakout_reason": f"fewer than {n} highs/lows: no reference level",
+        }
     up = max(float(x) for x in highs[-n:])
     lo = min(float(x) for x in lows[-n:])
     mid = (up + lo) / 2.0
     breakout_up = breakout_dn = ref_up = ref_dn = None
-    if closes is not None and len(closes) and len(highs) >= n + 1 and len(lows) >= n + 1:
-        ref_up = max(float(x) for x in highs[-n - 1:-1])
-        ref_dn = min(float(x) for x in lows[-n - 1:-1])
-        last = float(closes[-1])
-        breakout_up = bool(last > ref_up)
-        breakout_dn = bool(last < ref_dn)
+    persistence_up = persistence_dn = None
+    false_up = false_dn = None
+    breakout_reason = "no closes supplied: breakout state unmeasured"
+    if closes is not None and len(closes):
+        if len(highs) >= n + 1 and len(lows) >= n + 1:
+            ref_up = max(float(x) for x in highs[-n - 1:-1])
+            ref_dn = min(float(x) for x in lows[-n - 1:-1])
+            last = float(closes[-1])
+            breakout_up = bool(last > ref_up)
+            breakout_dn = bool(last < ref_dn)
+            tail = [float(x) for x in closes[-n:]]
+            persistence_up = sum(1 for x in tail if x > ref_up) / len(tail)
+            persistence_dn = sum(1 for x in tail if x < ref_dn) / len(tail)
+            prior = tail[:-1]
+            false_up = bool(last < ref_up and any(x > ref_up for x in prior))
+            false_dn = bool(last > ref_dn and any(x < ref_dn for x in prior))
+            breakout_reason = None
+        else:
+            breakout_reason = (
+                f"fewer than {n + 1} highs/lows: no prior-window reference level"
+            )
     return {
         "upper": round(up, 4),
         "lower": round(lo, 4),
@@ -444,17 +529,35 @@ def donchian_channel(highs, lows, n: int = 20, closes=None) -> dict:
         "breakout_dn": breakout_dn,
         "breakout_ref_up": round(ref_up, 4) if ref_up is not None else None,
         "breakout_ref_dn": round(ref_dn, 4) if ref_dn is not None else None,
+        "persistence_up": round(persistence_up, 4) if persistence_up is not None else None,
+        "persistence_dn": round(persistence_dn, 4) if persistence_dn is not None else None,
+        "false_breakout_up": false_up,
+        "false_breakout_dn": false_dn,
+        "reason": None,
+        "breakout_reason": breakout_reason,
     }
 
 
 def obv_divergence(closes, volumes, window: int = 30) -> dict:
     """On-Balance-Volume vs price: cumulative OBV trend vs price trend.
 
-    Returns {'obv_up': bool, 'bullish_div': bool} for a price lower-low with
-    a higher OBV low (bullish divergence) - a dip-reversal confirmation.
+    ``obv`` is the last cumulative OBV **level** the trend read is built on
+    (library §47) and ``obv_slope`` its least-squares slope per bar over the
+    last ``window`` values (§48 ``Slope(OBV,n)``), with ``obv_slope_norm``
+    that slope divided by the mean volume over the same window (§48's
+    normalisation). ``obv_up`` / ``bullish_div`` are the original bools for a
+    price lower-low with a higher OBV low (bullish divergence) - a
+    dip-reversal confirmation.
+
+    ``reason`` is a string when fewer than ``window`` closes/volumes were
+    supplied; the level and slope are never fabricated.
     """
     if len(closes) < window or len(volumes) < window:
-        return {"obv_up": None, "bullish_div": None}
+        return {
+            "obv": None, "obv_slope": None, "obv_slope_norm": None,
+            "obv_up": None, "bullish_div": None,
+            "reason": f"fewer than {window} closes/volumes: OBV unmeasured",
+        }
     obv = 0.0
     obv_series = []
     prev_c = None
@@ -480,7 +583,22 @@ def obv_divergence(closes, volumes, window: int = 30) -> dict:
     obv_up = bool(
         len(second_obv) and len(first_obv) and second_obv[-1] > first_obv[-1]
     )
-    return {"obv_up": obv_up, "bullish_div": bool(price_dn and obv_up)}
+    obv_slope = _ols_slope(obv_series[-window:])
+    vols_tail = [float(v) for v in volumes[-window:] if v is not None]
+    avg_vol = sum(vols_tail) / len(vols_tail) if vols_tail else None
+    obv_slope_norm = (
+        obv_slope / avg_vol if (obv_slope is not None and avg_vol) else None
+    )
+    return {
+        "obv": round(obv_series[-1], 4) if obv_series else None,
+        "obv_slope": round(obv_slope, 4) if obv_slope is not None else None,
+        "obv_slope_norm": (
+            round(obv_slope_norm, 6) if obv_slope_norm is not None else None
+        ),
+        "obv_up": obv_up,
+        "bullish_div": bool(price_dn and obv_up),
+        "reason": None,
+    }
 
 
 def parabolic_sar(highs, lows, af_start: float = 0.02, af_step: float = 0.02, af_max: float = 0.2, closes=None) -> dict:
@@ -873,4 +991,421 @@ def cost_optimal_span(cost_bps: float, vol: float) -> int | None:
         return None
     span = math.ceil(2.0 * (cost / 10_000.0) / (_COST_BUDGET_VOL_SHARE * sigma))
     return max(_SPAN_MIN, min(int(span), _SPAN_MAX))
+
+
+# ---------------------------------------------------------------------------
+# Depth reads (TechnicalScore library §7/§8/§21-§25/§28-§30/§43-§48/§58/§59/
+# §80/§91/§101-§104): the level / slope / ratio form of a series the module
+# already computes, so a leaf can print a checkable number instead of a bool.
+# Every producer refuses with a ``reason`` string - never a fabricated 0 -
+# when its series is too short, and an optional leg that cannot be measured
+# carries its own ``<leg>_reason`` while the rest of the read stands.
+# ---------------------------------------------------------------------------
+
+#: §59's volume-trend pair; the slower leg sets the volume history the read
+#: needs, which is why :func:`volume_depth` asks for 60 sessions, not 20.
+_VOL_TREND_FAST = 20
+_VOL_TREND_SLOW = 60
+
+
+def range_position(highs, lows, closes, n: int = 20) -> dict:
+    """Where the latest close sits inside the N-bar high/low range.
+
+    * ``high_n`` / ``low_n`` - the N-bar highest high / lowest low, the levels
+      :func:`donchian_channel` returns.
+    * ``bars_since_high`` - bars since the most recent N-bar high (0 = the
+      latest bar); the library's §101 ``HighAge``.
+    * ``distance_from_low`` - ``close / low_n - 1`` (§103), a fraction.
+    * ``range_position`` - ``(close - low_n) / (high_n - low_n)`` (§104), 0 at
+      the low and 1 at the high; ``None`` on a zero-width range rather than a
+      fabricated 0.5.
+
+    ``reason`` is a string when fewer than ``n`` highs/lows or no close were
+    supplied.
+    """
+    if len(highs) < n or len(lows) < n or not closes:
+        return {
+            "high_n": None, "low_n": None, "bars_since_high": None,
+            "distance_from_low": None, "range_position": None,
+            "reason": f"fewer than {n} bars (or no close): range unmeasured",
+        }
+    hs = [float(x) for x in highs[-n:]]
+    ls = [float(x) for x in lows[-n:]]
+    high_n = max(hs)
+    low_n = min(ls)
+    last = float(closes[-1])
+    last_high = max(i for i, v in enumerate(hs) if v == high_n)
+    width = high_n - low_n
+    return {
+        "high_n": round(high_n, 4),
+        "low_n": round(low_n, 4),
+        "bars_since_high": n - 1 - last_high,
+        "distance_from_low": round(last / low_n - 1.0, 6) if low_n > 0 else None,
+        "range_position": round((last - low_n) / width, 4) if width > 0 else None,
+        "reason": None,
+    }
+
+
+def sma_legs(closes, fast: int = 20, slow: int = 100) -> dict:
+    """Price vs the SMA20 / SMA100 legs the engine ledger records as absent.
+
+    ``sma_fast`` / ``sma_slow`` are the latest simple moving averages over the
+    module's own :func:`_sma`, and ``above_fast`` / ``above_slow`` the library
+    §3 ``MAState`` booleans (``close > SMA_n``). ``reason`` is a string when
+    fewer than ``slow`` closes were supplied.
+    """
+    if not closes or len(closes) < slow or fast < 1 or slow < 1:
+        return {
+            "sma_fast": None, "sma_slow": None, "above_fast": None,
+            "above_slow": None,
+            "reason": f"fewer than {slow} closes: SMA legs unmeasured",
+        }
+    vals = [float(c) for c in closes]
+    last = vals[-1]
+    sma_fast = _sma(vals, fast)[-1] if len(vals) >= fast else None
+    sma_slow = _sma(vals, slow)[-1]
+    return {
+        "sma_fast": round(sma_fast, 4) if sma_fast is not None else None,
+        "sma_slow": round(sma_slow, 4),
+        "above_fast": bool(last > sma_fast) if sma_fast is not None else None,
+        "above_slow": bool(last > sma_slow),
+        "reason": None,
+    }
+
+
+def _macd_series(closes, fast: int, slow: int, signal: int):
+    """MACD line / signal / histogram series aligned to ``closes``.
+
+    The same three lines ``value_dip._macd_hist`` builds, assembled from this
+    module's own :func:`ema` (the single EMA convention both modules share), so
+    a public MACD producer can live here without editing that module or
+    importing its private helper. Returns ``(line, signal, hist)``, or None
+    when the warm-up is incomplete.
+    """
+    if not closes or len(closes) < slow + signal + 2:
+        return None
+    vals = [float(c) for c in closes]
+    ema_fast = ema(vals, fast)
+    ema_slow = ema(vals, slow)
+    line = [
+        (f - s) if (f is not None and s is not None) else None
+        for f, s in zip(ema_fast, ema_slow, strict=False)
+    ]
+    start = next((i for i, v in enumerate(line) if v is not None), None)
+    if start is None:
+        return None
+    sig = [None] * start + ema(line[start:], signal)
+    hist = [
+        (lv - s) if (lv is not None and s is not None) else None
+        for lv, s in zip(line, sig, strict=False)
+    ]
+    return line, sig, hist
+
+
+def macd_depth(closes, fast: int = 12, slow: int = 26, signal: int = 9,
+               atr_value: float | None = None) -> dict:
+    """MACD line / signal / histogram plus their one-bar changes (§7/§8).
+
+    * ``macd`` / ``signal`` / ``hist`` - the latest line, signal and histogram.
+    * ``macd_slope`` / ``signal_slope`` / ``hist_slope`` - one-bar deltas
+      (§7's ``MACDSlope`` / ``HistogramSlope`` with k=1, the same delta
+      ``rule_eval.rule_signal_macd_hist_rising`` tests).
+    * ``hist_accel`` - ``Δhist_t - Δhist_{t-1}`` (§7's
+      ``HistogramAcceleration``).
+    * ``crossover`` - ``I(MACD > Signal)`` (§8).
+    * ``atr_spread`` - ``(MACD - Signal)/ATR`` (§8's ``MACDSpread``) when
+      ``atr_value`` is a positive number, else ``None`` with
+      ``atr_spread_reason`` naming the missing ATR.
+
+    ``reason`` is a string when fewer than ``slow + signal + 2`` closes were
+    supplied (the MACD warm-up this module's ``value_dip._macd_hist`` uses).
+    """
+    empty = {
+        "macd": None, "signal": None, "hist": None,
+        "macd_slope": None, "signal_slope": None, "hist_slope": None,
+        "hist_accel": None, "crossover": None, "atr_spread": None,
+        "reason": None, "atr_spread_reason": None,
+    }
+    series = _macd_series(closes, fast, slow, signal)
+    if series is None:
+        return {**empty, "reason": (
+            f"fewer than {slow + signal + 2} closes: MACD warm-up incomplete"
+        )}
+    line, sig, hist = series
+    line_v = [v for v in line if v is not None]
+    sig_v = [v for v in sig if v is not None]
+    hist_v = [v for v in hist if v is not None]
+    if not line_v or not sig_v or not hist_v:
+        return {**empty, "reason": "no usable MACD bar after the warm-up"}
+    out = {
+        "macd": round(line_v[-1], 4),
+        "signal": round(sig_v[-1], 4),
+        "hist": round(hist_v[-1], 4),
+        "macd_slope": round(line_v[-1] - line_v[-2], 4) if len(line_v) >= 2 else None,
+        "signal_slope": round(sig_v[-1] - sig_v[-2], 4) if len(sig_v) >= 2 else None,
+        "hist_slope": round(hist_v[-1] - hist_v[-2], 4) if len(hist_v) >= 2 else None,
+        "hist_accel": None,
+        "crossover": bool(line_v[-1] > sig_v[-1]),
+        "atr_spread": None,
+        "reason": None,
+        "atr_spread_reason": None,
+    }
+    if len(hist_v) >= 3:
+        out["hist_accel"] = round(
+            (hist_v[-1] - hist_v[-2]) - (hist_v[-2] - hist_v[-3]), 4
+        )
+    try:
+        atr = float(atr_value) if atr_value is not None else None
+    except (TypeError, ValueError):
+        atr = None
+    if atr is None or atr <= 0.0:
+        out["atr_spread_reason"] = "no positive ATR supplied: spread not normalised"
+    else:
+        out["atr_spread"] = round((line_v[-1] - sig_v[-1]) / atr, 6)
+    return out
+
+
+def bollinger_bandwidth(closes, window: int = 20, k: float = 2.0,
+                        lookback: int = 100, pct: float = 0.2,
+                        expansion_lag: int = 5) -> dict:
+    """Bollinger bandwidth, its own-history percentile and the squeeze reads.
+
+    The bands are the same population-standard-deviation construction
+    ``value_dip.bollinger_pct_b`` uses; the bandwidth is
+    ``BBW = (UB - LB)/MB = 2k*sd/MB`` (§21).
+
+    * ``bbw`` - the latest bandwidth.
+    * ``bbw_percentile`` - its empirical rank against the trailing
+      ``lookback`` bandwidths (§22, the same rank convention as
+      ``compression.atr_compression_read``).
+    * ``squeeze`` - ``bbw_percentile <= pct`` (§23, the lower fifth by
+      default); a REPORTED reading, never a gate.
+    * ``expansion`` - ``BBW_t/BBW_{t-expansion_lag} - 1`` (§24).
+    * ``mean_reversion_distance`` - ``(close - MB)/(UB - LB)`` (§25), the
+      mid-band-referenced form ``bollinger_pct_b`` does not compute; ``None``
+      on a zero-width band rather than a fabricated 0.
+
+    ``reason`` is a string when fewer than ``window + expansion_lag`` closes
+    were supplied, or when the middle band is non-positive (the bandwidth has
+    no denominator).
+    """
+    empty = {
+        "bbw": None, "bbw_percentile": None, "squeeze": None,
+        "expansion": None, "mean_reversion_distance": None, "reason": None,
+    }
+    if (not closes or window < 2 or expansion_lag < 1
+            or len(closes) < window + expansion_lag):
+        return {**empty, "reason": (
+            f"fewer than {window + expansion_lag} closes: bandwidth unmeasured"
+        )}
+    vals = [float(c) for c in closes]
+    bbw_series = []
+    for i in range(window, len(vals) + 1):
+        seg = vals[i - window:i]
+        mid = sum(seg) / window
+        if mid <= 0:
+            bbw_series.append(None)
+            continue
+        sd = math.sqrt(sum((v - mid) ** 2 for v in seg) / window)
+        bbw_series.append(2.0 * float(k) * sd / mid)
+    last_seg = vals[-window:]
+    mid = sum(last_seg) / window
+    sd = math.sqrt(sum((v - mid) ** 2 for v in last_seg) / window)
+    upper = mid + float(k) * sd
+    lower = mid - float(k) * sd
+    bbw = bbw_series[-1]
+    if bbw is None:
+        return {**empty, "reason": "non-positive middle band: bandwidth undefined"}
+    valid = [v for v in bbw_series if v is not None]
+    rank_window = valid[-lookback:] if lookback and lookback > 0 else valid
+    rank = _pct_rank(rank_window, bbw)
+    lagged = bbw_series[-1 - expansion_lag]
+    width = upper - lower
+    return {
+        "bbw": round(bbw, 6),
+        "bbw_percentile": round(rank, 4) if rank is not None else None,
+        "squeeze": bool(rank <= pct) if rank is not None else None,
+        "expansion": round(bbw / lagged - 1.0, 6) if lagged else None,
+        "mean_reversion_distance": (
+            round((vals[-1] - mid) / width, 4) if width > 0 else None
+        ),
+        "reason": None,
+    }
+
+
+def mean_reversion_z(series, value: float | None = None, min_n: int = 4) -> dict:
+    """Z-score of one observation against its own history (§80).
+
+    ``value`` defaults to the last usable observation of ``series`` (the
+    "current reading vs its own past" form the ledger names for the RSI / %b /
+    price-vs-band histories). The statistic is ``value_dip.zscore`` - the
+    repo's single generic z helper, imported rather than re-derived; the sign
+    is preserved, so a below-mean reading stays negative.
+
+    Returns ``z``, the ``value`` measured and ``n`` (usable observations).
+    ``reason`` is a string when fewer than ``min_n`` observations exist, the
+    series carries no dispersion, or no value could be resolved - the z is
+    never fabricated.
+    """
+    from .value_dip import zscore
+
+    vals = [float(v) for v in (series or []) if v is not None]
+    if value is None and vals:
+        value = vals[-1]
+    try:
+        z = zscore(value, vals, min_n=min_n) if value is not None else None
+    except (TypeError, ValueError):
+        z = None
+    if z is None:
+        return {
+            "z": None,
+            "value": value,
+            "n": len(vals),
+            "reason": (
+                f"fewer than {min_n} observations, no value, or zero "
+                "dispersion: z unmeasured"
+            ),
+        }
+    return {"z": round(z, 4), "value": value, "n": len(vals), "reason": None}
+
+
+def volume_depth(closes, volumes, n: int = 20, *, highs=None, lows=None,
+                 atr_value: float | None = None) -> dict:
+    """Volume spike / trend and the volume-confirmed breakout (§58/§59/§45).
+
+    * ``volume_spike`` - latest volume / the nearest-rank 95th percentile of
+      the last ``n`` volumes (§58).
+    * ``volume_trend`` - ``SMA(V,20)/SMA(V,60) - 1`` (§59), computed with the
+      module's own :func:`_sma`.
+    * ``volume_ratio`` - latest volume / the mean of the last ``n`` volumes,
+      the ``V/avg`` leg of §45.
+    * ``breakout_strength`` - ``(close - prior N-bar highest high)/ATR``
+      (§41), reported signed (negative = no breakout); needs ``highs``/``lows``.
+    * ``breakout_confirmation`` - ``breakout_strength x volume_ratio`` (§45),
+      the volume-confirmed breakout ratio.
+
+    ``reason`` is a string when the volume history is shorter than
+    ``max(n, 60)`` (the §59 pair sets the required history); the breakout leg
+    alone is ``None`` with ``breakout_reason`` when no highs/lows were
+    supplied, the prior channel is too short, or the ATR is unmeasurable.
+    """
+    empty = {
+        "volume_spike": None, "volume_trend": None, "volume_ratio": None,
+        "breakout_strength": None, "breakout_confirmation": None,
+        "reason": None, "breakout_reason": None,
+    }
+    need = max(n, _VOL_TREND_SLOW)
+    if not closes or not volumes or len(closes) < need or len(volumes) < need:
+        return {**empty, "reason": (
+            f"fewer than {need} closes/volumes: volume depth unmeasured"
+        )}
+    vs = [float(v) for v in volumes]
+    last_v = vs[-1]
+    p95 = _p95(vs[-n:])
+    mean_n = sum(vs[-n:]) / n
+    sma_fast = _sma(vs, _VOL_TREND_FAST)[-1]
+    sma_slow = _sma(vs, _VOL_TREND_SLOW)[-1]
+    ratio = last_v / mean_n if mean_n > 0 else None
+    out = {
+        "volume_spike": round(last_v / p95, 4) if p95 and p95 > 0 else None,
+        "volume_trend": round(sma_fast / sma_slow - 1.0, 6) if sma_slow else None,
+        "volume_ratio": round(ratio, 4) if ratio is not None else None,
+        "breakout_strength": None,
+        "breakout_confirmation": None,
+        "reason": None,
+        "breakout_reason": None,
+    }
+    if highs is None or lows is None:
+        out["breakout_reason"] = "no highs/lows supplied: breakout strength unmeasured"
+        return out
+    if len(highs) < n + 1 or len(lows) < n + 1:
+        out["breakout_reason"] = (
+            f"fewer than {n + 1} highs/lows: no prior-window breakout level"
+        )
+        return out
+    ref = max(float(x) for x in highs[-n - 1:-1])
+    atr = atr_value
+    if atr is None:
+        from .size import atr as _atr
+
+        atr = _atr([float(x) for x in highs], [float(x) for x in lows],
+                   [float(c) for c in closes])
+    try:
+        atr = float(atr) if atr is not None else None
+    except (TypeError, ValueError):
+        atr = None
+    if atr is None or atr <= 0.0:
+        out["breakout_reason"] = "ATR unmeasurable: breakout strength not normalised"
+        return out
+    strength = (float(closes[-1]) - ref) / atr
+    out["breakout_strength"] = round(strength, 4)
+    if ratio is not None:
+        out["breakout_confirmation"] = round(strength * ratio, 4)
+    else:
+        out["breakout_reason"] = "volume baseline unmeasured: confirmation not scaled"
+    return out
+
+
+def atr_depth(highs, lows, closes, short: int = 14, long: int = 50,
+              move_n: int = 5, accel_lag: int = 1) -> dict:
+    """ATR ratio / normalised movement / volatility acceleration (§28-§30, §91).
+
+    Uses ``size.atr`` - the repo's scalar ATR producer - on the full series and
+    on a lagged slice, so this is the *ratio* read and not
+    ``compression.atr_compression_read``'s percentile.
+
+    * ``atr_short`` / ``atr_long`` - ATR over ``short`` and ``long`` true
+      ranges (the latter through :func:`size.atr`'s mean-of-TRs definition).
+    * ``atr_pct`` - ``atr_short / close`` (§27 ``NATR`` as a fraction).
+    * ``atr_ratio`` / ``atr_expansion`` / ``atr_contraction`` -
+      ``ATR_short/ATR_long``, ``ratio - 1`` (§28) and ``1 - ratio`` (§29).
+    * ``atr_move`` - ``(close_t - close_{t-move_n})/ATR_short`` (§30).
+    * ``vol_acceleration`` - ``atr_pct_t - atr_pct_{t-accel_lag}`` (§91), the
+      ATR% series standing in for the volatility regime.
+
+    ``reason`` is a string when the series are misaligned, shorter than
+    ``max(long, move_n) + 1`` bars, or an ATR leg is unmeasurable.
+    """
+    empty = {
+        "atr_short": None, "atr_long": None, "atr_pct": None,
+        "atr_ratio": None, "atr_expansion": None, "atr_contraction": None,
+        "atr_move": None, "vol_acceleration": None, "reason": None,
+    }
+    need = max(long, move_n) + 1
+    if (len(highs) != len(lows) or len(lows) != len(closes)
+            or len(closes) < need or short < 1 or long < 1
+            or move_n < 1 or accel_lag < 1 or accel_lag >= len(closes) - 1):
+        return {**empty, "reason": (
+            f"fewer than {need} aligned bars: ATR depth unmeasured"
+        )}
+    from .size import atr as _atr
+
+    h = [float(x) for x in highs]
+    lo = [float(x) for x in lows]
+    c = [float(x) for x in closes]
+    atr_short = _atr(h, lo, c, window=short)
+    atr_long = _atr(h, lo, c, window=long)
+    if atr_short is None or atr_long is None or atr_short <= 0.0 or atr_long <= 0.0:
+        return {**empty, "reason": "ATR unmeasurable: depth not computed"}
+    ratio = atr_short / atr_long
+    atr_pct = atr_short / c[-1] if c[-1] > 0 else None
+    prev_atr = _atr(h[:-accel_lag], lo[:-accel_lag], c[:-accel_lag], window=short)
+    prev_close = c[-1 - accel_lag]
+    prev_pct = (
+        prev_atr / prev_close if (prev_atr is not None and prev_close > 0) else None
+    )
+    return {
+        "atr_short": round(atr_short, 6),
+        "atr_long": round(atr_long, 6),
+        "atr_pct": round(atr_pct, 6) if atr_pct is not None else None,
+        "atr_ratio": round(ratio, 6),
+        "atr_expansion": round(ratio - 1.0, 6),
+        "atr_contraction": round(1.0 - ratio, 6),
+        "atr_move": round((c[-1] - c[-1 - move_n]) / atr_short, 4),
+        "vol_acceleration": (
+            round(atr_pct - prev_pct, 6)
+            if (atr_pct is not None and prev_pct is not None) else None
+        ),
+        "reason": None,
+    }
 

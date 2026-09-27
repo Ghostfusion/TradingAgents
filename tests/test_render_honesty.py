@@ -244,12 +244,18 @@ def test_dcf_leaf_carries_the_bridge_it_used(monkeypatch):
     # needs, and it must be named.
     assert "cash=76,651,000,000" in out
     assert "debt=56,826,000,000" in out
-    assert "net_debt=19,825,000,000" in out
+    # NetDebt = TotalDebt − Cash (the library's definition, ValuationScore.md
+    # §4.4 C13), so a net-cash balance sheet prints a NEGATIVE net debt. This
+    # leaf printed `cash − debt` - the opposite sign under the library's name -
+    # until 2026-09-26 (`MASTER_PLAN.md` defect D-8), and the printed
+    # convention is now stated so the number cannot be read the other way.
+    assert "net_debt=-19,825,000,000" in out
+    assert "(total_debt - cash)" in out
     assert "bridge=(cash + ST investments - total debt)" in out
     # ...and the three printed numbers must reproduce the printed fair value.
     v = _leaf_floats(out)
     assert abs(v["equity"] / v["shares"] - v["fair_value"]) < 0.01
-    assert abs((v["cash"] - v["debt"]) - v["net_debt"]) < 1.0
+    assert abs((v["debt"] - v["cash"]) - v["net_debt"]) < 1.0
 
 
 def test_dcf_falls_back_to_the_narrow_cash_row_and_names_that_basis(monkeypatch):

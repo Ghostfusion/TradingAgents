@@ -26,8 +26,17 @@ floor is withheld with its reason rather than scored on what it lacks.
 
 The DCF is the one factor the owner asked to be *scaled* rather than re-prosed
 (§3.4): `dcf_confidence` scores the four legs the DCF family already prints, and
-the caller supplies `dcf_upside` already multiplied by it - so a DCF nobody could
-verify contributes less, with no sentence claiming it is an artifact.
+the factor entering VS is the raw upside multiplied by it - so a DCF nobody
+could verify contributes less, with no sentence claiming it is an artifact.
+
+Two routes supply that upside, caller-supplied first (FUND-21 / defect D-4): a
+caller that owns a DCF passes `dcf_upside` + `dcf_confidence_value` and the
+engine uses them unchanged; otherwise `fundamental_score_for_ticker` derives the
+upside itself, for **every** panel name whose canonical financials the resolver
+returned, from the repo's own producers (`dcf.compute_dcf`, then
+`cycle_dcf.perpetuity_value` over `normalized_cycle_fcf`) and the confidence from
+`dcf_confidence`. The route is recorded in the result and the basis, and a name
+the panel's financials cannot support is `None` **with its reason**.
 """
 
 from __future__ import annotations
@@ -513,6 +522,342 @@ def dcf_upside_scaled(upside, confidence) -> dict:
     }
 
 
+# --- The engine-derived DCF route (FUND-21 / defect D-4) -------------------
+#
+# The caller-supplied `dcf_upside` is the first route and stays unchanged. This
+# is the fallback for every caller that does not own a DCF: the peer-panel
+# resolver already fetched each name's canonical financials, so the repo's own
+# DCF producers run over that statement instead of leaving the factor dead.
+#
+# `rf` has no panel source - the DCF leaves read it from a macro vendor - so the
+# engine uses the DCF family's own documented fallback (0.04, the value
+# `analysis_tools._dcf_context` and `get_normalized_cycle_dcf` both use) and
+# STATES the assumption in the basis. A missing beta is not substituted
+# silently: it enters `dcf_confidence` as `beta_assumed`, the leg that lowers the
+# confidence, exactly as §3.3/§3.4 intend.
+
+DCF_FALLBACK_RF = 0.04
+DCF_FALLBACK_ERP = 0.05
+DCF_FALLBACK_GROWTH = 0.025
+DCF_FALLBACK_YEARS = 5
+
+
+def _fin_value(v):
+    """Current-period value of a canonical item (flat float or current/prior dict)."""
+    if isinstance(v, dict):
+        return v.get("current", v.get("value"))
+    return v
+
+
+def _fin_number(v) -> float | None:
+    v = _fin_value(v)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _fin_annual_series(fin: dict, key: str) -> list[float]:
+    """The annual series ``statement_parsing.fetch_ticker`` attached, or ``[]``.
+
+    ``fin[key + "_series"]`` is a bare list of floats on the fetch path and a
+    ``{"values": [...]}`` entry when a caller passes ``annual_series``' own
+    output through ``financials=``; both are read. A series with a hole (a
+    ``None`` value) is refused rather than zero-filled - the same rule
+    ``_series_from_payload`` applies.
+    """
+    entry = (fin or {}).get(f"{key}_series")
+    if isinstance(entry, dict):
+        entry = entry.get("values")
+    if not isinstance(entry, (list, tuple)) or not entry:
+        return []
+    vals = [_fin_number(v) for v in entry]
+    if any(v is None for v in vals):
+        return []
+    return [float(v) for v in vals]
+
+
+def _fin_fcf_series(fin: dict) -> list[float]:
+    """The annual FCF series the panel's financials already carry, oldest first.
+
+    ``fcf_series`` when the SEC XBRL path attached it, else operating cashflow
+    minus |capex| per year when both series are present, else the single latest
+    annual run rate - a one-point series ``compute_dcf`` accepts and the
+    mid-cycle normaliser refuses for want of three points. Never manufactured: a
+    year with a missing leg is not filled.
+    """
+    direct = _fin_annual_series(fin, "fcf")
+    if direct:
+        return direct
+    ocf = _fin_annual_series(fin, "operating_cashflow")
+    capex = _fin_annual_series(fin, "capex")
+    if ocf and capex and len(ocf) == len(capex):
+        return [o - abs(c) for o, c in zip(ocf, capex, strict=True)]
+    o = _fin_number((fin or {}).get("operating_cashflow"))
+    c = _fin_number((fin or {}).get("capex"))
+    if o is not None and c is not None:
+        return [o - abs(c)]
+    return []
+
+
+def _derive_dcf_upside(
+    fin: dict,
+    *,
+    rf: float = DCF_FALLBACK_RF,
+    erp: float = DCF_FALLBACK_ERP,
+    growth: float = DCF_FALLBACK_GROWTH,
+    years: int = DCF_FALLBACK_YEARS,
+    g: float = DCF_FALLBACK_GROWTH,
+) -> dict:
+    """One name's DCF upside from the canonical financials the panel holds.
+
+    ``upside`` is the FV-basis margin of safety ``(fair value - price) / fair
+    value`` - the quantity ``normalized.margin_of_safety`` and
+    ``get_normalized_cycle_dcf`` print, and the one the schema's ``+1``
+    direction means. Two of the repo's own producers are tried, in this order:
+
+    1. ``dcf.compute_dcf`` over the annual FCF series (the run-rate DCF), when
+       the latest annual FCF is positive;
+    2. ``cycle_dcf.perpetuity_value`` over ``normalized_cycle_fcf`` (the
+       mid-cycle DCF for cyclical reporters), which needs >= 3 annual periods;
+       the per-share fair value is ``pv / shares`` with no EV -> equity bridge,
+       the same convention ``get_normalized_cycle_dcf`` uses for this producer.
+
+    ``price`` is ``market_cap / shares`` - the derivation ``_dcf_context`` uses,
+    and the one that keeps the ratio independent of the share basis.
+
+    Returns ``{"upside", "route", "fair_value", "price", "terminal_share",
+    "confidence", "fcf_series", "beta", "beta_assumed", "reason", "basis"}``.
+    ``upside`` is ``None`` **with a reason** when the panel's financials cannot
+    support a DCF - never 0, never a proxy.
+    """
+    from .cycle_dcf import normalized_cycle_fcf, perpetuity_value
+    from .dcf import compute_dcf
+
+    fin = fin or {}
+    fcf = _fin_fcf_series(fin)
+    shares = _fin_number(fin.get("shares"))
+    market_cap = _fin_number(fin.get("market_cap"))
+    cash = _fin_number(fin.get("cash"))
+    debt = _fin_number(fin.get("total_debt"))
+    beta = _fin_number(fin.get("beta"))
+    beta_assumed = beta is None
+    beta_used = 1.0 if beta_assumed else float(beta)
+    price = (market_cap / shares) if (market_cap and shares) else None
+
+    out: dict = {
+        "upside": None,
+        "route": None,
+        "fair_value": None,
+        "price": price,
+        "terminal_share": None,
+        "confidence": None,
+        "fcf_series": fcf,
+        "beta": beta,
+        "beta_assumed": beta_assumed,
+        "reason": None,
+        "basis": "",
+    }
+
+    def _refuse(reason: str) -> dict:
+        out["reason"] = reason
+        out["basis"] = f"dcf upside: unavailable ({reason})"
+        return out
+
+    if not fcf:
+        return _refuse(
+            "the panel's financials carry no free-cash-flow series (no "
+            "fcf_series, and not both of operating_cashflow_series/capex_series)"
+        )
+    if price is None or not shares:
+        return _refuse(
+            "no shares and market cap to price a fair value "
+            f"(shares={shares}, market_cap={market_cap})"
+        )
+
+    res = None
+    if float(fcf[-1]) > 0:
+        res = compute_dcf(
+            fcf,
+            rf=float(rf),
+            beta=beta_used,
+            erp=float(erp),
+            growth=float(growth),
+            years=int(years),
+            shares=float(shares),
+            cash=float(cash or 0.0),
+            debt=float(debt or 0.0),
+        )
+    if res is not None:
+        route = "dcf.compute_dcf"
+        fair = float(res["price"])
+        terminal_share = res.get("terminal_share")
+    else:
+        cyc = normalized_cycle_fcf(fcf)
+        if cyc.get("median") is None:
+            return _refuse(
+                "no usable run-rate DCF (latest annual FCF "
+                f"{float(fcf[-1]):.4g}) and the mid-cycle normaliser needs >= 3 "
+                f"annual periods (have {cyc.get('n')})"
+            )
+        wacc = float(rf) + beta_used * float(erp)
+        pv = perpetuity_value(cyc["median"], wacc, float(g))
+        if pv is None:
+            return _refuse(
+                f"no usable DCF: wacc {wacc:.4g} <= perpetual growth {float(g):.4g}"
+            )
+        route = "cycle_dcf.perpetuity_value"
+        fair = float(pv) / float(shares)
+        terminal_share = None
+
+    if fair is None or not math.isfinite(fair) or fair <= 0:
+        return _refuse(f"{route} produced no positive fair value")
+
+    upside = (fair - price) / fair
+    confidence = dcf_confidence(
+        basis=None,
+        beta=beta,
+        beta_assumed=beta_assumed,
+        beta_range=None,
+        fcf_series=fcf,
+        terminal_share=terminal_share,
+    )
+    out.update(
+        {
+            "upside": upside,
+            "route": route,
+            "fair_value": fair,
+            "terminal_share": terminal_share,
+            "confidence": confidence,
+            "basis": (
+                f"dcf upside: engine-derived ({route}); fair value {fair:.4g} vs "
+                f"price {price:.4g} -> FV-basis margin of safety {upside:.4g}; "
+                f"rf {float(rf):g}"
+                + (
+                    " (assumed, no macro read on the panel path)"
+                    if float(rf) == DCF_FALLBACK_RF
+                    else ""
+                )
+                + f", erp {float(erp):g}, beta {beta_used:g}"
+                + (" (assumed)" if beta_assumed else " (provider)")
+            ),
+        }
+    )
+    return out
+
+
+def _engine_dcf_upside(
+    ticker: str,
+    panel: dict,
+    financials: dict,
+    *,
+    rf: float = DCF_FALLBACK_RF,
+    erp: float = DCF_FALLBACK_ERP,
+    growth: float = DCF_FALLBACK_GROWTH,
+    years: int = DCF_FALLBACK_YEARS,
+    g: float = DCF_FALLBACK_GROWTH,
+) -> tuple[dict, dict, dict]:
+    """The engine-derived route over the whole panel (FUND-21 / defect D-4).
+
+    Derives the DCF factor for EVERY name whose canonical financials the
+    resolver returned, not just the analysed ticker: a single name's upside
+    cannot be z-scored against peers who have none (``factors.category_scores``
+    drops a metric present for one of ten names), so a leaf alone could never
+    light this factor up. The value entering the panel is ``upside x
+    dcf_confidence`` - the §3.4 scaling, unchanged.
+
+    Returns ``(panel, own, summary)``: the panel with the derived factor added
+    to each supported name, the analysed ticker's ``dcf_upside_scaled``-shaped
+    record (``route``/``reason`` filled), and the printed summary of what each
+    route supplied and why the rest were refused.
+    """
+    routes: dict[str, int] = {}
+    reasons: dict[str, int] = {}
+    derived: dict[str, float] = {}
+    own: dict | None = None
+
+    for name in sorted(panel):
+        fin = financials.get(name)
+        if not isinstance(fin, dict):
+            why = "no canonical financials on the resolver result"
+            reasons[why] = reasons.get(why, 0) + 1
+            if name == ticker:
+                own = {
+                    "raw": None,
+                    "confidence": None,
+                    "effective": None,
+                    "route": None,
+                    "reason": why,
+                    "basis": f"dcf upside: unavailable ({why})",
+                }
+            continue
+        d = _derive_dcf_upside(fin, rf=rf, erp=erp, growth=growth, years=years, g=g)
+        if d["upside"] is None:
+            why = str(d["reason"] or "unavailable")
+            reasons[why] = reasons.get(why, 0) + 1
+            if name == ticker:
+                own = {
+                    "raw": None,
+                    "confidence": None,
+                    "effective": None,
+                    "route": None,
+                    "reason": why,
+                    "basis": f"dcf upside: unavailable ({why})",
+                }
+            continue
+        scaled = dcf_upside_scaled(d["upside"], (d["confidence"] or {}).get("confidence"))
+        if scaled["effective"] is None:
+            why = "the DCF confidence could not be measured"
+            reasons[why] = reasons.get(why, 0) + 1
+            if name == ticker:
+                own = {**scaled, "route": d["route"], "reason": why}
+            continue
+        derived[name] = scaled["effective"]
+        routes[str(d["route"])] = routes.get(str(d["route"]), 0) + 1
+        if name == ticker:
+            own = {
+                **scaled,
+                "route": d["route"],
+                "reason": None,
+                "fair_value": d["fair_value"],
+                "price": d["price"],
+            }
+
+    if own is None:
+        why = "the analysed ticker is not in the resolved panel"
+        own = {
+            "raw": None,
+            "confidence": None,
+            "effective": None,
+            "route": None,
+            "reason": why,
+            "basis": f"dcf upside: unavailable ({why})",
+        }
+
+    if derived:
+        panel = {
+            name: ({**row, "dcf_upside": derived[name]} if name in derived else row)
+            for name, row in panel.items()
+        }
+
+    route_txt = ", ".join(f"{k}={v}" for k, v in sorted(routes.items())) or "none"
+    reason_txt = ", ".join(f"{k} ({v})" for k, v in sorted(reasons.items())) or "none"
+    summary = {
+        "route": "engine-derived",
+        "panel_n": len(derived),
+        "panel_of": len(panel),
+        "routes": routes,
+        "reasons": reasons,
+        "basis": (
+            f"dcf upside (engine-derived, FUND-21): {len(derived)} of {len(panel)} "
+            f"panel name(s) supplied by {route_txt}; refused: {reason_txt}; scaled "
+            f"by dcf_confidence per §3.4"
+        ),
+    }
+    return panel, own, summary
+
+
 def fundamental_score_for_ticker(
     ticker: str,
     current_date: str | None = None,
@@ -537,10 +882,21 @@ def fundamental_score_for_ticker(
     ``dcf_upside`` is the raw DCF upside and ``dcf_confidence_value`` its 0-1
     confidence from ``dcf_confidence``; when both are given the VS sub-score
     consumes the **scaled** value (§3.4), so a DCF nobody could verify
-    contributes less with no prose involved.
+    contributes less with no prose involved. That route is first and unchanged.
+
+    When ``dcf_upside`` is not given, the engine derives the factor itself for
+    **every** panel name whose canonical financials the resolver returned
+    (``_engine_dcf_upside``: ``dcf.compute_dcf``, else
+    ``cycle_dcf.perpetuity_value`` over ``normalized_cycle_fcf``; confidence from
+    ``dcf_confidence``). One name's upside cannot be z-scored against peers who
+    have none, so deriving the whole panel is what actually lights the factor up.
+    A name the financials cannot support is left without it, with the reason
+    recorded in ``dcf_upside_panel`` - never a 0 and never a proxy.
 
     Returns the ``fundamental_score`` dict plus ``ticker``, ``panel_basis``,
-    ``panel_n`` and ``dcf_upside``.
+    ``panel_n``, ``dcf_upside`` (the analysed ticker's own record, carrying the
+    ``route`` that supplied it and a ``reason`` when it could not be) and
+    ``dcf_upside_panel`` (the per-route summary over the panel).
     """
     from datetime import datetime
 
@@ -562,12 +918,40 @@ def fundamental_score_for_ticker(
         tickers=names, current_date=date, include_score_metrics=True
     )
     panel = {str(k).upper(): dict(v) for k, v in (panel_res.get("metrics") or {}).items()}
+    financials = {
+        str(k).upper(): v
+        for k, v in (panel_res.get("financials") or {}).items()
+        if isinstance(v, dict)
+    }
 
-    scaled = None
     if dcf_upside is not None:
+        # Route 1 - the caller's own DCF, unchanged.
         scaled = dcf_upside_scaled(dcf_upside, dcf_confidence_value)
-        if scaled["effective"] is not None and key in panel:
+        scaled["route"] = "caller-supplied"
+        scaled["reason"] = (
+            None
+            if scaled["effective"] is not None
+            else "no dcf_confidence_value to scale the caller's upside by"
+        )
+        injected = scaled["effective"] is not None and key in panel
+        if injected:
             panel[key] = {**panel[key], "dcf_upside": scaled["effective"]}
+        dcf_panel = {
+            "route": "caller-supplied",
+            "panel_n": 1 if injected else 0,
+            "panel_of": len(panel),
+            "routes": {"caller-supplied": 1} if injected else {},
+            "reasons": {} if injected else {str(scaled["reason"]): 1},
+            "basis": (
+                "dcf upside (caller-supplied): raw "
+                f"{scaled['raw']} x confidence {scaled['confidence']} = "
+                f"{scaled['effective']} on {key}"
+                + ("" if injected else f"; NOT injected ({scaled['reason']})")
+            ),
+        }
+    else:
+        # Route 2 - the engine derives it for the whole panel (FUND-21).
+        panel, scaled, dcf_panel = _engine_dcf_upside(key, panel, financials)
 
     res = fundamental_score(
         panel,
@@ -581,6 +965,8 @@ def fundamental_score_for_ticker(
     res["panel_n"] = len(panel)
     res["panel_names"] = sorted(panel)
     res["dcf_upside"] = scaled
+    res["dcf_upside_panel"] = dcf_panel
+    res["basis"] = f"{res['basis']} | {dcf_panel['basis']}"
     return res
 
 

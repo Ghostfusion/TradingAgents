@@ -62,6 +62,32 @@ def _engine_label(engine: str) -> str:
     return "EventState" if engine == "event" else f"{engine.capitalize()}Score"
 
 
+def _engine_summary_line(engine: str, entry: dict, *, ticker: str) -> str:
+    """One engine's result as one line: label, score, band, coverage, floor.
+
+    The **one** place this line is composed, so the prompt block
+    (`engine_score_block`) and the report section (`engine_report_section`) read
+    the same snapshot through the same renderer and cannot print different
+    numbers or omit the coverage that travels with the score.
+
+    An unmeasured engine prints `NA` with its reason - never `0`.
+    """
+    label = _engine_label(engine)
+    score = entry.get("score")
+    if score is None:
+        return f"**{label}: NA** - {entry.get('reason') or 'not measured'}"
+    result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+    line = f"**{label}: {_plain_float(score)}/100**"
+    if entry.get("band"):
+        line += f" ({entry['band']})"
+    line += f" | coverage {_coverage_text(entry.get('coverage'), ticker)}"
+    floor = result.get("floor")
+    if floor is not None:
+        line += f" | required floor {_plain_float(floor)}"
+    line += " | ABOVE FLOOR"
+    return line
+
+
 def _call_engine(tool_name: str, ticker: str, trade_date: str | None) -> str:
     """Run one engine's own reader. Never raises - an engine that cannot be
     measured yields an explicit unavailable line, never a zero."""
@@ -87,6 +113,7 @@ def engine_score_block(
     ticker: str,
     trade_date: str | None = None,
     cfg: dict | None = None,
+    snapshot: dict | None = None,
 ) -> str:
     """The score-engine instruction for one analyst, WITH the numbers supplied.
 
@@ -101,6 +128,13 @@ def engine_score_block(
       result, but does not decide whether or where the authoritative engine
       result appears"* - a tool the model may or may not call does not satisfy
       that. The number is in the prompt either way.
+    * **It READS the run's snapshot; it does not recompute the engine.** The
+      calling analyst passes ``snapshot=state["quant_scorecard"]``, and the owned
+      engine's line comes from that one snapshot through the same renderer the
+      report section uses - so the prompt's number, the report's number and the
+      card's number are one number. Without a snapshot the block falls back to
+      the engine's own reader, which is a second producer of the same quantity
+      and is exactly what `RLW-2` removed from the run path (`_call_engine`).
     * **It works for an analyst that binds no tools at all.** The sentiment
       analyst pre-fetches its data and has no ToolNode, so a "call
       `get_sentiment_score`" instruction there would invite a hallucinated call
@@ -126,11 +160,21 @@ def engine_score_block(
     if not owned:
         return ""
 
+    snap = snapshot if isinstance(snapshot, dict) else None
     sections: list[str] = []
     for engine in owned:
         if not config.get(ENGINE_GATES[engine]):
             continue
-        text = _call_engine(ENGINE_TOOLS[engine], ticker, trade_date).strip()
+        text = ""
+        if snap:
+            entry = (snap.get("engines") or {}).get(engine) or {}
+            if entry.get("enabled"):
+                text = _engine_summary_line(engine, entry, ticker=ticker)
+        if not text:
+            # No snapshot handed down - a direct caller or a test. Fall back to
+            # the engine's own reader rather than dropping the number: a missing
+            # snapshot is a caller bug, not an unmeasured engine.
+            text = _call_engine(ENGINE_TOOLS[engine], ticker, trade_date).strip()
         if not text:
             continue
         sections.append(text)
@@ -357,21 +401,12 @@ def engine_report_section(
         label = _engine_label(engine)
         score = entry.get("score")
         head = f"## {label} (engine score)"
+        line = _engine_summary_line(engine, entry, ticker=ticker)
         if score is None:
-            reason = entry.get("reason") or "not measured"
-            blocks.append(f"{head}\n\n**{label}: NA** - {reason}\n")
+            blocks.append(f"{head}\n\n{line}\n")
             continue
-        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
-        line = f"**{label}: {_plain_float(score)}/100**"
-        if entry.get("band"):
-            line += f" ({entry['band']})"
-        line += f" | coverage {_coverage_text(entry.get('coverage'), ticker)}"
-        floor = result.get("floor")
-        if floor is not None:
-            line += f" | required floor {_plain_float(floor)}"
-        line += " | ABOVE FLOOR"
         # The category -> measurement chain for THIS engine only, so the section
-        # carries its own evidence rather than pointing at section V.
+        # carries its own evidence rather than pointing at section IVc.
         detail = format_engine_detail(
             {**snap, "engines": {engine: entry}}
         ).strip()

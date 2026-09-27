@@ -253,6 +253,174 @@ def market_breadth(
     return out
 
 
+# --- the cumulative A/D line and the Zweig thrust, over the same panel ------
+#
+# ``market_breadth`` reads ONE day's counts (``advance_decline``/``ad_ratio``).
+# The library's §10.2 is the CUMULATIVE line over the same per-session counts and
+# §11 the Zweig thrust over the advance/(advance+decline) SHARE - two readings of
+# ONE producer over the panel already fetched, never a second producer of a
+# quantity this module already computes (rule 15).
+#
+# Naming, per ``ScoreUniverse.md`` D-5: the cumulative reading is ``ad_line`` and
+# the same-day net ratio is ``ad_ratio``. The library's ``ADRatio`` (adv/dec) is a
+# THIRD meaning and this module deliberately never emits it.
+
+#: Zweig's thrust pair, mirroring the defaults ``technical_depth.zweig_breadth_thrust``
+#: declares: the advance share (its EMA) crosses from below ``LOW`` to above
+#: ``HIGH`` within ``WINDOW`` sessions. Declared policy - the library's §11 states
+#: the shape ("from a depressed level to a high level") and names no numbers - and
+#: passed explicitly to that producer so the two cannot drift silently.
+ZWEIG_THRUST_LOW = 0.40
+ZWEIG_THRUST_HIGH = 0.615
+ZWEIG_THRUST_WINDOW = 10
+
+
+def advance_decline_line(
+    closes_by_name: dict,
+    *,
+    thrust_window: int = ZWEIG_THRUST_WINDOW,
+    thrust_low: float = ZWEIG_THRUST_LOW,
+    thrust_high: float = ZWEIG_THRUST_HIGH,
+    min_n: int = 20,
+) -> dict | None:
+    """Cumulative advance-decline line (REG-5, §10.2) + Zweig thrust (REG-6, §11).
+
+    ``closes_by_name`` is the SAME ``{name: [close, ...]}`` panel
+    ``market_breadth`` takes, so the two reads sit over one panel and cannot
+    describe different universes. Each name is aligned on its OWN last bar (the
+    panel is contemporaneous), each bar's move counts ``+1``/``0``/``-1``, and the
+    net ``advancers - decliners`` per session is accumulated into ``ad_line``.
+
+    Returns::
+
+        {
+          "n": usable names, "coverage": usable / total,
+          "sessions": sessions in the line,
+          "ad_line": [cumulative net breadth, oldest -> newest] (REG-5),
+          "net": [advancers - decliners per session],
+          "advancers" | "decliners": [per-session counts],
+          "small_sample": bool, "min_n": int, "reason": str (small sample),
+          "zweig_thrust": {
+              "active": bool | None,
+              "window": int, "low": float, "high": float,
+              "current_ratio": adv/(adv+dec) | None,
+              "unavailable": reason | None,
+          },
+          "basis": str,
+        }
+
+    ``ad_line`` is the CUMULATIVE reading and is named so it cannot be confused
+    with ``market_breadth``'s same-day ``ad_ratio`` (``ScoreUniverse.md`` D-5);
+    the library's ``ADRatio`` (adv/dec) is a third meaning this module does not
+    emit. The line's LEVEL is anchored at the first session of the panel, so only
+    its shape/slope is meaningful, never its absolute value.
+
+    ``zweig_thrust.active`` is the §120 Zweig event read by the ONE producer
+    ``technical_depth.zweig_breadth_thrust`` (an EMA of the advance share rising
+    from below ``thrust_low`` to above ``thrust_high`` inside the trailing
+    ``thrust_window``); this read delegates to it so REG-6 and TECH-14 cannot
+    drift. ``current_ratio`` is that producer's latest ``adv / (adv + dec)``. It
+    is ``None`` - never ``False`` - when the read cannot be taken: an empty map
+    returns ``None``; a panel below ``min_n`` keeps the counts and withholds the
+    share/thrust with the reason (``small_sample``), the same
+    denominator-integrity rule ``market_breadth`` applies; and the delegated
+    producer's own floor (``ema_len + window`` aligned observations) is reported
+    in ``zweig_thrust["unavailable"]`` when the panel is too short for it.
+    """
+    panel = {k: v for k, v in (closes_by_name or {}).items() if _usable(v)}
+    if not panel:
+        return None
+    total = len(closes_by_name or {})
+    n = len(panel)
+    sessions = max(len(v) for v in panel.values()) - 1
+    if sessions < 1:
+        return None
+    # Align each name on its own last bar: age k means "k bars back from that
+    # name's newest close", so the newest session is contemporaneous across the
+    # panel and a shorter series simply stops contributing at its own start.
+    adv_by_age: dict[int, int] = {}
+    dec_by_age: dict[int, int] = {}
+    for vals in panel.values():
+        for k in range(1, len(vals)):
+            if vals[-k] > vals[-k - 1]:
+                adv_by_age[k] = adv_by_age.get(k, 0) + 1
+            elif vals[-k] < vals[-k - 1]:
+                dec_by_age[k] = dec_by_age.get(k, 0) + 1
+    advancers = [adv_by_age.get(k, 0) for k in range(sessions, 0, -1)]
+    decliners = [dec_by_age.get(k, 0) for k in range(sessions, 0, -1)]
+    net = [a - d for a, d in zip(advancers, decliners, strict=False)]
+    ad_line: list[int] = []
+    running = 0
+    for x in net:
+        running += x
+        ad_line.append(running)
+
+    gated = breadth_with_gate({"n": n}, min_n=min_n)
+    thrust = {
+        "active": None,
+        "window": int(thrust_window),
+        "low": float(thrust_low),
+        "high": float(thrust_high),
+        "current_ratio": None,
+        "unavailable": None,
+    }
+    reason_out: str | None = None
+    if gated.get("small_sample"):
+        reason_out = (
+            f"panel of {n} usable name(s) of {total} offered: "
+            f"{gated.get('reason', f'sample {n} < {min_n}')} - an "
+            "advance/(advance+decline) thrust over a handful of names is not a "
+            "market breadth read"
+        )
+        thrust["unavailable"] = reason_out
+    elif sessions < thrust_window:
+        thrust["unavailable"] = (
+            f"{sessions} session(s) of breadth, below the {thrust_window}-session "
+            "thrust window"
+        )
+    else:
+        # ONE producer for the Zweig reading (rule 15): the §120 formula lives in
+        # ``technical_depth.zweig_breadth_thrust`` (an EMA of the advance share
+        # crossing the thresholds). This read delegates to it rather than
+        # restating the statistic, so REG-6 and TECH-14 cannot drift; the import
+        # is deferred so this module's own import block is unchanged.
+        from .technical_depth import zweig_breadth_thrust
+
+        read = zweig_breadth_thrust(
+            advancers,
+            decliners,
+            window=int(thrust_window),
+            decline_threshold=float(thrust_low),
+            rise_threshold=float(thrust_high),
+        )
+        thrust["active"] = read.get("signal")
+        thrust["current_ratio"] = read.get("ratio")
+        thrust["unavailable"] = read.get("unavailable")
+
+    out = {
+        "n": n,
+        "coverage": round(n / total, 3) if total else 0.0,
+        "sessions": len(ad_line),
+        "ad_line": ad_line,
+        "net": net,
+        "advancers": advancers,
+        "decliners": decliners,
+        "small_sample": bool(gated.get("small_sample")),
+        "min_n": min_n,
+        "zweig_thrust": thrust,
+        "basis": (
+            f"{n}-name panel over {len(ad_line)} session(s); ad_line is the "
+            "cumulative advancers - decliners (§10.2), anchored at the first "
+            "session, so only its shape is meaningful; the same-day net ratio "
+            "stays market_breadth's ad_ratio and the library's adv/dec ADRatio is "
+            "never emitted here"
+        ),
+    }
+    if reason_out is not None:
+        out["reason"] = reason_out
+    return out
+
+
 # --- R5: a calibrated forward stress probability from the cross-section -----
 #
 # 2602.07066 aggregates MONTHLY cross-sectional fragility signals - return
@@ -630,6 +798,7 @@ def forward_stress_probability(
 __all__ = [
     "market_breadth",
     "mp_below_count",
+    "advance_decline_line",
     "PANEL_KEY",
     "forward_stress_probability",
     "MONTH_SESSIONS",
@@ -637,4 +806,7 @@ __all__ = [
     "FS_MIN_MONTHS",
     "FS_MIN_BIN_N",
     "FS_STRESS_QUANTILE",
+    "ZWEIG_THRUST_LOW",
+    "ZWEIG_THRUST_HIGH",
+    "ZWEIG_THRUST_WINDOW",
 ]

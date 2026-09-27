@@ -209,7 +209,9 @@ COMPONENTS: dict[str, Component] = {
            "tone", "tone"),
         # breadth (10)
         _c("bull_share", "breadth", "higher_better",
-           "aggregate_weighted_sentiment per-article score (share > 0)"),
+           "sentiment.aggregate_weighted_sentiment:626 (bull_share: per-day "
+           "share of accepted articles with s > +eps, 0..1, None on an empty day)",
+           "the positive share the producer emits; the day's n is the denominator"),
         _c("neutral_share", "breadth", "lower_better",
            "sentiment.aggregate_weighted_sentiment:626 (neutral_share)"),
         # institutional (15)
@@ -234,7 +236,13 @@ COMPONENTS: dict[str, Component] = {
            "a positioning gauge, not a predictor (SentimentScore.md §0.2 point 4)"),
         # short interest (5)
         _c("short_pct_float", "short_interest", "lower_better",
-           "yfinance_short_interest.get_short_interest_yfinance:37"),
+           "yfinance_short_interest.get_short_interest_yfinance:37 - the LEVEL, "
+           "as a decimal fraction of float (the leaf prints the level x100 with a "
+           "% marker, so the caller divides by 100); strategies/"
+           "short_interest.short_interest_percentile:35 is the name-relative "
+           "PERCENTILE and a DIFFERENT measure, not this component's value",
+           "the ramp (0.05, 0.25) is a fraction of float, so this row is the "
+           "level; the percentile would need its own row"),
         # dispersion (5)
         _c("dispersion", "dispersion", "lower_better",
            "sentiment.sentiment_dispersion:209",
@@ -243,9 +251,13 @@ COMPONENTS: dict[str, Component] = {
            "sentiment.sentiment_dispersion:209 (agreement)"),
         # extreme / crowding (5)
         _c("crowd_ratio", "extreme_crowding", "lower_better",
-           "sentiment.crowd_ratio:163 (0-100 ratio/percentile)",
-           "scored on this engine's own edges; the producer's 40/60 are display "
-           "constants, never this engine's score edges"),
+           "sentiment.crowd_ratio:163 (the 0-100 bull/(bull+bear) ratio; it "
+           "computes no percentile itself) + sentiment.crowd_band_percentile "
+           "(percentile band over the name's own history; the 40/60 constants are "
+           "only the documented fallback)",
+           "the component value is the ratio; the band is a percentile of the "
+           "name's own history once enough exists (owner Q5); scored on this "
+           "engine's own edges, never the producer's display bands"),
         _c("mention_heat", "extreme_crowding", "lower_better",
            "sentiment.mention_volume:43",
            "ATTENTION, not tone - never summed with the tone legs (neglected-firm "

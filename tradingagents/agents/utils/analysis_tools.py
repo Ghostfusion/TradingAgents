@@ -1329,7 +1329,10 @@ def get_mean_reversion_tech(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
     """Mean-reversion dip-timing + exit technicals: StochRSI, RSI2, Williams %R,
-    Keltner, Donchian, OBV divergence, Parabolic SAR, Elder thermometer.
+    Keltner, Donchian (now with breakout persistence and false-breakout flags),
+    OBV divergence and its LEVEL and slope, Parabolic SAR, Elder thermometer, the
+    per-signal mean-reversion z and the Bollinger-bandwidth squeeze/expansion
+    read.
 
     Complements get_dip_technical with the faster/smoother oscillators and
     channel/volume confirmations. Use before any 'oversold / dip timing /
@@ -1348,9 +1351,11 @@ def get_mean_reversion_tech(
     try:
         from tradingagents.strategies.size import atr
         from tradingagents.strategies.technical_factors import (
+            bollinger_bandwidth as _bbw,
             donchian_channel as _don,
             elder_thermometer as _elder,
             keltner_channel as _kelt,
+            mean_reversion_z as _mrz,
             obv_divergence as _obv,
             parabolic_sar as _psar,
             rsi2 as _rsi2,
@@ -1365,6 +1370,8 @@ def get_mean_reversion_tech(
         o = _obv(closes, data["volumes"])
         p = _psar(data["highs"], data["lows"], closes=closes)
         e = _elder(data["volumes"])
+        mrz = _mrz(closes)
+        bb = _bbw(closes)
         lines = [
             f"mean reversion tech {ticker}:",
             f"  stochrsi={s.get('stochrsi')} oversold={s.get('oversold')}",
@@ -1372,8 +1379,27 @@ def get_mean_reversion_tech(
             f"  keltner mid={k.get('mid')} pct={k.get('pct')}",
             f"  donchian up={d.get('upper')} lo={d.get('lower')} "
             f"breakout_up={d.get('breakout_up')} breakout_dn={d.get('breakout_dn')} "
-            f"(vs prior-{20}-bar {d.get('breakout_ref_up')}/{d.get('breakout_ref_dn')})",
-            f"  obv_up={o.get('obv_up')} bullish_div={o.get('bullish_div')}",
+            f"(vs prior-{20}-bar {d.get('breakout_ref_up')}/{d.get('breakout_ref_dn')}) "
+            f"persistence_up={d.get('persistence_up')} "
+            f"persistence_dn={d.get('persistence_dn')} "
+            f"false_breakout_up={d.get('false_breakout_up')} "
+            f"false_breakout_dn={d.get('false_breakout_dn')}",
+            # The OBV LEVEL `obv_divergence` computes and used to discard, plus
+            # its slope: the divergence flag alone cannot say whether the line is
+            # at a new high or merely turned up.
+            f"  obv_up={o.get('obv_up')} bullish_div={o.get('bullish_div')} "
+            f"level={o.get('obv')} slope={o.get('obv_slope')}",
+            # The per-signal mean-reversion z: how many of the name's own recent
+            # daily moves the last close is from its mean (>2 = stretched).
+            f"  mean_reversion_z={mrz.get('z')} (n={mrz.get('n')}"
+            f"{'; ' + str(mrz['reason']) if mrz.get('reason') else ''})",
+            # Bollinger bandwidth: the contraction (squeeze) and expansion reads
+            # the library's §21-§25 asks for, with the percentile over the name's
+            # own history so a quiet tape and a violent one are distinguishable.
+            f"  bollinger_bandwidth={bb.get('bbw')} "
+            f"pct={bb.get('bbw_percentile')} squeeze={bb.get('squeeze')} "
+            f"expansion={bb.get('expansion')} "
+            f"mean_reversion_distance={bb.get('mean_reversion_distance')}",
             f"  psar={p.get('sar')} below={p.get('below')} exit={p.get('exit')} "
             f"elder_ratio={e.get('ratio')} heavy={e.get('heavy')}",
         ]
@@ -2332,9 +2358,12 @@ def get_regime_components(
         return f"regime components unavailable for {ticker}: not enough price history."
     try:
         # vol_percentile expects a list of close *windows* (it computes vol of
-        # each). Build 21-day rolling windows over the close series.
+        # each). Build every 21-day window ENDING at or before the newest bar -
+        # overlapping, step 1 (`MASTER_PLAN.md` README-5 / REG-3): the same
+        # window set `_regime_components` ranks, so this diagnostic and the
+        # regime score print one quantity rather than two granularities of it.
         window = 21
-        windows = [closes[i - window : i] for i in range(window, len(closes) + 1, window)]
+        windows = [closes[i - window : i] for i in range(window, len(closes) + 1)]
         vol_pct = vol_percentile(windows or [closes], current_window=window)
         trend = trend_strength(closes, sma_window=min(200, max(2, len(closes) // 2)))
         # CHOP runs 0-100 (low = trend) in BOTH of its branches now, and is
@@ -2347,12 +2376,111 @@ def get_regime_components(
         label = regime_label(vol_pct, trend, chop)
     except Exception as exc:  # noqa: BLE001
         return f"regime components unavailable for {ticker}: {exc}"
+    # The market-level depth reads (`RegimeScore.md` §8.1 groups 1-2), all over
+    # the run's ONE shared S&P 500 panel rather than a second cross-section, and
+    # all measurement-only: none of them moves the label above.
+    depth: list[str] = []
+    try:
+        from tradingagents.strategies.breadth_depth import (
+            average_pairwise_correlation as _avg_corr,
+            interaction_terms as _interactions,
+            market_participation as _participation,
+            pair_spread as _pair_spread,
+            regime_composite as _regime_composite,
+        )
+        from tradingagents.strategies.market_breadth import (
+            advance_decline_line as _ad_line,
+        )
+
+        panel = _market_panel()
+        if panel:
+            # Participation counts (not the panel's percentages) and the
+            # cumulative A/D line with its Zweig-thrust block: one producer, two
+            # market readings, over the same panel the breadth read uses.
+            part = _participation(panel)
+            if part and part.get("participation_rate") is not None:
+                depth.append(
+                    f"participation={part['participation_rate']:.1%} "
+                    f"({part.get('positive_return_n')} of {part.get('n')} names "
+                    "up on the trailing window)"
+                )
+            adl = _ad_line(panel)
+            if adl:
+                thrust = (adl.get("zweig_thrust") or {}).get("active")
+                # The producer returns the cumulative line as a series; a tool
+                # line prints where it ENDS and over how many sessions, not the
+                # whole history (the series stays in the dict for a programmatic
+                # reader).
+                _line = adl.get("ad_line") or adl.get("net") or []
+                _latest = _line[-1] if isinstance(_line, list) and _line else None
+                depth.append(
+                    f"ad_line_latest={_latest} sessions={adl.get('sessions')} "
+                    f"zweig_thrust={thrust}"
+                )
+            # Cross-sectional correlation and its spike z: the §13 read the
+            # runtime has never had (the ceiling-style `_max_pairwise_corr` is a
+            # different quantity).
+            rets = {}
+            for _name, _cl in panel.items():
+                _r = _daily_returns(_cl)
+                if len(_r) >= 30:
+                    rets[_name] = _r
+            corr = _avg_corr(rets) if rets else {}
+            if corr.get("avg_corr") is not None:
+                depth.append(
+                    f"avg_pairwise_corr={corr['avg_corr']:.3f} "
+                    f"spike_z={corr.get('spike_z')} (n_names={corr.get('n_names')})"
+                )
+            comp = _regime_composite(
+                {
+                    "trend": trend,
+                    "breadth": None,
+                    "volatility": vol_pct,
+                    "correlation": corr.get("avg_corr"),
+                }
+            )
+            depth.append(
+                "regime_composite="
+                + (
+                    f"{comp['composite']}"
+                    if comp.get("composite") is not None
+                    else "None (no declared weight vector)"
+                )
+            )
+            inter = _interactions(
+                trend_strength=trend,
+                correlation=corr.get("avg_corr"),
+                volatility=vol_pct,
+            )
+            terms = {
+                k: v
+                for k, v in (inter.get("terms") or {}).items()
+                if v is not None
+            }
+            if terms:
+                depth.append(
+                    "interactions="
+                    + ", ".join(f"{k}={v:.4f}" for k, v in sorted(terms.items()))
+                )
+        bench = _benchmark_closes() or []
+        if len(bench) > 21 and len(closes) > 21:
+            ps = _pair_spread(closes, bench, window=21, label_a=ticker, label_b="benchmark")
+            if ps and ps.get("spread") is not None:
+                depth.append(
+                    f"vs_benchmark_spread={ps['spread']:+.2%} "
+                    f"(n_bars={ps.get('n_bars')})"
+                )
+    except Exception:  # noqa: BLE001 - depth reads are advisory; the label stands
+        depth = []
     chop_txt = f"{chop:.2f}" if chop is not None else "n/a (insufficient history)"
     # vol_pct is None when the series is too short to percentile (a fabricated
     # 0.5 was the old behaviour and is the defect WP-4 fixed) - the same guard
     # the chop clause above uses, for the same reason.
     vol_txt = f"{vol_pct:.2f}" if vol_pct is not None else "n/a (insufficient history)"
-    return f"regime {ticker}: vol_pct={vol_txt} trend={trend:.4f} chop={chop_txt} label={label}"
+    line = f"regime {ticker}: vol_pct={vol_txt} trend={trend:.4f} chop={chop_txt} label={label}"
+    if depth:
+        line += "\n  market depth: " + "; ".join(depth)
+    return line
 
 
 @tool
@@ -2876,7 +3004,11 @@ def get_dcf_valuation(
         f"erp={erp:.2%} (wacc = CAPM rf + beta*erp) "
         f"fcf_latest={res['fcf_latest']:.2f} shares={res['shares']:.1f} "
         f"share_basis={shares_basis or 'n/a'} "
-        f"cash={cash:,.0f} debt={debt:,.0f} net_debt={cash - debt:,.0f} "
+        # NetDebt = TotalDebt − Cash (the library's definition, ValuationScore.md
+        # §4.4 C13). The leaf printed `cash − debt` — the opposite sign — in the
+        # one place a reader compares the two books (`D-8`).
+        f"cash={cash:,.0f} debt={debt:,.0f} net_debt={debt - cash:,.0f} "
+        "(total_debt - cash) "
         f"bridge=({cash_basis} - {debt_basis}) equity={res['equity_value']:,.0f} "
         f"fair_value = equity / shares "
         f"(provider-derived; growth/ERP are analyst overrides{cash_debt_note})"
@@ -5717,7 +5849,27 @@ def get_technical_score(
                 f"technical score unavailable for {ticker}: fewer than 30 bars "
                 "or no indicator could be measured"
             )
-        res = technical_score(vals)
+        # The breakout category's persistence/false-breakout component is the one
+        # the score cannot derive from the flat component dict: it needs the
+        # Donchian channel's own flags (`persistence_up`/`persistence_dn` and the
+        # breakout signs), so the leaf hands the producer's dict over rather than
+        # a re-derived boolean (UNIV-BREAKOUT / `donchian_channel:467`). `None`
+        # when the bars are too short for the channel, and the component then
+        # stays absent with its reason - never a zero.
+        donchian = None
+        try:
+            from tradingagents.strategies.technical_factors import (
+                donchian_channel as _don_ch,
+            )
+
+            data = _ohlcv(ticker)
+            _cl = data.get("closes") or []
+            if len(_cl) >= 20:
+                donchian = _don_ch(data.get("highs") or [], data.get("lows") or [],
+                                   closes=_cl)
+        except Exception:  # noqa: BLE001 - one absent component is not a failure
+            donchian = None
+        res = technical_score(vals, donchian=donchian)
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"technical score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:
@@ -6311,14 +6463,16 @@ def _regime_components() -> dict:
         # realized-vol percentile of the BENCHMARK's own history (the
         # `regime.vol_percentile` defect fix: None, never a fabricated 0.5)
         window = 21
-        windows = [bench[i - window : i] for i in range(window, len(bench) + 1, window)]
-        # `range(..., len(bench) + 1, window)` stops at the last whole stride, so a
-        # series that is not a multiple of `window` loses its newest bars and the
-        # window ranked as "latest" is not the current one - a 320-bar history
-        # ranked `bench[294:315]`, up to 20 bars stale. Append the current window
-        # when the stride missed it.
-        if windows and windows[-1][-1] != bench[-1]:
-            windows.append(list(bench[-window:]))
+        # OVERLAPPING windows, step 1 (`MASTER_PLAN.md` README-5 / REG-3). A
+        # stride of `window` gave ~15 windows for a 320-bar history, so the rank
+        # was drawn from a handful of samples and its newest member was whatever
+        # the last whole multiple happened to cover; appending the current window
+        # fixed the staleness but left the rank coarse. Every window that ENDS at
+        # or before the newest bar is now ranked, so the latest member is always
+        # `bench[-window:]`, the count is `len(bench) - window + 1`, and the
+        # printed percentile can fall below `1/n` (the same quantity the
+        # `regime_score` leg ranks, from the same producer).
+        windows = [bench[i - window : i] for i in range(window, len(bench) + 1)]
         vp = vol_percentile_read(windows)
         if vp.get("percentile") is not None:
             vals["realized_vol_percentile"] = vp["percentile"]
@@ -6543,9 +6697,22 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
 
     Every value comes from an existing producer; one that cannot measure returns
     nothing and its component is ABSENT (NA), never 0 and never a neutral 50.
-    Returns ``(values, source)``; ``source`` tags the tone legs' scale. The
-    design's own holes (institutional, analyst, options, short interest, mention
-    heat) stay ``None`` and the engine prints them.
+    Returns ``(values, source)``; ``source`` tags the tone legs' scale.
+
+    Wired here: the tone legs and their momentum, `mention_heat` (ATTENTION, never
+    summed with tone), the weighted/neutral/dispersion read, the social read and
+    its crowd ratio, **the analyst revisions** (through the revision-index leaf's
+    own source and gate), **analyst agreement** (the keyless rating-action
+    payload), **the institutional flow** (`inst_flow_z` — the Q2 canonical
+    period-Δ, z-scored, from the same holdings frame the institution leaf prints),
+    **the options surface** (`iv_skew`, `put_call_ratio` through the same chain
+    builder `get_options_iv_read` uses), **short interest** (the decimal fraction
+    of float) and — once the aggregation emits it — `bull_share`. That is 17 of
+    the engine's 18 declared components.
+
+    An absent leg is never 0 and never a neutral 50: each producer returns `None`
+    with a reason and the engine prints it. The remaining gap is named, not
+    hidden — see the engine's own `absent` list on a run.
     """
     from datetime import date, timedelta
 
@@ -6593,6 +6760,12 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
             vals["neutral_share"] = agg[-1]["neutral_share"]
         if agg[-1].get("dispersion") is not None:
             vals["dispersion"] = agg[-1]["dispersion"]
+        # The positive share of the SAME accepted article set (`SENT-1`): the
+        # aggregation holds the per-article scores, so the PRODUCER emits the
+        # share - the declaration in `sentiment_score.COMPONENTS` names it, and a
+        # caller recomputing it would be a second producer of one quantity.
+        if agg[-1].get("bull_share") is not None:
+            vals["bull_share"] = agg[-1]["bull_share"]
     # record=False + the configured cache dir: this is a READER of the same
     # baseline the sentiment analyst's prefetch RECORDS. It used to append a
     # third time per run, and to the DEFAULT cache dir rather than the run's
@@ -6616,6 +6789,110 @@ def _sentiment_components(ticker: str, current_date: str | None, *, days: int = 
         disp = social.get("crowd_dispersion") or {}
         if disp.get("agreement") is not None:
             vals["dispersion_agreement"] = disp["agreement"]
+    # Analyst revisions (the `analyst` category). `revision_ratio(history)` takes
+    # a most-recent-first sequence of `{"up","down"}` period dicts and
+    # `fetch_revision_actions` returns exactly one such dict, so the history is
+    # one element long and the shortfall is printed by the producer. The source
+    # is the one the `get_analyst_revision_index` leaf reads, behind the leaf's
+    # own gate: with the gate off the component stays ABSENT and the engine
+    # prints its reason, rather than this reader opening a second unfetched
+    # number the owner never switched on (SENT-1's analyst half).
+    try:
+        from tradingagents.dataflows.config import get_config as _cfg_rev
+
+        if bool((_cfg_rev() or {}).get("enable_analyst_revision_index", False)):
+            from tradingagents.dataflows.yfinance_sector import fetch_revision_actions
+            from tradingagents.strategies.analyst_revisions import revision_ratio
+
+            actions = fetch_revision_actions(ticker)
+            rev = revision_ratio([actions]) if actions else None
+            if isinstance(rev, dict) and rev.get("ratio") is not None:
+                vals["revision_ratio"] = rev["ratio"]
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
+    # Options surface (`iv_skew`, `put_call_ratio`) through the SAME chain
+    # builder the `get_options_iv_read` leaf uses and the same `options_surface`
+    # producers, so the component and the tool cannot print different surfaces
+    # for one name. Absent when the chain cannot be read - never a neutral
+    # (SENT-5).
+    try:
+        from tradingagents.strategies.options_surface import (
+            iv_skew as _iv_skew,
+            put_call_oi_concentration as _put_call,
+        )
+
+        chain_rows, _why, _ctx = _options_chain_rows(ticker)
+        if chain_rows:
+            calls_oi = sum(
+                r.get("oi") or 0.0 for r in chain_rows if r.get("side") == "call"
+            )
+            puts_oi = sum(
+                r.get("oi") or 0.0 for r in chain_rows if r.get("side") == "put"
+            )
+            pcr = _put_call(puts_oi, calls_oi)
+            if pcr is not None:
+                vals["put_call_ratio"] = pcr
+            atm = min(chain_rows, key=lambda r: abs(r["strike"] - r["spot"]))
+            otm_puts = [
+                r for r in chain_rows if r["side"] == "put" and r["strike"] < r["spot"]
+            ]
+            otm_calls = [
+                r for r in chain_rows if r["side"] == "call" and r["strike"] > r["spot"]
+            ]
+            if otm_puts and otm_calls:
+                otm_put_iv = min(otm_puts, key=lambda r: abs(r["strike"] - r["spot"]))["iv"]
+                otm_call_iv = min(otm_calls, key=lambda r: abs(r["strike"] - r["spot"]))["iv"]
+                skew = _iv_skew(otm_put_iv, atm["iv"], otm_call_iv)
+                if skew is not None:
+                    vals["iv_skew"] = skew
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
+    # Short interest (`short_pct_float`): the DECIMAL fraction of float the
+    # declaration names, read structurally from the same vendor read the printed
+    # leaf renders. Not the rendered `x100` string (a 100x unit drift against the
+    # engine's `RAMPS["short_pct_float"] = (0.05, 0.25)`), and not
+    # `short_interest.short_interest_percentile` - a percentile over the
+    # settlement history, a different measure with its own row (SENT-3).
+    try:
+        from tradingagents.dataflows.yfinance_short_interest import short_interest_fields
+
+        fields = short_interest_fields(ticker)
+        if fields and fields.get("short_pct_float") is not None:
+            vals["short_pct_float"] = float(fields["short_pct_float"])
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
+    # Institutional flow (`inst_flow_z`, the Q2 canonical measure — 15% of the
+    # engine's weight): the vendor's own period-over-period Δ in % of float,
+    # z-scored against the name's own history by the producer. It reads the SAME
+    # moomoo frame the `get_institution_holdings` leaf prints (one read, two
+    # renderings), and the component's declared ramp is in z units (-2..2), so a
+    # level must never be substituted for the delta (SENT-2/SENT-4).
+    try:
+        from tradingagents.dataflows.moomoo import institution_holdings_rows
+        from tradingagents.strategies.sentiment_research import (
+            inst_flow_z as _inst_flow_z,
+        )
+
+        flow = _inst_flow_z(institution_holdings_rows(ticker))
+        if flow and flow.get("inst_flow_z") is not None:
+            vals["inst_flow_z"] = flow["inst_flow_z"]
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
+    # Analyst agreement (`analyst_agreement`): the latest rating per firm from
+    # the keyless upgrade/downgrade payload, scored by
+    # `consensus.agreement_score` inside the producer. `None` below two mapped
+    # ratings — one firm's view is not an agreement.
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_rating_actions
+        from tradingagents.strategies.sentiment_research import (
+            analyst_agreement as _analyst_agreement,
+        )
+
+        agreement = _analyst_agreement(fetch_rating_actions(ticker))
+        if agreement and agreement.get("analyst_agreement") is not None:
+            vals["analyst_agreement"] = agreement["analyst_agreement"]
+    except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
+        pass
     return vals, source
 
 
@@ -6702,8 +6979,20 @@ def get_sentiment_score(
 # --- WP-6: NewsScore -------------------------------------------------------
 
 
-def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -> dict:
+def _news_components(
+    ticker: str,
+    current_date: str | None,
+    *,
+    days: int = 30,
+    evidence: list | None = None,
+) -> dict:
     """Assemble the NewsScore components from the news pipeline.
+
+    ``evidence`` is an optional out-collector: when a list is passed, the scored
+    article set behind the aggregate relevance is appended to it, highest
+    relevance first, so the renderer can show the per-article evidence rather
+    than only the mean (`NEWS-14`). Passing nothing leaves every existing caller
+    unchanged (the three of them pass nothing).
 
     Relevance comes from `news_relevance.score_news_article` (the same producer
     the news analyst's leaf uses), novelty from the article set itself, the
@@ -6732,7 +7021,11 @@ def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -
     except Exception:  # noqa: BLE001
         articles = []
     if articles:
-        scored = []
+        scored: list[float] = []
+        # The per-article evidence behind the aggregate, kept so the renderer can
+        # show WHICH headline the relevance number came from (`NEWS-14`): the
+        # aggregate alone is a number a reader cannot challenge.
+        pairs: list[tuple[float, str]] = []
         for a in articles[:40]:
             text = str(a.get("title") or a.get("headline") or "")
             if not text:
@@ -6743,10 +7036,16 @@ def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -
                 value = res.get("score") if isinstance(res, dict) else res
                 if value is not None:
                     scored.append(float(value))
+                    pairs.append((float(value), text))
             except Exception:  # noqa: BLE001 - one bad article is not a failure
                 continue
         if scored:
             vals["relevance"] = sum(scored) / len(scored)
+        if evidence is not None:
+            evidence.extend(
+                {"title": t, "relevance": s}
+                for s, t in sorted(pairs, key=lambda p: -p[0])
+            )
         try:
             from tradingagents.strategies.news_score import news_novelty
 
@@ -6782,12 +7081,24 @@ def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -
                 vals["persistence"] = heat
     except Exception:  # noqa: BLE001 - one absent leg is not a failed engine
         pass
+    # The analyst leg needs a real revision history: `revision_ratio(history)`
+    # takes a most-recent-first sequence of `{"up","down"}` period dicts, and
+    # this leaf used to pass the TICKER - which iterates to characters, so every
+    # "period" was rejected and the leg could never measure while printing NA for
+    # a reason that was not "no source". `fetch_revision_actions` returns exactly
+    # one period dict, hence the one-element history, and it sits behind the same
+    # gate the revision-index leaf reads.
     try:
-        from tradingagents.strategies.analyst_revisions import revision_ratio
+        from tradingagents.dataflows.config import get_config as _cfg_rev
 
-        rev = revision_ratio(ticker)
-        if isinstance(rev, dict) and rev.get("ratio") is not None:
-            vals["analyst_revision"] = rev["ratio"]
+        if bool((_cfg_rev() or {}).get("enable_analyst_revision_index", False)):
+            from tradingagents.dataflows.yfinance_sector import fetch_revision_actions
+            from tradingagents.strategies.analyst_revisions import revision_ratio
+
+            actions = fetch_revision_actions(ticker)
+            rev = revision_ratio([actions]) if actions else None
+            if isinstance(rev, dict) and rev.get("ratio") is not None:
+                vals["analyst_revision"] = rev["ratio"]
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -6801,8 +7112,14 @@ def _news_components(ticker: str, current_date: str | None, *, days: int = 30) -
     return vals
 
 
-def _render_news_score(ticker: str, res: dict) -> str:
-    """Render the engine dict: components, absent categories with reasons, basis."""
+def _render_news_score(ticker: str, res: dict, evidence: list | None = None) -> str:
+    """Render the engine dict: components, absent categories with reasons, basis.
+
+    ``evidence`` carries the per-article rows behind the aggregate relevance
+    (`_news_components` fills it), printed concise and highest-first so the
+    number can be challenged rather than only trusted (`NEWS-14`). The aggregate
+    stays the primary read: the list is capped and never summed into a score.
+    """
     lines = [
         f"## NewsScore - {ticker} (advisory; "
         f"{len(res.get('measured') or [])} of "
@@ -6830,12 +7147,35 @@ def _render_news_score(ticker: str, res: dict) -> str:
             f"- composite [{res.get('status')}]: {res.get('score'):.1f}/100"
             f" - coverage {res.get('coverage'):.0%}"
         )
-    absent = res.get("absent") or []
-    if absent:
+    rows = [e for e in (evidence or []) if isinstance(e, dict)][:5]
+    if rows:
         lines.append("")
         lines.append(
-            "absent (NA with a reason, never 0): " + ", ".join(sorted(absent))
+            "highest-relevance articles "
+            "(news_relevance.score_news_article; the producer behind the "
+            "aggregate above, not a second number):"
         )
+        for e in rows:
+            score = e.get("relevance")
+            title = str(e.get("title") or "").strip()
+            if title:
+                lines.append(f"- relevance {score:.0f}: {title}")
+    absent = res.get("absent") or []
+    if absent:
+        # Every absent component is NA, never 0 - but only the ones the engine
+        # declares absent-with-evidence (`news_score.ABSENT_REASONS`) carry a
+        # reason. Listing them under "NA with a reason" claimed a reason for the
+        # ones that have none (`D-10`), so each name prints its own reason, or
+        # says plainly that the path supplied nothing.
+        reasons = res.get("absent_reasons") or {}
+        lines.append("")
+        lines.append("absent (never 0; a reason where the engine carries one):")
+        for name in sorted(absent):
+            reason = reasons.get(name)
+            if reason:
+                lines.append(f"- {name}: {reason}")
+            else:
+                lines.append(f"- {name}: no producer supplied it on this path")
     lines.append("")
     lines.append(f"basis: {res.get('basis')}")
     return "\n".join(lines)
@@ -6862,14 +7202,15 @@ def get_news_score(
     try:
         from tradingagents.strategies.news_score import news_score
 
-        vals = _news_components(ticker, current_date)
+        evidence: list = []
+        vals = _news_components(ticker, current_date, evidence=evidence)
         if not vals:
             return f"news score unavailable for {ticker}: no news producer measured"
         res = news_score(vals)
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"news score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:
-        return _render_news_score(ticker, res)
+        return _render_news_score(ticker, res, evidence=evidence)
     except Exception as exc:  # noqa: BLE001
         return f"news score unavailable for {ticker}: render failed ({exc})"
 
@@ -6928,11 +7269,45 @@ def get_tail_risk(
             )
     except Exception:
         pass
+    # The §8.2 loss/tail family and the §23 reversal leg, all pure functions
+    # over the same return series this leaf already has. Each returns None with
+    # its own reason when the series is too short for it, and the line prints
+    # `n/a` rather than a zero (NA ≠ 0).
+    try:
+        from tradingagents.strategies.book_risk import (
+            loss_frequency_family as _loss_freq,
+            momentum_reversal as _rev,
+            prob_loss as _p_loss,
+            sterling_ratio as _sterling,
+            volatility_window_ratio as _vol_ratio,
+        )
+
+        def _fmt(value, spec: str) -> str:
+            """The number, or `n/a` — an unmeasurable read is never a zero."""
+            return f"{value:{spec}}" if value is not None else "n/a"
+
+        pl = _p_loss(returns)
+        vwr = _vol_ratio(returns) or {}
+        lf = _loss_freq(returns) or {}
+        sterling = _sterling(returns)
+        reversal = _rev(returns)
+        extra = (
+            f" p_loss={_fmt(pl, '.1%')}"
+            f" sigma_ratio={_fmt(vwr.get('ratio'), '.3f')}"
+            f" sigma_expansion={vwr.get('expansion')}"
+            f" sterling={_fmt(sterling, '.3f')}"
+            f" reversal={_fmt(reversal, '.2%')}"
+            f" downside_freq={_fmt(lf.get('downside_freq'), '.1%')}"
+            f" worst_loss={_fmt(lf.get('worst_loss'), '.2%')}"
+        )
+    except Exception:  # noqa: BLE001 - the advisory extras must not cost the tool
+        extra = ""
     mvar_line = f" modified_var={abs(mvar):.2%}" if mvar is not None else " modified_var=n/a"
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} "
         f"var={f'{abs(var):.2%}' if var is not None else 'n/a'}"
         f"{mvar_line}{dd_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+        f"{extra}"
     )
 
 
@@ -7662,7 +8037,12 @@ def get_extended_indicators(
 ) -> str:
     """Extended trend/momentum/volume indicators: Ichimoku cloud, CCI, ROC,
     momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin Money Flow,
-    anchored VWAP (plain and event-anchored) and the golden/death cross.
+    anchored VWAP (plain and event-anchored) and the golden/death cross — plus
+    the depth families: SMA20/SMA100 levels and booleans, the MACD line/signal/
+    histogram with their slopes, the crossover, the ATR-normalised spread and the
+    histogram's acceleration, the position inside the name's own 52-week range,
+    ATR expansion/contraction with the volatility acceleration, and volume spike/
+    trend/breakout-confirmation.
 
     Complements get_technical_factors / get_indicators / get_mean_reversion_tech
     with the standard indicator group the project did not previously compute.
@@ -7685,6 +8065,33 @@ def get_extended_indicators(
             roc as _roc,
             trix as _trix,
             vpt as _vpt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"extended indicators unavailable for {ticker}: {exc}"
+    # The TechnicalScore library's §8.2 depth families, all pure producers in
+    # `technical_factors` (no new fetch: the same OHLCV cache).
+    try:
+        from tradingagents.strategies.size import atr as _atr
+        from tradingagents.strategies.technical_depth import (
+            adv_participation as _adv_part,
+            awesome_oscillator as _awesome,
+            candle_strength as _candle,
+            coppock_curve as _coppock,
+            dpo as _dpo,
+            ease_of_movement as _eom,
+            ema_stack as _ema_stack,
+            gap_depth as _gap_depth,
+            moving_average_depth as _ma_depth,
+            regression_read as _regression,
+            relative_vigor_index as _rvi,
+            ultimate_oscillator as _uo,
+        )
+        from tradingagents.strategies.technical_factors import (
+            atr_depth as _atr_depth,
+            macd_depth as _macd_depth,
+            range_position as _range_position,
+            sma_legs as _sma_legs,
+            volume_depth as _volume_depth,
         )
     except Exception as exc:  # noqa: BLE001
         return f"extended indicators unavailable for {ticker}: {exc}"
@@ -7728,8 +8135,100 @@ def get_extended_indicators(
                 f"vol={_sh['volume_ratio']}x vs {_sh['volume_multiple']}x "
                 f"-> signal={_sh['signal']}"
             )
+        atr_v = _atr(data["highs"], data["lows"], closes, window=14)
+        mac = _sma_legs(closes)
+        mcd = _macd_depth(closes, atr_value=atr_v)
+        rng = _range_position(data["highs"], data["lows"], closes)
+        atd = _atr_depth(data["highs"], data["lows"], closes)
+        vdp = _volume_depth(
+            closes,
+            data["volumes"],
+            highs=data["highs"],
+            lows=data["lows"],
+            atr_value=atr_v,
+        )
+        _opens = data.get("opens") or closes
+        rg = _regression(closes)
+        mad = _ma_depth(closes)
+        ems = _ema_stack(closes, atr_v)
+        cdl = _candle(_opens, data["highs"], data["lows"], closes)
+        gp = _gap_depth(closes, _opens, data["highs"], data["lows"])
+        part = _adv_part(data["volumes"])
+        dpo_ = _dpo(closes)
+        uo = _uo(closes, data["highs"], data["lows"])
+        aw = _awesome(data["highs"], data["lows"])
+        rvi = _rvi(_opens, data["highs"], data["lows"], closes)
+        cop = _coppock(closes)
+        eom_ = _eom(data["highs"], data["lows"], data["volumes"])
         lines = [
             f"extended indicators {ticker} (close {closes[-1]:.2f}):",
+            # The moving-average depth the library's §1 Trend ledger lists as
+            # ABSENT: SMA20/SMA100 as levels AND as booleans, so 'above which
+            # average' is one read rather than an inference from SMA50/200.
+            f"  sma_legs: fast={mac.get('sma_fast')} slow={mac.get('sma_slow')} "
+            f"above_fast={mac.get('above_fast')} above_slow={mac.get('above_slow')}",
+            # MACD line / signal / histogram with their one-bar slopes, the
+            # crossover flag, the ATR-normalised spread and the histogram's
+            # acceleration - the §7/§8 depth the engine's component list cannot
+            # carry (a boolean `macd_hist_rising` says nothing about slope).
+            f"  macd: line={mcd.get('macd')} signal={mcd.get('signal')} "
+            f"hist={mcd.get('hist')} slopes={mcd.get('macd_slope')}/"
+            f"{mcd.get('signal_slope')}/{mcd.get('hist_slope')} "
+            f"hist_accel={mcd.get('hist_accel')} "
+            f"crossover={mcd.get('crossover')} "
+            f"atr_spread={mcd.get('atr_spread')}",
+            # Where the name sits inside its own 52-week range: time since the
+            # high, distance off the low, and the position within the band.
+            f"  range_position: bars_since_high={rng.get('bars_since_high')} "
+            f"distance_from_low={rng.get('distance_from_low')} "
+            f"position_in_range={rng.get('range_position')}",
+            # ATR depth: the short/long ratio and its expansion/contraction, the
+            # ATR-normalised move and the volatility acceleration - distinct from
+            # `compression.atr_compression_read`'s percentile.
+            f"  atr_depth: short={atd.get('atr_short')} long={atd.get('atr_long')} "
+            f"pct={atd.get('atr_pct')} ratio={atd.get('atr_ratio')} "
+            f"expansion={atd.get('atr_expansion')} contraction={atd.get('atr_contraction')} "
+            f"move={atd.get('atr_move')} vol_acceleration={atd.get('vol_acceleration')}",
+            # Volume depth: a spike ratio, a trend read, and whether a breakout is
+            # volume-confirmed (the library's breakout-strength x V/avg product).
+            f"  volume_depth: spike={vdp.get('volume_spike')} "
+            f"trend={vdp.get('volume_trend')} ratio={vdp.get('volume_ratio')} "
+            f"breakout_confirmation={vdp.get('breakout_confirmation')} "
+            f"breakout_strength={vdp.get('breakout_strength')}",
+            # The regression family: how well a line explains the window (R²),
+            # the channel it implies, where price sits in it, and the trend's
+            # signal-to-noise - the library's §74-§79.
+            f"  regression: r2={rg.get('r2')} trend_quality={rg.get('trend_quality')} "
+            f"slope_pct={rg.get('slope_pct')} "
+            f"channel_lower={rg.get('channel_lower')} "
+            f"channel_upper={rg.get('channel_upper')} "
+            f"channel_position={rg.get('channel_position')} "
+            f"trend_to_noise={rg.get('trend_to_noise')}",
+            # Moving-average depth: the averages the module did not carry (WMA,
+            # HMA), the EMA slope, the crossover's spread and velocity, and the
+            # ATR-normalised EMA5/EMA20 stack.
+            f"  ma_depth: wma={mad.get('wma')} hma={mad.get('hma')} "
+            f"ema_slope={mad.get('ema_slope')} cross_spread={mad.get('cross_spread')} "
+            f"cross_velocity={mad.get('cross_velocity')} "
+            f"golden_cross={mad.get('golden_cross')} ema_stack={ems.get('stack')}",
+            # Intraday strength and the gap's own life: what type it was, whether
+            # price followed through, and how much of it filled.
+            f"  candle_strength: intraday={cdl.get('intraday_strength')} "
+            f"close_location={cdl.get('close_location')} "
+            f"body_pct={cdl.get('body_pct')}",
+            f"  gap: type={gp.get('type')} pct={gp.get('gap_pct')} "
+            f"continuation={gp.get('continuation')} filled={gp.get('filled')} "
+            f"fill_fraction={gp.get('fill_fraction')}",
+            # This name's share of its own average dollar volume: the §1 Breadth
+            # participation leg (a per-name read, not a market one).
+            f"  adv_participation={part.get('participation')} "
+            f"(window {part.get('window')})",
+            # The legacy oscillators the library's §113-§117 list: one line,
+            # each value None with a reason when its window is too long.
+            f"  oscillators: dpo={dpo_.get('dpo')} uo={uo.get('uo')} "
+            f"awesome={aw.get('ao')} rvi={rvi.get('rvi')} "
+            f"coppock={cop.get('coppock')} eom={eom_.get('emv')} "
+            f"eom_avg={eom_.get('emv_avg')}",
             f"  ichimoku: conversion={ic.get('conversion')} base={ic.get('base')} "
             f"span_a={ic.get('span_a')} span_b={ic.get('span_b')} "
             f"position={ic.get('label')}",
@@ -7927,8 +8426,23 @@ def get_book_tail_risk(
         stress_s = f"{stress:.2%}" if stress is not None else "n/a"
         dd_s = f"{dd:.2%}" if dd is not None else "n/a"
         gate_s = str(gate) if gate is not None else "n/a"
+        # The book's own concentration — the HHI over POSITION weights (the
+        # portfolio twin of the holder-register HHI, 0-1), the producer
+        # `RiskScore.md` §4 declares and nothing read. The configured basket,
+        # the single-name fallback and an explicit `weights` all arrive as `w`,
+        # so the number describes whichever book this call actually measured.
+        try:
+            from tradingagents.strategies.liquidity_risk import (
+                portfolio_hhi as _liq_hhi,
+            )
+
+            hhi = _liq_hhi(w)
+        except Exception:  # noqa: BLE001 - an advisory read must not break the tool
+            hhi = None
+        hhi_s = f"{hhi:.4f}" if hhi is not None else "n/a"
         return (
             f"book tail risk {ticker}: portfolio_cvar={pcvar_s} "
+            f"portfolio_hhi={hhi_s} "
             f"correlated_stress_-10pct={stress_s} mix={describe_source(mix_meta)} "
             f"drawdown(realized book)={dd_s} source={describe_source(dd_meta)} "
             f"drawdown_gate={gate_s} (True=block new risk)"
@@ -8320,6 +8834,62 @@ def get_kelly_alloc(
     return line
 
 
+def _options_chain_rows(
+    ticker: str, closes: list | None = None
+) -> tuple[list[dict] | None, str | None, dict]:
+    """The machine options chain as rows, or ``(None, reason, {})``.
+
+    Returns ``(rows, reason, ctx)``. ``ctx`` carries the chain's own context —
+    ``spot``, ``expiry``, ``days``, ``T`` — because the readers that print it
+    (the expiry label, the ATM greeks, the expected-move horizon) must print the
+    chain they were actually handed, not a second read of it.
+
+    One builder for **every** reader of this vendor read: `get_options_iv_read`
+    and the SentimentScore options components. Two builders would open two
+    chains, and `iv_skew`/`put_call_ratio` could then disagree about the same
+    name's surface in one run.
+
+    Rows carry ``strike``, ``iv``, ``oi``, ``side`` ('call'/'put'), ``spot`` and
+    ``days_to_expiry``; `strategies.options_surface` takes exactly this shape.
+    The expiry chosen is the same one the leaf has always used (the third listed,
+    or the last when fewer) and the spot is the name's own last close, so the
+    row set is a pure function of the vendor chain and the price series.
+    """
+    series = closes if closes is not None else (_ohlcv(ticker).get("closes") or [])
+    if len(series) < 30:
+        return None, "insufficient price history", {}
+    try:
+        import yfinance as _yf
+
+        tk = _yf.Ticker(str(ticker).upper())
+        expiries = list(tk.options or [])
+        if not expiries:
+            return None, "no option chain", {}
+        expiry = expiries[min(2, len(expiries) - 1)]
+        chain = tk.option_chain(expiry)
+    except Exception as exc:  # noqa: BLE001 - a vendor failure is not a crash
+        return None, f"{type(exc).__name__}: {exc}", {}
+    rows: list[dict] = []
+    spot = float(series[-1])
+    days = expiry_days(expiry)
+    T = max(days if days is not None else 30, 1) / 365.0
+    for side, frame in (("call", chain.calls), ("put", chain.puts)):
+        for _, r in frame.iterrows():
+            try:
+                iv = r.get("impliedVolatility")
+                if iv is not None and iv == iv and float(iv) > 0:
+                    oi = r.get("openInterest")
+                    rows.append({"strike": float(r["strike"]), "iv": float(iv),
+                                 "days_to_expiry": max(int(T * 365.0), 1),
+                                 "oi": float(oi) if oi is not None else None,
+                                 "spot": spot, "side": side})
+            except (TypeError, ValueError, KeyError):
+                continue
+    if len(rows) < 3:
+        return None, "chain has no usable IV rows", {}
+    return rows, None, {"spot": spot, "expiry": expiry, "days": days, "T": T}
+
+
 @tool
 
 def get_options_iv_read(
@@ -8343,43 +8913,13 @@ def get_options_iv_read(
         closes = _ohlcv(ticker).get("closes") or []
         if len(closes) < 30:
             return f"options iv read unavailable for {ticker}: insufficient price history"
-        import yfinance as _yf
-
-        tk = _yf.Ticker(str(ticker).upper())
-        expiries = list(tk.options or [])
-        if not expiries:
-            return f"options iv read unavailable for {ticker}: no option chain"
-        expiry = expiries[min(2, len(expiries) - 1)]
-        chain = tk.option_chain(expiry)
-        calls, puts = chain.calls, chain.puts
-        rows = []
-        spot = float(closes[-1])
-        days = expiry_days(expiry)
-        T = max(days if days is not None else 30, 1) / 365.0
-        for _, r in calls.iterrows():
-            try:
-                iv = r.get("impliedVolatility")
-                if iv is not None and iv == iv and float(iv) > 0:
-                    rows.append({"strike": float(r["strike"]), "iv": float(iv),
-                                 "days_to_expiry": max(int(T * 365.0), 1),
-                                 "oi": float(r.get("openInterest") or 0.0)
-                                 if r.get("openInterest") is not None else None,
-                                 "spot": spot, "side": "call"})
-            except (TypeError, ValueError, KeyError):
-                continue
-        for _, r in puts.iterrows():
-            try:
-                iv = r.get("impliedVolatility")
-                if iv is not None and iv == iv and float(iv) > 0:
-                    rows.append({"strike": float(r["strike"]), "iv": float(iv),
-                                 "days_to_expiry": max(int(T * 365.0), 1),
-                                 "oi": float(r.get("openInterest") or 0.0)
-                                 if r.get("openInterest") is not None else None,
-                                 "spot": spot, "side": "put"})
-            except (TypeError, ValueError, KeyError):
-                continue
-        if len(rows) < 3:
-            return f"options iv read unavailable for {ticker}: chain has no usable IV rows"
+        # One chain builder for this leaf and the SentimentScore options
+        # components (`_options_chain_rows`): two builders would open two chains
+        # and the two surfaces could disagree about one name's surface.
+        rows, why, ctx = _options_chain_rows(ticker, closes)
+        if rows is None:
+            return f"options iv read unavailable for {ticker}: {why}"
+        spot, expiry, days, T = ctx["spot"], ctx["expiry"], ctx["days"], ctx["T"]
         em = _exp_move(rows)
         calls_oi = sum(r.get("oi") or 0.0 for r in rows if r.get("side") == "call")
         puts_oi = sum(r.get("oi") or 0.0 for r in rows if r.get("side") == "put")

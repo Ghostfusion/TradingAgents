@@ -44,6 +44,8 @@ from scripts.score_panel import (
     META_KEY,
     REDUNDANT_ABS_CORR,
     SEC_REQUESTS_PER_SECOND,
+    SPLIT_MIN_NAMES,
+    SPLIT_MIN_PERIODS,
     STATUS_ADVISORY,
     STATUS_RESEARCH_ONLY,
     FetchResult,
@@ -57,11 +59,16 @@ from scripts.score_panel import (
     load_panel_series,
     multiple_testing,
     panel_path,
+    panel_splits,
     read_panel,
+    regime_labels,
     render_text,
+    robustness_split,
     sec_xbrl_transport,
+    sector_labels,
     slice_bars,
     split_chunks,
+    technical_category_matrix,
     technical_rows_asof,
     write_panel,
 )
@@ -920,3 +927,134 @@ def test_the_rendered_block_carries_the_cost_and_coverage_line(tmp_path):
     assert "coverage:" in text and "label:" in text
     assert report["panel"]["status"] in text
     assert "weight vector: NONE" in text, "below the floors, the line says so"
+
+
+# --------------------------------------------------------------------------
+# (h) the robustness splits (PLAN-6 / MF-3), the technical category matrix
+#     (TECH-24) and the UNMEASURED weight vectors MF-4 pins
+# --------------------------------------------------------------------------
+
+
+def _three_sectors() -> dict:
+    return {t: ["XLK", "XLF", "XLE"][i % 3] for i, t in enumerate(UNIVERSE)}
+
+
+def _two_regimes() -> dict:
+    return {d: ("bull" if i < 13 else "bear") for i, d in enumerate(DATES)}
+
+
+def test_sector_and_regime_splits_are_emitted_per_factor():
+    report = evaluate_panel(_planted_panel(_truth()), dates=DATES,
+                            sector_of=_three_sectors(), regime_of=_two_regimes())
+    sector = report["robustness"]["sector"]
+    assert sector["status"] == STATUS_ADVISORY
+    assert set(sector["label_counts"]) == {"XLK", "XLF", "XLE"}
+    assert set(sector["factors"]["fcf_yield"]) == {"XLK", "XLF", "XLE"}
+    for rec in sector["factors"]["fcf_yield"].values():
+        assert rec["available"] is True
+        assert rec["mean_rank_ic"] is not None
+        assert rec["n_names"] >= SPLIT_MIN_NAMES
+    regime = report["robustness"]["regime"]
+    assert regime["status"] == STATUS_ADVISORY
+    assert set(regime["label_counts"]) == {"bull", "bear"}
+    assert regime["factors"]["fcf_yield"]["bull"]["available"] is True
+    assert regime["factors"]["fcf_yield"]["bull"]["n_names"] == len(UNIVERSE)
+
+
+def test_a_thin_split_is_withheld_with_its_reason_never_a_number():
+    sectors = {t: ("XLK" if i < 3 else "XLF") for i, t in enumerate(UNIVERSE)}
+    report = evaluate_panel(_planted_panel(_truth()), dates=DATES, sector_of=sectors)
+    split = report["robustness"]["sector"]["factors"]["fcf_yield"]
+    thin = split["XLK"]
+    assert thin["available"] is False
+    assert thin["mean_rank_ic"] is None, "a thin split prints no number"
+    assert "min_names" in thin["reason"] and thin["n_names"] == 3
+    assert split["XLF"]["available"] is True, "the thick label is unaffected"
+
+
+def test_the_regime_split_is_withheld_without_a_regime_series():
+    report = evaluate_panel(_planted_panel(_truth()), dates=DATES)
+    regime = report["robustness"]["regime"]
+    assert regime["status"] == "UNMEASURED"
+    assert regime["factors"] == {}
+    assert "no date carries a regime label" in regime["reason"]
+    assert "market-level regime" in regime["reason"]
+
+
+def test_the_sector_default_reads_the_repos_static_map_with_no_vendor_call():
+    labels = sector_labels(["NVDA", "MSFT", "AMD", "ZZZZ"])
+    assert labels["NVDA"] == "XLK" and labels["MSFT"] == "XLK"
+    assert "ZZZZ" not in labels, "an uncovered name gets no guessed bucket"
+    from tradingagents.strategies.sector_rank import SECTOR_CONSTITUENTS
+
+    assert "NVDA" in SECTOR_CONSTITUENTS["SOXX"], "the label comes from declared data"
+    assert sector_labels(["KO"]) == {}, "a name outside the curated core is unlabelled"
+    assert regime_labels(DATES, regime_of={DATES[0]: "bull"}) == {DATES[0]: "bull"}
+    assert regime_labels(DATES) == {}, "no override -> no labels, never a guess"
+
+
+def test_robustness_split_withholds_below_the_declared_floors():
+    scores = {d: {t: float(i) for i, t in enumerate(UNIVERSE[:3])} for d in DATES}
+    out = robustness_split(scores, _planted_panel(_truth()),
+                           lambda d, t: "ALL", holding=5, n_buckets=10)
+    assert out["ALL"]["available"] is False
+    assert f"min_names={SPLIT_MIN_NAMES}" in out["ALL"]["reason"]
+    assert out["ALL"]["mean_rank_ic"] is None
+
+
+def test_panel_splits_reports_each_axis_with_its_label_source_and_floors():
+    scores = {"fcf_yield": {d: {t: float(i) for i, t in enumerate(UNIVERSE)}
+                            for d in DATES}}
+    panels = _planted_panel(_truth())
+    blocks = panel_splits(scores, panels, dates=DATES, sector_of=_three_sectors(),
+                          regime_of=_two_regimes())
+    assert set(blocks) == {"sector", "regime"}
+    assert blocks["sector"]["floors"] == {"min_names": SPLIT_MIN_NAMES,
+                                          "min_periods": SPLIT_MIN_PERIODS}
+    assert "caller-supplied" in blocks["sector"]["label_source"]
+    bare = panel_splits(scores, panels, dates=DATES)
+    assert "static curated constituent map" in bare["sector"]["label_source"]
+    assert bare["regime"]["status"] == "UNMEASURED"
+    assert "no market-level regime" in bare["regime"]["label_source"]
+
+
+def test_the_technical_category_matrix_is_reported_beside_the_component_matrix():
+    n = 320
+    long_dates = [f"2025-{1 + i // 28:02d}-{1 + i % 28:02d}" for i in range(n)]
+    names = [f"Q{i:03d}" for i in range(40)]
+    series = {t: _bars(long_dates, drift=0.0005 * i, seed=200 + i, noise=0.012)
+              for i, t in enumerate(names)}
+    provider = PriceProvider(loader=lambda t: series.get(t, {}))
+    rows = technical_rows_asof(names, long_dates[-1], provider)
+    panel = {long_dates[-1]: rows}
+    matrix = technical_category_matrix(panel, [long_dates[-1]])
+    from tradingagents.strategies.technical_score import CATEGORY_WEIGHTS
+
+    assert matrix["status"] == STATUS_ADVISORY
+    assert matrix["categories"] == list(CATEGORY_WEIGHTS)
+    assert matrix["n_pairs"] > 0, "the nine category sub-scores were correlated"
+    assert all("|" in pair for pair in matrix["pairs"])
+    report = evaluate_panel(panel, dates=[long_dates[-1]])
+    assert report["redundancy"]["n_pairs"] > 0, "the component matrix still travels"
+    assert report["technical_categories"]["n_pairs"] == matrix["n_pairs"]
+
+
+def test_the_category_matrix_is_withheld_with_its_reason_on_a_componentless_panel():
+    matrix = technical_category_matrix(_planted_panel(_truth()), DATES)
+    assert matrix["status"] == "UNMEASURED"
+    assert "can score" in matrix["reason"]
+    assert matrix["pairs"] == {} and matrix["n_pairs"] == 0
+
+
+def test_news_and_regime_engines_print_unmeasured_weight_vectors():
+    """MF-4: no invented table - the engine with no readable vector says so."""
+    registry = engine_registry()
+    for engine in ("news_score", "regime_score"):
+        vector = engine_weight_vector(engine, registry)
+        assert vector["weights"] is None
+        assert vector["status"] == "UNMEASURED"
+        assert "no declared category weight table" in vector["basis"]
+    text = render_text(evaluate_panel(_planted_panel(_truth()), dates=DATES))
+    for engine in ("news_score", "regime_score"):
+        line = next(ln for ln in text.splitlines() if ln.startswith(f"- {engine}:"))
+        assert "weights NONE [UNMEASURED]" in line

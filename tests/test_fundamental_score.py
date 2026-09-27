@@ -96,11 +96,23 @@ def test_no_factor_enters_two_sub_scores() -> None:
 
 
 def test_an_unavailable_factor_is_recorded_not_proxied() -> None:
-    """`NA` is not `0`: a factor with no supplier is named, never substituted."""
+    """`NA` is not `0`: a factor with no supplier is named, never substituted.
+
+    D-5 moved `fcf_yield` from NA to PRESENT: the panel assembler now supplies
+    it from the canonical operating_cashflow/capex/market_cap it already holds
+    (the CapEx-quality read's own key). The two factors the panel genuinely
+    cannot carry stay NA with their reason in the record's `formula`:
+    `rev_cagr5` (needs 6 annual periods; the fetch carries ~4-5) and `val_z`
+    (needs the name's own per-period multiple series, which the panel never
+    holds).
+    """
     gaps = factor_gap_report()
     assert "rev_cagr5" in gaps["FGS"]["NA"]
-    assert "fcf_yield" in gaps["VS"]["NA"]
     assert "val_z" in gaps["VS"]["NA"]
+    assert "fcf_yield" in gaps["VS"]["present"]
+    assert "fcf_yield" not in gaps["VS"]["NA"]
+    assert "NOT carried by the peer panel" in FACTOR_SCHEMA["val_z"].formula
+    assert "NOT carried by the peer panel" in FACTOR_SCHEMA["rev_cagr5"].formula
     # and the declared-present sets carry no NA factor
     for sub, rep in gaps.items():
         assert not set(rep["present"]) & set(rep["NA"])
@@ -146,8 +158,8 @@ def test_coverage_denominator_is_the_subscore_not_the_panel() -> None:
     fqs = quality_subscore(panel, min_coverage=3)
     assert all(entry["of"] == 7 for entry in fqs["coverage"].values())
     vs = valuation_subscore(panel, min_coverage=1)
-    # VS declares 12 factors, 2 of which are NA on this path -> 10 considered
-    assert all(entry["of"] == 10 for entry in vs["coverage"].values())
+    # VS declares 12 factors, 1 of which is NA on this path (val_z) -> 11
+    assert all(entry["of"] == 11 for entry in vs["coverage"].values())
 
 
 def test_subscore_basis_states_its_own_factor_count() -> None:
@@ -411,6 +423,128 @@ def test_scaled_dcf_upside_reaches_the_panel_only_when_supplied() -> None:
     )
 
 
+# --------------------------------------------------------------------------
+# FUND-21 / defect D-4 - the engine-derived DCF route
+# --------------------------------------------------------------------------
+
+
+def _dcf_fin(*, market_cap: float = 1_000_000.0, shares: float = 10_000.0,
+             beta: float | None = 1.1) -> dict:
+    """Canonical financials carrying every leg the panel DCF reads."""
+    fin = {
+        "market_cap": {"value": market_cap},
+        "shares": {"value": shares},
+        "cash": {"value": 50_000.0},
+        "total_debt": {"value": 200_000.0},
+        "operating_cashflow": {"value": 80_000.0},
+        "capex": {"value": 20_000.0},
+        "operating_cashflow_series": [60_000.0, 65_000.0, 70_000.0, 75_000.0, 80_000.0],
+        "capex_series": [20_000.0] * 5,
+    }
+    if beta is not None:
+        fin["beta"] = {"value": beta}
+    return fin
+
+
+def _vs_panel(n: int = 10) -> dict:
+    """A peer panel carrying only VS's non-DCF legs, so dcf_upside is visible."""
+    return {
+        f"N{i}": {
+            "ev_ebit": 30.0 - i,
+            "price_to_earnings": 40.0 - 2 * i,
+            "earnings_yield": 0.02 + i / 200.0,
+        }
+        for i in range(n)
+    }
+
+
+def test_engine_derives_the_dcf_upside_from_the_panels_own_financials() -> None:
+    """D-4: with no caller-supplied upside the engine derives it itself."""
+    from tradingagents.strategies.fundamental_score import _derive_dcf_upside
+
+    d = _derive_dcf_upside(_dcf_fin())
+    assert d["route"] == "dcf.compute_dcf"
+    assert d["reason"] is None
+    assert d["upside"] == pytest.approx((d["fair_value"] - d["price"]) / d["fair_value"])
+    # the confidence is the same four-leg read the caller path scales by
+    assert d["confidence"]["confidence"] is not None
+    assert "engine-derived (dcf.compute_dcf)" in d["basis"]
+
+
+def test_engine_dcf_refuses_with_a_reason_when_the_panel_cannot_support_it() -> None:
+    """`NA != 0`: no FCF series -> None with the reason, never a 0 or a proxy."""
+    from tradingagents.strategies.fundamental_score import _derive_dcf_upside
+
+    d = _derive_dcf_upside({"market_cap": {"value": 1e6}, "shares": {"value": 1e3}})
+    assert d["upside"] is None and d["route"] is None
+    assert "no free-cash-flow series" in d["reason"]
+    assert "unavailable" in d["basis"]
+
+
+def test_engine_falls_back_to_the_mid_cycle_dcf_when_the_run_rate_is_negative() -> None:
+    """A cyclical trough: the latest FCF is negative, the median is not."""
+    from tradingagents.strategies.fundamental_score import _derive_dcf_upside
+
+    d = _derive_dcf_upside(
+        {
+            "market_cap": {"value": 1_000_000.0},
+            "shares": {"value": 10_000.0},
+            "beta": {"value": 1.1},
+            "cash": {"value": 0.0},
+            "total_debt": {"value": 0.0},
+            "operating_cashflow_series": [50_000.0, 60_000.0, -1_000.0],
+            "capex_series": [0.0, 0.0, 0.0],
+        }
+    )
+    assert d["route"] == "cycle_dcf.perpetuity_value"
+    assert d["reason"] is None
+    assert d["upside"] == pytest.approx((d["fair_value"] - d["price"]) / d["fair_value"])
+    # the cycle route prints no terminal share, so that leg is honestly missing
+    assert "terminal_sensitivity" in d["confidence"]["legs_missing"]
+
+
+def test_engine_route_lights_the_factor_up_across_the_whole_panel() -> None:
+    """One name's DCF cannot be z-scored; the engine derives it for the panel."""
+    fins = {f"N{i}": _dcf_fin(market_cap=800_000.0 + 50_000 * i) for i in range(10)}
+
+    def _resolver(*, tickers, current_date, include_score_metrics):
+        return {"metrics": _vs_panel(), "financials": fins, "basis": "synthetic"}
+
+    res = fundamental_score_for_ticker("N5", "2026-09-17", resolver=_resolver)
+    assert res["dcf_upside"]["route"] == "dcf.compute_dcf"
+    assert res["dcf_upside"]["effective"] is not None
+    assert res["dcf_upside_panel"]["panel_n"] == 10
+    assert "dcf_upside" in (res["subscores"]["VS"]["metrics_used"] or [])
+    assert "dcf_upside" not in (res["subscores"]["VS"]["metrics_dropped"] or {})
+    assert "engine-derived" in res["basis"]
+
+
+def test_a_resolver_without_financials_records_the_refusal_not_a_number() -> None:
+    def _resolver(*, tickers, current_date, include_score_metrics):
+        return {"metrics": _vs_panel(), "basis": "synthetic"}
+
+    res = fundamental_score_for_ticker("N5", "2026-09-17", resolver=_resolver)
+    assert res["dcf_upside"]["route"] is None
+    assert res["dcf_upside"]["effective"] is None
+    assert "no canonical financials" in res["dcf_upside"]["reason"]
+    assert "dcf_upside" not in (res["subscores"]["VS"]["metrics_used"] or [])
+
+
+def test_the_caller_supplied_route_stays_first_and_is_not_re_derived() -> None:
+    fins = {f"N{i}": _dcf_fin() for i in range(10)}
+
+    def _resolver(*, tickers, current_date, include_score_metrics):
+        return {"metrics": _vs_panel(), "financials": fins, "basis": "synthetic"}
+
+    res = fundamental_score_for_ticker(
+        "N0", resolver=_resolver, dcf_upside=0.25, dcf_confidence_value=0.5
+    )
+    assert res["dcf_upside"]["route"] == "caller-supplied"
+    assert res["dcf_upside"]["effective"] == pytest.approx(0.125)
+    assert res["dcf_upside_panel"]["route"] == "caller-supplied"
+    assert res["dcf_upside_panel"]["panel_n"] == 1
+
+
 def test_panel_extension_is_opt_in_and_leaves_the_quality_panel_alone() -> None:
     """The round-3 quality composite's published coverage must not move."""
     from tradingagents.strategies.peer_universe import _panel_from_fin
@@ -439,6 +573,11 @@ def test_panel_extension_is_opt_in_and_leaves_the_quality_panel_alone() -> None:
     assert "price_to_earnings" in extended
     assert "price_to_earnings" not in base
     assert "earnings_yield" in extended
+    # D-5: the panel now supplies the CapEx-quality read's own fcf_yield key
+    # (free_cash_flow / market_cap) instead of declaring it NA - and it stays
+    # out of the default quality panel, whose published row must not move.
+    assert extended["fcf_yield"] == pytest.approx((80_000.0 - 20_000.0) / 1_000_000.0)
+    assert "fcf_yield" not in base
     # the quality factors themselves are unchanged by the extension
     for k, v in base.items():
         assert extended[k] == v

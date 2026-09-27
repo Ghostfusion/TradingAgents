@@ -80,6 +80,25 @@ def test_gdelt_sentiment_renders(monkeypatch):
     assert "GDELT" in out and "2026-08-26" in out
 
 
+def test_gdelt_sentiment_normalises_native_tone_to_unit(monkeypatch):
+    """GDELT's -100..100 tone is normalised to the canonical -1..1 BEFORE the
+    SMA, and the transform is named in the text, so a GDELT ``sma_7d`` is
+    comparable to an EODHD one instead of ~100x it (SENT-12)."""
+    monkeypatch.setattr(
+        "tradingagents.dataflows.gdelt._sentiment_points_gdelt",
+        lambda *a: [
+            {"date": "2026-08-25", "score": 40.0, "n": 3},
+            {"date": "2026-08-26", "score": -20.0, "n": 2},
+        ],
+    )
+    out = get_news_sentiment_gdelt("AAPL", "2026-08-20", "2026-08-29")
+    assert "unit scale -1..1" in out
+    assert "normalise_sentiment" in out
+    # native 40 -> +0.40 on the unit scale; native -20 -> -0.20
+    assert "| 2026-08-25 | +0.40 |" in out
+    assert "| 2026-08-26 | -0.20 |" in out
+
+
 def test_gdelt_sentiment_no_data(monkeypatch):
     monkeypatch.setattr(
         "tradingagents.dataflows.gdelt._sentiment_points_gdelt", lambda *a: None

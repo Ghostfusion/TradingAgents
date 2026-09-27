@@ -83,6 +83,26 @@ def test_next_earnings_filters_past():
     assert next_earnings(_earnings_rows(), "2026-08-25") is None
 
 
+def test_next_earnings_reads_beyond_60d_and_names_the_horizon():
+    """EVT-5: the moomoo fetch spans +95d, so the read horizon must too - a
+    print 70 days out is representable (the old 60d default dropped it), and
+    ``basis`` names the horizon so a reader sees how far the read reaches."""
+    res = next_earnings([{"date": "2026-10-19", "eps_estimate": 1.0}], "2026-08-10")
+    assert res is not None
+    assert res["days_until"] == 70
+    assert res["days_until"] > 60
+    assert "95d forward window" in res["basis"]
+
+
+def test_next_earnings_stops_at_the_fetched_edge():
+    """The fetch's own span is the ceiling: 95d is readable, 96d is unfetched
+    (unmeasured) and must read as None, not as "no earnings"."""
+    td = "2026-08-10"
+    at_edge = next_earnings([{"date": "2026-11-13", "eps_estimate": 1.0}], td)
+    assert at_edge is not None and at_edge["days_until"] == 95
+    assert next_earnings([{"date": "2026-11-14", "eps_estimate": 1.0}], td) is None
+
+
 def test_implied_move_percent_to_fraction():
     assert implied_move_from_history(_move_history()) == pytest.approx(0.042)
     assert implied_move_from_history([]) is None

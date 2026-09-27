@@ -120,6 +120,128 @@ def fetch_sector(ticker: str, timeout: float = 8.0) -> str | None:
     return sec or None
 
 
+def _grade(value) -> str | None:
+    """A grade cell as a clean string, or None for missing/NaN/blank."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    return text
+
+
+def _action_datetime(value):
+    """A row's action date as a tz-naive ``datetime``, or None when unreadable."""
+    from datetime import datetime
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+    # date / numpy.datetime64 / pandas Timestamp fallback
+    try:
+        return datetime.fromisoformat(str(value)[:19])
+    except ValueError:
+        return None
+
+
+def _upgrades_downgrades(ticker: str):
+    """The raw yfinance ``upgrades_downgrades`` frame, or None; never raises."""
+    try:
+        import yfinance as yf
+
+        df = yf.Ticker(ticker).upgrades_downgrades
+    except Exception:  # noqa: BLE001 - enrichment must never raise
+        return None
+    if df is None or getattr(df, "empty", True):
+        return None
+    return df
+
+
+def _rating_action_rows(ticker: str, days: int) -> list[dict] | None:
+    """Windowed analyst-action rows, NEWEST FIRST, or None; never raises.
+
+    One dict per action inside the last ``days``: ``date`` (YYYY-MM-DD),
+    ``firm``, ``action`` (lower-cased ``Action``/``Grade``), ``to_grade`` and
+    ``from_grade`` (the vendor's rating strings, or None). ``None`` when the
+    source is unavailable; ``[]`` when the frame exists but has no in-window
+    rows.
+    """
+    from datetime import datetime, timedelta
+
+    df = _upgrades_downgrades(ticker)
+    if df is None:
+        return None
+    cutoff = datetime.now() - timedelta(days=int(days))
+    rows: list[dict] = []
+    for idx, row in df.iterrows():
+        try:
+            # yfinance 1.5.x sets GradeDate as the frame INDEX (not a column),
+            # so the date falls back to the iterrows index; the column spellings
+            # are kept for older/alternate frames.
+            when = _action_datetime(
+                row.get("GradeDate") or row.get("ActionDate") or row.get("date") or idx
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        if when is None:
+            continue
+        if when.tzinfo is not None:
+            when = when.replace(tzinfo=None)
+        if when < cutoff:
+            continue
+        rows.append(
+            {
+                "date": when.strftime("%Y-%m-%d"),
+                "firm": str(row.get("Firm") or row.get("firm") or "").strip(),
+                "action": str(row.get("Action") or row.get("Grade") or "").lower(),
+                "to_grade": _grade(row.get("ToGrade") or row.get("toGrade")),
+                "from_grade": _grade(row.get("FromGrade") or row.get("fromGrade")),
+                "_when": when,
+            }
+        )
+    rows.sort(key=lambda r: r["_when"], reverse=True)
+    for r in rows:
+        r.pop("_when")
+    return rows
+
+
+def fetch_rating_actions(
+    ticker: str, days: int = 60, timeout: float = 12.0
+) -> list[dict] | None:
+    """Per-name analyst actions with their ratings, in the last ``days``.
+
+    The structured sibling of :func:`fetch_revision_actions`: the same
+    ``upgrades_downgrades`` read, but the grade strings survive instead of being
+    collapsed to up/down counts, so a consensus-agreement producer can consume
+    them. Rows are NEWEST FIRST; each is
+    ``{"date": "YYYY-MM-DD", "firm": str, "action": str, "to_grade": str|None,
+    "from_grade": str|None}``. ``None`` when the source is unavailable or
+    empty; ``[]`` when the frame exists but no action falls in the window.
+    """
+    result: dict = {}
+
+    def _work() -> None:
+        try:
+            rows = _rating_action_rows(ticker, days)
+            if rows is not None:
+                result["rows"] = rows
+        except Exception:  # noqa: BLE001 - enrichment must never raise
+            pass
+
+    t = threading.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result.get("rows")
+
+
 def fetch_revision_actions(ticker: str, days: int = 60, timeout: float = 12.0) -> dict | None:
     """Analyst upgrade/downgrade actions in the last ``days`` as a revisions
     proxy: {"up", "down", "net"} counts; None when the source is unavailable."""
@@ -127,33 +249,14 @@ def fetch_revision_actions(ticker: str, days: int = 60, timeout: float = 12.0) -
 
     def _work() -> None:
         try:
-            from datetime import datetime, timedelta
-
-            import yfinance as yf
-
-            df = yf.Ticker(ticker).upgrades_downgrades
-            if df is None or df.empty:
+            rows = _rating_action_rows(ticker, days)
+            if rows is None:
                 return
-            cutoff = datetime.now() - timedelta(days=int(days))
             up = down = 0
-            for _, row in df.iterrows():
-                try:
-                    when = row.get("ActionDate") or row.get("date")
-                    action = str(row.get("Action") or row.get("Grade") or "").lower()
-                except Exception:  # noqa: BLE001
-                    continue
-                if when is None:
-                    continue
-                if isinstance(when, str):
-                    try:
-                        when = datetime.strptime(str(when)[:10], "%Y-%m-%d")
-                    except ValueError:
-                        continue
-                if when < cutoff:
-                    continue
-                if "up" in action:
+            for r in rows:
+                if "up" in r["action"]:
                     up += 1
-                elif "down" in action:
+                elif "down" in r["action"]:
                     down += 1
             result["up"], result["down"] = up, down
             result["net"] = up - down
@@ -293,6 +396,7 @@ def fetch_eps_revisions(
 __all__ = [
     "fetch_sector",
     "fetch_revision_actions",
+    "fetch_rating_actions",
     "fetch_estimate_trend",
     "fetch_eps_revisions",
     "ESTIMATE_LEVEL_BASIS",

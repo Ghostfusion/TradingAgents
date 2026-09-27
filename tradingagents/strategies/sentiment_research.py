@@ -27,6 +27,8 @@ import numpy as _np
 from scipy import stats as _st
 
 __all__ = [
+    "inst_flow_z",
+    "analyst_agreement",
     "sentiment_lead_lag",
     "multi_horizon_sentiment_regression",
     "sector_neutral_z",
@@ -60,6 +62,111 @@ def _clean(series) -> list[float]:
         if math.isfinite(f):
             out.append(f)
     return out
+
+
+def inst_flow_z(rows: list[dict] | None, *, min_obs: int = 4) -> dict | None:
+    """Institutional period-over-period flow z - the ``inst_flow_z`` producer.
+
+    Q2 canonical measure: the LATEST 13F-style period-over-period change in
+    institutional % of float (percentage points) z-scored against the name's
+    own history of changes. ``SentimentScore.RAMPS['inst_flow_z'] = (-2.0, 2.0)``
+    is this component's declared edge - do not change the ramp, and note the
+    declaration asks for a DELTA (a change), never an ownership level.
+
+    ``rows`` is ``dataflows.moomoo.institution_holdings_rows`` output, NEWEST
+    PERIOD FIRST, so the latest change is the first finite ``pct_change``. The
+    reference distribution is the full change series and the SAMPLE standard
+    deviation (ddof=1) is used via ``factors.z_score``: the reported periods are
+    a sample drawn from the name's ongoing flow process, so the unbiased
+    estimator is the appropriate one (a population sigma would understate the
+    spread at these small n and is not used).
+
+    Returns ``{"inst_flow_z": z, "pct_change": latest, "n": n, "basis": ...}``,
+    or ``{"inst_flow_z": None, "reason": ..., ...}`` below ``min_obs``
+    observations or on a zero-variance series (never 0). ``None`` when ``rows``
+    is missing/empty.
+
+    Note: this is the SentimentScore leaf. The wired caller is the integration
+    owner's sentiment tool; ``inst_flow_z`` is not itself a tool.
+    """
+    from .factors import z_score
+
+    if not rows:
+        return None
+    changes = _clean(r.get("pct_change") for r in rows)
+    n = len(changes)
+    latest = changes[0] if changes else None
+    basis = (
+        f"period-over-period change in institutional % of float (pp), latest "
+        f"against its own {n}-period history; sample sigma (ddof=1)"
+    )
+    if n < min_obs:
+        return {
+            "inst_flow_z": None,
+            "pct_change": latest,
+            "n": n,
+            "reason": f"insufficient history: {n} < min_obs={min_obs}",
+            "basis": basis,
+        }
+    z = z_score(latest, changes)
+    if z is None:
+        return {
+            "inst_flow_z": None,
+            "pct_change": latest,
+            "n": n,
+            "reason": "zero variance in the change series",
+            "basis": basis,
+        }
+    return {"inst_flow_z": float(z), "pct_change": latest, "n": n, "basis": basis}
+
+
+def analyst_agreement(rows: list[dict] | None, *, min_ratings: int = 2) -> dict | None:
+    """Per-name analyst consensus agreement - the ``analyst_agreement`` producer.
+
+    ``rows`` is ``dataflows.yfinance_sector.fetch_rating_actions`` output (NEWEST
+    FIRST). The latest ``to_grade`` per firm is kept, so a firm that acted
+    several times in the window does not out-vote a one-action firm, then
+    ``consensus.agreement_score`` (``1 - (max-min)/2`` over the 5-tier map,
+    clipped 0..1) is returned. Grades the 5-tier map does not recognise
+    (e.g. "Outperform") are dropped by ``agreement_score`` itself, per its
+    contract.
+
+    Returns ``{"analyst_agreement": score, "n": n, "ratings": [...], "basis": ...}``.
+    Below ``min_ratings`` mapped ratings the dict carries
+    ``analyst_agreement=None`` with the reason (never 0). ``None`` when ``rows``
+    is missing/empty.
+    """
+    from .consensus import agreement_score, rating_to_number
+
+    if not rows:
+        return None
+    latest: dict[str, str] = {}
+    for r in rows:
+        firm = str(r.get("firm") or "").strip()
+        grade = r.get("to_grade")
+        if not firm or grade is None or firm in latest:
+            continue
+        latest[firm] = str(grade)
+    ratings = list(latest.values())
+    n = sum(1 for g in ratings if rating_to_number(g) is not None)
+    basis = (
+        "latest analyst rating per firm over the window; "
+        "consensus.agreement_score = 1 - (max-min)/2 over the 5-tier map"
+    )
+    if n < min_ratings:
+        return {
+            "analyst_agreement": None,
+            "n": n,
+            "ratings": ratings,
+            "reason": f"fewer than {min_ratings} mapped ratings ({n})",
+            "basis": basis,
+        }
+    return {
+        "analyst_agreement": float(agreement_score(ratings)),
+        "n": n,
+        "ratings": ratings,
+        "basis": basis,
+    }
 
 
 def sentiment_lead_lag(

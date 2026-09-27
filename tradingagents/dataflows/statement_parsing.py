@@ -166,6 +166,10 @@ _ROW_ALIASES = {
     "total_liabilities": ["total liabilities"],
     "current_assets": ["total current assets", "current assets"],
     "current_liabilities": ["total current liabilities", "current liabilities"],
+    # Accounts payable, the DPO / payables-turnover denominator (library §6).
+    # No canonical key carried it before, so the cash-conversion cycle's third
+    # leg had no input anywhere in the tree.
+    "payables": ["accounts payable", "payables"],
     "retained_earnings": ["retained earnings"],
     "ppem": ["property plant", "net ppe", "ppe", "fixed assets"],
     "marketable_securities": [

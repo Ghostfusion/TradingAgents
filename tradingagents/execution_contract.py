@@ -237,6 +237,17 @@ def risk_advisory(final_state: dict) -> dict | None:
     return out or None
 
 
+#: Producer-owned reason for the ``null`` ``opportunity_score`` slot (plan
+#: section 7.2, owner Q1). One deterministic constant, not a per-run message:
+#: the slot is empty by decision, not by a failure that varies, so the artifact
+#: carries one stable sentence saying why. It states an absence, never an error.
+OPPORTUNITY_SCORE_REASON = (
+    "null by decision, not by failure: the research composite is advisory "
+    "(research-only) and never reaches this slot, and this repo publishes no "
+    "deterministic opportunity measurement (plan section 7.2)."
+)
+
+
 def opportunity_score() -> float | None:
     """Always ``None`` today - deliberately (plan section 7.2).
 
@@ -247,7 +258,9 @@ def opportunity_score() -> float | None:
     either under a numeric field the executor may rank on would dress an
     estimate up as a measurement - the same defect class as the number/label
     integrity fixes of 2026-09-12. The schema allows ``null``, so a missing
-    score is honest and the artifact still ingests.
+    score is honest and the artifact still ingests; the producer-owned
+    ``OPPORTUNITY_SCORE_REASON`` ships beside it, under
+    ``opportunity_score_reason``, so the null is explained rather than bare.
     """
     return None
 
@@ -279,7 +292,9 @@ def envelope_fields(
 
     ``produced_at``/``expires_at`` are always UTC-aware; ``producer`` and the
     idempotency key are minted per artifact; the advisory blocks are ``None``
-    when their source did not run.
+    when their source did not run. ``opportunity_score`` is always ``null`` and
+    always accompanied by its ``opportunity_score_reason`` field
+    (``OPPORTUNITY_SCORE_REASON``).
     """
     produced = now or datetime.now(timezone.utc)
     if produced.tzinfo is None:  # pragma: no cover - callers pass aware stamps
@@ -290,6 +305,7 @@ def envelope_fields(
         "idempotency_key": str(uuid.uuid4()),
         "producer": producer_block(run_id),
         "opportunity_score": opportunity_score(),
+        "opportunity_score_reason": OPPORTUNITY_SCORE_REASON,
         "confidence": confidence_of(final_state),
         "risk_context": risk_advisory(final_state),
     }
@@ -368,6 +384,23 @@ def integrity_problems(raw: dict, *, now: datetime) -> list[dict]:
             bad(
                 "invalid_opportunity_score",
                 f"opportunity_score {score!r} is outside 0..100",
+            )
+
+    # The producer-owned reason beside the score slot (PLAN-3): the slot is
+    # ``null`` by decision, so an artifact that carries the slot must carry the
+    # sentence explaining it - same presence-and-type shape as the score check
+    # above. Never an error, so only a missing or non-string value is a problem.
+    if "opportunity_score" in raw:
+        reason = raw.get("opportunity_score_reason")
+        if reason is None:
+            bad(
+                "missing_field",
+                "opportunity_score_reason is required when opportunity_score is present",
+            )
+        elif not isinstance(reason, str) or not reason.strip():
+            bad(
+                "invalid_opportunity_score_reason",
+                f"opportunity_score_reason {reason!r} is not a non-empty string",
             )
 
     if "artifact_sha256" in raw or "decision_hash" in raw:

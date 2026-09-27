@@ -565,6 +565,49 @@ This document recommends **B** and implements nothing. **No work on this engine 
 start before Q1 is answered** — the answer determines whether a new module may
 compute a multiple at all.
 
+**[ANSWERED 2026-09-26 by the owner: `ValuationScore` becomes its own engine and
+`FundamentalScore` CONSUMES it — the closest reading to (B), with the ownership
+made explicit rather than left implicit.** The owner's rule:
+
+> *"Calculate valuation once. Attribute it twice if necessary, but don't calculate
+> it twice."*
+
+The architecture the answer fixes:
+
+```
+ValuationScore  ← DCF, multiples, EV/EBITDA, P/E, P/S, FCF yield, PEG,
+                  residual income, relative valuation — computed ONCE here
+      │
+      ▼
+FundamentalScore = w_Q·Quality + w_G·Growth + w_B·BalanceSheet
+                 + w_C·CashFlow + w_V·Valuation,   V = ValuationScore
+```
+
+That is the whole point of the answer: the failure it prevents is a DCF that
+reaches the final composite **through two independent-looking paths** — once as
+`ValuationScore` and once inside `FundamentalScore.valuation_subscore` — which is
+the double count master rule 3/15 forbids, not a weighing question.
+
+Consequences, recorded so the migration cannot drift:
+
+* **This is not (A).** The multiples do not move out of `fundamental_score.py`
+  before `ValuationScore` exists and produces them; `VS` in `SUBSCORE_FACTORS`
+  (`factor_schema.py:410`) stays until the cutover, and no stored `VS` reading is
+  rewritten. The migration order is VAL-8 (the module) before any `VS` change.
+* **This is not (C).** They are not one object under two names: `ValuationScore`
+  is the producer of the valuation dimension; `FundamentalScore`'s valuation leg
+  becomes a **consumption** of it, named as a dependency in the schema.
+* **Until the migration lands the overlap is latent, not live** — there is no
+  `ValuationScore` producer in the tree (zero code hits), so nothing is counted
+  twice today. The risk is a future module duplicating the calculation, which is
+  what the rule above forbids.
+* **Q2 (the allocation weight) and Q5 (who owns the historical-position quantity)
+  now follow**: the valuation dimension must have exactly one weight wherever it
+  enters, and `val_z` is `ValuationScore`'s rather than a second
+  `FundamentalScore` producer.
+
+`MASTER_PLAN.md` §2.1 records the answer; Phase 7's VAL rows are unblocked.
+
 **Q2 — the research-allocation weight.** `ValuationScore` is absent from the
 master's six-engine allocation. Is its weight a carve-out from Fundamental (→
 27.5 / 7.5) or a seventh line that breaks the 100% sum? Proposed 7.5%, unadopted.

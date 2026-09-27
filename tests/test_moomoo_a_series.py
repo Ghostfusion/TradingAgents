@@ -11,6 +11,7 @@ from tradingagents.dataflows.moomoo import (
     get_earnings_surprise_history_moomoo,
     get_expected_move_moomoo,
     get_institution_holdings_moomoo,
+    institution_holdings_rows,
 )
 
 RET_OK = 0
@@ -47,6 +48,75 @@ class InstitutionHoldingsTests(unittest.TestCase):
             self.assertRaises(NoMarketDataError),
         ):
             get_institution_holdings_moomoo("AVGO")
+
+
+class InstitutionHoldingsRowsTests(unittest.TestCase):
+    """The structured accessor the renderer and `inst_flow_z` share."""
+
+    def _fixture(self):
+        return pd.DataFrame(
+            {
+                "period_text": ["2026/Q2", "2026/Q1"],
+                "institution_quantity": [5646, 5465],
+                "holder_quantity": [3.7e9, 3.8e9],
+                "holder_pct": [78.4, 79.6],
+                "holder_pct_change": [-1.2, -0.1],
+            }
+        )
+
+    def test_rows_shape_and_newest_first_order(self):
+        ctx = mock.Mock()
+        ctx.get_shareholders_institutional.return_value = (RET_OK, self._fixture())
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AVGO"),
+        ):
+            rows = institution_holdings_rows("AVGO")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["period"], "2026/Q2")
+        self.assertEqual(rows[0]["institutions"], 5646)
+        self.assertAlmostEqual(rows[0]["shares_held"], 3.7e9)
+        self.assertAlmostEqual(rows[0]["pct_of_float"], 78.4)
+        self.assertAlmostEqual(rows[0]["pct_change"], -1.2)
+        self.assertEqual(
+            set(rows[0]),
+            {"period", "institutions", "shares_held", "pct_of_float", "pct_change"},
+        )
+
+    def test_empty_frame_returns_none(self):
+        ctx = mock.Mock()
+        ctx.get_shareholders_institutional.return_value = (RET_OK, pd.DataFrame())
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AVGO"),
+        ):
+            self.assertIsNone(institution_holdings_rows("AVGO"))
+
+    def test_renderer_is_byte_identical_over_the_accessor(self):
+        """The accessor refactor must not move a character of the printed table."""
+        ctx = mock.Mock()
+        ctx.get_shareholders_institutional.return_value = (RET_OK, self._fixture())
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AVGO"),
+        ):
+            out = get_institution_holdings_moomoo("AVGO")
+        expected = "\n".join(
+            [
+                "## Institutional Ownership — AVGO (moomoo)",
+                "",
+                "| Period | Institutions | Shares held | % of float | Chg (pp) |",
+                "| --- | --- | --- | --- | --- |",
+                "| 2026/Q2 | 5646 | 3.70B | 78.4% | -1.2pp |",
+                "| 2026/Q1 | 5465 | 3.80B | 79.6% | -0.1pp |",
+                "",
+                "Interpretation: the % of float held by institutions and its period change "
+                "is the smart-money ownership signal; a persistent decline can precede "
+                "under-performance, a rise can support supply/demand. Weigh alongside "
+                "capital flow and price action.",
+            ]
+        )
+        self.assertEqual(out, expected)
 
 
 class EarningsSurpriseHistoryTests(unittest.TestCase):

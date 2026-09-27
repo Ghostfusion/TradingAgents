@@ -7,7 +7,9 @@ import numpy as np
 import pytest
 
 from tradingagents.strategies.sentiment_research import (
+    analyst_agreement,
     ic_term_structure,
+    inst_flow_z,
     multi_horizon_sentiment_regression,
     quintile_long_short,
     residualize_sentiment,
@@ -176,3 +178,98 @@ def test_factor_scale_direction_and_floor():
     assert sentiment_factor_scale(0.01, 0.3, min_ic=0.02) == 1.0
     assert sentiment_factor_scale(None, 0.3, min_ic=0.02) == 1.0
     assert sentiment_factor_scale(0.05, None, min_ic=0.02) == 1.0
+
+
+# --- inst_flow_z: the institutional period-over-period change z -------------
+
+def _flow_rows(changes):
+    """institution_holdings_rows-shaped rows, NEWEST FIRST."""
+    return [
+        {"period": f"2026/Q{len(changes) - i}", "pct_change": c}
+        for i, c in enumerate(changes)
+    ]
+
+
+def test_inst_flow_z_matches_hand_computed_sample_z():
+    changes = [1.5, 0.5, -1.0, 0.2, -0.4, 2.0]  # newest first
+    out = inst_flow_z(_flow_rows(changes))
+    mean = sum(changes) / len(changes)
+    var = sum((c - mean) ** 2 for c in changes) / (len(changes) - 1)  # ddof=1
+    expected = (changes[0] - mean) / var ** 0.5
+    assert out is not None
+    assert out["inst_flow_z"] == pytest.approx(expected)
+    assert out["pct_change"] == 1.5
+    assert out["n"] == 6
+    assert "ddof=1" in out["basis"]
+
+
+def test_inst_flow_z_below_min_obs_is_none_with_reason():
+    out = inst_flow_z(_flow_rows([1.0, 2.0, 3.0]))  # 3 < default min_obs=4
+    assert out is not None
+    assert out["inst_flow_z"] is None
+    assert out["n"] == 3
+    assert "min_obs=4" in out["reason"]
+
+
+def test_inst_flow_z_constant_series_does_not_divide_by_zero():
+    out = inst_flow_z(_flow_rows([1.0] * 5))
+    assert out is not None
+    assert out["inst_flow_z"] is None
+    assert "variance" in out["reason"]
+
+
+def test_inst_flow_z_empty_and_missing_rows_are_none():
+    assert inst_flow_z([]) is None
+    assert inst_flow_z(None) is None
+
+
+def test_inst_flow_z_skips_non_finite_changes():
+    rows = _flow_rows([1.0, 0.5, 0.2, -0.3, 0.7])
+    rows.insert(1, {"period": "bad", "pct_change": None})  # newest-period gap
+    rows.insert(2, {"period": "bad2", "pct_change": float("nan")})
+    out = inst_flow_z(rows)
+    assert out is not None
+    assert out["n"] == 5
+    assert out["pct_change"] == 1.0
+
+
+# --- analyst_agreement: latest rating per firm -> agreement_score -----------
+
+def test_analyst_agreement_keeps_latest_rating_per_firm():
+    rows = [
+        {"firm": "Morgan", "to_grade": "Buy", "date": "2026-09-10"},
+        {"firm": "Goldman", "to_grade": "Sell", "date": "2026-09-05"},
+        {"firm": "Morgan", "to_grade": "Hold", "date": "2026-08-01"},  # older, same firm
+    ]
+    out = analyst_agreement(rows)
+    assert out is not None
+    # Buy (1.0) and Sell (-1.0): 1 - (1 - -1)/2 = 0.0
+    assert out["analyst_agreement"] == pytest.approx(0.0)
+    assert out["n"] == 2
+    assert set(out["ratings"]) == {"Buy", "Sell"}
+
+
+def test_analyst_agreement_below_two_mapped_is_none_with_reason():
+    out = analyst_agreement([{"firm": "Morgan", "to_grade": "Buy"}])
+    assert out is not None
+    assert out["analyst_agreement"] is None
+    assert out["n"] == 1
+    assert "min" in out["reason"] or "fewer" in out["reason"]
+
+
+def test_analyst_agreement_empty_and_missing_rows_are_none():
+    assert analyst_agreement([]) is None
+    assert analyst_agreement(None) is None
+
+
+def test_analyst_agreement_drops_unmapped_vendor_grades():
+    out = analyst_agreement(
+        [
+            {"firm": "A", "to_grade": "Outperform"},  # not in the 5-tier map
+            {"firm": "B", "to_grade": "Buy"},
+            {"firm": "C", "to_grade": "Sell"},
+        ]
+    )
+    assert out is not None
+    assert out["n"] == 2  # Outperform dropped by agreement_score's map
+    assert out["analyst_agreement"] == pytest.approx(0.0)

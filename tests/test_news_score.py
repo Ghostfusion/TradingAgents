@@ -24,13 +24,24 @@ from tradingagents.strategies.news_score import (
     COMPONENT_WEIGHTS,
     COMPONENTS,
     COMPOSITE_MIN_COVERAGE,
+    FORM_EVENT_SCORES,
+    GUIDANCE_RAMP,
     NEWS_BANDS,
+    NEWS_CATEGORIES,
+    NEWS_CATEGORY_ORDER,
+    NEWS_CATEGORY_WEIGHTS,
+    PERSISTENCE_MIN_PERIODS,
     RAMPS,
     SCALE_CONVENTION,
     align_components,
     component_weight_share,
+    corporate_events_score,
+    guidance_change_score,
+    news_confidence,
     news_novelty,
+    news_persistence,
     news_score,
+    news_volume_acceleration,
 )
 
 
@@ -366,3 +377,211 @@ def test_persistence_stays_absent_without_a_mention_series(monkeypatch) -> None:
     monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
 
     assert "persistence" not in at._news_components("PERS", "2026-09-04")
+
+
+# ---------------------------------------------------------------------------
+# D-1: the `categories` key both renderers read
+# ---------------------------------------------------------------------------
+
+
+def test_the_categories_key_covers_every_declared_owner_category() -> None:
+    res = news_score(_present())
+    assert set(res["categories"]) == set(NEWS_CATEGORY_ORDER)
+    assert set(res["categories"]) == set(NEWS_CATEGORIES)
+
+
+def test_every_category_block_mirrors_the_sentiment_score_shape() -> None:
+    res = news_score(_present())
+    for cat, entry in res["categories"].items():
+        for key in ("score", "coverage", "floor", "withheld", "band", "weight",
+                    "category", "raw_directions"):
+            assert key in entry, (cat, key)
+        assert entry["category"] == cat
+        assert entry["weight"] == pytest.approx(NEWS_CATEGORY_WEIGHTS[cat])
+
+
+def test_an_unmeasurable_category_carries_a_withheld_reason() -> None:
+    res = news_score({})
+    for cat, entry in res["categories"].items():
+        assert entry["score"] is None, cat
+        assert entry["withheld"], cat
+        assert "floor" in entry["withheld"], cat
+
+
+def test_a_two_component_category_scores_from_one_measured_leg() -> None:
+    # relevance present, materiality absent: the category still scores, and the
+    # absent leg lowers the category coverage rather than counting as a zero
+    res = news_score({"relevance": 70.0})
+    cat = res["categories"]["relevance_materiality"]
+    assert cat["score"] == pytest.approx(
+        align_components({"relevance": 70.0})["relevance"], abs=0.005
+    )
+    assert cat["coverage"] == pytest.approx(0.5)
+    assert "materiality" in cat["components"]
+
+
+# ---------------------------------------------------------------------------
+# NEWS-8: news-volume acceleration (the first difference)
+# ---------------------------------------------------------------------------
+
+
+def test_a_flat_count_series_scores_zero_acceleration() -> None:
+    out = news_volume_acceleration([{"n": 3}, {"n": 3}, {"n": 3}, {"n": 3}])
+    assert out is not None
+    assert out["acceleration"] == 0.0   # a measurement, not a gap
+    assert out["normalized"] is None    # sigma_V == 0: no scale to normalise by
+    assert out["sigma"] == 0.0
+
+
+def test_news_volume_acceleration_is_the_first_difference() -> None:
+    out = news_volume_acceleration([{"n": 2}, {"n": 2}, {"n": 8}])
+    assert out is not None
+    assert out["acceleration"] == pytest.approx(6.0)
+    assert out["normalized"] is not None
+
+
+def test_news_volume_acceleration_refuses_below_two_counts() -> None:
+    assert news_volume_acceleration([]) is None
+    assert news_volume_acceleration([{"n": 5}]) is None
+    assert news_volume_acceleration([{"n": None}]) is None
+
+
+# ---------------------------------------------------------------------------
+# NEWS-10: the library's persistence quantity
+# ---------------------------------------------------------------------------
+
+
+def test_news_persistence_positive_share_and_multi_lambda_decay() -> None:
+    points = [{"score": s} for s in (0.1, -0.2, 0.3, 0.4, -0.1)]
+    out = news_persistence(points)
+    assert out is not None
+    assert out["positive_share"] == pytest.approx(0.6)
+    assert 0.0 <= out["decayed_persistence"] <= 1.0
+    assert out["half_lives"] == [7.0, 14.0, 30.0]
+
+
+def test_news_persistence_decays_older_positive_periods() -> None:
+    # same positive share (3 of 5), but the positives sit at the RECENT end in
+    # one series and the OLD end in the other: the multi-lambda kernel must
+    # score the recent one higher
+    recent = news_persistence([{"score": s} for s in (0.0, 0.0, 1.0, 1.0, 1.0)])
+    older = news_persistence([{"score": s} for s in (1.0, 1.0, 1.0, 0.0, 0.0)])
+    assert recent["positive_share"] == older["positive_share"] == pytest.approx(0.6)
+    assert recent["decayed_persistence"] > older["decayed_persistence"]
+
+
+def test_news_persistence_refuses_below_the_stated_minimum() -> None:
+    assert PERSISTENCE_MIN_PERIODS > 1
+    assert news_persistence([{"score": 0.1}] * (PERSISTENCE_MIN_PERIODS - 1)) is None
+    assert news_persistence([]) is None
+
+
+# ---------------------------------------------------------------------------
+# NEWS-11: a first-class NewsConfidence output, distinct from coverage
+# ---------------------------------------------------------------------------
+
+
+def test_news_confidence_names_its_recipe_and_moves_with_the_sample() -> None:
+    thin = news_confidence(1, 1)
+    fat = news_confidence(7, 10)
+    assert thin is not None and fat is not None
+    for key in ("confidence", "sample_size", "positive", "negative",
+                "positive_share", "c_n", "wilson_low", "wilson_high",
+                "wilson_width", "bayesian_mean"):
+        assert key in thin, key
+    assert thin["sample_size"] == 1 and fat["sample_size"] == 10
+    assert thin["confidence"] < fat["confidence"]
+    assert "Wilson" in thin["basis"] and "C_N" in thin["basis"]
+
+
+def test_news_confidence_refuses_an_empty_sample() -> None:
+    assert news_confidence(0, 0) is None
+    assert news_confidence(None, None) is None
+
+
+def test_the_scores_confidence_key_is_not_the_coverage_value() -> None:
+    conf = news_confidence(7, 10)
+    res = news_score(_present(), confidence=conf)
+    assert res["confidence"]["sample_size"] == 10
+    # coverage is a weight share; confidence is what the sample supports. They
+    # are different units and the result never presents one as the other.
+    assert res["confidence"]["confidence"] != res["coverage"]
+    assert "WEIGHT SHARE" in res["basis"]
+    without = news_score(_present())
+    assert without["coverage"] == res["coverage"]
+    assert without["confidence"] is None
+
+
+# ---------------------------------------------------------------------------
+# NEWS-4 / D-2: corporate_events from the declared form table
+# ---------------------------------------------------------------------------
+
+
+def test_corporate_events_score_uses_the_declared_table() -> None:
+    out = corporate_events_score(["8-K", "10-Q"])
+    assert out["score"] == pytest.approx(FORM_EVENT_SCORES["8-K"])
+    assert set(out["forms"]) == {"8-K", "10-Q"}
+    assert out["mean"] == pytest.approx(
+        (FORM_EVENT_SCORES["8-K"] + FORM_EVENT_SCORES["10-Q"]) / 2
+    )
+    assert "DECLARED" in out["basis"]
+
+
+def test_corporate_events_score_refuses_empty_and_all_unknown() -> None:
+    empty = corporate_events_score([])
+    assert empty["score"] is None
+    assert "no filed forms" in empty["reason"]
+    unknown = corporate_events_score(["XYZ", "ZZZ"])
+    assert unknown["score"] is None
+    assert "no recognised SEC form" in unknown["reason"]
+    assert set(unknown["ignored"]) == {"XYZ", "ZZZ"}
+
+
+def test_corporate_events_score_ignores_unknown_forms_but_keeps_known() -> None:
+    out = corporate_events_score(["8-K", "XYZ"])
+    assert out["score"] == pytest.approx(FORM_EVENT_SCORES["8-K"])
+    assert out["ignored"] == ["XYZ"]
+
+
+def test_corporate_events_score_windows_dated_rows_only() -> None:
+    rows = [
+        {"form": "8-K", "date": "2026-09-01"},
+        {"form": "10-Q", "date": "2026-06-01"},
+    ]
+    out = corporate_events_score(rows, window_days=30)
+    assert out["forms"] == ["8-K"]
+    assert out["window_days"] == 30
+
+
+# ---------------------------------------------------------------------------
+# NEWS-3: guidance_change from the (gated) guidance revision rows
+# ---------------------------------------------------------------------------
+
+
+def test_guidance_change_scores_a_raise_above_50_and_a_cut_below() -> None:
+    up = guidance_change_score([{
+        "revenue_guidance_min": 110.0, "revenue_guidance_max": 130.0,
+        "revenue_guidance_prior_min": 90.0, "revenue_guidance_prior_max": 110.0,
+    }])
+    assert up["score"] > 50.0
+    assert up["revenue_change"] == pytest.approx(0.20)
+    assert up["ramp"] == list(GUIDANCE_RAMP)
+    down = guidance_change_score([{
+        "eps_guidance_min": 0.9, "eps_guidance_max": 1.1,
+        "eps_guidance_prior_min": 1.2, "eps_guidance_prior_max": 1.4,
+    }])
+    assert down["score"] < 50.0
+    flat = guidance_change_score([{
+        "revenue_guidance_min": 100.0, "revenue_guidance_max": 120.0,
+        "revenue_guidance_prior_min": 100.0, "revenue_guidance_prior_max": 120.0,
+    }])
+    assert flat["score"] == pytest.approx(50.0)
+
+
+def test_guidance_change_refuses_without_a_prior_range() -> None:
+    forward_only = guidance_change_score([{
+        "revenue_guidance_min": 110.0, "revenue_guidance_max": 130.0,
+    }])
+    assert forward_only["score"] is None
+    assert "prior range" in forward_only["reason"]
+    assert guidance_change_score([])["score"] is None

@@ -59,23 +59,23 @@ def realized_vol(
 def vol_percentile(history: list[list[float]], current_window: int = 21) -> float | None:
     """Percentile rank (0-1) of the latest realized vol vs all history windows.
 
-    Returns ``None`` when it cannot measure - fewer than two windows to rank
-    against - and **never a fabricated 0.5**. The 0.5 this used to return on
-    failure was a neutral that entered every caller as if volatility had been
-    measured mid-band (master rule 1: `NA` is not `0`, and an absent component
-    must leave the denominator with its reason). The reason is available to the
-    caller without guessing: the rank is unmeasurable exactly when
-    ``len(history) < 2``, and :func:`vol_percentile_read` returns it as a string
-    for display.
+    The rank is the count of windows **strictly below** the latest over the
+    number of windows: floor 0, ceiling ``(n-1)/n``, ties counted as not-below.
+    The self-inclusive ``<=`` this replaced floored the printed percentile at
+    ``1/n`` (RegimeScore.md §3 defect 5 / REG-3); the 0.5 it returned on failure
+    was a fabricated neutral (master rule 1: `NA` is not `0`). ``None`` is
+    returned with fewer than two windows to rank against, and also when every
+    window is equal (zero dispersion: a 0 would read as "lowest vol ever", the
+    same fabricated extreme); :func:`vol_percentile_read` carries the reason.
+    The caller owns the windows, so overlapping windows make the rank granular.
     """
-    wins = []
-    for close in history:
-        wins.append(make_vol_series_of_closes(close, window=current_window))
+    wins = [make_vol_series_of_closes(c, window=current_window) for c in history]
     if len(wins) < 2:
         return None
     recent = wins[-1]
-    below = sum(1 for w in wins if w <= recent)
-    return below / len(wins)
+    if all(w == recent for w in wins):
+        return None  # zero dispersion: a 0 here would be a fabricated extreme
+    return _vol_rank_below(wins, recent)
 
 
 def vol_percentile_read(history: list[list[float]], current_window: int = 21) -> dict:
@@ -84,22 +84,22 @@ def vol_percentile_read(history: list[list[float]], current_window: int = 21) ->
     Returns ``{"percentile": 0-1 | None, "windows": int, "reason": str | None,
     "basis": str}``. One implementation: the rank is :func:`vol_percentile`'s, so
     a display path can print WHY the leg is absent instead of a value that was
-    never measured.
+    never measured. Two reasons exist: fewer than two windows to rank against,
+    and zero dispersion across them (every window's realized vol equal - a
+    printed 0 there would be a fabricated "lowest ever").
     """
     windows = len(history or ())
     pct = vol_percentile(history, current_window=current_window)
     if pct is None:
+        reason = (
+            f"{windows} window(s) of history, needs 2 to rank the latest "
+            f"realized vol against its own past" if windows < 2
+            else "no dispersion across windows to rank against (every "
+            "window's realized vol is equal)"
+        )
         return {
-            "percentile": None,
-            "windows": windows,
-            "reason": (
-                f"{windows} window(s) of history, needs 2 to rank the latest "
-                f"realized vol against its own past"
-            ),
-            "basis": (
-                f"realized-vol percentile unmeasurable: {windows} window(s) of "
-                f"history, needs 2 - never a fabricated 0.5"
-            ),
+            "percentile": None, "windows": windows, "reason": reason,
+            "basis": f"realized-vol percentile unmeasurable: {reason} - never a fabricated 0.5",
         }
     return {
         "percentile": pct,
@@ -1643,6 +1643,15 @@ __all__ = [
     "BOCPD_SHIFT_THRESHOLD",
     "SPECTRAL_GATE_NAME",
     "spectral_change_read",
+    "INDEX_TREND_MIN_BARS",
+    "vol_percentile_of",
+    "index_trend",
+    "index_trend_reads",
+    "relative_vol_ratio",
+    "upside_downside_beta",
+    "market_stress_composite",
+    "hmm_transition_read",
+    "regime_state_metadata",
 ]
 
 
@@ -1653,3 +1662,626 @@ def _lazy_regime_state():
 
 
 regime_factor, regime_state = _lazy_regime_state()
+
+
+# ---------------------------------------------------------------------------
+# Regime depth reads (REG-4, REG-10, REG-11, REG-12, REG-16, REG-17).
+#
+# Every producer below takes its bar series as an ARGUMENT and fetches nothing:
+# `index_trend` / `index_trend_reads` (SPY/QQQ/IWM market trend, REG-4),
+# `relative_vol_ratio` (REG-10), `upside_downside_beta` (REG-11),
+# `market_stress_composite` (REG-12), `vol_percentile_of` (the volatility
+# estimator ranked on the realized-vol scale, REG-2), and the two
+# beside-the-score state blocks `hmm_transition_read` (REG-16) and
+# `regime_state_metadata` (REG-17). None of them is a score weight, and each
+# returns None (or None values) with a reason when it cannot measure.
+# ---------------------------------------------------------------------------
+
+#: Bars below which an index-trend read is refused. The same 60-bar floor
+#: `regime_score.MIN_BARS` uses, restated here so this module imports nothing
+#: back from the score engine.
+INDEX_TREND_MIN_BARS = 60
+
+
+def _vol_rank_below(window_vols: list[float], recent: float | None) -> float | None:
+    """Strictly-below rank of ``recent`` over ``window_vols`` - the ONE convention.
+
+    Count of windows **strictly below** ``recent`` over the number of windows:
+    floor 0, ceiling ``(n-1)/n``, ties count as not-below. The self-inclusive
+    ``<=`` the percentile producers used to use floored the printed value at
+    ``1/n`` (RegimeScore.md §3 defect 5 / REG-3). ``None`` - never 0 - when
+    there is no window set or ``recent`` is not a finite number.
+    """
+    if not window_vols or recent is None:
+        return None
+    try:
+        r = float(recent)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(r):
+        return None
+    return sum(1 for w in window_vols if w < r) / len(window_vols)
+
+
+def vol_percentile_of(
+    value: float | None, history: list[list[float]], current_window: int = 21
+) -> float | None:
+    """Percentile rank of ONE realized vol against the history's window vols.
+
+    The rank is :func:`_vol_rank_below`'s - the same strictly-below convention as
+    :func:`vol_percentile` - so a value on the same annualized scale as
+    :func:`make_vol_series_of_closes` lands on the label's 0-1 axis. This is the
+    entry the volatility-estimator path uses (REG-2): ``volatility_models.
+    ewma_vol`` / ``garch11_fit`` return an annualized vol, and this ranks it
+    against the caller's window distribution instead of discarding it after it
+    moved ``position_scale`` only.
+
+    ``history`` is the caller's list of close windows (overlapping ones make the
+    rank granular); this builds no windows of its own. Returns ``None`` - never a
+    fabricated 0.5 - when there are fewer than two windows, when every window is
+    equal (zero dispersion), or when ``value`` is not a finite number.
+    """
+    wins = [
+        make_vol_series_of_closes(c, window=current_window) for c in (history or [])
+    ]
+    if len(wins) < 2 or value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v) or all(w == wins[0] for w in wins):
+        return None
+    return _vol_rank_below(wins, v)
+
+
+def index_trend(closes: list, *, label: str = "index", window: int | None = None) -> dict:
+    """Trend read for ONE market index (SPY / QQQ / IWM) from a bar series.
+
+    `RegimeScore.md` §1/§4/§5.2: market-level trend is a prerequisite for a
+    `RegimeScore` that is not a second `TechnicalScore`. The bar series is an
+    ARGUMENT - nothing is fetched here - so the same producer reads whichever
+    index the caller supplies and one leaf can print three separate reads.
+
+    Returns ``{"label", "trend", "above_sma", "sma", "sma_window", "n",
+    "withheld", "basis"}``. ``trend`` is :func:`trend_strength`'s quantity
+    (``P/SMA - 1``, signed) and ``above_sma`` is ``P >= SMA``. Below
+    :data:`INDEX_TREND_MIN_BARS` closes the read is ``None`` with the reason -
+    never ``0.0`` (master rule 1). A history shorter than 200 bars uses
+    ``min(200, n // 2)`` and the basis prints the window actually used, so a
+    120-bar read is never quoted as a 200-day one.
+    """
+    series = [float(c) for c in (closes or []) if c is not None]
+    n = len(series)
+    if n < INDEX_TREND_MIN_BARS:
+        withheld = f"{n} bar(s), {INDEX_TREND_MIN_BARS} needed for a trend read"
+        return {
+            "label": label,
+            "trend": None,
+            "above_sma": None,
+            "sma": None,
+            "sma_window": None,
+            "n": n,
+            "withheld": withheld,
+            "basis": f"{label} index trend unmeasurable: {withheld}",
+        }
+    w = int(window) if window else (200 if n > 200 else min(200, max(2, n // 2)))
+    trend = trend_strength(series, sma_window=w)
+    sma = sum(series[-w:]) / w
+    above = bool(series[-1] >= sma)
+    return {
+        "label": label,
+        "trend": trend,
+        "above_sma": above,
+        "sma": sma,
+        "sma_window": w,
+        "n": n,
+        "withheld": None,
+        "basis": (
+            f"{label} trend P/SMA-1 = {trend:+.4f} over a {w}-bar SMA on {n} "
+            f"bar(s); {'above' if above else 'below'} the SMA"
+        ),
+    }
+
+
+def index_trend_reads(series_by_index: dict) -> dict:
+    """One :func:`index_trend` read per caller-labelled index (SPY / QQQ / IWM).
+
+    ``series_by_index`` maps the label a leaf prints to that index's close
+    series - ``{"SPY": spy_closes, "QQQ": qqq_closes, "IWM": iwm_closes}`` - and
+    the labels are preserved, so three separate reads print from one call.
+    Nothing is fetched and no cross-index composite is formed: the owner's
+    cross-index weights do not exist (`RegimeScore.md` §4), so a mean over them
+    would be an invented index.
+
+    Returns ``{"reads", "measured", "withheld", "basis"}``: ``reads[label]`` is
+    :func:`index_trend`'s dict, ``measured`` lists the labels with a value and
+    ``withheld`` maps a refused label to its reason.
+    """
+    reads: dict = {}
+    withheld: dict = {}
+    for name, series in (series_by_index or {}).items():
+        read = index_trend(series, label=str(name))
+        reads[str(name)] = read
+        if read["trend"] is None:
+            withheld[str(name)] = read["withheld"]
+    measured = [name for name, read in reads.items() if read["trend"] is not None]
+    if not reads:
+        basis = "no index series supplied: nothing to read (never a fabricated trend)"
+    elif measured:
+        parts = ", ".join(
+            f"{name} {reads[name]['trend']:+.4f} over {reads[name]['sma_window']} bars"
+            for name in measured
+        )
+        basis = f"{len(measured)} of {len(reads)} index trend read(s) measured: {parts}"
+    else:
+        basis = f"no index trend measured ({len(withheld)} label(s) refused)"
+    return {"reads": reads, "measured": measured, "withheld": withheld, "basis": basis}
+
+
+def relative_vol_ratio(
+    a_closes: list, b_closes: list, *, window: int = 21, min_obs: int = 20
+) -> dict:
+    """Relative volatility: ``a``'s annualized vol over ``b``'s (RegimeScore.md §8.1 §18).
+
+    Both legs are ``volatility_models.ewma_vol`` over the trailing ``window`` log
+    returns - one estimator, annualized, so the ratio is unit-free. The two
+    series are ARGUMENTS; nothing is fetched. Returns ``{"ratio", "a_vol",
+    "b_vol", "window", "n_a", "n_b", "withheld", "basis"}``. ``None`` values with
+    the reason when either series carries fewer than ``min_obs`` usable log
+    returns or ``b``'s vol is 0 - never a fabricated ratio (master rule 1).
+    """
+    from .volatility_models import ewma_vol
+
+    def _leg(series):
+        closes = [float(c) for c in (series or []) if c is not None]
+        rets = []
+        for i in range(1, len(closes)):
+            if closes[i - 1] > 0 and closes[i] > 0:
+                rets.append(math.log(closes[i] / closes[i - 1]))
+        return ewma_vol(rets[-int(window):], min_obs=int(min_obs)), len(rets)
+
+    a_vol, n_a = _leg(a_closes)
+    b_vol, n_b = _leg(b_closes)
+    out = {
+        "ratio": None,
+        "a_vol": a_vol,
+        "b_vol": b_vol,
+        "window": int(window),
+        "n_a": n_a,
+        "n_b": n_b,
+        "withheld": None,
+        "basis": "",
+    }
+    if a_vol is None or b_vol is None or b_vol <= 0:
+        out["withheld"] = (
+            f"relative vol unmeasurable: a has {n_a} and b has {n_b} usable log "
+            f"return(s), {int(min_obs)} needed for each (or b's vol is 0)"
+        )
+        out["basis"] = out["withheld"]
+        return out
+    out["ratio"] = a_vol / b_vol
+    out["basis"] = (
+        f"relative vol {out['ratio']:.3f}x: a={a_vol:.4f} vs b={b_vol:.4f} "
+        f"annualized (ewma_vol over the last {int(window)} log return(s))"
+    )
+    return out
+
+
+def upside_downside_beta(returns: list, benchmark: list, *, min_obs: int = 10) -> dict:
+    """Upside / downside beta: ``evaluate.beta`` split by the benchmark's sign.
+
+    `RegimeScore.md` §8.1 §20. ``beta`` is imported from ``strategies/evaluate.py``
+    and is NOT re-implemented (one producer): the up-leg runs it on the aligned
+    bars whose benchmark return is > 0, the down-leg on the bars < 0, and
+    ``asymmetry = downside_beta - upside_beta`` (positive = the name falls harder
+    than it rises).
+
+    Returns ``{"beta", "upside_beta", "downside_beta", "asymmetry", "n", "n_up",
+    "n_down", "withheld", "basis"}``. ``None`` with the reason when either leg
+    carries fewer than ``min_obs`` aligned observations, or when the benchmark
+    has no up (or no down) bar - never a fabricated beta.
+    """
+    from .evaluate import beta as _beta
+
+    r = [float(x) for x in (returns or [])]
+    b = [float(x) for x in (benchmark or [])]
+    n = min(len(r), len(b))
+    pairs = [
+        (r[i], b[i])
+        for i in range(n)
+        if math.isfinite(r[i]) and math.isfinite(b[i])
+    ]
+    up = [(x, y) for x, y in pairs if y > 0]
+    down = [(x, y) for x, y in pairs if y < 0]
+    out = {
+        "beta": None,
+        "upside_beta": None,
+        "downside_beta": None,
+        "asymmetry": None,
+        "n": len(pairs),
+        "n_up": len(up),
+        "n_down": len(down),
+        "withheld": None,
+        "basis": "",
+    }
+    if len(up) < int(min_obs) or len(down) < int(min_obs):
+        out["withheld"] = (
+            f"upside/downside beta unmeasurable: {len(up)} up and {len(down)} "
+            f"down aligned bar(s), {int(min_obs)} needed on each side"
+        )
+        out["basis"] = out["withheld"]
+        return out
+    up_b = _beta([x for x, _ in up], [y for _, y in up])
+    down_b = _beta([x for x, _ in down], [y for _, y in down])
+    if up_b is None or down_b is None:
+        out["withheld"] = "upside/downside beta unmeasurable: a leg's benchmark variance is 0"
+        out["basis"] = out["withheld"]
+        return out
+    out["beta"] = _beta([x for x, _ in pairs], [y for _, y in pairs])
+    out["upside_beta"] = up_b
+    out["downside_beta"] = down_b
+    out["asymmetry"] = down_b - up_b
+    out["basis"] = (
+        f"beta {out['beta'] if out['beta'] is None else round(out['beta'], 4)} over "
+        f"{len(pairs)} bar(s); upside {up_b:.4f} on {len(up)}, downside {down_b:.4f} "
+        f"on {len(down)}, asymmetry {out['asymmetry']:+.4f} (evaluate.beta per side)"
+    )
+    return out
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    """Pearson correlation of two equal-length finite series (None if degenerate)."""
+    n = min(len(xs), len(ys))
+    if n < 3:
+        return None
+    mx = sum(xs[:n]) / n
+    my = sum(ys[:n]) / n
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    sxx = sum((xs[i] - mx) ** 2 for i in range(n))
+    syy = sum((ys[i] - my) ** 2 for i in range(n))
+    if sxx <= 0 or syy <= 0:
+        return None
+    return sxy / math.sqrt(sxx * syy)
+
+
+def _log_returns_of(vals: list[float]) -> list[float | None]:
+    """Natural-log returns aligned to ``vals`` (index 0 is None)."""
+    out: list[float | None] = [None]
+    for i in range(1, len(vals)):
+        a, b = vals[i - 1], vals[i]
+        out.append(math.log(b / a) if (a > 0 and b > 0) else None)
+    return out
+
+
+def market_stress_composite(
+    closes: list,
+    *,
+    benchmark: list | None = None,
+    volumes: list | None = None,
+    window: int = 21,
+) -> dict:
+    """Market-stress composite on a stated 0-100 scale (RegimeScore.md §8.1 §22).
+
+    Four legs, each mapped to 0-100 by a STATED ramp, then equally weighted over
+    the legs that measured (``NA != 0``: an unmeasured leg leaves the denominator
+    and is named in ``withheld``). Every leg comes from a producer that already
+    exists; nothing is fetched.
+
+    * ``volatility``  - :func:`vol_percentile` over overlapping ``window``-bar
+      windows of ``closes`` -> ``100 * pct``.
+    * ``drawdown``    - peak-to-trough fraction of ``closes`` ->
+      ``100 * min(dd / 0.20, 1)`` (a 20% drawdown is full stress).
+    * ``correlation`` - Pearson correlation of ``closes`` log returns against
+      ``benchmark``'s -> ``100 * clip((r - 0.20) / 0.60, 0, 1)``.
+    * ``illiquidity`` - ``liquidity_risk.amihud_illiquidity`` over the same
+      overlapping windows, ranked by :func:`_vol_rank_below`'s convention ->
+      ``100 * pct``.
+
+    Returns ``{"score", "legs", "coverage", "n_legs", "measured", "withheld",
+    "basis"}``. ``score`` is ``None`` with the reason when no leg measured. The
+    equal weighting is stated, not implied: the owner's §22 leg weights do not
+    exist (`RegimeScore.md` §4 - report the components, do not invent an index).
+    """
+    series = [float(c) for c in (closes or []) if c is not None]
+    legs: dict = {}
+    withheld: dict = {}
+    if len(series) < 2:
+        reason = "market stress unmeasurable: fewer than 2 closes"
+        return {
+            "score": None,
+            "legs": legs,
+            "coverage": 0.0,
+            "n_legs": 4,
+            "measured": [],
+            "withheld": {"all": reason},
+            "basis": reason,
+        }
+    w = max(2, int(window))
+    windows = [series[i - w:i] for i in range(w, len(series) + 1)]
+
+    pct = vol_percentile(windows, current_window=w)
+    if pct is None:
+        withheld["volatility"] = (
+            f"vol percentile unmeasurable over {len(windows)} window(s)"
+        )
+    else:
+        legs["volatility"] = 100.0 * pct
+
+    peak = series[0]
+    mdd = 0.0
+    for v in series:
+        peak = max(peak, v)
+        if peak > 0:
+            mdd = max(mdd, (peak - v) / peak)
+    legs["drawdown"] = 100.0 * min(mdd / 0.20, 1.0)
+
+    if benchmark:
+        br = [float(x) for x in benchmark if x is not None]
+        la = _log_returns_of(series)
+        lb = _log_returns_of(br)
+        m = min(len(la), len(lb))
+        pairs = [
+            (la[-m + i], lb[-m + i])
+            for i in range(m)
+            if la[-m + i] is not None and lb[-m + i] is not None
+        ]
+        corr = _pearson([x for x, _ in pairs], [y for _, y in pairs])
+        if corr is None:
+            withheld["correlation"] = (
+                f"correlation unmeasurable over {len(pairs)} aligned return(s)"
+            )
+        else:
+            legs["correlation"] = 100.0 * min(max((corr - 0.20) / 0.60, 0.0), 1.0)
+    else:
+        withheld["correlation"] = "no benchmark series supplied"
+
+    if volumes:
+        from .liquidity_risk import amihud_illiquidity
+
+        vol_series = [float(v) for v in volumes if v is not None]
+        if len(vol_series) < len(series):
+            withheld["illiquidity"] = (
+                f"{len(vol_series)} volume(s) for {len(series)} close(s), "
+                f"needs one per bar for amihud_illiquidity"
+            )
+        else:
+            vol_series = vol_series[-len(series):]
+            illiq = [
+                amihud_illiquidity(series[i - w:i], vol_series[i - w:i])
+                for i in range(w, len(series) + 1)
+            ]
+            illiq = [v for v in illiq if v is not None]
+            if len(illiq) < 2 or all(v == illiq[0] for v in illiq):
+                withheld["illiquidity"] = (
+                    f"{len(illiq)} Amihud window(s), needs 2 with dispersion"
+                )
+            else:
+                legs["illiquidity"] = 100.0 * _vol_rank_below(illiq, illiq[-1])
+    else:
+        withheld["illiquidity"] = "no volumes supplied for amihud_illiquidity"
+
+    if not legs:
+        return {
+            "score": None,
+            "legs": legs,
+            "coverage": 0.0,
+            "n_legs": 4,
+            "measured": [],
+            "withheld": withheld,
+            "basis": "market stress unmeasurable: no leg measured",
+        }
+    measured = sorted(legs)
+    score = sum(legs[k] for k in measured) / len(measured)
+    detail = ", ".join(f"{k}={legs[k]:.1f}" for k in measured)
+    return {
+        "score": score,
+        "legs": legs,
+        "coverage": len(measured) / 4.0,
+        "n_legs": 4,
+        "measured": measured,
+        "withheld": withheld,
+        "basis": (
+            f"market stress {score:.1f}/100 from {len(measured)} of 4 equal-weighted "
+            f"leg(s) ({detail}); stated ramps: vol percentile x100, drawdown/20% "
+            f"x100, (corr-0.20)/0.60 x100, Amihud percentile x100"
+        ),
+    }
+
+
+def hmm_transition_read(result: dict | None, *, horizon: int = 1) -> dict:
+    """HMM transition probability, persistence and duration (RegimeScore.md §46/§47/§51).
+
+    ``_hmm_canonical`` builds the row-stochastic matrix and
+    :func:`hmm_filtered_regime` returns it as ``params.transmat``; the label path
+    (:func:`hmm_regime`) discards it. This surfaces it BESIDE the score - a
+    state/meta output, never a weight (owner decision §7 Q4).
+
+    ``result`` is :func:`hmm_filtered_regime`'s return value (or any mapping with
+    a ``transmat`` key). Returns ``{"state", "n_states", "horizon",
+    "persistence", "leave_probability", "next_state_probs", "stay_probabilities",
+    "expected_duration", "withheld", "basis"}``: ``persistence`` is ``A[s][s]``
+    at the last filtered state, ``next_state_probs`` is row ``s`` of
+    ``A ** horizon``, and ``expected_duration[i] = 1 / (1 - A[i][i])`` bars
+    (``None`` for an absorbing row, where that geometric mean is infinite). All
+    ``None`` with the reason when the result carries no usable matrix.
+    """
+    out = {
+        "state": None,
+        "n_states": None,
+        "horizon": None,
+        "persistence": None,
+        "leave_probability": None,
+        "next_state_probs": None,
+        "stay_probabilities": None,
+        "expected_duration": None,
+        "withheld": None,
+        "basis": "",
+    }
+    transmat = None
+    state = None
+    if isinstance(result, dict):
+        params = result.get("params")
+        if isinstance(params, dict):
+            transmat = params.get("transmat")
+        if transmat is None:
+            transmat = result.get("transmat")
+        last = result.get("last")
+        if isinstance(last, dict):
+            state = last.get("state")
+    if not transmat:
+        out["withheld"] = (
+            "no HMM transition matrix supplied (hmm_filtered_regime returned "
+            "nothing, or carries no params.transmat)"
+        )
+        out["basis"] = out["withheld"]
+        return out
+    n = len(transmat)
+    if n < 1 or any(len(row) != n for row in transmat):
+        out["withheld"] = f"transition matrix is not square ({n} row(s))"
+        out["basis"] = out["withheld"]
+        return out
+    try:
+        a = [[float(x) for x in row] for row in transmat]
+    except (TypeError, ValueError):
+        out["withheld"] = "transition matrix carries a non-numeric entry"
+        out["basis"] = out["withheld"]
+        return out
+    h = max(1, int(horizon))
+    power = [row[:] for row in a]
+    for _ in range(h - 1):
+        power = [
+            [sum(power[i][k] * a[k][j] for k in range(n)) for j in range(n)]
+            for i in range(n)
+        ]
+    s = int(state) if isinstance(state, (int, float)) and 0 <= int(state) < n else 0
+    out["state"] = s
+    out["n_states"] = n
+    out["horizon"] = h
+    out["persistence"] = a[s][s]
+    out["stay_probabilities"] = [a[i][i] for i in range(n)]
+    out["next_state_probs"] = [round(v, 6) for v in power[s]]
+    out["leave_probability"] = 1.0 - power[s][s]
+    out["expected_duration"] = [
+        None if a[i][i] >= 1.0 else 1.0 / (1.0 - a[i][i]) for i in range(n)
+    ]
+    out["basis"] = (
+        f"{n}-state HMM at state {s}: persistence {a[s][s]:.4f}, "
+        f"P(leave) over {h} bar(s) {out['leave_probability']:.4f}, expected "
+        f"durations {[None if d is None else round(d, 2) for d in out['expected_duration']]} "
+        f"bar(s) (transmat from hmm_filtered_regime's params)"
+    )
+    return out
+
+
+def regime_state_metadata(
+    probs: list,
+    *,
+    scores: list | None = None,
+    transmat: list | None = None,
+    change_lag: int = 1,
+    stability_lag: int = 1,
+) -> dict:
+    """The confidence / state metadata block, emitted BESIDE the score (RegimeScore.md §96).
+
+    ``probs`` is a bar-aligned probability series (:func:`hmm_filtered_regime`'s
+    ``probs``: each row a state distribution, or ``None`` before the first
+    filtered read). Nothing here is multiplied into a score - the library's own
+    §96 rule - and nothing is fetched. The formulas, stated rather than implied:
+
+    * ``entropy`` / ``entropy_normalized`` - ``-sum(p ln p)`` of the latest row,
+      in nats and divided by ``ln(k)``.
+    * ``confidence`` - ``max(p)`` of the latest row (posterior mass on the MAP state).
+    * ``stability`` - ``1 - mean(|p_t - p_{t-lag}|)`` against the row
+      ``stability_lag`` bars earlier (1 = unchanged posterior).
+    * ``change`` - ``s_t - s_{t-change_lag}`` of the caller's ``scores`` series.
+    * ``velocity`` - ``s_t - s_{t-1}``; ``acceleration`` - the velocity's own
+      first difference.
+    * ``surprise`` - ``-ln(P(S_t | S_{t-1}))`` from ``transmat`` at the two most
+      recent MAP states (the surprisal of the transition the filter made).
+
+    Returns ``{"entropy", "entropy_normalized", "confidence", "stability",
+    "change", "velocity", "acceleration", "surprise", "n_states", "withheld",
+    "basis"}``. A field with no input is ``None`` and named in ``withheld`` -
+    never a fabricated 0.
+    """
+    rows = [
+        (i, [float(p) for p in row])
+        for i, row in enumerate(probs or [])
+        if row is not None
+    ]
+    withheld: dict = {}
+    out: dict = {
+        "entropy": None,
+        "entropy_normalized": None,
+        "confidence": None,
+        "stability": None,
+        "change": None,
+        "velocity": None,
+        "acceleration": None,
+        "surprise": None,
+        "n_states": None,
+        "withheld": withheld,
+        "basis": "",
+    }
+    if not rows:
+        withheld["all"] = "no filtered probability row supplied"
+        out["basis"] = "regime state metadata unmeasurable: no filtered probability row"
+        return out
+    idx, last = rows[-1]
+    k = len(last)
+    out["n_states"] = k
+    ent = -sum(p * math.log(p) for p in last if p > 0)
+    out["entropy"] = ent
+    out["entropy_normalized"] = ent / math.log(k) if k > 1 else None
+    out["confidence"] = max(last)
+
+    lag = max(1, int(stability_lag))
+    prev = next((row for i, row in reversed(rows) if i <= idx - lag), None)
+    if prev is not None and len(prev) == k:
+        out["stability"] = 1.0 - sum(abs(a - b) for a, b in zip(last, prev, strict=False)) / k
+    else:
+        withheld["stability"] = (
+            f"no probability row at least {lag} bar(s) before the latest"
+        )
+
+    sc = [float(x) for x in (scores or []) if x is not None]
+    cl = max(1, int(change_lag))
+    if len(sc) >= cl + 1:
+        out["change"] = sc[-1] - sc[-1 - cl]
+    else:
+        withheld["change"] = f"{len(sc)} score(s), needs {cl + 1} for a lag-{cl} change"
+    if len(sc) >= 2:
+        out["velocity"] = sc[-1] - sc[-2]
+    else:
+        withheld["velocity"] = f"{len(sc)} score(s), needs 2 for a velocity"
+    if len(sc) >= 3:
+        out["acceleration"] = (sc[-1] - sc[-2]) - (sc[-2] - sc[-3])
+    else:
+        withheld["acceleration"] = f"{len(sc)} score(s), needs 3 for an acceleration"
+
+    map_states = [max(range(len(row)), key=lambda j: row[j]) for _, row in rows]
+    if transmat and len(map_states) >= 2:
+        try:
+            a = [[float(x) for x in row] for row in transmat]
+        except (TypeError, ValueError):
+            a = []
+        p_state, c_state = map_states[-2], map_states[-1]
+        if a and len(a) > max(p_state, c_state) and a[p_state][c_state] > 0:
+            out["surprise"] = -math.log(a[p_state][c_state])
+        else:
+            withheld["surprise"] = (
+                "transition matrix has no positive P(S_t | S_{t-1}) at the last "
+                "two MAP states"
+            )
+    else:
+        withheld["surprise"] = (
+            "no transition matrix (and/or fewer than 2 filtered rows) supplied"
+        )
+    out["basis"] = (
+        f"regime state metadata over {len(rows)} filtered row(s), {k} state(s): "
+        f"entropy {ent:.4f} nats (normalized "
+        f"{out['entropy_normalized'] if out['entropy_normalized'] is None else round(out['entropy_normalized'], 4)}), "
+        f"confidence {out['confidence']:.4f}; {len(withheld)} field(s) withheld"
+    )
+    return out

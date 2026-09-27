@@ -29,6 +29,13 @@ from .events import catalyst_risk_penalty, drift_side, surprise_score
 
 logger = logging.getLogger(__name__)
 
+# Forward span of the moomoo earnings-calendar fetch in ``fetch_catalyst_data``
+# (``trade_date + 95d``; its backward leg is 35d). ``next_earnings`` reads no
+# further than this: a print beyond the fetched window is *unmeasured*, not
+# absent, so widening the read past it would silently turn a blind spot into
+# "no earnings". The horizon and the fetch share this one number.
+_EARNINGS_LOOKAHEAD_DAYS = 95
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -87,8 +94,21 @@ def last_earnings_surprise(rows: list) -> dict | None:
     return best
 
 
-def next_earnings(rows: list, trade_date: str, lookahead_days: int = 60) -> dict | None:
-    """First earnings entry at/after trade_date within lookahead_days."""
+def next_earnings(
+    rows: list, trade_date: str, lookahead_days: int = _EARNINGS_LOOKAHEAD_DAYS
+) -> dict | None:
+    """First earnings entry at/after trade_date within lookahead_days.
+
+    ``rows`` is the moomoo earnings calendar from :func:`fetch_catalyst_data`,
+    which fetches ``trade_date - 35d .. trade_date + 95d``; ``lookahead_days``
+    defaults to that forward span so a print out to the fetched edge is
+    readable (the old 60d default hid the 60-95d window the fetch already
+    carried). It is NOT raised past the fetch: beyond it the calendar is
+    unfetched, so the honest answer there is None (unmeasured), never "no
+    earnings". Returns ``{"date", "days_until", "eps_estimate", "eps_actual",
+    "basis"}`` (``basis`` names the horizon) or None when no entry falls inside
+    the lookahead.
+    """
     td = parse_date(trade_date)
     if td is None:
         return None
@@ -105,6 +125,13 @@ def next_earnings(rows: list, trade_date: str, lookahead_days: int = 60) -> dict
                 "eps_estimate": _num(row.get("eps_estimate"), _num(row.get("consensus"))),
                 "eps_actual": _num(row.get("eps_actual"), _num(row.get("actual"))),
             }
+    if best is None:
+        return None
+    best["basis"] = (
+        f"first print at/after {td.strftime('%Y-%m-%d')} inside the fetched "
+        f"{lookahead_days}d forward window (moomoo earnings calendar "
+        f"trade_date-35d..trade_date+{lookahead_days}d)"
+    )
     return best
 
 
@@ -482,7 +509,7 @@ def fetch_catalyst_data(ticker: str, trade_date: str) -> dict | None:
         ctx = _ensure_ctx()
         market = code.split(".")[0] if "." in code else "US"
         past = (td - timedelta(days=35)).strftime("%Y-%m-%d")
-        fwd = (td + timedelta(days=95)).strftime("%Y-%m-%d")
+        fwd = (td + timedelta(days=_EARNINGS_LOOKAHEAD_DAYS)).strftime("%Y-%m-%d")
 
         earnings_rows = _filter_by_security(_calendar_window(ctx, market, past, fwd), code)
 

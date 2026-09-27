@@ -2507,6 +2507,48 @@ def screen_value_dip_moomoo(
 # ---------------------------------------------------------------------------
 
 
+def institution_holdings_rows(ticker: str) -> list[dict] | None:
+    """Structured 13F-style institutional-ownership rows, NEWEST PERIOD FIRST.
+
+    The same ``get_shareholders_institutional`` frame the markdown renderer
+    prints, returned as plain rows so a producer can measure the
+    period-over-period change without parsing the table. Keys, one per vendor
+    row, in the order the renderer consumes them:
+
+    - ``period`` (str): the reporting period label (``period_text``),
+    - ``institutions`` (int|None): reporting institutions (``institution_quantity``),
+    - ``shares_held`` (float|None): shares held (``holder_quantity``),
+    - ``pct_of_float`` (float|None): 0..100 percent of float (``holder_pct``),
+    - ``pct_change`` (float|None): percentage points vs the PRIOR period
+      (``holder_pct_change``) - the delta ``strategies.sentiment_research.inst_flow_z``
+      z-scores.
+
+    Values are the vendor's own objects (uncoerced), so the renderer's
+    ``isinstance`` formatting is byte-identical; a producer coerces what it
+    reads. ``None`` when the vendor has no rows. A permission / no-data SDK
+    error still raises ``NoMarketDataError`` via ``_check_ret``.
+    """
+    code = _moomoo_code(ticker)
+    ctx = _ensure_ctx()
+    ret, data = _sdk_call(ctx.get_shareholders_institutional, code)
+    _check_ret(ret, data, ticker, code, "get_shareholders_institutional")
+    df = data
+    if df is None or df.empty:
+        return None
+    rows: list[dict] = []
+    for _, row in df.iterrows():
+        rows.append(
+            {
+                "period": str(row.get("period_text", "?")),
+                "institutions": row.get("institution_quantity"),
+                "shares_held": row.get("holder_quantity"),
+                "pct_of_float": row.get("holder_pct"),
+                "pct_change": row.get("holder_pct_change"),
+            }
+        )
+    return rows
+
+
 def get_institution_holdings_moomoo(ticker: str) -> str:
     """Institutional ownership + change by reporting period (shareholders F10).
 
@@ -2515,29 +2557,27 @@ def get_institution_holdings_moomoo(ticker: str) -> str:
     number of reporting institutions.  A rising institutional % with price
     stable flags accumulation; a falling % flags distribution.
     """
-    code = _moomoo_code(ticker)
-    ctx = _ensure_ctx()
-    ret, data = _sdk_call(ctx.get_shareholders_institutional, code)
-    _check_ret(ret, data, ticker, code, "get_shareholders_institutional")
-    df = data
-    if df is None or df.empty:
-        raise NoMarketDataError(ticker, code, detail="no institutional holding data")
+    rows = institution_holdings_rows(ticker)
+    if rows is None:
+        raise NoMarketDataError(
+            ticker, _moomoo_code(ticker), detail="no institutional holding data"
+        )
     lines = [f"## Institutional Ownership — {ticker} (moomoo)", ""]
     lines.append("| Period | Institutions | Shares held | % of float | Chg (pp) |")
     lines.append("| --- | --- | --- | --- | --- |")
-    for _, row in df.head(6).iterrows():
-        period = str(row.get("period_text", "?"))
-        inst = row.get("institution_quantity")
+    for row in rows[:6]:
+        period = str(row.get("period", "?"))
+        inst = row.get("institutions")
         inst_s = int(inst) if isinstance(inst, (int, float)) else "n/a"
-        qty = row.get("holder_quantity")
+        qty = row.get("shares_held")
         qty_s = (
             f"{qty / 1e9:.2f}B"
             if isinstance(qty, (int, float)) and abs(qty) >= 1e9
             else (f"{qty / 1e6:.1f}M" if isinstance(qty, (int, float)) else "n/a")
         )
-        pct = row.get("holder_pct")
+        pct = row.get("pct_of_float")
         pct_s = f"{float(pct):.1f}%" if isinstance(pct, (int, float)) else "n/a"
-        chg = row.get("holder_pct_change")
+        chg = row.get("pct_change")
         chg_s = f"{float(chg):+.1f}pp" if isinstance(chg, (int, float)) else "n/a"
         lines.append(f"| {period} | {inst_s} | {qty_s} | {pct_s} | {chg_s} |")
     lines.append("")

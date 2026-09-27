@@ -151,8 +151,13 @@ ABSENT_REASONS: dict[str, str] = {
 # an absent value never reads as a measured zero.
 NA_REASONS: dict[str, str] = {
     "earnings": (
-        "NA: no print inside next_earnings' 60d lookahead (calendar absent or empty, "
-        "or nothing scheduled inside the horizon)"
+        # 95d, not 60d: the producer's read horizon is now the fetch's own
+        # forward span (`catalyst._EARNINGS_LOOKAHEAD_DAYS`), so a print out to
+        # +95d is READ here; `HORIZONS["earnings"] = 60.0` is this engine's
+        # scoring window, a separate declared choice. Naming 60 in a refusal
+        # reason would misstate which window came back empty.
+        "NA: no print inside next_earnings' 95d lookahead (calendar absent or empty, "
+        "or nothing scheduled inside the fetched window)"
     ),
     "macro": (
         "NA: no HIGH-importance event inside the producer's own window "

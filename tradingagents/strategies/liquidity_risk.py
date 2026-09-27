@@ -150,6 +150,58 @@ def ownership_hhi(holdings: list[float] | None) -> float | None:
     return total_sq
 
 
+def portfolio_hhi(weights: dict | list | None) -> float | None:
+    """Herfindahl-Hirschman index over the book's own POSITION weights (0-1).
+
+    The **portfolio** twin of :func:`ownership_hhi` above, and the producer the
+    risk engine's ``risk_score.COMPONENTS["portfolio_hhi"]`` row reads
+    (RiskScore §4, §26). The two are deliberately not the same number:
+    ``ownership_hhi`` is a **holder register** in percent (scale **0-10000**),
+    this is **portfolio** concentration over position weights, on the scale the
+    engine declares for that row - **sum of squared shares, 0-1**. The scales
+    differ by 10^4 (RiskScore §8.3 d4) and must never be mixed or printed as
+    each other.
+
+    Accepts ``{name: weight}`` or a bare list of weights. The weight-sum
+    convention is the book's own, the same one
+    ``book_risk.normalize_book_weights`` applies:
+
+    - a sum **<= 1.0** keeps the raw weights, so an uninvested remainder (a
+      cash sleeve) dilutes the HHI exactly as it dilutes the book's tail;
+    - a sum **> 1.0** (a config error) is normalized down to 1.0 to stay a
+      valid book.
+
+    Negative weights are not positions in this long-only register and are
+    ignored (as in :func:`ownership_hhi`). Returns the scalar **0-1** - ``1.0``
+    for a single position, ``1/N`` for N equal positions, and the engine's ramp
+    ``(0.05, 0.50)`` is 20 / 2 equal names - under the caller's
+    ``portfolio_hhi`` key. ``None`` - never ``0`` - when the book cannot be
+    measured: no weights, an empty register, no finite positive weight, or a
+    non-positive total (a zero denominator).
+    """
+    import math as _math
+
+    if weights is None:
+        return None
+    raw = list(weights.values()) if isinstance(weights, dict) else list(weights)
+    vals: list[float] = []
+    for v in raw:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if _math.isfinite(f) and f > 0.0:
+            vals.append(f)
+    if not vals:
+        return None
+    total = sum(vals)
+    if total <= 0.0:
+        return None
+    if total > 1.0:
+        vals = [v / total for v in vals]
+    return round(sum(v * v for v in vals), 6)
+
+
 def liquidity_verdict(
     illiq: float | None,
     float_turnover: float | None,

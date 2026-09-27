@@ -1388,27 +1388,76 @@ class TradingAgentsGraph:
             logger.warning("tranche risk read skipped: %s", tranche_exc)
             return None
 
+    @staticmethod
+    def _sentiment_points_fallback(ticker: str, start: str, end: str) -> tuple[list, str | None]:
+        """Sentiment points and the feed that answered, mirroring the leaf's chain.
+
+        Same order as ``analysis_tools._sentiment_points_with_source`` /
+        ``get_sentiment_lead_lag`` (EODHD -> Alpha Vantage -> GDELT): the read
+        degrades only when **every** source is empty, and the caller gets the
+        source name so the tone unit is declared, never guessed. No source is
+        called twice and no new vendor is reached.
+        """
+        loaders = (
+            ("eodhd", "tradingagents.dataflows.eodhd", "_sentiment_points_eodhd"),
+            (
+                "alpha_vantage",
+                "tradingagents.dataflows.alpha_vantage_news",
+                "_sentiment_points_alpha_vantage",
+            ),
+            ("gdelt", "tradingagents.dataflows.gdelt", "_sentiment_points_gdelt"),
+        )
+        for source, module, func in loaders:
+            try:
+                fn = getattr(__import__(module, fromlist=[func]), func)
+                points = fn(ticker, start, end)
+            except Exception:  # noqa: BLE001 - try the next feed
+                continue
+            if points:
+                return list(points), source
+        return [], None
+
     def _sentiment_factor_read(self, ticker: str, closes: list) -> dict | None:
         """Measured news-sentiment factor read for the opt-in overlay fold.
 
-        Returns ``{"rank_ic", "innovation", "sma_7d", "source"}`` or None when
-        the run-level series is missing / coverage is insufficient (the fold
-        then stays neutral 1.0 — never blocks). ``rank_ic`` is the name's own
-        measured 5-day rank IC over the trailing window (deterministic);
-        ``innovation`` is the latest sentiment innovation.
+        Returns ``{"self_lead_lag", "innovation", "sma_7d", "source"}`` or None
+        when no feed has a usable series / coverage is insufficient (the fold
+        then stays neutral 1.0 — never blocks). ``source`` names the feed that
+        actually answered the EODHD -> Alpha Vantage -> GDELT chain, and every
+        point is normalised to the canonical unit scale on arrival, so a GDELT
+        ``sma_7d``/``innovation`` cannot enter ~100x an EODHD one.
+
+        ``self_lead_lag`` is ``sentiment_research.sentiment_lead_lag``'s strongest
+        |Spearman| lag for this name's sentiment against **its own** forward
+        returns. It is a single-name self-correlation, not a cross-sectional IC
+        (which would need a panel of names and new vendor calls), so it carries
+        its real name rather than ``rank_ic``. The fold consumes it only as a
+        **sign gate** against ``innovation``; the owner's recorded position
+        (`docs/scores/README.md` §5.6) is that the four-quadrant confirmation
+        (`sentiment_score.confirmation_quadrant`) replaces it.
         """
         if not self.config.get("enable_sentiment_factor"):
             return None
         try:
-            from tradingagents.dataflows.eodhd import _sentiment_points_eodhd
             from tradingagents.strategies import sentiment_research as _sr
+            from tradingagents.strategies.sentiment_score import normalise_sentiment
 
             end = datetime.now().strftime("%Y-%m-%d")
             start = (datetime.now() - timedelta(days=150)).strftime("%Y-%m-%d")
-            points = _sentiment_points_eodhd(ticker, start, end)
+            points, source = self._sentiment_points_fallback(ticker, start, end)
             if not points:
                 return None
-            sent = sorted(points, key=lambda p: p["date"])
+            # One unit before any arithmetic: the feed's declared scale
+            # (eodhd/AV -1..1, gdelt -100..100) is applied through the engine's
+            # one table; an unreadable point is dropped, never zeroed.
+            unit_points = []
+            for p in points:
+                norm = normalise_sentiment(p.get("score"), source)
+                if norm["value"] is not None:
+                    unit_points.append({"date": p["date"], "score": norm["value"]})
+            if not unit_points:
+                return None
+            sent = sorted(unit_points, key=lambda p: p["date"])
             scores = [float(p["score"]) for p in sent]
             if len(scores) < 20:
                 return None
@@ -1426,8 +1475,9 @@ class TradingAgentsGraph:
             latest_inn = None
             if len(smas) >= 2 and smas[-2] is not None:
                 latest_inn = scores[-1] - smas[-2]
-            # Name-level 5-day rank IC: cross-correlate sentiment with the
-            # name's own forward returns (the strongest |spearman| lag).
+            # Single-name self lead/lag: cross-correlate this name's sentiment
+            # with its OWN forward returns (strongest |spearman| lag). NOT a
+            # cross-sectional IC — hence `self_lead_lag`, never `rank_ic`.
             if len(closes) < 40:
                 return None
             closes_f = [float(c) for c in closes]
@@ -1436,17 +1486,17 @@ class TradingAgentsGraph:
             use_s = scores[-n:]
             use_r = [rets[-i] if i <= len(rets) else None for i in range(1, n + 1)]
             ll = _sr.sentiment_lead_lag(use_s, [r for r in use_r if r is not None], max_lags=5)
-            rank_ic = None
+            self_lead_lag = None
             if ll:
                 best = max(ll, key=lambda r: abs(r["spearman_corr"]))
-                rank_ic = round(best["spearman_corr"], 4)
-            if rank_ic is None:
+                self_lead_lag = round(best["spearman_corr"], 4)
+            if self_lead_lag is None:
                 return None
             return {
-                "rank_ic": rank_ic,
+                "self_lead_lag": self_lead_lag,
                 "innovation": round(latest_inn, 4) if latest_inn is not None else None,
                 "sma_7d": round(latest_sma, 4) if latest_sma is not None else None,
-                "source": "eodhd",
+                "source": str(source or ""),
             }
         except Exception as sent_exc:  # noqa: BLE001 - fold degrades to neutral
             logger.warning("sentiment factor read skipped: %s", sent_exc)

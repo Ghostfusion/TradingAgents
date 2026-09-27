@@ -28,10 +28,12 @@ def cvar(returns: list, alpha: float = 0.05) -> float | None:
 def normalize_book_weights(returns_by_name: dict, weights: dict | None = None) -> dict | None:
     """The book's weights under the cash-sleeve convention, or None.
 
-    ONE implementation (ground rule 2): ``portfolio_cvar`` and
-    ``book_correlated_stress`` each carried their own copy of these rules until
-    2026-09-17 (P0-8d), so a change to the cash-sleeve convention could land in
-    one path and silently miss the other. The rules:
+    **The single implementation** of the cash-sleeve / equal-weight / normalise
+    rules (ground rule 2): ``portfolio_cvar`` and ``book_correlated_stress``
+    each carried their own copy of these rules until 2026-09-17 (P0-8d), so a
+    change to the cash-sleeve convention could land in one path and silently
+    miss the other. Both now delegate here and no caller re-implements them. The
+    rules:
 
     - weights summing to **1.0** -> the normalized relative book.
     - summing to **< 1.0** -> the RAW weights, so the remainder (1 - total) stays
@@ -1417,8 +1419,454 @@ def drawdown_envelope(
     }
 
 
+# ---------------------------------------------------------------------------
+# Risk scalars (RiskScore.md §8.2) - the cheap producers the library names and
+# no module computed. All pure and offline, over series/positions passed in: no
+# fetch, no vendor call, and nothing here moves a gate, a size or one of the
+# score's pinned conventions (``risk_score.PIN_*``). A producer that cannot
+# measure returns ``None`` (or a ``None``-valued key) with the reason in
+# ``basis`` / the docstring - never ``0`` (``NA != 0``).
+# ---------------------------------------------------------------------------
+
+
+def _finite_series(series) -> list[float]:
+    """The finite numeric observations of a series (order preserved)."""
+    out: list[float] = []
+    for v in series or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f):
+            out.append(f)
+    return out
+
+
+def _window_vol(vals: list[float], periods_per_year: float) -> float | None:
+    """Annualized sample stdev of one window (``evaluate.volatility:84`` shape)."""
+    if len(vals) < 2:
+        return None
+    mean = sum(vals) / len(vals)
+    var = sum((v - mean) ** 2 for v in vals) / (len(vals) - 1)
+    return math.sqrt(var * periods_per_year)
+
+
+def _compound(vals: list[float]) -> float | None:
+    """Compounded return over a window (None on an empty window)."""
+    if not vals:
+        return None
+    prod = 1.0
+    for v in vals:
+        prod *= 1.0 + v
+    return prod - 1.0
+
+
+def prob_loss(returns: list, threshold: float = 0.0) -> float | None:
+    """``P(R < threshold)``: the empirical loss frequency over a return series.
+
+    RiskScore §8.2 §34 - the return-series ``P(R < 0)`` the library asks for,
+    beside ``evaluate.downside_deviation:846``, which measures the loss
+    *magnitude* and not how often a loss happens. ``threshold`` defaults to
+    ``0.0`` (any strictly negative period); pass e.g. ``-0.02`` for
+    ``P(R < -2%)``.
+
+    Returns a **frequency in 0-1** under the caller's ``prob_loss`` key - a
+    real ``0.0`` when the series simply never lost. ``None`` - never ``0`` -
+    when the series is empty or carries no finite observation.
+    """
+    vals = _finite_series(returns)
+    if not vals:
+        return None
+    try:
+        t = float(threshold)
+    except (TypeError, ValueError):
+        t = 0.0
+    if not math.isfinite(t):
+        t = 0.0
+    return round(sum(1 for v in vals if v < t) / len(vals), 6)
+
+
+def volatility_window_ratio(
+    returns: list,
+    short: int = 20,
+    long: int = 60,
+    periods_per_year: float = 252.0,
+) -> dict | None:
+    """Two-window volatility ratio and expansion (RiskScore §8.2 §2.4-§2.5).
+
+    ``sigma_short`` / ``sigma_long`` are the annualized sample standard
+    deviations (``evaluate.volatility:84``'s estimator) of the **last**
+    ``short`` and the **last** ``long`` observations of one series, so the long
+    window contains the short one and the two share their recent tail. Both
+    library readings are reported together:
+
+    - ``ratio`` = ``sigma_short / sigma_long`` (1.0 = flat vol, > 1 expanding);
+    - ``expansion`` = ``(sigma_short - sigma_long) / sigma_long``, the same
+      shape on the difference.
+
+    Returns ``{"sigma_short", "sigma_long", "ratio", "expansion", "short",
+    "long", "basis"}``. ``None`` - never ``0`` - when the series is shorter
+    than ``long``, either window has fewer than two finite observations,
+    ``short``/``long`` are degenerate (``short < 2`` or ``short >= long``), or
+    ``sigma_long == 0`` (a zero denominator: a flat series has no ratio).
+    """
+    vals = _finite_series(returns)
+    try:
+        s = int(short)
+        lng = int(long)
+    except (TypeError, ValueError):
+        return None
+    if s < 2 or lng < 2 or s >= lng or len(vals) < lng:
+        return None
+    try:
+        ppy = float(periods_per_year)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ppy) or ppy <= 0.0:
+        return None
+    sig_s = _window_vol(vals[-s:], ppy)
+    sig_l = _window_vol(vals[-lng:], ppy)
+    if sig_s is None or sig_l is None or sig_l == 0.0:
+        return None
+    ratio = sig_s / sig_l
+    expansion = (sig_s - sig_l) / sig_l
+    return {
+        "sigma_short": round(sig_s, 8),
+        "sigma_long": round(sig_l, 8),
+        "ratio": round(ratio, 6),
+        "expansion": round(expansion, 6),
+        "short": s,
+        "long": lng,
+        "basis": (
+            f"annualized sigma over the last {s} and {lng} observation(s) of "
+            f"{len(vals)}; ratio={ratio:.6g}, expansion={expansion:.6g}"
+        ),
+    }
+
+
+def sterling_ratio(returns: list, periods_per_year: float = 252.0) -> float | None:
+    """Sterling ratio = annualized return / **average** drawdown (§8.2 §6.4).
+
+    ``evaluate.calmar_ratio:1018`` divides the annualized CAGR by the single
+    maximum drawdown; Sterling divides it by the **mean depth** of the
+    drawdown episodes (``evaluate.underwater_drawdowns:979``), so a series that
+    draws down often is penalized even when no single drawdown is deep. The
+    numerator is the annualized CAGR, matching Calmar's shape.
+
+    Returns the ratio (dimensionless) under the caller's ``sterling_ratio``
+    key. ``None`` - never ``0`` - when the series has fewer than two finite
+    observations, has no drawdown episode, has a zero mean depth (a zero
+    denominator), or the CAGR is not finite.
+    """
+    vals = _finite_series(returns)
+    if len(vals) < 2:
+        return None
+    from tradingagents.strategies.evaluate import (
+        cagr,
+        equity_curve,
+        underwater_drawdowns,
+    )
+
+    events = underwater_drawdowns(equity_curve(vals))
+    if not events:
+        return None
+    avg_depth = sum(float(e["depth"]) for e in events) / len(events)
+    if avg_depth <= 0.0:
+        return None
+    c = cagr(vals, periods_per_year)
+    if c is None or not math.isfinite(float(c)):
+        return None
+    return round(float(c) / avg_depth, 6)
+
+
+def loss_frequency_family(
+    returns: list,
+    large_loss: float = -0.02,
+    var_alpha: float = 0.05,
+    crash_mult: float = 2.0,
+) -> dict | None:
+    """The §9.4-§9.5 / §10.1-§10.4 loss-frequency family (RiskScore §8.2).
+
+    Beside ``evaluate.downside_deviation:846`` (the loss *magnitude*), this
+    counts the loss *events* over one return series:
+
+    - ``downside_freq`` - share of periods with ``R < 0`` (§10.1);
+    - ``large_loss_freq`` - share at/below ``large_loss`` (§10.2), a declared
+      material-loss floor (default -2%);
+    - ``avg_loss`` - mean of the negative returns (§10.3);
+    - ``worst_loss`` - the most negative return (§10.4);
+    - ``extreme_loss_freq`` - share at/below the historical
+      ``book_risk.simple_var:9`` threshold at ``var_alpha`` (§9.4). This is the
+      VaR's own breach share and is ~``var_alpha`` by construction - the
+      instrument for that claim is ``book_risk.var_coverage_test``; the
+      informative tail-shape legs are ``large_loss_freq`` and ``crash_freq``;
+    - ``crash_freq`` - share at/below ``crash_mult`` x that VaR threshold
+      (§9.5), i.e. how much of the tail sits beyond twice the VaR.
+
+    Returns ``{"downside_freq", "large_loss_freq", "extreme_loss_freq",
+    "crash_freq", "avg_loss", "worst_loss", "large_loss", "extreme_loss",
+    "crash", "n", "n_losses", "basis"}``. A frequency is a real ``0.0`` when
+    the series never crossed its threshold; ``avg_loss`` / ``worst_loss`` are
+    ``None`` (reason in ``basis``) when there is no negative period to average.
+    The whole read is ``None`` - never a dict of zeros - when the series is
+    empty or carries no finite observation.
+    """
+    vals = _finite_series(returns)
+    if not vals:
+        return None
+    try:
+        floor = float(large_loss)
+    except (TypeError, ValueError):
+        floor = -0.02
+    try:
+        alpha = float(var_alpha)
+    except (TypeError, ValueError):
+        alpha = 0.05
+    try:
+        mult = float(crash_mult)
+    except (TypeError, ValueError):
+        mult = 2.0
+    n = len(vals)
+    losses = [v for v in vals if v < 0.0]
+    extreme = simple_var(vals, alpha)
+    crash = (mult * extreme) if extreme is not None else None
+
+    def _share(threshold: float | None) -> float | None:
+        if threshold is None:
+            return None
+        return round(sum(1 for v in vals if v <= threshold) / n, 6)
+
+    avg_loss = round(sum(losses) / len(losses), 8) if losses else None
+    worst = round(min(losses), 8) if losses else None
+    return {
+        "downside_freq": round(len(losses) / n, 6),
+        "large_loss_freq": _share(floor),
+        "extreme_loss_freq": _share(extreme),
+        "crash_freq": _share(crash),
+        "avg_loss": avg_loss,
+        "worst_loss": worst,
+        "large_loss": round(floor, 8),
+        "extreme_loss": None if extreme is None else round(extreme, 8),
+        "crash": None if crash is None else round(crash, 8),
+        "n": n,
+        "n_losses": len(losses),
+        "basis": (
+            f"{len(losses)} loss(es) of {n} period(s); downside_freq="
+            f"{len(losses) / n:.4g}; large_loss floor {floor:.4g}; "
+            f"extreme_loss = simple_var(alpha={alpha}) = "
+            f"{'NA' if extreme is None else format(extreme, '.4g')}; crash = "
+            f"{mult} x extreme = "
+            f"{'NA' if crash is None else format(crash, '.4g')}; avg_loss="
+            + ("NA (no negative period)" if avg_loss is None
+               else f"{avg_loss:.4g}")
+        ),
+    }
+
+
+def momentum_reversal(returns: list, short: int = 21, long: int = 252) -> float | None:
+    """Momentum-reversal leg ``R_short - R_long`` (RiskScore §8.2 §23).
+
+    ``R_short`` is the compounded return over the **last** ``short`` periods
+    and ``R_long`` the compounded return over the **last** ``long`` periods, so
+    the leg is the recent trend in excess of the long trend: positive = recent
+    momentum running ahead of the long trend (the library's §23
+    reversal/crash setup), negative = recent underperformance. The default
+    21/252 pair mirrors the 1-month / 12-month momentum horizons
+    (``momentum.momentum_12_1:358``).
+
+    Returns the difference in **return units** (dimensionless) under the
+    caller's ``momentum_reversal`` key. ``None`` - never ``0`` - when the
+    series is shorter than ``long``, either window has no finite observation,
+    or ``short``/``long`` are degenerate (``short < 1`` or ``short >= long``).
+    """
+    vals = _finite_series(returns)
+    try:
+        s = int(short)
+        lng = int(long)
+    except (TypeError, ValueError):
+        return None
+    if s < 1 or lng < 1 or s >= lng or len(vals) < lng:
+        return None
+    r_short = _compound(vals[-s:])
+    r_long = _compound(vals[-lng:])
+    if r_short is None or r_long is None:
+        return None
+    return round(r_short - r_long, 8)
+
+
+def _tail_adjusted_return(
+    expected_return: float | None, tail_loss: float | None
+) -> float | None:
+    """Tail-adjusted return = ``ExpectedReturn / CVaR`` (RiskScore §8.2 §58).
+
+    **Private - built and awaiting its consumer.** No leaf holds an expected
+    return beside a CVaR today, so this is a private producer rather than a
+    public calc with no caller (the wiring gate
+    ``tests/test_calc_agent_wiring.py``); it becomes public again when a leaf
+    genuinely holds both inputs.
+
+    The tail analog of the Sharpe: return per unit of tail loss.
+    ``expected_return`` is a return over the same horizon
+    (``evaluate.total_return:53``). ``tail_loss`` must be the **positive loss
+    magnitude** the engine pins (§0.3) - pass ``abs(book_risk.cvar(...))`` or
+    the executor's ``es_pct``. A raw negative ``cvar`` flips the sign of the
+    ratio, so it is refused rather than silently ``abs()``-ed.
+
+    Returns the ratio (dimensionless) under the caller's
+    ``tail_adjusted_return`` key. ``None`` - never ``0`` - when either input is
+    missing/non-finite or ``tail_loss <= 0`` (a zero denominator: no measured
+    tail means no tail-adjusted return).
+    """
+    if expected_return is None or tail_loss is None:
+        return None
+    try:
+        er = float(expected_return)
+        tl = float(tail_loss)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(er) and math.isfinite(tl)) or tl <= 0.0:
+        return None
+    return round(er / tl, 6)
+
+
+def _liquidity_adjusted_cvar(
+    returns: list,
+    positions: dict | None,
+    alpha: float = 0.05,
+    impact_coeff: float = 0.1,
+    weights: dict | None = None,
+) -> dict | None:
+    """Liquidity-adjusted CVaR ``CVaR + ExecutionCost_tail`` (§8.2 §68).
+
+    **Private - built and awaiting its consumer.** No leaf exports a portfolio
+    mix series beside per-name order/ADV/price today (``get_tail_risk`` is
+    single-name and ``get_book_tail_risk`` holds weights but no mix), so this
+    is a private producer rather than a public calc with no caller (the wiring
+    gate ``tests/test_calc_agent_wiring.py``); it becomes public again when a
+    leaf can hand it the mix and the orders.
+
+    The book's tail loss plus the price impact of liquidating it. The CVaR leg
+    is the historical CVaR of the book's return series (``book_risk.cvar:18``;
+    the reported ``cvar`` is the **positive** magnitude, the engine's pinned
+    convention §0.3). The execution-cost leg is the weight-averaged per-name
+    Almgren-Chriss impact from ``liquidity_risk.market_impact_slippage:243``:
+    per share ``price * impact_coeff * order_qty / adv``, divided by ``price``
+    to land in return units - i.e. ``impact_coeff * order_qty / adv`` per name.
+
+    ``positions`` maps ``name -> {"order_qty", "adv", "price"}``; a name whose
+    fields are missing/non-positive is refused by that producer and left out of
+    the average. ``weights`` maps ``name -> weight`` (the book's own weights;
+    absent -> equal weight over the names with a usable position), and the
+    average is renormalized over the names that actually produced a cost, so a
+    refused name does not dilute the leg.
+
+    Returns ``{"cvar", "execution_cost_tail", "liquidity_adjusted_cvar", "n",
+    "alpha", "basis"}`` (positive loss fractions). ``None`` - never ``0`` -
+    when the return series is empty, when no name yields a measurable execution
+    cost, or when the measured names' weights sum to zero (a zero denominator):
+    a plain CVaR must never be printed under a liquidity-adjusted name.
+    """
+    vals = _finite_series(returns)
+    if not vals:
+        return None
+    cv = cvar(vals, alpha)
+    if cv is None:
+        return None
+    from tradingagents.strategies.liquidity_risk import market_impact_slippage
+
+    pos = positions or {}
+    w = weights or {}
+    cost_num = 0.0
+    w_sum = 0.0
+    n = 0
+    for name, spec in pos.items():
+        if not isinstance(spec, dict):
+            continue
+        slip = market_impact_slippage(
+            spec.get("order_qty"), spec.get("adv"), spec.get("price"), impact_coeff
+        )
+        if slip is None:
+            continue
+        try:
+            price = float(spec.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(price) or price <= 0.0:
+            continue
+        weight = 1.0
+        if w:
+            try:
+                weight = float(w.get(name, 0.0))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(weight) or weight <= 0.0:
+                continue
+        cost_num += weight * (float(slip) / price)
+        w_sum += weight
+        n += 1
+    if n == 0 or w_sum <= 0.0:
+        return None
+    exec_cost = cost_num / w_sum
+    cvar_pos = -float(cv)  # cvar is negative = loss -> the pinned positive form
+    return {
+        "cvar": round(cvar_pos, 8),
+        "execution_cost_tail": round(exec_cost, 8),
+        "liquidity_adjusted_cvar": round(cvar_pos + exec_cost, 8),
+        "n": n,
+        "alpha": float(alpha),
+        "basis": (
+            f"CVaR({1.0 - float(alpha):.1%}) = {cvar_pos:.4g} (positive loss "
+            f"fraction) + weight-averaged Almgren-Chriss impact over {n} "
+            f"name(s) = {exec_cost:.4g}"
+        ),
+    }
+
+
+def _nonlinear_risk_penalty(
+    x: float | None, gamma: float = 2.0, lo: float = 0.0, hi: float = 1.0
+) -> float | None:
+    """Nonlinear risk penalty ``x ** gamma`` (RiskScore §8.2 §63).
+
+    **Private - built and awaiting its consumer.** The exponent's consumer is
+    the engine-side alignment (``score_engine.align:69``), and the score's ramp
+    is deliberately still linear, so nothing calls this yet; it is a private
+    producer rather than a public calc with no caller (the wiring gate
+    ``tests/test_calc_agent_wiring.py``). Wiring it into the score would move a
+    score number and is an explicit owner decision.
+
+    The library's power penalty on a normalised risk fraction ``x``: with
+    ``gamma > 1`` the high end of the risk range is punished super-linearly
+    (``gamma == 1`` is the linear identity the score's ``score_engine.align:69``
+    ramp already applies; ``0 < gamma < 1`` is a concave, softer penalty).
+    ``x`` is clamped to ``[lo, hi]`` first so the power is well defined (a
+    negative base with a fractional exponent is complex) and the result stays
+    on the ramp's own ``lo..hi`` scale.
+
+    Returns ``x ** gamma`` in the same units as ``x`` under the caller's
+    ``nonlinear_risk_penalty`` key. ``None`` - never ``0`` - when ``x`` is
+    missing/non-finite, ``gamma`` is non-finite/non-positive, or the clamp
+    window is degenerate (``hi <= lo``).
+    """
+    if x is None:
+        return None
+    try:
+        xv = float(x)
+        g = float(gamma)
+        a = float(lo)
+        b = float(hi)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (xv, g, a, b)):
+        return None
+    if g <= 0.0 or b <= a:
+        return None
+    return round(min(b, max(a, xv)) ** g, 8)
+
+
 __all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "portfolio_returns", "stress_loss", "book_correlated_stress", "net_beta", "drawdown_gate",
            "cdar", "return_autocorrelation", "var_cvar_horizon", "incremental_var", "component_var", "extreme_quantile_var",
            "min_cvar_weights", "copula_scenarios",
            "var_coverage_test", "VAR_COVERAGE_MIN_N", "VAR_COVERAGE_LEVEL",
-           "drawdown_envelope"]
+           "drawdown_envelope",
+           "prob_loss", "volatility_window_ratio", "sterling_ratio",
+           "loss_frequency_family", "momentum_reversal"]

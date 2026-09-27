@@ -398,6 +398,21 @@ def test_mention_heat_is_assembled_from_the_per_day_count_series(monkeypatch) ->
                         lambda *a, **k: (points, "eodhd"))
     monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
     monkeypatch.setattr(sent, "compute_social_scores", lambda *a, **k: {})
+    # The assembler's other legs are vendor reads; this test is about the
+    # attention ratio, and a unit test must not open a chain or an info blob.
+    monkeypatch.setattr(at, "_options_chain_rows", lambda *a, **k: (None, "test", {}))
+    monkeypatch.setattr(
+        "tradingagents.dataflows.yfinance_short_interest.short_interest_fields",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.moomoo.institution_holdings_rows",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.yfinance_sector.fetch_rating_actions",
+        lambda *a, **k: None,
+    )
 
     vals, _source = at._sentiment_components("HEAT", "2026-09-04")
     # 9/1..9/3 average 3 mentions/day; the last day is 9 -> ratio 3.0
@@ -412,6 +427,190 @@ def test_mention_heat_stays_absent_without_a_mention_series(monkeypatch) -> None
     monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
     monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
     monkeypatch.setattr(sent, "compute_social_scores", lambda *a, **k: {})
+    monkeypatch.setattr(at, "_options_chain_rows", lambda *a, **k: (None, "test", {}))
+    monkeypatch.setattr(
+        "tradingagents.dataflows.yfinance_short_interest.short_interest_fields",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.moomoo.institution_holdings_rows",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.yfinance_sector.fetch_rating_actions",
+        lambda *a, **k: None,
+    )
 
     vals, _source = at._sentiment_components("HEAT", "2026-09-04")
     assert "mention_heat" not in vals
+
+
+# ---------------------------------------------------------------------------
+# SENT-1: the positive share the `bull_share` declaration names
+# ---------------------------------------------------------------------------
+
+
+def _w_art(title, score, ticker="TEST", rel=80.0):
+    return {
+        "title": title,
+        "time_published": "20260916T120000",
+        "ticker_sentiment": [
+            {"ticker": ticker, "ticker_sentiment_score": score,
+             "relevance_score": rel}
+        ],
+    }
+
+
+def test_bull_share_is_the_positive_fraction_of_the_days_articles() -> None:
+    from tradingagents.strategies.sentiment import aggregate_weighted_sentiment
+
+    pos = aggregate_weighted_sentiment([_w_art(f"P{i}", 0.4) for i in range(3)], "TEST")
+    assert pos[-1]["bull_share"] == pytest.approx(1.0)
+    neg = aggregate_weighted_sentiment([_w_art(f"N{i}", -0.4) for i in range(3)], "TEST")
+    assert neg[-1]["bull_share"] == pytest.approx(0.0)
+    # |s| < eps (the row's own 0.05) is neutral, so it is NOT positive
+    neutral = aggregate_weighted_sentiment(
+        [_w_art("U0", 0.01), _w_art("U1", -0.01), _w_art("U2", 0.0)], "TEST"
+    )
+    assert neutral[-1]["bull_share"] == pytest.approx(0.0)
+    assert neutral[-1]["neutral_share"] == pytest.approx(1.0)
+
+
+def test_bull_share_uses_the_rows_own_eps_and_denominator() -> None:
+    from tradingagents.strategies.sentiment import aggregate_weighted_sentiment
+
+    rows = aggregate_weighted_sentiment(
+        [_w_art("M0", 0.4), _w_art("M1", -0.4), _w_art("M2", 0.2)],
+        "TEST", neutral_eps=0.10,
+    )
+    assert rows[-1]["n"] == 3
+    # 0.4 and 0.2 clear +0.10; -0.4 does not -> 2 of 3
+    assert rows[-1]["bull_share"] == pytest.approx(2 / 3, abs=1e-4)
+
+
+def test_an_empty_feed_has_no_row_and_no_bull_share() -> None:
+    from tradingagents.strategies.sentiment import aggregate_weighted_sentiment
+
+    # a day only exists when an article was accepted, so an empty feed is a
+    # refusal (None), never a row with bull_share 0
+    assert aggregate_weighted_sentiment([], "TEST") is None
+
+
+# ---------------------------------------------------------------------------
+# SENT-6: crowd bands as a percentile over the name's own history
+# ---------------------------------------------------------------------------
+
+
+def _crowd_history():
+    # 25 prior ratios spread 30..54
+    return [float(v) for v in range(30, 55)]
+
+
+def test_crowd_percentile_bands_over_own_history() -> None:
+    from tradingagents.strategies.sentiment import crowd_band_percentile
+
+    hist = _crowd_history()
+    top = crowd_band_percentile(60.0, hist)
+    assert top["method"] == "percentile"
+    assert top["percentile"] == pytest.approx(100.0)
+    assert top["band"] == "crowded-bullish"
+    assert crowd_band_percentile(30.0, hist)["band"] == "crowded-bearish"
+    mid = crowd_band_percentile(45.0, hist)
+    assert mid["method"] == "percentile"
+    assert mid["band"] == "neutral"
+
+
+def test_crowd_bands_fall_back_to_the_constants_without_history() -> None:
+    from tradingagents.strategies.sentiment import crowd_band_percentile
+
+    short = crowd_band_percentile(70.0, [50.0, 51.0])
+    assert short["method"] == "constant-fallback"
+    assert short["percentile"] is None
+    assert short["band"] == "crowded-bullish"
+    assert "fell back" in short["basis"]
+    assert crowd_band_percentile(30.0, [])["band"] == "crowded-bearish"
+    assert crowd_band_percentile(50.0, [])["band"] == "neutral"
+
+
+def test_crowd_percentile_thresholds_are_configuration() -> None:
+    from tradingagents.strategies.sentiment import crowd_band_percentile
+
+    hist = _crowd_history()
+    default = crowd_band_percentile(45.0, hist)
+    tight = crowd_band_percentile(45.0, hist, low_pct=40.0, high_pct=60.0)
+    assert default["percentile"] == pytest.approx(64.0)
+    assert default["band"] == "neutral"
+    assert tight["band"] == "crowded-bullish"
+    assert tight["thresholds"]["high_pct"] == 60.0
+    assert default["thresholds"]["high_pct"] == 80.0
+
+
+def test_crowd_ratio_uses_the_percentile_when_history_is_given() -> None:
+    from tradingagents.strategies.sentiment import crowd_ratio
+
+    hist = _crowd_history()
+    pct = crowd_ratio(60, 40, history=hist)
+    assert pct["band_method"] == "percentile"
+    assert pct["band"] == "crowded-bullish"
+    assert pct["percentile"] == pytest.approx(100.0)
+    const = crowd_ratio(60, 40)
+    assert const["band_method"] == "constant-fallback"
+    assert const["band"] == "crowded-bullish"  # 60 clears the 60 constant
+
+
+# ---------------------------------------------------------------------------
+# SENT-8: the dynamics beside the canonical slope
+# ---------------------------------------------------------------------------
+
+
+def test_dynamics_second_difference_and_ar1_phi() -> None:
+    from tradingagents.strategies.sentiment import sentiment_dynamics
+
+    # geometric decay S_t = 0.5 S_{t-1}: phi 0.5, half-life -ln2/ln0.5 = 1
+    geo = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125]
+    out = sentiment_dynamics(geo)
+    assert out is not None
+    assert out["second_difference"] == pytest.approx(geo[-1] - 2 * geo[-2] + geo[-3])
+    assert out["ar1_phi"] == pytest.approx(0.5, abs=1e-6)
+    assert out["half_life"] == pytest.approx(1.0, abs=1e-4)
+    assert out["persistence"] == pytest.approx(1.0, abs=1e-6)
+    assert out["n"] == 6
+
+
+def test_dynamics_second_difference_matches_the_three_point_formula() -> None:
+    from tradingagents.strategies.sentiment import sentiment_dynamics
+
+    out = sentiment_dynamics([0.0, 0.0, 1.0, 3.0, 6.0])
+    assert out is not None
+    assert out["second_difference"] == pytest.approx(1.0)
+
+
+def test_dynamics_refuses_below_the_stated_floor() -> None:
+    from tradingagents.strategies.sentiment import sentiment_dynamics
+
+    assert sentiment_dynamics([0.1, 0.2, 0.3, 0.4]) is None
+    assert sentiment_dynamics([]) is None
+    assert sentiment_dynamics([None] * 9) is None
+
+
+def test_dynamics_half_life_absent_when_phi_has_no_decay() -> None:
+    from tradingagents.strategies.sentiment import sentiment_dynamics
+
+    # a perfectly linear rise has phi == 1 (a random walk): no half-life, no
+    # mean reversion - the quantities are None, never a fabricated number
+    out = sentiment_dynamics([0.1, 0.2, 0.3, 0.4, 0.5])
+    assert out is not None
+    assert out["ar1_phi"] == pytest.approx(1.0)
+    assert out["half_life"] is None
+    assert out["mean_reversion_speed"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_dynamics_are_additions_not_a_replacement_for_velocity() -> None:
+    from tradingagents.strategies.sentiment import (
+        sentiment_dynamics,
+        sentiment_velocity,
+    )
+
+    series = [0.1, 0.2, 0.15, 0.3, 0.25, 0.4]
+    assert sentiment_velocity(series) is not None
+    assert sentiment_dynamics(series) is not None

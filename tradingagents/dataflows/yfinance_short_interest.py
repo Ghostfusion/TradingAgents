@@ -34,11 +34,24 @@ def _num(value):
     return f"{n:,.4f}"
 
 
-def get_short_interest_yfinance(ticker: str) -> str:
-    """Fetch short interest / ownership data for a ticker from yfinance.
+def short_interest_fields(ticker: str) -> dict | None:
+    """The raw short-interest fields yfinance reports, or ``None``.
 
-    Returns a markdown report with shares short, days-to-cover, short % of
-    float, and float / insider / institutional ownership where available.
+    **One read, two renderings.** `get_short_interest_yfinance` prints these
+    values, and `SentimentScore`'s `short_pct_float` component consumes the
+    numeric one — it cannot read the rendered text, whose `%` line is the same
+    value ×100, and re-parsing a printed number is how a 100× unit drift starts.
+
+    Keys and units are the vendor's own: ``shares_short``,
+    ``shares_short_prior``, ``short_ratio`` (days-to-cover),
+    ``short_pct_float`` (**decimal fraction of float — 0.05 means 5%**),
+    ``float_shares``, ``shares_outstanding``, ``held_pct_insiders``,
+    ``held_pct_institutions`` (both fractions too). A field the vendor omits is
+    ``None``, never 0.
+
+    ``None`` when the vendor returns nothing meaningful, so a caller can print
+    its own reason; a *fetch* failure still raises ``NoMarketDataError`` exactly
+    as before, because that is the router's degrade contract.
     """
     canonical = require_symbol(ticker)
     import yfinance as yf
@@ -49,20 +62,44 @@ def get_short_interest_yfinance(ticker: str) -> str:
         logger.warning("Short-interest info fetch failed for %s: %s", ticker, exc)
         raise NoMarketDataError(ticker, canonical, "yfinance info fetch failed") from exc
 
-    shares_short = info.get("sharesShort")
-    shares_short_prior = info.get("sharesShortPriorMonth")
-    short_ratio = info.get("shortRatio")
-    short_pct_float = info.get("shortPercentOfFloat")
-    float_shares = info.get("floatShares")
-    shares_out = info.get("sharesOutstanding")
-    insiders = info.get("heldPercentInsiders")
-    institutions = info.get("heldPercentInstitutions")
+    fields = {
+        "shares_short": info.get("sharesShort"),
+        "shares_short_prior": info.get("sharesShortPriorMonth"),
+        "short_ratio": info.get("shortRatio"),
+        "short_pct_float": info.get("shortPercentOfFloat"),
+        "float_shares": info.get("floatShares"),
+        "shares_outstanding": info.get("sharesOutstanding"),
+        "held_pct_insiders": info.get("heldPercentInsiders"),
+        "held_pct_institutions": info.get("heldPercentInstitutions"),
+    }
+    meaningful = ("shares_short", "short_ratio", "short_pct_float", "float_shares")
+    if all(fields[k] is None for k in meaningful):
+        return None
+    return fields
 
+
+def get_short_interest_yfinance(ticker: str) -> str:
+    """Fetch short interest / ownership data for a ticker from yfinance.
+
+    Returns a markdown report with shares short, days-to-cover, short % of
+    float, and float / insider / institutional ownership where available.
+    """
+    canonical = require_symbol(ticker)
+    fields = short_interest_fields(ticker)
     # Nothing meaningful returned -> honest no-data signal.
-    if all(v is None for v in (shares_short, short_ratio, short_pct_float, float_shares)):
+    if fields is None:
         raise NoMarketDataError(
             ticker, canonical, "no short-interest / float data returned"
         )
+
+    shares_short = fields["shares_short"]
+    shares_short_prior = fields["shares_short_prior"]
+    short_ratio = fields["short_ratio"]
+    short_pct_float = fields["short_pct_float"]
+    float_shares = fields["float_shares"]
+    shares_out = fields["shares_outstanding"]
+    insiders = fields["held_pct_insiders"]
+    institutions = fields["held_pct_institutions"]
 
     lines = [f"## {ticker.upper()} Short Interest & Ownership (yfinance)", ""]
     if shares_short is not None:

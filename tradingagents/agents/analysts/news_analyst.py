@@ -163,7 +163,11 @@ def create_news_analyst(llm, backup_llm=None, config=None):
                 # NewsScore AND EventState both belong to THIS report (the
                 # ownership map: news -> news, event -> news).
                 + engine_score_block(
-                    "news", state["company_of_interest"], current_date, config
+                    "news",
+                    state["company_of_interest"],
+                    current_date,
+                    config,
+                    snapshot=state.get("quant_scorecard"),
                 )
                 # §13.1: the full scorecard beside the owned engine(s).
                 + scorecard_context_block(
