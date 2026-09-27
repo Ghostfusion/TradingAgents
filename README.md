@@ -35,8 +35,11 @@
   **SBC-adjusted free-cash-flow read** (`us-gaap:ShareBasedCompensation` -> the canonical `sbc` key) now
   exists as `strategies/ratios.sbc_adjusted_fcf`: `reported_fcf = OCF - |capex|` beside
   `economic_fcf = reported_fcf - SBC`, plus `SBC/revenue` (the quality-pillar ratio the round-3 composite
-  study names), and all four rows render in the analyst ratio block (`- SBC / - SBC/revenue /
-  - SBC-adj FCF / - SBC/FCF`). It is a **single named XBRL concept, and a filer without it refuses with a
+  study names). The read renders in the fundamentals analyst's quality-factors leaf, which fetches the SEC
+  XBRL series; the plain ratio block reads the *vendor* statements, which carry no SBC row at all (live
+  MSFT 2026-09-27: D&A and the working-capital legs are itemised, the SBC add-back is not), so the four
+  keys stay engine-only there instead of printing four permanent `n/a` lines. It is a **single named XBRL
+  concept, and a filer without it refuses with a
   reason** - never a zero adjustment: measured live 2026-09-27, 55 of 60 large US filers carry
   `us-gaap:ShareBasedCompensation` (MSFT FY2026 12.405B, SBC/revenue 3.74%; CVX files none and refuses),
   and the nearest alternative, `us-gaap:AllocatedShareBasedCompensationExpense`, is a *different quantity*

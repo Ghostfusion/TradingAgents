@@ -50,7 +50,10 @@ The block also carries the FundamentalScore library's families
   ValuationScore)    economic cash flow = reported FCF - us-gaap:ShareBasedCompensation,
                      read from the one XBRL concept whose definition is the
                      cash-flow add-back; a filer without it refuses with a reason
-                     rather than adjusting by zero
+                     rather than adjusting by zero. Engine keys only: the vendor
+                     statements carry no SBC row, so they are NOT in RENDER_ORDER
+                     (see the note there) - the read renders through the
+                     quality-factors leaf, which reads the SEC series.
 
 No-fabrication rule: every ratio returns ``None`` when an input is missing
 (never an invented number), mirroring ``dataflows/quantitative_scores``. The
@@ -838,7 +841,10 @@ def compute_ratios(fin: dict, price: float | None = None,
         "net_issuance_yield": sy["net_issuance_yield"],
         # ---- ValuationScore §55: SBC adjustment --------------------------
         # ``sbc_adjusted_fcf`` owns the formula; these four keys are the read's
-        # own output, so the block prints one FCF adjustment, not a second.
+        # own output, so no second FCF adjustment exists anywhere. They are NOT
+        # in RENDER_ORDER: the vendor statements carry no SBC row, so the
+        # rendering leaf would print four permanent ``n/a`` lines (see the note
+        # on RENDER_ORDER).
         "sbc": sbc_read["sbc"],
         "sbc_to_revenue": sbc_read["sbc_to_revenue"],
         "sbc_adjusted_fcf": sbc_read["economic_fcf"],
@@ -967,12 +973,16 @@ RENDER_ORDER = [
     ("buyback_yield", "Buyback yield", "pct"),
     ("shareholder_yield", "Shareholder yield", "pct"),
     ("net_issuance_yield", "Net issuance yield", "pct"),
-    # ValuationScore §55 - the SBC-adjusted free-cash-flow read. The analyst
-    # ratio leaf renders every RENDER_ORDER row, so these reach a reader.
-    ("sbc", "SBC", "int"),
-    ("sbc_to_revenue", "SBC/revenue", "pct"),
-    ("sbc_adjusted_fcf", "SBC-adj FCF", "int"),
-    ("sbc_to_fcf", "SBC/FCF", "pct"),
+    # No SBC rows here on purpose. ``compute_ratios`` carries the §55 keys
+    # (``sbc``/``sbc_to_revenue``/``sbc_adjusted_fcf``/``sbc_to_fcf``) but this
+    # list is what the analyst ratio leaf renders, and that leaf reads the
+    # VENDOR statements - which carry no share-based-compensation row at all
+    # (verified live 2026-09-27 on MSFT's moomoo annual cash-flow statement:
+    # D&A and working capital are itemised, the SBC add-back is not). Rendering
+    # them here would print four permanent ``n/a`` lines in every fundamentals
+    # report. The read reaches the model through
+    # ``quant_formula_tools.get_quality_factors``, which fetches the SEC XBRL
+    # series the tag lives in.
     ("gross_margin", "Gross margin", "pct"),
     ("ebit_margin", "EBIT margin", "pct"),
     ("ebitda_margin", "EBITDA margin", "pct"),

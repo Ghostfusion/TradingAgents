@@ -498,12 +498,13 @@ def test_vs55_refuses_without_the_xbrl_concept_never_a_zero_adjustment():
     assert read["sbc_to_revenue"] is None
     assert SBC_XBRL_TAG in read["reason"]
     assert "not substituted" in read["reason"]
-    # The ratio block carries the same refusal, not a substituted adjustment.
+    # The ratio block carries the same refusal, not a substituted adjustment,
+    # and no permanent n/a rows (the vendor path can never fill them).
     r = compute_ratios(fin)
     assert r["sbc"] is None and r["sbc_adjusted_fcf"] is None
     from tradingagents.strategies.ratios import render_ratios
 
-    assert render_ratios(r).count("- SBC-adj FCF: n/a") == 1
+    assert "SBC" not in render_ratios(r)
 
 
 def test_vs55_does_not_fall_back_to_the_income_statement_sbo_tag():
@@ -555,14 +556,16 @@ def test_vs55_ratio_to_fcf_is_refused_when_reported_fcf_is_negative():
     assert read["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
 
 
-def test_vs55_renders_both_measures_and_the_refusal():
+def test_vs55_is_not_rendered_as_permanent_n_a_rows():
+    """The §55 keys are engine outputs; the read renders only where it has input.
+
+    The analyst ratio leaf reads the VENDOR statements, which carry no
+    share-based-compensation row (live MSFT 2026-09-27), so four ``n/a`` lines
+    there would be pure prompt noise. The read reaches the model through
+    ``quant_formula_tools.get_quality_factors`` instead (its own tests pin that).
+    """
     from tradingagents.strategies.ratios import render_ratios
 
-    with_sbc = render_ratios(compute_ratios(_fin(sbc=12e6)))
-    assert "- SBC: 12,000,000" in with_sbc
-    assert "- SBC/revenue: 1.33%" in with_sbc
-    assert "- SBC-adj FCF: 48,000,000" in with_sbc
-    assert "- SBC/FCF: 20.00%" in with_sbc
-    without = render_ratios(compute_ratios(_fin()))
-    assert "- SBC: n/a" in without
-    assert "- SBC-adj FCF: n/a" in without
+    block = render_ratios(compute_ratios(_fin(sbc=12e6)))
+    assert "SBC" not in block
+    assert "- FCF:" in block
