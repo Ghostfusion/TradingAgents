@@ -647,6 +647,8 @@ The repo's recurring defect class is **"a field whose name promises more than it
 
 **Not done:** authoring the 48 remaining rows of "Enforced at"/"Proven by" evidence is a substantial, judgement-heavy task, and an unverified row is worse than a missing one in a document whose stated purpose is to stop gates that cannot fire.
 
+**[CORRECTED 2026-09-27 — R4 stage 2 landed]** The gap above is closed: R4 stage 2 registered the last 48 `enable_*` keys, one family per commit (score-engine, debate/run-shape, factor-model, event, vendor/screener, score/aggregation, odds-and-ends), so `docs/gate_registry.md` now covers **all 112 of the 112** and its scope line says so. Four of the newly registered keys are **inert** (`enable_factor_model`, `enable_factor_proposal_loop`, `enable_tuner`, `enable_value_dip`) and their rows say so; every other new row carries a `Proven by` cell naming a test or code path that was opened when the row was added. `tests/test_gate_env_toggles.py` machine-checks the doc's key set against `REGISTRY` and each row's Status against the source, so the doc cannot drift back.
+
 ---
 
 ## 21. Open decisions
