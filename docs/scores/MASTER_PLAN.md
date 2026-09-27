@@ -288,6 +288,58 @@ Data is already fetched; the producer does not exist.
 
 ---
 
+### 5.1 Re-probed 2026-09-27 — can the provider chain feed each ABSENT producer?
+
+§12.1 audited Phase 2 as over-reported. The owner then asked the prior question:
+can the providers supply the absent producers' inputs at all? Six read-only probes
+took every absent-producer row and answered, per row, whether the input is already
+in the chain (and merely unread), a new endpoint of an integrated vendor, a vendor
+purchase, or unpublished anywhere.
+
+**Headline: not one of the 21 rows is vendor-blocked.** Eighteen are `REPO_SIDE`
+(the input is held, or is plain arithmetic over data the repo already has) or
+`FEEDABLE_NOW` (fetched today and dropped by a parser); one is `NO_SOURCE`. What
+remains missing is *definitions* (three rows), *wiring*, and one *entitlement
+question* — not data.
+
+| verdict | rows | the one-line finding |
+| --- | --- | --- |
+| `FEEDABLE_NOW` | TECH-19, NEWS-7, NEWS-5 | the label, the series and the classifier are all in the chain today |
+| `REPO_SIDE` | TECH-7/TECH-12, TECH-14, TECH-23, REG-4, REG-16, REG-17, RISK-5, RISK-7/RISK-12, SENT-7 (negation/intensifier half), SENT-9, SENT-10, SENT-11, FUND-15, FUND-16, NEWS-9, NEWS-12/NEWS-13, EVT-9 | a producer, an emitter or a definition — no fetch |
+| `VENDOR_ONLY` | SENT-7 (aspect-taxonomy half) | the only leg with no cheap source |
+| `NO_SOURCE` | RISK-20 (balance-sheet `FXExposure`) | probed against three real SEC XBRL instances: nothing files a currency split of total assets and liabilities |
+| superseded | MKT-13, VAL-10/12/13/14/15/17 | belong to engines that D1/D2 move to Phase 7 |
+
+**TECH-19 / NEWS-7 — `FEEDABLE_NOW`.** Label: `yfinance_sector.fetch_sector:64` (FMP profile → Finnhub `company_profile2` → yfinance `info` → the repo's own SPDR universe map) plus `sector_rank.sector_group_of:163` → the SPDR ticker; probed live: AAPL → Technology → XLK, XOM → Energy → XLE, JPM → Financial Services → XLF. Series: `_ohlcv(sector_etf)` (`stockstats_utils.load_ohlcv:254`, keyless) — live XLK/XLE 1,256 bars each, and the same call target already serves all eleven SPDR series in `get_sector_rank` and `get_sector_rotation_screen`. Arithmetic: `relative_strength.relative_strength_report:214`; the private `sector_screener._rel_outperformance:248` is exactly stock-return minus sector-ETF-return. When every label leg is unavailable the honest output is NA, never a bucket.
+
+**NEWS-5 — `FEEDABLE_NOW`: the tags are fetched and thrown away.** Benzinga `/v2/news` carries `channels[]`, `tags[]` and `importance_rank` (`benzinga.py:401-414` renders title/date/author/url only); EODHD `/news` carries `tags[]` (50 standard tags) plus a `sentiment{polarity,neg,neu,pos}` object (`eodhd.py:262-271` renders title/content/date/source only); Alpha Vantage `NEWS_SENTIMENT` returns per-article `topics[]` (`sentiment.py:637-650` reads only `ticker_sentiment`). AV has no legal/regulatory topic, so the `regulatory_legal` half maps to GDELT GKG themes or Benzinga's channels; the tag→category table is repo-side either way.
+
+**NEWS-9 — `REPO_SIDE`.** Headlines and timestamps are already fetched by every news vendor, so similarity needs a local embedding (`sentence-transformers` `all-MiniLM-L6-v2`, $0/CPU) or TF-IDF cosine; the only vendor publishing a duplicate signal is Marketaux (`similar[]`, free tier 100 req/day), which is optional. `news_novelty:309` is a first-seen count share today.
+
+**NEWS-12/NEWS-13 — `REPO_SIDE`, needs a run.** The producers exist and are tested (`sentiment_research.multi_horizon_sentiment_regression:264`, `ic_term_structure:501`); `_news_components` hard-codes one 30-day window (`analysis_tools.py:7019`).
+
+**SENT-7 — `REPO_SIDE` for the negation/intensifier half.** The library's own language (`SentimentScore.md` §10/§11: negation `S(w|neg) = −S(w)`, `(-1)^I(NegWithinK)`, booster α) is VADER's rule engine — its `NEGATE` set with a three-token look-back plus `BOOSTER_DICT` (±0.293), MIT-licensed and purely local over text the repo already holds (`text_factors.lm_tone:121` is unigram-only today, over a *reduced* Loughran-McDonald seed set). The **aspect taxonomy** is the one leg with no cheap source (MeaningCloud's ABSA tier is search-sourced only; Aylien/Lexalytics are enterprise quotes) — `VENDOR_ONLY`, and the only row in this table that is.
+
+**SENT-9 — `REPO_SIDE`; source breadth is the weak leg.** The counts exist (`sentiment.compute_social_scores:488` bullish/bearish/unlabeled/sample_size over `stocktwits.stocktwits_counts:83`; the per-day news count `n` through `aggregate_daily_sentiment:667`). Kish N_eff, HHI and Gini are closed-form over them. But only ONE social source is wired (Stocktwits; Reddit arrives as text) — per-source breadth needs a new call target: ApeWisdom's keyless Reddit+4chan mention API, or Finnhub `/stock/social-sentiment` (Premium).
+
+**SENT-10 / SENT-11 — `REPO_SIDE`.** Both take series the repo already holds in-process (the daily sentiment series, the per-item polarity, `_ohlcv` returns), and the models to reuse already exist: `regime._hmm_em:355` / `hmm_filtered_regime:545`, `statistical_kalman.kalman_spread:42`, plus the entropy helpers.
+
+**FUND-15 / FUND-16 — `REPO_SIDE`, but a definition must come first.** The inputs are present: the wide EDGAR panel (30 dates × 150 names, 24/28 fundamental factors) and `sec_edgar.financial_history_series:496` for the per-name statement history. §36's `MaximumPossibleStd` and §26's lags `n` / weights `w_i` are unbound in the library — a definition decision, not a producer. Vendor "dispersion" (Zacks, Bloomberg BEst) is analyst-estimate spread, a different quantity.
+
+**TECH-7/TECH-12, TECH-14, TECH-23, RISK-5, RISK-7/RISK-12 — `REPO_SIDE`.** `technical_factors.bollinger_bandwidth:1168` and `keltner_channel:439` both exist, so the TTM squeeze histogram is unwritten arithmetic. The Zweig thrust exists and prints (`technical_depth.zweig_breadth_thrust:400`, `market_breadth.advance_decline_line:391`); it is not a `technical_score` component, which is a declared-table edit. The redundancy producers exist (`alpha_zoo.redundancy_screen:581`, `score_panel.redundancy_matrix:1414`) and §129's seven-state enum is a design choice. `derivatives_gamma.gex_per_strike:52` already returns per-strike `contributions` beside `spot`, so distance-to-spot and a ranked top-|GEX| list are arithmetic, and the chain rows are already fetched free (`cboe.get_options_surface:103`, `yfinance_options`). `cluster_exposure_share` is book-side: `BookState.cluster_notional():109` and `notional():103` already hold the numerator and denominator that `signald/risk/gate.py:369` compares, so it is a producer plus plumbing — no vendor publishes an account's cluster notional.
+
+**REG-4 / REG-16 / REG-17 — `REPO_SIDE`.** All three producers exist and are tested; a scoped grep finds no caller outside `strategies/regime.py`. Emitter work only.
+
+**RISK-20's balance-sheet leg — `NO_SOURCE`.** The probe downloaded three real XBRL instances and read them: JPM's 10-K carries 9,026 explicit members and puts `us-gaap:Assets` on `StatementGeographicalAxis` (18 facts — but the members are US *states*, and there is no `CurrencyAxis`); HSBC's 20-F uses `srt:CurrencyAxis` only for hedging instruments, derivative assets/liabilities, VaR and notionals; Unilever's only for borrowings plus one filer-defined extension. No standard, universe-wide tag carries a currency split of **total** assets and liabilities, and no vendor verified sells one (S&P Capital IQ has a liabilities-side subset, enterprise). The dimensional plumbing exists (free SEC FSDS `segments`; sec-api.io XBRL-to-JSON, $49/mo) — the facts do not. `_fx_exposure` stays private.
+
+**EVT-9 — `REPO_SIDE` plus a contradiction to resolve.** `event_state.py:591` returns a 0-100 `{score, band, coverage, families}` while `scripts/score_panel.py:903` (`ENGINE_NOT_SCORED`) states "EventScore is a state/flag object, not a 0-100 score", and `engine_registry:954` imports only `ENGINE_MODULES:893`, which omits `event_state`. One of the two is wrong; an owner decision (add the panel column, or record it as out of panel scope) precedes any run.
+
+**Defects this probe found.** Checking the GDELT rows live found that the vendor's tone claim was never real — the DOC 2.0 article-list response carries no per-article tone, the code parsed that field anyway, and a rate-limited (429) response was classified as no-data because the body was parsed before the status. Both fixed in `0fe27e7`, with the failing-first proof in the CHANGELOG entry. Flagged, not confirmed: `sp500_universe.fetch_sp500_universe` live-returned 317 bucketed rows for the current S&P 500 (its wikitext row regex appears to under-capture) — a keyless label fallback that under-covers silently.
+
+**What this does not settle.** Three definition decisions (FUND-15's normaliser, FUND-16's lags and weights, TECH-23's state enum), one owner call (EVT-9), one entitlement question (enumerating Benzinga's news channels needs an entitled key), and one live probe (GDELT `mode=timelineTone`, blocked by GDELT answering 429 to this host on 2026-09-27).
+
+---
+
 ## 6. Phase 3 — the measurement layer (Phase C) (`WORK`, D2-4, I3-5)
 
 Nothing promotes a weight, a status or a composite rung without this phase. It is
@@ -665,7 +717,9 @@ Three of them stay underscore-private, awaiting a leaf that holds both inputs.
 **What this audit does not say.** Every row above still respects the constraints the phases were run
 under: no fabricated number, no gate or size changed, and each absent quantity carries its reason. The
 defect is in the *reporting* of the round, not in the work — a phase is not done because most of its
-rows are.
+rows are. **Where each absent row's unblocking route is recorded:** §5.1, re-probed 2026-09-27 — 18 of
+the 21 absent-producer rows are `REPO_SIDE` or `FEEDABLE_NOW`, one is `NO_SOURCE`, and the rest turn on
+a definition or one vendor entitlement.
 
 ---
 
