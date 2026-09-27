@@ -232,7 +232,7 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 52 | Cash-Adjusted Valuation | :1387 | 2 | ABSENT | No `(MC − Cash)/NI` |
 | 53 | Debt-Adjusted Valuation | :1406 | 3 | ABSENT | `ratios.py:205` `debt_to_equity` is a leverage ratio, not a valuation adjustment; no Debt/EV, Net Debt/EBITDA or Net Debt/FCF |
 | 54 | Dilution-Adjusted Valuation | :1433 | 3 | ABSENT | Zero hits for share-count dilution |
-| 55 | Share-Based Compensation Adjustment | :1461 | 3 | ABSENT | Zero hits for SBC |
+| 55 | Share-Based Compensation Adjustment | :1461 | 3 | **elsewhere** | `strategies/ratios.py::sbc_adjusted_fcf` (built 2026-09-27) computes the library's own two measures — `reported_fcf = OCF - |capex|` beside `economic_fcf = reported_fcf - us-gaap:ShareBasedCompensation` — plus `sbc_to_revenue`, the companion ratio the round-3 composite study places in the Quality pillar (`docs/research/scoring_round3/altman_composite.md`), and `sbc_to_fcf`. The SBC leg is exactly **one named XBRL concept** (canonical `sbc` / `sbc_series`); a filer that does not file it **refuses with a reason naming it** and `economic_fcf` stays `None`, and `AllocatedShareBasedCompensationExpense` is deliberately not a fallback (live SIMO FY2025 26,283,000 vs 203,305,000). Reachable through `quant_formula_tools::get_quality_factors`. Coverage probed 2026-09-27: 55/60 large US filers carry the tag |
 | 56 | Margin-of-Safety Calculations | :1486 | 4 | **elsewhere** | `tradingagents/strategies/normalized.py::margin_of_safety:120` = `(IV − P)/IV`; `margin_of_safety_bases:127` also gives the price basis; leaf `analysis_tools.py::get_margin_of_safety:5181`; scenario mos `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` |
 | 57 | Weighted Intrinsic Value | :1518 | 3 | ABSENT | No multi-model IV weighting |
 | 58 | Valuation Dispersion | :1543 | 5 | ABSENT | No `σ(IV)/median(IV)`; no multi-model IV panel to take a σ over |
@@ -265,7 +265,7 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 85 | Valuation Composite With Multiple Independent Models | :2166 | 3 | ABSENT | The composite — by decision (§5) |
 | — | Recommended ValuationScore Architecture for Your System (unnumbered) | :2208 | 1 | ABSENT | Design only: 10 sub-engines + a 14-key output contract. This document adopts the *separation* it recommends and rejects its `f(...)` composite sketch |
 
-**Tally: 14 `elsewhere`, 25 `PARTIAL`, 47 `ABSENT` (of 86).**
+**Tally: 15 `elsewhere`, 25 `PARTIAL`, 46 `ABSENT` (of 86).**
 
 ---
 
@@ -305,6 +305,7 @@ below was read this round.
 | `tradingagents/strategies/normalized_fcf.py::maintenance_fcf:81` | §8 Basic FCF (`reported_fcf`) + a maintenance-capex floor | `{maintenance_fcf, reported_fcf, growth_capex, basis}` |
 | `tradingagents/strategies/earnings_quality.py::earnings_quality_verdict:24` | §7 Cash Conversion | `cc = OCF/NI` with bands, plus the Sloan accrual `(NI−OCF)/TA` |
 | `tradingagents/strategies/capex_quality.py::capex_quality_read:126` | §7 FCF Yield, §18 incremental ROIC + spread | `fcf_yield` at `:247`; `incr_roic` at `:184-187`, `spread` at `:188` |
+| `tradingagents/strategies/ratios.py::sbc_adjusted_fcf` | §55 SBC adjustment (`ReportedFCF` / `EconomicFCF = FCF - SBC`) | `{sbc, reported_fcf, economic_fcf, sbc_to_revenue, sbc_to_ocf, sbc_to_fcf, economic_fcf_yield, xbrl_tag, basis, reason}`; the refusal names the missing XBRL concept rather than adjusting by zero |
 | `tradingagents/strategies/etf_valuation.py::etf_valuation:80` | §2 P/E (harmonic), forward P/E, earnings yield; §7 FCF yield; §30 valuation percentile vs own history | ETF basket aggregate |
 | `tradingagents/strategies/cross_section.py::winsorize:31` | §76 Winsorized Valuation Factors | default `0.01/0.99` |
 | `tradingagents/strategies/cross_section.py::cross_sectional_z:70` / `industry_neutral_z:89` | §29, §32, §72 | winsorise → demean (by sector) → z |
@@ -774,3 +775,5 @@ Read at both line ranges this round:
 4. **Coverage.** Library §77 multiplies; the repo withholds below a floor and renormalises (`factors.py::_coverage_floor:246`, `category_scores:258`) per master rule 1.
 5. **Quality adjustment.** Library §33 `PE/ROE` versus Damodaran's `PBV/ROE` pairing (the companion-variable rule in §4's Damodaran row).
 6. **PEG benchmark.** Library §2/§20 give `PEG` with no benchmark; the literature (Arak & Foster 2003; Schnabel 2009; Trombley 2008) shows a fixed benchmark of 1.0 is wrong, and the repo's only PEG producer (`value_dip_tools.py::_forward_peg_read:659`) returns a bare number with no peer context.
+
+**Q8 — where does the SBC-adjusted FCF belong?** The library puts §55 in `ValuationScore`, while its companion ratio sits in the **Quality** pillar of the round-3 composite study (`SBC/Revenue`, `altman_composite.md`). The producer exists (2026-09-27) and is **engine-only**: does `EconomicFCF` enter `ValuationScore` as a factor, or `FundamentalScore`'s quality/cash-flow pillar, or both under different names (which invariant 15 forbids)? Until the owner rules, the read is an advisory engine key with no weight and no composite membership.

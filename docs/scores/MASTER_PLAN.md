@@ -305,6 +305,7 @@ question* — not data.
 | verdict | rows | the one-line finding |
 | --- | --- | --- |
 | `FEEDABLE_NOW` | TECH-19, NEWS-7, NEWS-5 | the label, the series and the classifier are all in the chain today |
+| `FEEDABLE_NOW` (probed 2026-09-27) | ValuationScore §55 (SBC-adjusted FCF) | the tag had never been probed because row 55 belonged to no `VAL-*` id: live on 60 large US filers, **55** file `us-gaap:ShareBasedCompensation` with an annual FY value (CVX and XOM file none), and the producer is now built (2026-09-27) — a filer without the tag refuses with the reason, never adjusts by zero |
 | `REPO_SIDE` | TECH-7/TECH-12, TECH-14, TECH-23, REG-4, REG-16, REG-17, RISK-5, RISK-7/RISK-12, SENT-7 (negation/intensifier half), SENT-9, SENT-10, SENT-11, FUND-15, FUND-16, NEWS-9, NEWS-12/NEWS-13, EVT-9 | a producer, an emitter or a definition — no fetch |
 | `VENDOR_ONLY` | SENT-7 (aspect-taxonomy half) | the only leg with no cheap source |
 | `NO_SOURCE` | RISK-20 (balance-sheet `FXExposure`) | probed against three real SEC XBRL instances: nothing files a currency split of total assets and liabilities |
