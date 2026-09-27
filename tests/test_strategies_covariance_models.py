@@ -164,7 +164,7 @@ def test_lw_shrinkage_in_unit_interval_and_shrinks():
     assert 0.0 <= r["shrinkage"] <= 1.0
     assert r["n_names"] == 8 and r["n_obs"] == 80
     # Sample covariance from numpy directly to confirm the shrunk matrix is
-    # the claimed convex combination (delta = b^2/d^2 clipped).
+    # the claimed convex combination (delta = (b^2/t)/d^2 clipped, LW 2004).
     names = r["names"]
     mat = np.array([rets[n][-80:] for n in names], dtype=float).T
     mat = mat - mat.mean(axis=0, keepdims=True)
@@ -174,7 +174,7 @@ def test_lw_shrinkage_in_unit_interval_and_shrinks():
     outer = np.einsum("ni,nj->nij", mat, mat)
     b2 = np.mean(np.sum((outer - S) ** 2, axis=(1, 2)))
     d2 = np.sum((S - T) ** 2)
-    expected_delta = 0.0 if d2 <= 0 else min(max(b2 / d2, 0.0), 1.0)
+    expected_delta = 0.0 if d2 <= 0 else min(max((b2 / 80) / d2, 0.0), 1.0)
     expected = (1 - expected_delta) * S + expected_delta * T
     assert r["shrinkage"] == pytest.approx(expected_delta, abs=1e-6)
     np.testing.assert_allclose(np.array(r["cov"]), expected, atol=1e-12)

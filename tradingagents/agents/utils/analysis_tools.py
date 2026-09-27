@@ -8908,7 +8908,7 @@ def get_covariance_read(
     """Covariance-robustness read: Ledoit-Wolf shrunk covariance + EWMA
     covariance for a name list (advisory). The sample covariance overfits when
     the name count approaches the observation count; shrinkage stabilizes it
-    (delta = b^2/d^2 in [0,1]). Reports the shrinkage intensity, the implied
+    (delta = (b^2/t)/d^2 in [0,1]). Reports the shrinkage intensity, the implied
     vol of each name under the shrunk matrix, and the EWMA (RiskMetrics 0.94)
     vol - so 'the covariance is noisy / these names correlate' claims are
     grounded in the shrunk numbers, not the raw sample. Use before any

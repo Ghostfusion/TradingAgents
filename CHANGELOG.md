@@ -108,6 +108,33 @@ gains that as a row set: **`MOM-1`..`MOM-6`** in §10 (Phase 7, `D7`), plus thre
 corrected: it has the document now, and what is still missing is the *engine*. No engine was built,
 no weight changed, no gate moved.
 
+### Fixed
+**The Ledoit-Wolf shrinkage intensity was `t` times too large - `clip(b²/d²)` is now `clip((b²/t)/d²)` (2026-09-27).**
+`covariance_models.ledoit_wolf_shrink` divided the average squared Frobenius error of the sample covariance
+(`b²`) by the target mismatch (`d²`) and stopped there; Ledoit-Wolf (2004)'s intensity divides by the
+observation count as well, which is what makes the estimator *consistent* - the numerator is a per-
+observation error, not a total. **The defect was not cosmetic: without `/t` the intensity saturated at 1.0**
+on any panel narrow relative to its history, and an intensity of 1.0 returns the target alone and discards
+the sample it was handed. Measured on an iid Gaussian panel (p=5, t=250, seed 11): `b² = 30.041`, `d² = 0.176`,
+so the old form clipped to 1.0000 and the corrected form is 0.6813 - against the 0.6366 the 2026-09-23 record
+measured for the paper's own answer.
+
+Changed: the arithmetic, the module docstring's formula (whose "(web-verified against the standard
+implementation)" claim was itself false), the `analysis_tools` covariance-read docstring, `docs/api_reference.md`'s
+table row, and the pinned expectation in `tests/test_strategies_covariance_models.py` (which recomputed the
+same `b²/d²` and asserted equality - the reason this needed the owner's call rather than a silent fix).
+
+**What is deliberately still open.** The paper's intensity is `(π̂ − ρ̂)/(t·γ̂)`; the correction applied here is
+`(b²/t)/d²`, i.e. `π̂/(t·γ̂)`, which omits `ρ̂` - the diagonal-only part of `π̂`, the noise a scaled-identity
+target cannot fit. Measured on the same panel: with `ρ̂ = 10.408` the full form is **0.4453**. So the engine is
+now consistent but still shrinks harder than the paper. Including `ρ̂` is a second change to the same
+documented convention, so it is recorded here as an open decision rather than folded into this fix.
+
+Verification: `tests/test_strategies_covariance_models.py` 11 passed,
+`tests/test_spectral_null_band.py` 3 passed, ruff clean; a standalone probe recomputes `b²`, `d²`, `ρ̂` and both
+candidate intensities from the panel and asserts the returned shrinkage equals the corrected form and that the
+matrix is that intensity's convex combination (max |cov − expected| = 1.4e-20).
+
 ### Changed
 **EVT-9: EventScore is a scored engine, and the panel carries its column (2026-09-27).** `event_state` returns a 0-100 `{score, band, coverage, families}`, which is what the owner's decision affirmed — so it moved out of `scripts/score_panel.py::ENGINE_NOT_SCORED` (now empty, kept as data so the old claim's reader finds the correction) and into `ENGINE_MODULES`. The registry now lists it with its declared component table and its producers, and the panel carries its column. Its factors are event-driven, so on a price/fundamentals panel they report `measured: False` **with their own reasons** rather than a number nobody measured — the engine's own 0-100 read still comes from the run's snapshot. **Web impact: none.**
 
@@ -543,7 +570,7 @@ Focused set with the registry and api-reference contracts: **90 passed**; `ruff`
 
 **Measured, not asserted.** On an iid Gaussian panel with `p = 5`, `t = 250`: the paper's intensity is **0.6366**, the engine returns **1.0000**, and the matrix it returns sits on the scaled-identity target (`||Sigma - I||/||I|| = 0.0444`, against `0.0363` for the pure target) rather than on the 64/36 blend the formula asks for. At `p = 11`, `t = 252` the paper's own answer is 0.995 - which is why this has never been visible on an ETF-width panel. It bites where a panel is narrow relative to its history, i.e. exactly the case a small book presents.
 
-**Why it is recorded rather than fixed.** The code **matches its own module docstring** (`delta = clip(b^2 / d^2, 0, 1)`, `covariance_models.py:9`) and its own pinned test (`tests/test_strategies_covariance_models.py` recomputes the same `b^2/d^2` and asserts equality with the returned field). Correcting the arithmetic therefore is not a bug fix but a change to a documented, tested convention, whose output an analyst-facing covariance read (`agents/utils/analysis_tools.py`, `_lw`) also consumes. The correction is one line - `b2 / d2` becomes `(b2 / t) / d2` - plus that docstring line and that test's expectation, and it changes what the engine reports for every covariance read, so it belongs to the owner rather than to this wave.
+**[FIXED 2026-09-27 - see the entry at the top of this file; the arithmetic below is kept as the record of what was wrong.]** **Why it was recorded rather than fixed (2026-09-23).** The code **matches its own module docstring** (`delta = clip(b^2 / d^2, 0, 1)`, `covariance_models.py:9`) and its own pinned test (`tests/test_strategies_covariance_models.py` recomputes the same `b^2/d^2` and asserts equality with the returned field). Correcting the arithmetic therefore is not a bug fix but a change to a documented, tested convention, whose output an analyst-facing covariance read (`agents/utils/analysis_tools.py`, `_lw`) also consumes. The correction is one line - `b2 / d2` becomes `(b2 / t) / d2` - plus that docstring line and that test's expectation, and it changes what the engine reports for every covariance read, so it belongs to the owner rather than to this wave.
 
 **The finding shaped R3's design instead of being absorbed by it.** R3's null band is calibrated at an **explicit** intensity, refuses a zero band with its reason, and reports the engine's own intensity beside it as `engine_shrinkage` - so a saturated input can never silently become "everything moved", and a reader of the read can see both numbers.
 

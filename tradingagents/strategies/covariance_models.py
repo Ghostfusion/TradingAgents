@@ -6,9 +6,13 @@ Black-Litterman / max-diversification / risk contribution):
 
 - ``ledoit_wolf_shrink`` - Ledoit-Wolf (2004) linear shrinkage toward a
   target (scaled identity ``mu*I`` or the diagonal of the sample), with the
-  shrinkage intensity ``delta = clip(b^2 / d^2, 0, 1)`` where ``b^2`` is the
-  average squared Frobenius error of the sample covariance rows and ``d^2``
-  the target mismatch (web-verified against the standard implementation).
+  shrinkage intensity ``delta = clip((b^2 / t) / d^2, 0, 1)`` where ``b^2`` is
+  the average squared Frobenius error of the sample covariance rows, ``t`` the
+  observation count and ``d^2`` the target mismatch. **Corrected 2026-09-27**:
+  the ``/ t`` was missing from 2026-09-17 to that date (defect D-LW, recorded in
+  `CHANGELOG.md` and measured in `docs/AGENT_ONBOARDING.md`), so the intensity
+  was ``t`` times too large and saturated at 1.0 - the target alone - on every
+  panel narrow relative to its history.
   Most valuable when ``n_names ~ n_obs`` (sample covariance overfits).
 - ``ewma_covariance`` - RiskMetrics EWMA covariance
   ``Sigma_t = lam*Sigma_{t-1} + (1-lam)*r_{t-1} r_{t-1}'`` seeded on the
@@ -108,7 +112,11 @@ def ledoit_wolf_shrink(
     outer = _np.einsum("ni,nj->nij", X, X)
     b2 = float(_np.mean(_np.sum((outer - S) ** 2, axis=(1, 2))))
     d2 = float(_np.sum((S - F) ** 2))
-    shrinkage = 0.0 if d2 <= 0 else min(max(b2 / d2, 0.0), 1.0)
+    # Ledoit-Wolf (2004): the intensity is (b^2 / t) / d^2 - the numerator is the
+    # AVERAGE squared Frobenius error per observation, not the total. Without the
+    # division by t the intensity is t times too large and saturates at 1.0 on any
+    # panel narrow relative to its history, which returns the target alone.
+    shrinkage = 0.0 if d2 <= 0 else min(max((b2 / t) / d2, 0.0), 1.0)
     Sigma = (1.0 - shrinkage) * S + shrinkage * F
     cov = [[float(x) for x in row] for row in Sigma]
     return {
