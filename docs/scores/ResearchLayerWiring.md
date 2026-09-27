@@ -1001,7 +1001,7 @@ tightenings in §9.1–§9.4.
 | The context is the only quantitative channel into the debate | `trading_graph.py::_compiled_decision_context:1243-1509`, set `:649`; imported by no other builder |
 | It is consumed at ten sites, one bounded | §1.2 table; `structured_debate.py:216` is the bound |
 | The scores reach only a tool and the card | `agents/toolsets.py`; `reporting.py:859-1246`, `1893` |
-| The card has no research-layer reader | `signald/watch.py:6-8`; `capabilities.py:1906`; `reporting.py:1845` |
+| The card has no research-layer reader | `signald/watch.py:6-8`; `../trading_web/backend/capabilities.py:1906`; `reporting.py:1845` |
 | All eight gates default off | `default_config.py:1234/1236/1242/1245/1246/1250/1263/1266` |
 | The context becomes verifiable ground truth | `structured_debate.py::ground_truth_from_state:330`, `_parse_key_value_lines:312` |
 | The context becomes report section IVa | `reporting.py:1701-1703` |

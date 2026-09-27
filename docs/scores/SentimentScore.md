@@ -17,7 +17,7 @@ announcement is *information* (news); analysts turning positive is
 *interpretation* (sentiment); +8% on 3× volume is *price* (technical). **Three
 separate observations.**
 
-Status: **built (2026-09-18); gate off by default.** `strategies/sentiment_score.py` is the engine (including the confirmation quadrant §0.3 recorded as missing), `get_sentiment_score` its leaf and `enable_sentiment_score` its membership switch. It participates in the **research allocation only** - never in the decision composite (master rule 17). The four holes §1 records are still holes. **[CORRECTED 2026-09-26: three holes — §7 Q4 closed the 20-day delta by making the OLS slope `sentiment.sentiment_velocity:25` canonical and refusing a second 20-day delta producer.]** **Unmeasured** (vendor gate).
+Status: **built (2026-09-18); gate off by default.** `strategies/sentiment_score.py` is the engine (including the confirmation quadrant §0.3 recorded as missing), `get_sentiment_score` its leaf and `enable_sentiment_score` its membership switch. It participates in the **research allocation only** - never in the decision composite (master rule 17). The four holes §1 records are still holes. **[CORRECTED 2026-09-26: three holes — §7 Q4 closed the 20-day delta by making the OLS slope `sentiment.sentiment_velocity:37` canonical and refusing a second 20-day delta producer.]** **Unmeasured** (vendor gate).
 
 ---
 
@@ -27,22 +27,22 @@ Status: **built (2026-09-18); gate off by default.** `strategies/sentiment_score
 
 | Category | Weight | Status |
 | --- | --: | --- |
-| News sentiment | **15%** | SCORABLE — `sentiment.aggregate_weighted_sentiment:626`, `daily_sentiment_sma:501` |
-| Sentiment momentum | **15%** | **PARTIAL** — a **7-day innovation** exists; the owner's `Sentiment_today − Sentiment_20d` does not **[CORRECTED 2026-09-26: §7 Q4 retired this hole — the OLS slope `sentiment.sentiment_velocity:25` is the canonical momentum measure and a second 20-day delta is explicitly not built]** |
+| News sentiment | **15%** | SCORABLE — `sentiment.aggregate_weighted_sentiment:845`, `daily_sentiment_sma:501` |
+| Sentiment momentum | **15%** | **PARTIAL** — a **7-day innovation** exists; the owner's `Sentiment_today − Sentiment_20d` does not **[CORRECTED 2026-09-26: §7 Q4 retired this hole — the OLS slope `sentiment.sentiment_velocity:37` is the canonical momentum measure and a second 20-day delta is explicitly not built]** |
 | Sentiment breadth | **10%** | **PARTIAL** — per-day `neutral_share` + modal agreement; no per-source positive share |
 | Institutional sentiment | **15%** | **PARTIAL** — a raw holdings level, bound to the **fundamentals** toolset |
 | Analyst sentiment | **10%** | SCORABLE — `analyst_revisions.revision_ratio:79`, `consensus.agreement_score:14` |
-| Retail / social | **10%** | SCORABLE — `sentiment.compute_social_scores:273` |
+| Retail / social | **10%** | SCORABLE — `sentiment.compute_social_scores:488` |
 | Options sentiment | **10%** | SCORABLE — `options_surface.iv_skew:25`, `put_call_oi_concentration:34`, `volatility_risk_premium:65` |
 | Short interest | **5%** | **PARTIAL** — raw level only; no percentile or change basis |
-| Dispersion | **5%** | SCORABLE — `sentiment.sentiment_dispersion:209` |
+| Dispersion | **5%** | SCORABLE — `sentiment.sentiment_dispersion:400` |
 | Extreme / crowding | **5%** | **PARTIAL** — display-only bands from hardcoded constants |
 
 **The four holes**: 20-day momentum (only a 7-day innovation exists),
 acceleration (a producer exists and is unwired), per-source breadth, and
 institutional sentiment on the sentiment surface. **[CORRECTED 2026-09-26: it is
 now **three** holes — §7 Q4 closed the 20-day delta by making the OLS slope
-`sentiment.sentiment_velocity:25` canonical and forbidding a second 20-day delta
+`sentiment.sentiment_velocity:37` canonical and forbidding a second 20-day delta
 producer.]**
 
 ### 0.2 What the evidence says, and how it constrains the score
@@ -78,22 +78,22 @@ The owner's rule: *"don't assume positive sentiment is bullish."* The 2×2:
 | negative | falling | **confirmed negative** |
 | negative | rising | **divergence** |
 
-**What exists is PARTIAL and differently shaped.** `sentiment_research.sentiment_lead_lag:65`
+**What exists is PARTIAL and differently shaped.** `sentiment_research.sentiment_lead_lag:172`
 (with `innovations=True`) computes `Corr(dSentiment, dPrice)` per name;
-`sentiment_research.sentiment_factor_scale:570` turns sign-agreement with the
+`sentiment_research.sentiment_factor_scale:677` turns sign-agreement with the
 *measured historical IC direction* into a 0.8/1.0/1.2 sizing multiplier, wired
-through `overlays.fold_sentiment_into_overlay:127` ←
-`trading_graph._sentiment_factor_read:1178` and **gated off by default**
+through `overlays.fold_sentiment_into_overlay:198` ←
+`trading_graph._sentiment_factor_read:1420` and **gated off by default**
 (`enable_sentiment_factor`, `default_config.py:821`).
 
 Two things are wrong with using that as the owner's check, both recorded in §3:
 the wired read is a **single-name self-correlation** used as a sign gate (not a
 cross-sectional IC), and it hardcodes `source="eodhd"` with no fallback. **The
 quadrant label and a market-adjusted (abnormal) return do not exist.** **[CORRECTED
-2026-09-26: both are built. `tradingagents/strategies/sentiment_score.py::confirmation_quadrant:330`
+2026-09-26: both are built. `tradingagents/strategies/sentiment_score.py::confirmation_quadrant:342`
 returns four distinct labels — `confirm-up` / `diverge-up` / `confirm-down` /
 `diverge-down`, keyed on the *price* direction — and
-`tradingagents/agents/utils/analysis_tools.py::_sentiment_price_read:6525` computes
+`tradingagents/agents/utils/analysis_tools.py::_sentiment_price_read:6679` computes
 the market-adjusted (abnormal) return (name return − benchmark return). This
 document's own §8.1 §99/§100 already record them built.]** The
 design: the quadrant **is** the interface — `sentiment = +0.72` alone is not
@@ -105,24 +105,24 @@ actionable.
 
 | Component | Weight | Status | Producer (`module.function:line`) | Output key | Direction | Scale/units | Gap |
 | --- | --: | --- | --- | --- | --- | --- | --- |
-| News sentiment | 15 | SCORABLE | `sentiment.aggregate_weighted_sentiment:626`; `sentiment.aggregate_daily_sentiment:448`; `sentiment.daily_sentiment_sma:511`; `sentiment.weighted_rolling_sentiment:739`; leaves `get_news_sentiment` (news_data_tools:110) / `get_news_sentiment_series` (analysis_tools:6793) | `score` / `unweighted` / `weighted` / `sma_7d` | higher = bullish | -1..1 per-day level; `neutral_share` 0-1 | GDELT fallback delivers -100..100 through the same route (defect) |
-| News sentiment → weighted level (sub) | — | SCORABLE | `sentiment.aggregate_weighted_sentiment:626` | `weighted`, `unweighted`, `n` | higher = bullish | -1..1 | gated `enable_weighted_sentiment_agg` (default False, default_config.py:1044) |
-| News sentiment → 7d SMA (sub) | — | SCORABLE | `sentiment.daily_sentiment_sma:511` | `sma_7d` | higher = bullish | -1..1 | — |
-| News sentiment → innovation (sub) | — | SCORABLE | `sentiment.daily_sentiment_sma:511` | `innovation` | positive = improving | -1..1, `score_t − sma_7d_{t−1}` | 7-day, not 20-day |
-| Sentiment momentum | 15 | PARTIAL | only `sentiment.daily_sentiment_sma:511` (`innovation`, 7-day) and `sentiment.weighted_rolling_sentiment:739` (10-day exp window) | `innovation`, `weighted` | positive = improving | -1..1 | spec's `Sentiment_today − Sentiment_20d` ABSENT **[CORRECTED 2026-09-26: §7 Q4 closed this — the regression slope `sentiment_velocity:25` is canonical; the 20-day delta is deliberately not built]** |
-| Momentum → acceleration (sub) | — | UNWIRED | `sentiment.sentiment_velocity:25` (OLS slope/day) | (none) | positive = accelerating | sentiment-points/day | no production caller (tests only) |
-| Sentiment breadth | 10 | PARTIAL | `sentiment.aggregate_weighted_sentiment:626` (`neutral_share`); `sentiment.sentiment_dispersion:209` (`agreement`) | `neutral_share`, `agreement` | n/a | 0-1 share | no per-source positive-share producer |
-| Breadth → crowd bull share (sub) | — | PARTIAL | `sentiment.crowd_ratio:163` | `ratio`, `net_share`, `band` | high = crowded-bullish | ratio 0-100 (B/(B+BE)×100) | social counts only, not news/analyst/institutional sources |
+| News sentiment | 15 | SCORABLE | `sentiment.aggregate_weighted_sentiment:845`; `sentiment.aggregate_daily_sentiment:667`; `sentiment.daily_sentiment_sma:730`; `sentiment.weighted_rolling_sentiment:968`; leaves `get_news_sentiment` (news_data_tools:110) / `get_news_sentiment_series` (analysis_tools:6793) | `score` / `unweighted` / `weighted` / `sma_7d` | higher = bullish | -1..1 per-day level; `neutral_share` 0-1 | GDELT fallback delivers -100..100 through the same route (defect) |
+| News sentiment → weighted level (sub) | — | SCORABLE | `sentiment.aggregate_weighted_sentiment:845` | `weighted`, `unweighted`, `n` | higher = bullish | -1..1 | gated `enable_weighted_sentiment_agg` (default False, default_config.py:1044) |
+| News sentiment → 7d SMA (sub) | — | SCORABLE | `sentiment.daily_sentiment_sma:730` | `sma_7d` | higher = bullish | -1..1 | — |
+| News sentiment → innovation (sub) | — | SCORABLE | `sentiment.daily_sentiment_sma:730` | `innovation` | positive = improving | -1..1, `score_t − sma_7d_{t−1}` | 7-day, not 20-day |
+| Sentiment momentum | 15 | PARTIAL | only `sentiment.daily_sentiment_sma:730` (`innovation`, 7-day) and `sentiment.weighted_rolling_sentiment:968` (10-day exp window) | `innovation`, `weighted` | positive = improving | -1..1 | spec's `Sentiment_today − Sentiment_20d` ABSENT **[CORRECTED 2026-09-26: §7 Q4 closed this — the regression slope `sentiment_velocity:25` is canonical; the 20-day delta is deliberately not built]** |
+| Momentum → acceleration (sub) | — | UNWIRED | `sentiment.sentiment_velocity:37` (OLS slope/day) | (none) | positive = accelerating | sentiment-points/day | no production caller (tests only) |
+| Sentiment breadth | 10 | PARTIAL | `sentiment.aggregate_weighted_sentiment:845` (`neutral_share`); `sentiment.sentiment_dispersion:400` (`agreement`) | `neutral_share`, `agreement` | n/a | 0-1 share | no per-source positive-share producer |
+| Breadth → crowd bull share (sub) | — | PARTIAL | `sentiment.crowd_ratio:336` | `ratio`, `net_share`, `band` | high = crowded-bullish | ratio 0-100 (B/(B+BE)×100) | social counts only, not news/analyst/institutional sources |
 | Institutional sentiment | 15 | PARTIAL | leaf `get_institution_holdings` (moomoo_extra_tools:226); raw level only | institution % of float + Chg (pp) | rising = accumulation | % of float, pp change | bound to **fundamentals_company_tools (toolsets.py:395)**, no score/percentile/flow |
 | Institutional → flow proxy (sub) | — | PARTIAL | leaf `get_orderflow_read` (analysis_tools:1215) ← `strategies.orderflow.summarize` | `inst_net`, `retail_net`, `distribution_score` | inst_net>0 = accumulation | shares; distribution 0-1 | market toolset only; not institutional ownership |
 | Analyst sentiment | 10 | SCORABLE | `analyst_revisions.revision_ratio:79`; `consensus.agreement_score:14`; `consensus.weighted_consensus:32`; leaves `get_analyst_verdict` (analysis_tools:1383), `get_analyst_ratings` (analyst_data_tools:10), `get_analyst_revision_index` (analyst_revision_tools:43) | `index`, `ratio`, `agreement`, stance | higher index = net upgrades | index weighted `(up−down)/(up+down)`-style; ratio -1..1; agreement 0-1; stance -1..1 | revision index gated `enable_analyst_revision_index` (default False) |
-| Retail & social | 10 | SCORABLE | `sentiment.compute_social_scores:273`; leaf `get_sentiment_computed` (analysis_tools:6759); sentiment_analyst prefetch (StockTwits/Reddit) | `computed_score`, `computed_velocity`, counts | higher = bullish | `computed_score` -1..1; `computed_velocity` z-score | velocity/breadth helpers unwired (below) |
-| Retail → mention heat (sub) | — | UNWIRED | `sentiment.mention_volume:43` | (none) | >1 = hot | ratio recent/baseline | no production caller (tests only) |
+| Retail & social | 10 | SCORABLE | `sentiment.compute_social_scores:488`; leaf `get_sentiment_computed` (analysis_tools:6759); sentiment_analyst prefetch (StockTwits/Reddit) | `computed_score`, `computed_velocity`, counts | higher = bullish | `computed_score` -1..1; `computed_velocity` z-score | velocity/breadth helpers unwired (below) |
+| Retail → mention heat (sub) | — | UNWIRED | `sentiment.mention_volume:171` | (none) | >1 = hot | ratio recent/baseline | no production caller (tests only) |
 | Options sentiment | 10 | SCORABLE | leaves `get_options_iv_read` (analysis_tools:6034), `get_derivatives_flow` (3142), `get_options_surface` (7553), `get_options_chain` (market_position_tools:121); producers `options_surface.iv_skew:25`, `put_call_oi_concentration:34`, `volatility_risk_premium:65`, `expected_move_from_chain:50` | skew, PCR, VRP, expected move, gamma regime | puts rich / PCR>1 = bearish/fear | skew ratio; PCR ratio; VRP %; move % | no composite options-sentiment score |
-| Short interest | 5 | PARTIAL | leaf `get_short_interest` (market_position_tools:220) → `yfinance_short_interest.get_short_interest_yfinance:37` / `massive.get_short_interest_massive:485`; `get_short_sale_volume` (analysis_tools:8886); `get_short_volume` (market_position_tools:238) | shares short, days-to-cover, %float, short-sale % | high = bearish/crowding | %float, days, % of volume | raw only; no percentile/change-basis score |
-| Dispersion | 5 | SCORABLE | `sentiment.sentiment_dispersion:209` | `dispersion`, `agreement`, `n` | higher = more disagreement | weighted population std ≥0 (polarity points); agreement 0-1 | fed by `compute_social_scores:308`, `aggregate_weighted_sentiment:704` |
-| Extreme & crowding | 5 | PARTIAL | `sentiment.crowd_ratio:163` | `ratio`, `band` | crowded-bullish / crowded-bearish | 0-100 with hardcoded 40/60 bands | display-only bands, never a gate; no validated extreme measure |
-| **Sentiment × Price Confirmation** (owner-named) | — | PARTIAL | `sentiment_research.sentiment_lead_lag:65` (`innovations=True`); `sentiment_research.sentiment_factor_scale:570`; wired via `overlays.fold_sentiment_into_overlay:127` ← `trading_graph._sentiment_factor_read:1178` | `rank_ic`, `innovation`, `scale` | sign agreement with measured IC | corr -1..1; scale 0.5-1.2 | no four-quadrant label, no market-adjusted (abnormal) return; gate `enable_sentiment_factor` default False (default_config.py:815) **[CORRECTED 2026-09-26: both now exist — `sentiment_score.confirmation_quadrant:330` (four labels) and `analysis_tools._sentiment_price_read:6525` (abnormal return); see §0.3. The gate note applies only to the legacy sign-gate fold]** |
+| Short interest | 5 | PARTIAL | leaf `get_short_interest` (market_position_tools:220) → `yfinance_short_interest.get_short_interest_yfinance:81` / `massive.get_short_interest_massive:485`; `get_short_sale_volume` (analysis_tools:8886); `get_short_volume` (market_position_tools:238) | shares short, days-to-cover, %float, short-sale % | high = bearish/crowding | %float, days, % of volume | raw only; no percentile/change-basis score |
+| Dispersion | 5 | SCORABLE | `sentiment.sentiment_dispersion:400` | `dispersion`, `agreement`, `n` | higher = more disagreement | weighted population std ≥0 (polarity points); agreement 0-1 | fed by `compute_social_scores:308`, `aggregate_weighted_sentiment:704` |
+| Extreme & crowding | 5 | PARTIAL | `sentiment.crowd_ratio:336` | `ratio`, `band` | crowded-bullish / crowded-bearish | 0-100 with hardcoded 40/60 bands | display-only bands, never a gate; no validated extreme measure |
+| **Sentiment × Price Confirmation** (owner-named) | — | PARTIAL | `sentiment_research.sentiment_lead_lag:172` (`innovations=True`); `sentiment_research.sentiment_factor_scale:677`; wired via `overlays.fold_sentiment_into_overlay:198` ← `trading_graph._sentiment_factor_read:1420` | `self_lead_lag`, `innovation`, `scale` | sign agreement with measured IC | corr -1..1; scale 0.5-1.2 | no four-quadrant label, no market-adjusted (abnormal) return; gate `enable_sentiment_factor` default False (default_config.py:815) **[CORRECTED 2026-09-26: both now exist — `sentiment_score.confirmation_quadrant:342` (four labels) and `analysis_tools._sentiment_price_read:6679` (abnormal return); see §0.3. The gate note applies only to the legacy sign-gate fold]** |
 
 #
 
@@ -166,7 +166,7 @@ No sentiment toolset exists: `sentiment_analyst` binds no tools (toolsets.py mod
 universe, so the missing fallback is defensive, not live.**
 `trading_graph._sentiment_factor_read` hardcodes `source="eodhd"` and returns
 `None` when EODHD has no series, while the leaf
-(`analysis_tools.get_sentiment_lead_lag`) falls back. The probe asked how often
+(`analysis_tools.get_sentiment_lead_lag`) falls back. [CORRECTED 2026-09-26: the hardcoding is gone (SENT-13) — the read calls `_sentiment_points_fallback:1392`, which walks the EODHD → Alpha Vantage → GDELT chain, and returns `"source": str(source or "")` (`trading_graph.py:1420-1500`) naming the feed that actually answered; every point is normalised through `normalise_sentiment` on arrival. The probe's 26-of-26 result is unchanged, so the fallback remains defensive rather than live.] The probe asked how often
 that costs a read: **26 of 26 names returned a non-empty series** - 16 large caps
 (AMZN MSFT NVDA TSM VST WDC LRCX AMKR ASML HPE IBM JCI LULU NFLX SIMO SMCI,
 73-151 daily points each over a 150-day window), four ETFs (SPY 151, QQQ 146,
@@ -180,9 +180,9 @@ its evidence, rather than fixed speculatively.
 4. **Institutional sentiment is bound to the fundamentals toolset.** `get_institution_holdings` appears only at `toolsets.py:404` (fundamentals_company_tools), never in market_tools/news_tools. Combined with the sentiment analyst binding zero tools (toolsets.py:1-19 docstring), institutional sentiment is unreachable from the sentiment surface — it exists only as a raw holdings table for the fundamentals analyst.
 5. **Dispersion/crowd producers are gated and mislocated.** `sentiment_dispersion:209` and `crowd_ratio:163` reach a tool only through `get_sentiment_computed` (analysis_tools:6759 → `_render_crowd_row:6661`), bound to **market_tools:325** behind `enable_crowd_ratio_bands` (default False, default_config.py:1045). The sentiment report is produced by the sentiment analyst, which never calls them.
 6. **Weighted aggregation is gated off and off-surface.** `aggregate_weighted_sentiment:616` is reached only via `_sentiment_agg_rows:6735` under `enable_weighted_sentiment_agg` (default False, default_config.py:1044), and only from `get_news_sentiment_series` (market/news), not from the sentiment analyst.
-7. **`_sentiment_factor_read:1178` hardcodes `source="eodhd"`** (trading_graph.py:1235) and, when EODHD returns nothing, returns None rather than falling back to AV/GDELT — while the leaf `get_sentiment_lead_lag` (analysis_tools:6846-6878) does fall back. The wired confirmation fold therefore silently degrades to neutral 1.0 on names where EODHD has no /sentiments coverage.
-8. **`_sentiment_factor_read`'s `rank_ic` is a single-name self-correlation**, not a cross-sectional IC (trading_graph.py:1216-1230 correlates the name's own sentiment with its own forward returns, max_lags=5). It is used as a sign gate by `sentiment_factor_scale:570`, not as the owner's market-adjusted confirmation.
-9. **Dead seams: `weighted_sentiment:109`, `blended_score:79`, `consensus_verdict:66`, `decayed_weight:91`** have no production readers (grep across engine + executor + web: module + tests only).
+7. **`_sentiment_factor_read:1420` hardcodes `source="eodhd"`** (trading_graph.py:1235) and, when EODHD returns nothing, returns None rather than falling back to AV/GDELT — while the leaf `get_sentiment_lead_lag` (analysis_tools:6846-6878) does fall back. The wired confirmation fold therefore silently degrades to neutral 1.0 on names where EODHD has no /sentiments coverage. [CORRECTED 2026-09-26: **fixed (SENT-13)** — the read no longer hardcodes the source: `_sentiment_points_fallback:1392` walks EODHD → Alpha Vantage → GDELT and `"source"` names the feed that answered (`trading_graph.py:1420-1500`); the stated consequence (a silent neutral fold on an EODHD miss) no longer applies, and the method's line is `:1420`, not `:1178`. The §-number and the coverage probe's conclusion stand.]
+8. **`_sentiment_factor_read`'s `rank_ic` is a single-name self-correlation**, not a cross-sectional IC (trading_graph.py:1216-1230 correlates the name's own sentiment with its own forward returns, max_lags=5). It is used as a sign gate by `sentiment_factor_scale:570`, not as the owner's market-adjusted confirmation. [CORRECTED 2026-09-26: **the statistic now carries its real name (SENT-13)** — the read returns `self_lead_lag` (the lead/lag block is `trading_graph.py:1479-1493`), `overlays.fold_sentiment_into_overlay:198` passes `sentiment_ctx["self_lead_lag"]` into the gate (the call itself is `overlays.py:223`), and the key `rank_ic` is gone from that path. Only `sentiment_research.sentiment_factor_scale`'s own **parameter** is still spelled `rank_ic` (`sentiment_research.py:678`) — a private helper name, not the read's key. The reading here (a single-name self-correlation, not a cross-sectional IC; replaced by `sentiment_score.confirmation_quadrant`) stands.]
+9. **Dead seams: `weighted_sentiment:109`, `blended_score:79`, `consensus_verdict:66`, `decayed_weight:91`** have no production readers (grep across engine + executor + web: module + tests only). [CORRECTED 2026-09-26: **resolved (SENT-14)** — the first three were **deleted**, not kept (`sentiment.py:18-22`), so they no longer exist to be dead; `decayed_weight` survives at `:194` (the `:91` here was stale) and **does** have a production reader, the aggregation's per-message weight loop (`sentiment.py:935`), so the "no production readers" claim is now false for it. The row's remaining open half is the news path's: `_news_components` never calls the decay half (D-9).]
 10. **Crowd bands are hardcoded constants** `_CROWD_BULL`/`_CROWD_BEAR` (sentiment.py, immediately above `crowd_ratio:163`) with no percentile basis — the source-convention 40/60 split is a constant by construction.
 
 #
@@ -200,7 +200,7 @@ its evidence, rather than fixed speculatively.
 | Sentiment heat / mention volume | per-day mention counts | yes — StockTwits counts in `compute_social_scores:273`, `_baseline_file:265` rolling buffer | surface `mention_volume:43` on the persisted count baseline |
 | Short-interest percentile/change | short % of float over several settlements | yes — `get_short_interest_massive:485` (multi-settlement, newest-first); `get_short_interest_yfinance:37` | percentile of current short % of float vs the settlement series already returned |
 | Extreme/crowding with a stated scale | crowd ratio history | yes — `compute_social_scores:273` + `_baseline_file:265` | percentile of `crowd_ratio` ratio vs the ticker's own persisted baseline (replaces the fixed 40/60 constant) |
-| Sentiment × Price Confirmation quadrant `Sign(dSentiment) × Sign(abnormal return)` | dSentiment + market-adjusted return | sentiment: `daily_sentiment_sma:501` innovation / `_sentiment_factor_read:1178`; benchmark closes: `_ohlcv`/`get_relative_strength`/`_sentiment_factor_read` (closes passed in) | `sign(innovation) × sign(name_ret − bench_ret)` over the last session → {confirm-up, confirm-down, diverge-up, diverge-down}; no producer exists today. **[CORRECTED 2026-09-26: produced now — `sentiment_score.confirmation_quadrant:330` (four labels) + `analysis_tools._sentiment_price_read:6525` (abnormal return), see §0.3]** |
+| Sentiment × Price Confirmation quadrant `Sign(dSentiment) × Sign(abnormal return)` | dSentiment + market-adjusted return | sentiment: `daily_sentiment_sma:501` innovation / `_sentiment_factor_read:1420`; benchmark closes: `_ohlcv`/`get_relative_strength`/`_sentiment_factor_read` (closes passed in) | `sign(innovation) × sign(name_ret − bench_ret)` over the last session → {confirm-up, confirm-down, diverge-up, diverge-down}; no producer exists today. **[CORRECTED 2026-09-26: produced now — `sentiment_score.confirmation_quadrant:342` (four labels) + `analysis_tools._sentiment_price_read:6679` (abnormal return), see §0.3]** |
 
 ---
 
@@ -230,7 +230,7 @@ its evidence, rather than fixed speculatively.
 ### 5.1 The scale hazard this engine inherits
 
 The news-sentiment route has **two scales behind one name**: EODHD/Alpha Vantage
-deliver −1..1, GDELT delivers **−100..100** (`gdelt.get_news_sentiment_gdelt:278`,
+deliver −1..1, GDELT delivers **−100..100** (`gdelt.get_news_sentiment_gdelt:317`,
 `_sentiment_points_gdelt:250`) and the routing (`interface.py:488-492`) does not
 normalise, while the category is advertised as −1..1
 (`interface.py:187`, `news_data_tools.get_news_sentiment:110`). A GDELT-sourced
@@ -332,7 +332,7 @@ no producer in the five modules of the sentiment path (`sentiment_score.py`,
 `analysis_tools.py`).
 
 The engine's own rules bound the reading: every component is aligned so **100 =
-favourable** (`sentiment_score.align_components:411` → `score_engine.align:69`),
+favourable** (`sentiment_score.align_components:423` → `score_engine.align:69`),
 each quantity is measured once and owned by one engine (master §2.1), and the
 composite is advisory. Those three rules are the comparison points for §8.4.
 
@@ -346,10 +346,10 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | § | Library section | Fmls | Status (producer read) |
 | --: | --- | --: | --- |
 | 1 | SentimentScore mathematical architecture | 0 | n/a — a data-flow diagram; the engine mirrors its level→momentum→normalisation spine (`sentiment_score.py:180,271`), but its Layer 1 (raw NLP) has no code |
-| 2 | Basic polarity | 1 | built — `sentiment.score_from_counts:149` (`(bull−bear)/labeled` ≡ `(P−N)/(P+N)`); counts in `text_factors.lm_tone:121` |
+| 2 | Basic polarity | 1 | built — `sentiment.score_from_counts:219` (`(bull−bear)/labeled` ≡ `(P−N)/(P+N)`); counts in `text_factors.lm_tone:121` |
 | 3 | Positive intensity | 1 | ABSENT — nearest honest producer `text_factors.lm_tone:121` (a positive count, no `P/(P+N)`) |
 | 4 | Negative intensity | 2 | ABSENT — nearest honest producer `text_factors.lm_tone:121` (negative count only) |
-| 5 | Net sentiment | 2 | built — `sentiment.score_from_counts:149` |
+| 5 | Net sentiment | 2 | built — `sentiment.score_from_counts:219` |
 | 6 | Weighted lexical sentiment | 1 | ABSENT — no per-word lexicon strength; `text_factors.lm_tone:121` weights every hit equally |
 | 7 | TF-IDF-weighted sentiment | 2 | ABSENT — no TF-IDF anywhere in the five modules |
 | 8 | Financial-domain dictionary score | 1 | built (variant) — `text_factors.lm_tone:121` over the LM seed lists (`DICTIONARY_VERSION:41`); denominator is `/words`, not `/(P+N)` |
@@ -362,97 +362,97 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 15 | Clause-level sentiment | 2 | ABSENT |
 | 16 | Sentence-level sentiment | 1 | ABSENT — `text_factors.readability:170` counts sentences, but scores none |
 | 17 | Paragraph-level sentiment | 1 | ABSENT |
-| 18 | Headline sentiment | 1 | ABSENT — the headline is used only as a dedupe key (`sentiment._normalise_headline:614`) |
+| 18 | Headline sentiment | 1 | ABSENT — the headline is used only as a dedupe key (`sentiment._normalise_headline:833`) |
 | 19 | Body sentiment | 2 | ABSENT |
 | 20 | Headline/body divergence | 1 | elsewhere — `text_factors.divergence:198` computes a cross-document `tone_gap`, not headline-vs-body |
 | 21 | Title-weighted sentiment | 2 | ABSENT |
-| 22 | Transformer probability sentiment | 3 | ABSENT — the polarity is a vendor/model number (`sentiment._article_polarity:410`); no `P+,P0,P−` |
+| 22 | Transformer probability sentiment | 3 | ABSENT — the polarity is a vendor/model number (`sentiment._article_polarity:629`); no `P+,P0,P−` |
 | 23 | Expected sentiment | 2 | ABSENT — duplicate of §22 (see §8.3) |
 | 24 | Sentiment confidence | 4 | ABSENT — no entropy/softmax confidence producer |
 | 25 | Sentiment uncertainty | 2 | ABSENT |
-| 26 | Sentiment variance | 4 | elsewhere — `sentiment.sentiment_dispersion:209` (weighted population std of polarity) |
+| 26 | Sentiment variance | 4 | elsewhere — `sentiment.sentiment_dispersion:400` (weighted population std of polarity) |
 | 27 | Sentiment magnitude | 1 | ABSENT |
 | 28 | Expected sentiment magnitude | 1 | ABSENT |
 | 29 | Conviction | 2 | ABSENT |
 | 30 | Subjectivity | 3 | ABSENT — no subjectivity/objectivity input in the pipeline |
 | 31 | Sentiment reliability | 1 | ABSENT |
-| 32 | Entity sentiment | 1 | built — `sentiment._article_polarity:410` selects the per-ticker row from `ticker_sentiment` |
+| 32 | Entity sentiment | 1 | built — `sentiment._article_polarity:629` selects the per-ticker row from `ticker_sentiment` |
 | 33 | Aspect sentiment | 8 | ABSENT — no aspect taxonomy or aspect scorer |
 | 34 | Aspect sentiment dispersion | 1 | ABSENT |
-| 35 | Source-weighted sentiment | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:626` weights by `relevance/100 × official_boost`, an unsigned proxy, not a source-reliability `Q_j` (`_weighted_basis:599`) |
+| 35 | Source-weighted sentiment | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:845` weights by `relevance/100 × official_boost`, an unsigned proxy, not a source-reliability `Q_j` (`_weighted_basis:599`) |
 | 36 | Author-weighted sentiment | 1 | ABSENT — no per-author reliability |
 | 37 | Account/source independence | 2 | ABSENT — no `1/N_source` weight |
 | 38 | Duplicate-adjusted sentiment | 2 | PARTIAL — `aggregate_weighted_sentiment:626` **drops** syndicated duplicates (`_normalise_headline:614`) rather than weighting by `1−D_i` |
-| 39 | Time decay | 2 | built — `sentiment.decayed_weight:91` (`2^{−age/h}`) |
-| 40 | Exponentially weighted sentiment | 2 | PARTIAL — `sentiment.weighted_rolling_sentiment:739` uses `exp(linspace)` weights, not `α=2/(N+1)` |
-| 41 | Half-life-based EWMA | 1 | PARTIAL — `sentiment.decayed_weight:91` is the `2^{−t/h}` form, not `α=1−e^{−ln2/h}` |
-| 42 | Exponentially weighted individual messages | 2 | built — `sentiment.weighted_sentiment:109` (decay × credibility per message) |
-| 43 | Sentiment volume | 1 | built — the per-day `n` from `sentiment.aggregate_daily_sentiment:448`, carried through `daily_sentiment_sma:511` |
+| 39 | Time decay | 2 | built — `sentiment.decayed_weight:194` (`2^{−age/h}`) |
+| 40 | Exponentially weighted sentiment | 2 | PARTIAL — `sentiment.weighted_rolling_sentiment:968` uses `exp(linspace)` weights, not `α=2/(N+1)` |
+| 41 | Half-life-based EWMA | 1 | PARTIAL — `sentiment.decayed_weight:194` is the `2^{−t/h}` form, not `α=1−e^{−ln2/h}` |
+| 42 | Exponentially weighted individual messages | 2 | built — `sentiment.weighted_sentiment:109` (decay × credibility per message) [CORRECTED 2026-09-26: **the named helper was deleted** as a dead seam (SENT-14; `sentiment.py:18-22`), so this row's producer no longer exists. The nearest surviving producer of a per-message decay × credibility weight is `sentiment.decayed_weight:194` inside `aggregate_weighted_sentiment`'s weight loop (`sentiment.py:935`, `official_boost` supplying the credibility half); the row's `built` status now rests on that pair, not on `weighted_sentiment`.] |
+| 43 | Sentiment volume | 1 | built — the per-day `n` from `sentiment.aggregate_daily_sentiment:667`, carried through `daily_sentiment_sma:511` |
 | 44 | Sentiment-bearing volume | 1 | ABSENT — `n` counts all scored articles, not `P++P−>threshold` |
 | 45 | Sentiment volume z-score | 1 | ABSENT — only the ratio `mention_volume:43`; no volume z |
-| 46 | Sentiment buzz | 1 | built — `sentiment.mention_volume:43` (recent/baseline ratio) |
+| 46 | Sentiment buzz | 1 | built — `sentiment.mention_volume:171` (recent/baseline ratio) |
 | 47 | Relative sentiment buzz | 1 | ABSENT — no universe denominator |
 | 48 | Abnormal sentiment volume | 1 | ABSENT — duplicate of §45 (see §8.3) |
-| 49 | Positive volume | 1 | PARTIAL — `sentiment.compute_social_scores:273` bullish count (social only) |
-| 50 | Negative volume | 1 | PARTIAL — `sentiment.compute_social_scores:273` bearish count (social only) |
-| 51 | Sentiment breadth | 1 | built — `sentiment.score_from_counts:149`; `crowd_ratio:163` `net_share` |
+| 49 | Positive volume | 1 | PARTIAL — `sentiment.compute_social_scores:488` bullish count (social only) |
+| 50 | Negative volume | 1 | PARTIAL — `sentiment.compute_social_scores:488` bearish count (social only) |
+| 51 | Sentiment breadth | 1 | built — `sentiment.score_from_counts:219`; `crowd_ratio:163` `net_share` |
 | 52 | Weighted breadth | 1 | ABSENT — no weighted positive/negative sums |
 | 53 | Positive sentiment intensity | 1 | ABSENT |
 | 54 | Negative sentiment intensity | 1 | ABSENT |
 | 55 | Sentiment pressure | 1 | ABSENT |
 | 56 | Positive/negative sentiment ratio | 2 | ABSENT — no PNR producer |
-| 57 | Sentiment imbalance | 1 | built — `sentiment.score_from_counts:149` (the ε-free form) |
-| 58 | Sentiment dispersion | 1 | built — `sentiment.sentiment_dispersion:209` |
+| 57 | Sentiment imbalance | 1 | built — `sentiment.score_from_counts:219` (the ε-free form) |
+| 58 | Sentiment dispersion | 1 | built — `sentiment.sentiment_dispersion:400` |
 | 59 | Sentiment entropy | 2 | ABSENT — no entropy producer in the five modules |
-| 60 | Sentiment consensus | 1 | PARTIAL — `sentiment.sentiment_dispersion:209` `agreement` / `consensus_overlap:55` (modal share, not `1−H*`) |
+| 60 | Sentiment consensus | 1 | PARTIAL — `sentiment.sentiment_dispersion:400` `agreement` / `consensus_overlap:55` (modal share, not `1−H*`) |
 | 61 | Source dispersion | 1 | ABSENT |
 | 62 | Source consensus | 1 | ABSENT |
-| 63 | Sentiment velocity | 1 | built (variant) — `sentiment.sentiment_velocity:25` (OLS slope/day is canonical per §7 Q4; the library is the 1-step delta) |
+| 63 | Sentiment velocity | 1 | built (variant) — `sentiment.sentiment_velocity:37` (OLS slope/day is canonical per §7 Q4; the library is the 1-step delta) |
 | 64 | Percentage sentiment velocity | 1 | ABSENT |
 | 65 | Sentiment acceleration | 2 | ABSENT — no second difference; nearest producer `sentiment_velocity:25` |
 | 66 | Sentiment jerk | 2 | ABSENT |
-| 67 | Sentiment momentum | 1 | PARTIAL — `sentiment.daily_sentiment_sma:511` `innovation` (7-day, not `S_t−S_{t−k}`) |
+| 67 | Sentiment momentum | 1 | PARTIAL — `sentiment.daily_sentiment_sma:730` `innovation` (7-day, not `S_t−S_{t−k}`) |
 | 68 | Normalized sentiment momentum | 1 | ABSENT |
 | 69 | Sentiment trend | 2 | PARTIAL — `sentiment_velocity:25` is the slope; no intercept or fit beyond it |
-| 70 | Rolling sentiment slope | 1 | built — `sentiment.sentiment_velocity:25` (`Cov(t,S)/Var(t)` form) |
+| 70 | Rolling sentiment slope | 1 | built — `sentiment.sentiment_velocity:37` (`Cov(t,S)/Var(t)` form) |
 | 71 | Sentiment regression trend strength | 2 | ABSENT — no `R²` producer |
 | 72 | Sentiment persistence | 1 | ABSENT — and mislabelled (see §8.3) |
 | 73 | Negative persistence | 1 | ABSENT |
 | 74 | Positive persistence | 1 | ABSENT |
 | 75 | Sentiment half-life | 2 | ABSENT — no AR(1) φ estimate |
-| 76 | Sentiment mean reversion | 2 | elsewhere — `sentiment.surprise_velocity:131` is the standardized form `(S−mean)/std` |
-| 77 | Sentiment z-score | 1 | built — `sentiment.surprise_velocity:131` |
-| 78 | Rolling z-score | 1 | built — `sentiment.surprise_velocity:131` (rolling baseline window) |
+| 76 | Sentiment mean reversion | 2 | elsewhere — `sentiment.surprise_velocity:201` is the standardized form `(S−mean)/std` |
+| 77 | Sentiment z-score | 1 | built — `sentiment.surprise_velocity:201` |
+| 78 | Rolling z-score | 1 | built — `sentiment.surprise_velocity:201` (rolling baseline window) |
 | 79 | Robust sentiment z-score | 1 | ABSENT — no MAD |
 | 80 | Percentile sentiment | 2 | ABSENT — the crowd bands are fixed constants (`sentiment.py:159-160`) |
-| 81 | Cross-sectional sentiment rank | 2 | built — `sentiment_research._bucket:459`; `sector_neutral_z:239` |
-| 82 | Cross-sectional sentiment z-score | 1 | built — `sentiment_research.sector_neutral_z:239` |
-| 83 | Sector-relative sentiment | 1 | built — `sentiment_research.sector_neutral_z:239` |
+| 81 | Cross-sectional sentiment rank | 2 | built — `sentiment_research._bucket:566`; `sector_neutral_z:239` |
+| 82 | Cross-sectional sentiment z-score | 1 | built — `sentiment_research.sector_neutral_z:346` |
+| 83 | Sector-relative sentiment | 1 | built — `sentiment_research.sector_neutral_z:346` |
 | 84 | Industry-relative sentiment | 1 | PARTIAL — `sector_neutral_z:239` is sector granularity only; no industry map |
-| 85 | Market-relative sentiment | 1 | built — `sentiment_research.residualize_sentiment:276` (log-mcap + sector dummies); universe fallback in `sector_neutral_z:239` |
+| 85 | Market-relative sentiment | 1 | built — `sentiment_research.residualize_sentiment:383` (log-mcap + sector dummies); universe fallback in `sector_neutral_z:239` |
 | 86 | Sentiment beta | 2 | ABSENT — no regression of sentiment on a market sentiment index |
 | 87 | Idiosyncratic sentiment | 1 | PARTIAL — `residualize_sentiment:276` residualizes on mcap+sector, not on a sentiment β |
-| 88 | Sentiment-price correlation | 1 | built — `sentiment_research.sentiment_lead_lag:65` |
-| 89 | Sentiment predictive beta | 2 | built — `sentiment_research.multi_horizon_sentiment_regression:157` (Newey-West HAC) |
-| 90 | Sentiment-return information coefficient | 2 | built — `sentiment_research.rolling_information_coefficient:337`; `ic_term_structure:394` |
-| 91 | IC information ratio | 1 | built — `sentiment_research.ic_term_structure:394` (`ic_ir`) |
-| 92 | Sentiment volatility | 1 | elsewhere — `sentiment.sentiment_dispersion:209` is cross-item std, not the time-series std |
+| 88 | Sentiment-price correlation | 1 | built — `sentiment_research.sentiment_lead_lag:172` |
+| 89 | Sentiment predictive beta | 2 | built — `sentiment_research.multi_horizon_sentiment_regression:264` (Newey-West HAC) |
+| 90 | Sentiment-return information coefficient | 2 | built — `sentiment_research.rolling_information_coefficient:444`; `ic_term_structure:394` |
+| 91 | IC information ratio | 1 | built — `sentiment_research.ic_term_structure:501` (`ic_ir`) |
+| 92 | Sentiment volatility | 1 | elsewhere — `sentiment.sentiment_dispersion:400` is cross-item std, not the time-series std |
 | 93 | EWMA sentiment volatility | 1 | ABSENT |
-| 94 | Sentiment shock | 1 | elsewhere — `sentiment.daily_sentiment_sma:511` `innovation` (unnormalised) |
-| 95 | Abnormal sentiment shock | 1 | built — `sentiment.surprise_velocity:131` |
+| 94 | Sentiment shock | 1 | elsewhere — `sentiment.daily_sentiment_sma:730` `innovation` (unnormalised) |
+| 95 | Abnormal sentiment shock | 1 | built — `sentiment.surprise_velocity:201` |
 | 96 | Sentiment regime | 1 | ABSENT — no regime classifier on the sentiment surface |
 | 97 | Sentiment reversal | 2 | ABSENT |
-| 98 | Sentiment divergence from price | 2 | PARTIAL — `sentiment_score.confirmation_quadrant:330` is the sign quadrant, not `Z_S−Z_R` |
-| 99 | Sentiment-price confirmation | 2 | built — `sentiment_score.confirmation_quadrant:330` |
+| 98 | Sentiment divergence from price | 2 | PARTIAL — `sentiment_score.confirmation_quadrant:342` is the sign quadrant, not `Z_S−Z_R` |
+| 99 | Sentiment-price confirmation | 2 | built — `sentiment_score.confirmation_quadrant:342` |
 | 100 | Sentiment-price disagreement | 2 | built — `confirmation_quadrant:330` (the two `diverge-*` cells) |
 | 101 | Sentiment elasticity | 2 | ABSENT |
 | 102 | Sentiment-to-volatility relationship | 2 | ABSENT |
 | 103 | Sentiment asymmetry | 4 | ABSENT |
 | 104 | Negative sentiment amplification | 1 | ABSENT |
 | 105 | Sentiment saturation | 1 | ABSENT — `score_engine.align:69` is a clamped linear ramp, not tanh |
-| 106 | Sentiment threshold | 2 | PARTIAL — `sentiment_score.SENTIMENT_BANDS:272` labels, not an `I(S>θ)` gate |
+| 106 | Sentiment threshold | 2 | PARTIAL — `sentiment_score.SENTIMENT_BANDS:274` labels, not an `I(S>θ)` gate |
 | 107 | Dynamic threshold | 1 | ABSENT |
-| 108 | Sentiment surprise | 2 | built — `sentiment.surprise_velocity:131` |
+| 108 | Sentiment surprise | 2 | built — `sentiment.surprise_velocity:201` |
 | 109 | Sentiment change relative to expectation | 1 | ABSENT |
 | 110 | Sentiment acceleration × volume | 1 | ABSENT — no interaction term; sign contradicts the code (see §8.4) |
 | 111 | Sentiment momentum × breadth | 1 | ABSENT |
@@ -470,24 +470,24 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 123 | Sentiment mean-reversion speed | 2 | ABSENT |
 | 124 | Sentiment half-life | 1 | ABSENT — duplicate of §75 (see §8.3) |
 | 125 | Sentiment autocorrelation | 2 | ABSENT |
-| 126 | Sentiment cross-correlation with returns | 1 | built — `sentiment_research.sentiment_lead_lag:65` (≡ §88/§90, see §8.3) |
-| 127 | Sentiment lead/lag | 1 | built — `sentiment_research.sentiment_lead_lag:65` (`lag_days` over `±max_lags`) |
+| 126 | Sentiment cross-correlation with returns | 1 | built — `sentiment_research.sentiment_lead_lag:172` (≡ §88/§90, see §8.3) |
+| 127 | Sentiment lead/lag | 1 | built — `sentiment_research.sentiment_lead_lag:172` (`lag_days` over `±max_lags`) |
 | 128 | Sentiment event study | 2 | ABSENT — no CAR producer |
 | 129 | Sentiment-adjusted expected return | 2 | PARTIAL — `multi_horizon_sentiment_regression:157` gives the β, not the fitted `E[R]` |
-| 130 | Sentiment residual | 1 | built — `sentiment_research.residualize_sentiment:276` |
-| 131 | Market sentiment index | 3 | PARTIAL — `sentiment_research._cross_section:229` builds per-date cross-sections; no explicit MSI |
+| 130 | Sentiment residual | 1 | built — `sentiment_research.residualize_sentiment:383` |
+| 131 | Market sentiment index | 3 | PARTIAL — `sentiment_research._cross_section:336` builds per-date cross-sections; no explicit MSI |
 | 132 | Equal-weighted market sentiment | 1 | PARTIAL — as §131; no equal-weight mean producer |
-| 133 | Sentiment breadth index | 1 | elsewhere — `sentiment.score_from_counts:149` (different denominator) |
-| 134 | Sector sentiment | 1 | built — `sentiment_research.sector_neutral_z:239` (sector means) |
-| 135 | Sector-relative sentiment | 1 | built — `sentiment_research.sector_neutral_z:239` (≡ §83, see §8.3) |
-| 136 | Sentiment dispersion across stocks | 1 | PARTIAL — `sentiment_research._cross_section:229` gives the cross-section; no explicit std |
+| 133 | Sentiment breadth index | 1 | elsewhere — `sentiment.score_from_counts:219` (different denominator) |
+| 134 | Sector sentiment | 1 | built — `sentiment_research.sector_neutral_z:346` (sector means) |
+| 135 | Sector-relative sentiment | 1 | built — `sentiment_research.sector_neutral_z:346` (≡ §83, see §8.3) |
+| 136 | Sentiment dispersion across stocks | 1 | PARTIAL — `sentiment_research._cross_section:336` gives the cross-section; no explicit std |
 | 137 | Sentiment concentration | 1 | ABSENT — no HHI |
 | 138 | Gini coefficient of sentiment participation | 1 | ABSENT |
 | 139 | Source breadth | 1 | ABSENT — no unique/total source ratio |
 | 140 | Sentiment independence | 2 | ABSENT |
 | 141 | Complete item-level sentiment formula | 1 | ABSENT — the six-factor product needs confidence, entity relevance, source reliability and independence, of which only time decay exists |
-| 142 | Complete aggregate sentiment formula | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:626` is the weighted mean, with none of the four non-decay factors |
-| 143 | Multi-horizon sentiment | 7 | PARTIAL — `sentiment_research.multi_horizon_sentiment_regression:157` for research; `daily_sentiment_sma:511` for the 7-day horizon |
+| 142 | Complete aggregate sentiment formula | 1 | PARTIAL — `sentiment.aggregate_weighted_sentiment:845` is the weighted mean, with none of the four non-decay factors |
+| 143 | Multi-horizon sentiment | 7 | PARTIAL — `sentiment_research.multi_horizon_sentiment_regression:264` for research; `daily_sentiment_sma:511` for the 7-day horizon |
 | 144 | Short/medium/long sentiment spread | 2 | ABSENT |
 | 145 | Sentiment regime transition | 2 | ABSENT |
 | 146 | Sentiment shock persistence | 1 | ABSENT |
@@ -498,7 +498,7 @@ or name; **ABSENT** = no producer in the repo; **n/a** = not a formula.
 | 151 | Tanh normalization | 1 | ABSENT — no tanh in the five modules |
 | 152 | Robust final score | 2 | ABSENT — needs the robust z of §79 |
 | 153 | Sentiment confidence | 3 | ABSENT |
-| 154 | Sentiment coverage | 1 | built (variant) — `sentiment_score.COMPOSITE_MIN_COVERAGE:284` + `score_engine.coverage_floor:53` enforce a floor; the `N_eff` form is absent |
+| 154 | Sentiment coverage | 1 | built (variant) — `sentiment_score.COMPOSITE_MIN_COVERAGE:296` + `score_engine.coverage_floor:53` enforce a floor; the `N_eff` form is absent |
 | 155 | Recommended production SentimentScore | 0 | PARTIAL — the six-layer target; Layers 1-2 mostly absent, 3-5 partial, Layer 6 built |
 | 156 | The formula I'd actually implement first | 9 | PARTIAL — the v1 pipeline's weighted mean, slope, breadth and dispersion exist; its `N_eff` and tanh normalisation do not |
 
@@ -511,7 +511,7 @@ layers, four of which have no code at all**.
 
 1. **Raw NLP (Layer 1) — the largest cluster.** §3, §4, §6, §7, §9-§19, §21-§31,
    §33, §34, §36, §37. The engine consumes a vendor/model polarity
-   (`sentiment._article_polarity:410`) and never constructs one: no negation
+   (`sentiment._article_polarity:629`) and never constructs one: no negation
    window, no intensifier/diminisher, no clause/sentence/paragraph split, no
    aspect taxonomy, no subjectivity, uncertainty, entropy or conviction. The one
    producer that *does* build polarity deterministically is
@@ -523,13 +523,13 @@ layers, four of which have no code at all**.
    (`decayed_weight:91`) plus an unsigned relevance proxy (`_weighted_basis:599`
    states it is "NOT a model probability").
 2. **Dynamics beyond the slope.** §65, §66, §68, §71-§75, §97, §112(part),
-   §122-§125, §146, §147. `sentiment.sentiment_velocity:25` is the only wired
+   §122-§125, §146, §147. `sentiment.sentiment_velocity:37` is the only wired
    dynamics producer; §7 Q4 makes its OLS slope the canonical direction, so the
    missing pieces are the **three-point second difference** (§65/§66) and an
    **AR(1) φ** (§75/§122-§124) — both one short function over the series
    `daily_sentiment_sma:511` already returns.
 3. **Volume, attention and participation.** §44, §45, §47, §48, §52-§56, §59-§62,
-   §110, §112, §114, §137-§140. `sentiment.mention_volume:43` is the only volume
+   §110, §112, §114, §137-§140. `sentiment.mention_volume:171` is the only volume
    producer; there is **no effective sample size (`N_eff`, §114)** and no
    HHI/Gini/concentration measure. The code's own comment explains why the
    attention leg is a separate row (`sentiment_score.py:236`), so §110/§112's
@@ -614,14 +614,14 @@ and the two couplings recorded in [`NewsScore.md`](NewsScore.md) §0.3.
 
 1. **Direction — levels the library calls bullish that the engine refuses to
    score as such.** The engine aligns every component to 100 = favourable
-   (`sentiment_score.align_components:411`; `score_engine.align:69`; the `RAMPS`
+   (`sentiment_score.align_components:423`; `score_engine.align:69`; the `RAMPS`
    table at `sentiment_score.py:155`). The library presents several *levels* as
    bullish-positive with no alignment rule: **§77** ("this is a core
    institutional-style calculation", i.e. a high z is strong), **§89/§90**
    (IC/β as evidence of predictive information) and **§131/§132** (a market
    sentiment index). §0.2 point 2 (Baker-Wurgler) makes the cross-sectional sign
    **contrarian** and §0.3 says a high `SentimentScore` is **not** a buy; the code
-   reads `rank_ic` only as a **sign gate** — `sentiment_research.sentiment_factor_scale:570`
+   reads `rank_ic` only as a **sign gate** — `sentiment_research.sentiment_factor_scale:677`
    sets `direction = 1.0 if (rank_ic > 0) == (innovation > 0) else −1.0`, never a
    0-100 direction. Mapping §77, §90 or §131 straight onto a 0-100 with
    higher = favourable **inverts** the engine's rule precisely on the
@@ -643,7 +643,7 @@ and the two couplings recorded in [`NewsScore.md`](NewsScore.md) §0.3.
    the library does not state** — a reader must not read §58 as an aligned 0-100.
 4. **Confirmation shape — 2 cells vs 4.** §99's `Sign(S) × Sign(R)` is
    two-valued, and §100's discrete form is identically 0 (defect 8.3-10). The
-   engine's `sentiment_score.confirmation_quadrant:330` returns **four** distinct
+   engine's `sentiment_score.confirmation_quadrant:342` returns **four** distinct
    labels keyed on the **price** direction (`CONFIRMATION_QUADRANTS:282`:
    `confirm-up`, `diverge-up`, `confirm-down`, `diverge-down`). The owner's two
    cells in §0.3 — *positive sentiment with rising price confirms; with falling
@@ -658,7 +658,7 @@ and the two couplings recorded in [`NewsScore.md`](NewsScore.md) §0.3.
 6. **Sentiment `Confidence`/`SourceReliability` must not be the shared
    `news_relevance` number.** §35 (`Q_j`), §36 (`A_i`), §141 and §142 all require
    a confidence/reliability term. The code has exactly one weight input and
-   names what it is not — `sentiment._weighted_basis:599`: "relevance is an
+   names what it is not — `sentiment._weighted_basis:818`: "relevance is an
    unsigned proxy for confidence, NOT a model probability". [`NewsScore.md`](NewsScore.md)
    §0.3 already records that this same relevance **is** the sentiment
    aggregation's weight and that one leaf serves both surfaces. Building §35 or
@@ -670,7 +670,7 @@ and the two couplings recorded in [`NewsScore.md`](NewsScore.md) §0.3.
    §148 all take the tone as bounded in −1..1. The code's route carries a
    **−100..100 GDELT leg** beside the −1..1 EODHD/AV ones — the defect §5.1
    records — which is why the engine pins the scale first
-   (`sentiment_score.SCALE_TABLE:50`, `normalise_sentiment:80`, and the
+   (`sentiment_score.SCALE_TABLE:56`, `normalise_sentiment:80`, and the
    two-source **refusal** in `normalise_components:394`). §148's `50(1+S)` on a
    GDELT value yields ±5050. The library never names the unit, so any formula
    taken from it is unbuildable on the raw aggregate until §5.1's unit pin is

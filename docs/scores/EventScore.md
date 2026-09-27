@@ -46,11 +46,11 @@ carry both meanings today.
 
 | Same producer | `EventScore` reads it as | `RiskScore`'s event leg reads it as |
 | --- | --- | --- |
-| `catalyst.build_catalyst_snapshot:219` → `scale` | **occurrence**: is an event inside the window | **exposure**: `contract.build_position_contract`'s `catalyst_scale` (`contract.py:115`, applied `:208-212`); `fold_catalyst_into_overlay:362`; `pre_market.catalyst_window_read:103` |
+| `catalyst.build_catalyst_snapshot:246` → `scale` | **occurrence**: is an event inside the window | **exposure**: `contract.build_position_contract`'s `catalyst_scale` (`contract.py:115`, applied `:208-212`); `fold_catalyst_into_overlay:362`; `pre_market.catalyst_window_read:103` |
 | `events.catalyst_risk_penalty:63` | (invoked inside the snapshot, `catalyst.py:266`) | the exposure multiplier itself — implied move vs baseline |
-| `catalyst.implied_move_from_history:111` → `implied_move` | event sizing context | intended `contract.build_position_contract`'s `implied_move_pct` (`contract.py:118`, `:262-267`) — **never populated** (§3 D1) |
+| `catalyst.implied_move_from_history:138` → `implied_move` | event sizing context | intended `contract.build_position_contract`'s `implied_move_pct` (`contract.py:118`, `:262-267`) — **never populated** (§3 D1) |
 | `events.position_mult_by_side:37` | the side label via `drift_side:26` | `get_beat_miss_sizing:2252`'s position multiplier |
-| `book_risk.book_correlated_stress:146` | — | macro-event correlated tail loss |
+| `book_risk.book_correlated_stress:148` | — | macro-event correlated tail loss |
 | `regime.regime_gate_read:850`'s `catalyst_window` | an event-regime veto input | an entry veto — **deliberately not fed** (owner decision 2026-09-18; §3 D3, closed) |
 
 **The design rule**: `EventScore`'s components are the **occurrence** measures
@@ -371,15 +371,15 @@ answers are here.
 
 1. **Does the owner want a 0-100 `EventScore`, or the structured event state of
    §5.3?** The staged spec recommends the engine *before* NewsScore is allowed to
-   influence `opportunity_score` — a gate-shaped role, which the state satisfies and a score does not. **CLOSED 2026-09-17 (plan §13 Q7): the structured state is the deliverable** — no 0-100 `EventScore`. **[CORRECTED 2026-09-26: this CLOSED claim is contradicted by the code — `strategies/event_state.py::event_state:586` returns a 0-100 `score` (equal weights over the seven families, `EVENT_BANDS`, `status=RESEARCH_ONLY`), so a 0-100 `EventScore` **does** exist. This is recorded as an OPEN item (**EVT-1**, `docs/scores/MASTER_PLAN.md` §open-items: "Supply a per-family impact/severity weight vector for the 0-100 score the code emits with equal weights, or decide to remove the score"), NOT as a fixed defect.]**
+   influence `opportunity_score` — a gate-shaped role, which the state satisfies and a score does not. **CLOSED 2026-09-17 (plan §13 Q7): the structured state is the deliverable** — no 0-100 `EventScore`. **[CORRECTED 2026-09-26: this CLOSED claim is contradicted by the code — `strategies/event_state.py::event_state:591` returns a 0-100 `score` (equal weights over the seven families, `EVENT_BANDS`, `status=RESEARCH_ONLY`), so a 0-100 `EventScore` **does** exist. This is recorded as an OPEN item (**EVT-1**, `docs/scores/MASTER_PLAN.md` §open-items: "Supply a per-family impact/severity weight vector for the 0-100 score the code emits with equal weights, or decide to remove the score"), NOT as a fixed defect.]**
 2. **Should macro/Fed/OPEX be able to hard-block?** Today only earnings can
    (`catalyst.py:280-288`). Extending it is a **fail-closed behaviour change**
    that would start rejecting trades the engine currently takes; it needs the owner's explicit decision, not a default. **CLOSED 2026-09-17 (plan §13 Q7): not extended** — only earnings may hard-block, and a test pins it.
 3. **The two "expected move" producers**: `options_surface.implied_move_pct:42`
-   (ATM-implied, live) vs `catalyst.implied_move_from_history:111` (earnings
+   (ATM-implied, live) vs `catalyst.implied_move_from_history:138` (earnings
    history). Which is canonical for sizing? (Same question as
    [`RiskScore.md`](RiskScore.md) §7 Q4 — it must be answered once.) **DECIDED 2026-09-17:** `options_surface.implied_move_pct:42`
-is **canonical** when a valid surface exists; `catalyst.implied_move_from_history:111`
+is **canonical** when a valid surface exists; `catalyst.implied_move_from_history:138`
 is the **fallback and validation cross-check**; no reconciliation model. **`EventScore`
 owns the authoritative field and `RiskScore` consumes it** - the same decision as
 `RiskScore.md` §7 Q4, answered once, here.
@@ -392,7 +392,7 @@ underlying event keeps its own scope. **Market events do not become hard blocker
 (plan §13 Q7).
 5. **Do product/clinical, court and investor-day calendars get built?** They are
    ABSENT, and the smallest honest producer is a forward-calendar adapter
-   modelled on `moomoo.get_economic_calendar_moomoo:1813` + `catalyst._calendar_window:394`.
+   modelled on `moomoo.get_economic_calendar_moomoo:1813` + `catalyst._calendar_window:421`.
 **DECIDED 2026-09-17:** this is **implementation coverage, not an architecture
 question**. Define the four calendar interfaces (product, clinical, court, investor
 day) each returning `available | missing | not_applicable`, and **never convert
@@ -494,7 +494,7 @@ doc-internal drift, ledgered here rather than silently rewritten. **[CORRECTED 2
 
 **Delta against §5.3.** §5.3's Layer 3 ("the score, only if the owner wants one") and
 §7 Q1 (CLOSED: "no 0-100 `EventScore`") are now behind the code: `event_state` at
-`strategies/event_state.py::event_state:586` returns a 0-100 `score` (equal weights,
+`strategies/event_state.py::event_state:591` returns a 0-100 `score` (equal weights,
 `EVENT_BANDS`, `RESEARCH_ONLY`). The library's §119/§120 supply exactly the Layer-3
 architecture §5.3 deferred — the product form, `50 + 50·tanh(k·ES_raw)`, and weight
 vectors — and the code adopts **none** of it (§9.4).
@@ -504,10 +504,10 @@ library says an EventScore should measure — checked against the code:
 
 | # | Dimension | Producer? | Symbol / why not |
 | --- | --- | --- | --- |
-| 1 | Magnitude | **no** | no economic-magnitude producer; `strategies/catalyst.py::implied_move_from_history:111` is event *sizing*, not magnitude |
-| 2 | Surprise | **partly** | `strategies/events.py::surprise_score:17` (relative `(act-est)/abs(est)`), `strategies/catalyst.py::last_earnings_surprise:70` |
-| 3 | Direction | **partly** | `strategies/events.py::drift_side:26` (`beat`/`miss`/`flat`), `strategies/catalyst.py::fed_direction:184` (`HOLD`/`HIKE`/`CUT`) — labels, not a signed scalar |
-| 4 | Probability | **no** | `strategies/catalyst.py::fed_imminence:142` `modal_prob` is a rate-path probability, not an event probability |
+| 1 | Magnitude | **no** | no economic-magnitude producer; `strategies/catalyst.py::implied_move_from_history:138` is event *sizing*, not magnitude |
+| 2 | Surprise | **partly** | `strategies/events.py::surprise_score:17` (relative `(act-est)/abs(est)`), `strategies/catalyst.py::last_earnings_surprise:77` |
+| 3 | Direction | **partly** | `strategies/events.py::drift_side:26` (`beat`/`miss`/`flat`), `strategies/catalyst.py::fed_direction:211` (`HOLD`/`HIKE`/`CUT`) — labels, not a signed scalar |
+| 4 | Probability | **no** | `strategies/catalyst.py::fed_imminence:169` `modal_prob` is a rate-path probability, not an event probability |
 | 5 | Timing | **yes** | `strategies/event_state.py::imminence:349`, `::HORIZONS:66` |
 | 6 | Persistence | **partly** | `strategies/events.py::expected_drift_after:56`, printed as `post_event_drift` (`agents/utils/analysis_tools.py:734`) |
 | 7 | Market reaction | **partly** | `agents/utils/analysis_tools.py::get_earnings_event_read:660` print-day return + `volume_ratio` (a leaf read, not a scored component) |
@@ -525,9 +525,9 @@ producer anywhere, with the nearest honest symbol where one exists.
 
 | § | Title | Formulas | Status | Evidence (`path::symbol` / nearest) |
 | --: | --- | --: | --- | --- |
-| 1 | Core Event Representation | 3 | PARTIAL | `strategies/event_state.py::COMPONENTS:205` / `::FAMILY_COMPONENTS:299` (family imminence + flags, not a `(D,T,P,M,S,C,Q,H,X)` tuple) |
-| 2 | Event Direction | 7 | PARTIAL | `events.drift_side:26`, `catalyst.fed_direction:184` (labels, not a signed scalar) |
-| 3 | Event Magnitude | 7 | ABSENT | no economic-magnitude producer; `catalyst.implied_move_from_history:111` is sizing |
+| 1 | Core Event Representation | 3 | PARTIAL | `strategies/event_state.py::COMPONENTS:210` / `::FAMILY_COMPONENTS:299` (family imminence + flags, not a `(D,T,P,M,S,C,Q,H,X)` tuple) |
+| 2 | Event Direction | 7 | PARTIAL | `events.drift_side:26`, `catalyst.fed_direction:211` (labels, not a signed scalar) |
+| 3 | Event Magnitude | 7 | ABSENT | no economic-magnitude producer; `catalyst.implied_move_from_history:138` is sizing |
 | 4 | Event Surprise | 3 | PARTIAL | `events.surprise_score:17` relative surprise only |
 | 5 | Earnings Surprise | 6 | PARTIAL | EPS surprise via `events.surprise_score:17`; no revenue/EBITDA/margin/FCF leg |
 | 6 | Earnings Surprise Composite | 3 | ABSENT | none |
@@ -554,7 +554,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 27 | Abnormal Volume | 1 | PARTIAL | `get_earnings_event_read:660` `volume_ratio` vs its 20d mean |
 | 28 | Price × Volume Event Strength | 2 | ABSENT | none |
 | 29 | Volatility Shock | 2 | ABSENT | none |
-| 30 | Implied Volatility Event Signal | 1 | elsewhere | `catalyst.implied_move_from_history:111` |
+| 30 | Implied Volatility Event Signal | 1 | elsewhere | `catalyst.implied_move_from_history:138` |
 | 31 | IV Skew Event Signal | 2 | elsewhere | `options_surface.iv_skew:25` |
 | 32 | Options-Implied Event Move | 2 | elsewhere | `options_surface.implied_move_pct:42`; `moomoo_extra_tools.get_expected_move:274` |
 | 33 | Event Surprise vs Market Move | 1 | ABSENT | none |
@@ -565,7 +565,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 38 | Event Decay | 2 | ABSENT | none |
 | 39 | Time-Decay Weight | 2 | ABSENT | none |
 | 40 | Event Recency Score | 1 | ABSENT | none |
-| 41 | Catalyst Proximity | 2 | BUILT | `event_state.imminence:349` (linear clamp, not `e^-ld`/`1/(1+d)`) |
+| 41 | Catalyst Proximity | 2 | BUILT | `event_state.imminence:354` (linear clamp, not `e^-ld`/`1/(1+d)`) |
 | 42 | Event Horizon Score | 1 | PARTIAL | `event_state.HORIZONS:66` per family (declares **7** families: earnings, macro, fed, opex, product_clinical, court, investor_day). **[CORRECTED 2026-09-26: the `HORIZONS:60` line ref and the "declared for 3 families" count were both stale — `event_state.py::HORIZONS:66` declares 7.]** |
 | 43 | Event Duration | 1 | ABSENT | none |
 | 44 | Event Conviction | 1 | ABSENT | none |
@@ -581,7 +581,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 54 | Event Probability Revision | 2 | ABSENT | none |
 | 55 | Hazard Rate | 1 | ABSENT | none |
 | 56 | Survival Probability | 1 | ABSENT | none |
-| 57 | Event Timing Probability | 1 | PARTIAL | `event_state.imminence:349` is a timing measure, not a probability |
+| 57 | Event Timing Probability | 1 | PARTIAL | `event_state.imminence:354` is a timing measure, not a probability |
 | 58 | Event Clustering | 1 | ABSENT | none |
 | 59 | Event Density | 1 | ABSENT | none |
 | 60 | Event Overload | 1 | ABSENT | none |
@@ -590,8 +590,8 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 63 | Event Synergy | 1 | ABSENT | none |
 | 64 | Event Conflict | 1 | ABSENT | none |
 | 65 | Net Event Exposure | 1 | ABSENT | none |
-| 66 | EventScore Raw | 1 | PARTIAL | `event_state.event_state:586` equal-weight combine, not the library's product |
-| 67 | EventScore Normalization | 2 | PARTIAL | `event_state.event_state:586` `combine`/`align` to 0-100, inverted; not tanh |
+| 66 | EventScore Raw | 1 | PARTIAL | `event_state.event_state:591` equal-weight combine, not the library's product |
+| 67 | EventScore Normalization | 2 | PARTIAL | `event_state.event_state:591` `combine`/`align` to 0-100, inverted; not tanh |
 | 68 | Cross-Sectional EventScore | 2 | ABSENT | none |
 | 69 | Sector-Relative EventScore | 1 | ABSENT | none |
 | 70 | Market-Relative EventScore | 1 | ABSENT | none |
@@ -608,7 +608,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 81 | Catalyst Risk/Reward | 1 | ABSENT | none |
 | 82 | Event Expected Value | 1 | ABSENT | none |
 | 83 | Event Risk | 1 | elsewhere | `events.catalyst_risk_penalty:63` (RiskScore's leg, `EventScore.md` sec 0.2) |
-| 84 | Tail Event Risk | 1 | elsewhere | `book_risk.book_correlated_stress:146` |
+| 84 | Tail Event Risk | 1 | elsewhere | `book_risk.book_correlated_stress:148` |
 | 85 | Event CVaR | 1 | elsewhere | `book_risk.cvar:18` |
 | 86 | Event VaR | 1 | elsewhere | `book_risk.cvar:18` |
 | 87 | Event Risk-Adjusted Score | 1 | ABSENT | none |
@@ -631,9 +631,9 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 104 | Event-Type Alpha | 1 | ABSENT | none |
 | 105 | Event-Type Sharpe | 1 | ABSENT | none |
 | 106 | Bayesian Historical Event Model | 1 | ABSENT | none |
-| 107 | Sample-Size Confidence | 1 | PARTIAL | `event_state.EVENT_MIN_COVERAGE:333` + `score_engine.coverage_floor` |
-| 108 | Data Coverage Score | 1 | BUILT | `event_state.event_state:586` coverage; `event_calendars.calendar_coverage:269` |
-| 109 | EventScore Coverage Adjustment | 1 | BUILT | `event_state.event_state:586` (NA lowers coverage, never the score) |
+| 107 | Sample-Size Confidence | 1 | PARTIAL | `event_state.EVENT_MIN_COVERAGE:338` + `score_engine.coverage_floor` |
+| 108 | Data Coverage Score | 1 | BUILT | `event_state.event_state:591` coverage; `event_calendars.calendar_coverage:269` |
+| 109 | EventScore Coverage Adjustment | 1 | BUILT | `event_state.event_state:591` (NA lowers coverage, never the score) |
 | 110 | Missing-Data Penalty | 1 | PARTIAL | NA!=0 lowers coverage; withheld below `EVENT_MIN_COVERAGE` (`event_state.py:333`) |
 | 111 | Event Confidence Adjustment | 1 | ABSENT | none |
 | 112 | Event Conflict Adjustment | 1 | ABSENT | none |
@@ -642,8 +642,8 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 115 | Event Evidence Score | 1 | ABSENT | none |
 | 116 | Event Confidence Composite | 1 | ABSENT | none |
 | 117 | Event Impact Composite | 1 | ABSENT | none |
-| 118 | Event Timing Composite | 1 | BUILT | `event_state.event_state:586` equal-weight composite over imminence |
-| 119 | Final EventScore Architecture | 4 | PARTIAL | `event_state.event_state:586`; equal-weight/inverted, not the library's product form |
+| 118 | Event Timing Composite | 1 | BUILT | `event_state.event_state:591` equal-weight composite over imminence |
+| 119 | Final EventScore Architecture | 4 | PARTIAL | `event_state.event_state:591`; equal-weight/inverted, not the library's product form |
 | 120 | Recommended EventScore Sub-Engines | 4 | PARTIAL | only the Timing/Coverage sub-engines exist (`event_state.py`) |
 
 ### 9.2 Not built — the backlog the library names
@@ -676,21 +676,21 @@ hard-block.
   Tail Event Risk`, `# 85. Event CVaR`, `# 86. Event VaR`. §0.2 assigns those to
   RiskScore's event leg, and the code agrees with §0.2, not the library:
   `strategies/events.py::catalyst_risk_penalty:63` (the exposure multiplier),
-  `strategies/book_risk.py::book_correlated_stress:146`, `::cvar:18`. `event_state.py`
+  `strategies/book_risk.py::book_correlated_stress:148`, `::cvar:18`. `event_state.py`
   declares no event-risk component and never imports the sizing or risk path — so the
   library's risk sections must not be read as EventScore output.
 - **§0.3 (the hard block is the only fail-closed event path).** The library contains **no
   gate or block formula** (the only occurrence of "block"/"gate" in 2,126 lines is the
   `:2111` prose sentence). Its surprise (§4-6) and probability (§12-13, §52-57) formulas
   are **measurement** formulas: `strategies/events.py::surprise_score:17` feeds
-  `last_earnings_surprise:70`'s label, and `catalyst.build_catalyst_snapshot:219`'s
+  `last_earnings_surprise:70`'s label, and `catalyst.build_catalyst_snapshot:246`'s
   `hard_block` is set only on `earnings.days_until <= catalyst_hard_block_days`. Neither
   the library's surprise nor its probability formulas gate anything, and no score here
   reaches `GATE_PRECEDENCE`.
 - **§0.1 ("no weight table — and that is not an omission to fill in").** The library
   *does* publish weight vectors — `# 117` `w1..w5`, `# 118` `w1..w4`, `# 88` `w1..w5`, and
   the Impact/Confidence composites of `# 119` — and `# 120` proposes a 25-way sub-engine
-  split. The code adopts none of them: `strategies/event_state.py::event_state:586` runs
+  split. The code adopts none of them: `strategies/event_state.py::event_state:591` runs
   `weights=None`, takes equal weights (1.0 per family) and **prints that no vector is
   published** ("no weight vector is published for this engine (EventScore.md section
   0.1)"). The library supplies the architecture §0.1 declines to invent; the machine

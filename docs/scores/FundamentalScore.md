@@ -327,10 +327,10 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 13 | Revenue growth YoY | 2.00 | **C** | `statement_parsing.sane_revenue_yoy:1048`; leaf `Revenue YoY` (`analysis_tools.py:1448`) |
+| 13 | Revenue growth YoY | 2.00 | **C** | `statement_parsing.sane_revenue_yoy:1052`; leaf `Revenue YoY` (`analysis_tools.py:1448`) |
 | 14 | Revenue CAGR 3Y | 1.50 | **A** | no 3-year CAGR anywhere |
 | 15 | Revenue CAGR 5Y | 1.00 | **C** | `capex_quality_read` key `rev_cagr5` (`capex_quality.py:252`), leaf `Rev CAGR5=` (`value_dip_tools.py:571`); needs ≥6 annual points |
-| 16 | EPS growth YoY | 1.50 | **C** | `statement_parsing.sane_eps_yoy:1028` (vendor-sourced, degenerate-base guard >300% nulled) |
+| 16 | EPS growth YoY | 1.50 | **C** | `statement_parsing.sane_eps_yoy:1032` (vendor-sourced, degenerate-base guard >300% nulled) |
 | 17 | EPS CAGR 3Y | 1.00 | **A** | no EPS series exists |
 | 18 | EPS CAGR 5Y | 0.75 | **A** | — |
 | 19 | FCF growth YoY | 1.50 | **A** | `fcf_growth` is a caller-supplied argument to `earnings_quality_verdict`; no producer |
@@ -371,16 +371,16 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 43 | P/E | 2.00 | **C** | `ratios.compute_ratios:198`; historical series via `get_valuation_z_score` |
+| 43 | P/E | 2.00 | **C** | `ratios.compute_ratios:437`; historical series via `get_valuation_z_score` |
 | 44 | Forward P/E | 1.50 | **P** | vendor passthrough (`y_finance.py:382`); computed for ETFs (`strategies/etf_valuation.py:148`) |
 | 45 | PEG | 1.50 | **P** | vendor passthrough (`y_finance.py:383`); `forward_peg` is a `value_dip` input only |
 | 46 | EV/EBIT | 2.00 | **C** | `quantitative_scores.acquirers_multiple:260`; screen row `ev_ebit`; ratios key |
-| 47 | EV/EBITDA | 1.50 | **C** | `ratios.compute_ratios:195` |
-| 48 | EV/Sales | 0.75 | **C** | `ratios.compute_ratios:197` |
-| 49 | P/S | 0.75 | **C** | `ratios.compute_ratios:200` |
-| 50 | P/B | 0.75 | **C** | `ratios.compute_ratios:199` |
-| 51 | P/CF | 1.00 | **C** | `ratios.compute_ratios:201` |
-| 52 | Price / FCF | 1.50 | **C** | `ratios.compute_ratios:202` |
+| 47 | EV/EBITDA | 1.50 | **C** | `ratios.compute_ratios:437` |
+| 48 | EV/Sales | 0.75 | **C** | `ratios.compute_ratios:437` |
+| 49 | P/S | 0.75 | **C** | `ratios.compute_ratios:437` |
+| 50 | P/B | 0.75 | **C** | `ratios.compute_ratios:437` |
+| 51 | P/CF | 1.00 | **C** | `ratios.compute_ratios:437` |
+| 52 | Price / FCF | 1.50 | **C** | `ratios.compute_ratios:437` |
 | 53 | FCF yield | 2.00 | **C** | see #27 (duplicate of #27 in the source's own table — a redundancy the source flags) |
 | 54 | Earnings yield | 1.00 | **C** | `quantitative_scores.earnings_yield:251` (EBIT/EV); leaf `EY` |
 | 55 | EV / FCF | 1.00 | **A** | — |
@@ -396,12 +396,12 @@ existing implementation.
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
 | 60 | Net debt / EBITDA | 1.50 | **A** | no EBITDA denominator anywhere; `net_debt` exists only as a DCF bridge line |
-| 61 | Debt / equity | 1.00 | **C** | `ratios.compute_ratios:205`; `value_dip.balance_sheet_health:383` leaf |
+| 61 | Debt / equity | 1.00 | **C** | `ratios.compute_ratios:437`; `value_dip.balance_sheet_health:383` leaf |
 | 62 | Debt / assets | 0.75 | **A** | only the Piotroski `f_dlever` boolean; the moomoo vendor filter is server-side |
 | 63 | Net debt / FCF | 1.00 | **A** | — |
 | 64 | Interest coverage | 1.00 | **A** | alias exists (`statement_parsing.py:105`), zero consumers |
-| 65 | Current ratio | 0.75 | **C** | `ratios.compute_ratios:206`; internal `fin["current_ratio"]` |
-| 66 | Quick ratio | 0.50 | **C** | `ratios.compute_ratios:207` |
+| 65 | Current ratio | 0.75 | **C** | `ratios.compute_ratios:437`; internal `fin["current_ratio"]` |
+| 66 | Quick ratio | 0.50 | **C** | `ratios.compute_ratios:437` |
 | 67 | Cash / debt | 1.00 | **A** | `cash_ratio` is cash/**current liabilities** — a different ratio |
 | 68 | Net cash yield | 0.50 | **A** | — |
 | 69 | Working capital / assets | 0.50 | **P** | `canonical["working_capital"]` (`statement_parsing.py:1134`), internal to Altman/Ohlson. **[CORRECTED 2026-09-26: cite `statement_parsing.py:1504-1509` — `:1134` is the `fin["gross_margin"]` assignment]** |
@@ -445,7 +445,7 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 89 | Dividend Yield | 0.50 | **C** | `ratios.compute_ratios:209` (nulled >25% as a scale artifact); `capital_income.indicated_yield:55` |
+| 89 | Dividend Yield | 0.50 | **C** | `ratios.compute_ratios:437` (nulled >25% as a scale artifact); `capital_income.indicated_yield:55` |
 | 90 | Dividend growth | 0.50 | **P** | only raw history via `get_corporate_actions`; no growth RATE computed |
 | 91 | Payout ratio | 0.50 | **P** | vendor passthrough (`finnhub.py:346`) |
 | 92 | Buyback yield | 1.00 | **A** | alias `share_buybacks` exists (`statement_parsing.py:189`) with **no consumer**; repurchase $ surfaced only as raw trailing-4Q |
@@ -462,7 +462,7 @@ existing implementation.
 | 96 | Ohlson O-Score | 0.40 | **C** | `normalized.ohlson_o_score:157`; leaf `ohlson_o:` |
 | 97 | Distance to Default (Merton) | 0.40 | **P** | `credit_spread.merton_distance_to_default:104` exists but requires **caller-supplied** equity/debt/equity-vol; no tool resolves them |
 | 98 | Interest-coverage stress | 0.25 | **A** | see #64 |
-| 99 | Liquidity stress | 0.20 | **P** | market-liquidity verdict only (`liquidity_risk.liquidity_verdict:153`); balance-sheet side is `get_balance_sheet_health` + the capex funding-cover DISTRESS regime (`OCF/capex < 0.6`) |
+| 99 | Liquidity stress | 0.20 | **P** | market-liquidity verdict only (`liquidity_risk.liquidity_verdict:205`); balance-sheet side is `get_balance_sheet_health` + the capex funding-cover DISTRESS regime (`OCF/capex < 0.6`) |
 | 100 | Debt maturity risk | 0.25 | **A** | no maturity-wall / WAM logic; `short_term_debt` parsed but only summed |
 
 ---
@@ -872,15 +872,15 @@ The engine the rows are measured against: `strategies/fundamental_score.py`
 `risk_subscore:221`, `subscores:234`, `fundamental_score:243`,
 `_restate_coverage_over_declared_factors:159`, `factor_gap_report:587`), whose
 factor sets, directions and availability are declared once in
-`strategies/factor_schema.py::FACTOR_SCHEMA:182` / `SUBSCORE_FACTORS:399` — 28
+`strategies/factor_schema.py::FACTOR_SCHEMA:190` / `SUBSCORE_FACTORS:399` — 28
 factors, of which FQS reads 7, FGS 3, VS 12, FRS 6.
 
 | § | Section | Blocks / eqs | Status | Verified producer, or the nearest honest producer named |
 | --: | --- | --: | :-: | --- |
 | 1 | Profitability | 21 / 21 | **PARTIAL** | ROA `strategies/ratios.py:204`; ROE `strategies/ratios.py:203`; GP/A `dataflows/quantitative_scores.py::gross_profitability:299`. PARTIAL: gross margin computed only inside `dataflows/statement_parsing.py::enrich_screen_ratios` (`fin["gross_margin"]:1134`, never rendered); operating margin and net margin are vendor passthroughs (`dataflows/y_finance.py:399`, `:398`); EBIT margin exists only inside `strategies/normalized.py::median_norm_ebit:14`; level ROIC is ABSENT — only the 3-lag ΔNOPAT/ΔIC (`strategies/capex_quality.py::capex_quality_read`, key `incr_roic`), and `ROIC − WACC` therefore exists only as the **incremental** spread (key `spread`). ABSENT: ROCE, gross-profit/equity, gross-profit growth, gross-margin change (only the Piotroski boolean `f_dmargin`, `quantitative_scores.py:681`), EBIT/EBITDA/operating-income growth, EBITDA margin (EBITDA is a vendor passthrough `dataflows/y_finance.py:397` and a repo-internal intermediate `strategies/ratios.py:162`, never a margin) |
-| 2 | Earnings quality | 13 / 13 | **PARTIAL** | CFO/NI built: `strategies/earnings_quality.py::earnings_quality_verdict:24`, key `cash_conversion:103`. Accrual ratio built: `strategies/normalized.py::accruals_ratio:62` (`(NI − CFO)/TA`). Cash earnings (= CFO − CapEx, i.e. FCF) built: `strategies/ratios.py:169` → key `free_cash_flow:214`. PARTIAL: earnings volatility σ(ROA) exists only as `var_roa` inside `dataflows/quantitative_scores.py::growth_metrics:786` (needs ≥5 annual points; feeds the G-Score G4 leg); CFO/revenue exists only as the printed `cash_margin=` of `agents/utils/analysis_tools.py::get_normalized_fcf_dcf:2953`. ABSENT: FCF/NI, CFO/EBITDA, FCF margin, the **Sloan balance-sheet-change** form (§2's own "Sloan-style accrual measure" — the code's Sloan label is on the *cash-flow* form, see §4.4), earnings-persistence β (no regression anywhere) |
+| 2 | Earnings quality | 13 / 13 | **PARTIAL** | CFO/NI built: `strategies/earnings_quality.py::earnings_quality_verdict:24`, key `cash_conversion:103`. Accrual ratio built: `strategies/normalized.py::accruals_ratio:62` (`(NI − CFO)/TA`). Cash earnings (= CFO − CapEx, i.e. FCF) built: `strategies/ratios.py:169` → key `free_cash_flow:214`. PARTIAL: earnings volatility σ(ROA) exists only as `var_roa` inside `dataflows/quantitative_scores.py::growth_metrics:786` (needs ≥5 annual points; feeds the G-Score G4 leg); CFO/revenue exists only as the printed `cash_margin=` of `agents/utils/analysis_tools.py::get_normalized_fcf_dcf:3085`. ABSENT: FCF/NI, CFO/EBITDA, FCF margin, the **Sloan balance-sheet-change** form (§2's own "Sloan-style accrual measure" — the code's Sloan label is on the *cash-flow* form, see §4.4), earnings-persistence β (no regression anywhere) |
 | 3 | Free cash flow | 9 / 9 | **PARTIAL** | FCF built `strategies/ratios.py:169`; FCF yield built twice — `strategies/value_dip.py::fcf_yield:155` (leaf `agents/utils/value_dip_tools.py::get_fcf_yield:380`) and `capex_quality_read` key `fcf_yield`. PARTIAL: FCF stability is `median/min/max/mean/n` only — `strategies/cycle_dcf.py::normalized_cycle_fcf:23`, **no std**. ABSENT: unlevered FCF, FCF/EV, FCF/sales, FCF/assets, FCF/equity, FCF growth |
-| 4 | Growth | 9 / 9 | **PARTIAL** | Revenue growth built `dataflows/statement_parsing.py::sane_revenue_yoy:1048`; EPS growth built `sane_eps_yoy:1028`; CAGR built for **revenue only** (`strategies/capex_quality.py::_cagr:52`, `min_span=5` → `rev_cagr5`) — and `strategies/factor_schema.py:251` declares that factor `availability=NA`, so the engine reports its own single CAGR as unavailable (§4.4 C12). ABSENT: EPS/FCF/EBITDA/EBIT/book-value CAGR, FCF growth, growth acceleration (nearest: `capex_quality._delta:63`, a 3-lag change on NOPAT/invested capital/capex only), sustainable growth rate, internal growth rate |
+| 4 | Growth | 9 / 9 | **PARTIAL** | Revenue growth built `dataflows/statement_parsing.py::sane_revenue_yoy:1052`; EPS growth built `sane_eps_yoy:1028`; CAGR built for **revenue only** (`strategies/capex_quality.py::_cagr:52`, `min_span=5` → `rev_cagr5`) — and `strategies/factor_schema.py:251` declares that factor `availability=NA`, so the engine reports its own single CAGR as unavailable (§4.4 C12). ABSENT: EPS/FCF/EBITDA/EBIT/book-value CAGR, FCF growth, growth acceleration (nearest: `capex_quality._delta:63`, a 3-lag change on NOPAT/invested capital/capex only), sustainable growth rate, internal growth rate |
 | 5 | Margin quality | 7 / 6 | **PARTIAL** | Same producers as §1: gross margin internal (`statement_parsing.py:1134`), EBIT margin internal (`normalized.py:14`). PARTIAL: Δgross-margin is the Piotroski boolean `f_dmargin` (`quantitative_scores.py:681`). ABSENT: EBITDA margin, net margin as a computed ratio, FCF margin, Δ²GM (second difference of any margin) |
 | 6 | Operating efficiency | 10 / 10 | **PARTIAL** | Asset turnover built: `dataflows/statement_parsing.py::enrich_screen_ratios` (`fin["asset_turnover"]:1137`) and as the `dupont_3` leg `strategies/dupont.py::dupont_3:94`. PARTIAL: inventory turnover and receivable turnover exist only as **day-ratios inside a boolean** — `quantitative_scores.py::overpriced_score` C2 (`dso = receivables/revenue`) and C3 (`dinv = inventory/cogs`), neither ×365 nor exposed. ABSENT: fixed-asset turnover, working-capital turnover, payables turnover, cash-conversion cycle (no DIO/DSO/DPO producer anywhere) |
 | 7 | Working-capital quality | 6 / 6 | **PARTIAL** | `canonical["working_capital"] = current_assets − current_liabilities` built at `dataflows/statement_parsing.py:1508` with provenance, consumed only by Altman X1 and Ohlson WCTA. PARTIAL: receivables/inventory intensity changes exist direction-only (`overpriced_score` C2/C3). ABSENT: AR intensity, inventory intensity, payables intensity, WC/sales, ΔNWC as a standalone quantity |
@@ -892,24 +892,24 @@ factors, of which FQS reads 7, FGS 3, VS 12, FRS 6.
 | 13 | Valuation factors | 13 / 13 | **PARTIAL** | Built: `price_to_earnings:198`, `price_to_book:199`, `price_to_sales:200`, `price_to_cash_flow:201`, `price_to_free_cash_flow:202`, `ev_ebitda:195`, `ev_ebit:196`, `ev_sales:197` (all `strategies/ratios.py`), plus `fcf_yield` (`value_dip.py:155`). PARTIAL: forward P/E and PEG are vendor passthroughs (`dataflows/y_finance.py:382`, `:384`); the library's `Earnings yield = EPS/Price` has **no** producer — the engine's `earnings_yield` is `EBIT/EV` (§4.4 C1). ABSENT: EV/FCF, book yield |
 | 14 | Earnings yield relative to bonds | 2 / 2 | **ABSENT** | No producer: no risk-free subtraction on any earnings or FCF yield exists in `tradingagents/`. Nearest honest producers, both of a different quantity: `strategies/credit_spread.py::credit_stress_level:44` (OAS bands) and the `risk_free` parameter of `strategies/evaluate.py::sharpe:94` (a Sharpe input, not a yield spread) |
 | 15 | EV-based valuation | 4 / 4 | **PARTIAL** | EV built `dataflows/quantitative_scores.py::enterprise_value:241` (= market cap + total debt − cash; no preferred, no minority — §4.4 C3); EBIT yield built as the engine's `earnings_yield` key (`quantitative_scores.py:251`). ABSENT: EBITDA yield, FCF yield on EV (the library's second listing of the same quantity as §3's Enterprise FCF Yield, §4.3 D2c) |
-| 16 | DuPont analysis | 4 / 4 | **built** | `strategies/dupont.py::dupont_3:94` (ROE = net margin × asset turnover × equity multiplier — the library's exact three-factor form) and `dupont_5:67`; leaf `agents/utils/analysis_tools.py::get_dupont_read:3487` |
+| 16 | DuPont analysis | 4 / 4 | **built** | `strategies/dupont.py::dupont_3:94` (ROE = net margin × asset turnover × equity multiplier — the library's exact three-factor form) and `dupont_5:67`; leaf `agents/utils/analysis_tools.py::get_dupont_read:3619` |
 | 17 | Piotroski F-Score | 11 / 1 | **built** | `dataflows/quantitative_scores.py::piotroski_f_score:202` and the paper-basis `piotroski_f_score_detailed:590` (signals `f_droa:647`, `f_dlever:661`, `f_dmargin:681`, `f_dturn:685`, `f_accrual`, `f_dcurrent`), gated `enable_f_score_detail` (default **False**, `default_config.py:1204`). All nine signals present |
 | 18 | Beneish M-Score | 9 / 9 | **built** | `dataflows/quantitative_scores.py::beneish_m_score:113` with `_M_WEIGHTS:97` carrying all eight variables (`dsri`, `gmi`, `aqi`, `sgi`, `depi`, `sgai`, `tata`, `lvgi`) and the published coefficients; bands `M_SUSPECT:108` / `M_CLEAN:110` |
 | 19 | Altman Z-Score | 6 / 6 | **built** | `dataflows/quantitative_scores.py::altman_z_score:181` plus the variant family `altman_variant:409`, `altman_zone:482`, `altman_variant_for:511` and the three zone tables (`:395-397`) — the engine exceeds the library's single public-manufacturer form |
 | 20 | Ohlson O-Score | 1 / 1 | **built** | `strategies/normalized.py::ohlson_o_score:157` returns both the logit `score` and `p` — the library's `P(Default) = 1/(1+e^-O)` — plus a verdict; leaf `ohlson_o:` |
 | 21 | Quality factor calculations | 5 / 5 | **PARTIAL** | `strategies/factors.py::z_composite_alpha:147` implements `QualityZ = Σ w_i z_i` exactly (`cross_sectional_z` per factor, weighted sum, equal weights by default); `factors.py::category_scores:258` is the coverage-gated weighted mean the four sub-scores call, with `QUALITY_DIRECTIONS:213` supplying the signs. PARTIAL: the library's `Score = min(100, max(0, 50 + 10Z))` map has **no** producer — the engine maps the composite to 0-100 by tie-aware percentile, and `z_composite_alpha` returns the raw weighted z with no 0-100 map at all (§4.4 C7) |
-| 22 | Sector-relative normalization | 4 / 4 | **built** | `strategies/cross_section.py::industry_neutral_z:89` (winsorise → demean by the caller's group → z, residual "unknown" bucket for unmapped names), `group_median:344`, `centered_rank:140`. Contradiction, not absence: the 0-100 percentile is taken across the whole scored peer set, not within sector (§4.4 C6) |
+| 22 | Sector-relative normalization | 4 / 4 | **built** | `strategies/cross_section.py::industry_neutral_z:111` (winsorise → demean by the caller's group → z, residual "unknown" bucket for unmapped names), `group_median:344`, `centered_rank:140`. Contradiction, not absence: the 0-100 percentile is taken across the whole scored peer set, not within sector (§4.4 C6) |
 | 23 | Robust z-score | 2 / 2 | **ABSENT** | No median/MAD standardisation exists: zero occurrences of `1.4826` or a MAD helper in `tradingagents/`. Nearest honest producers: `cross_section.py::cross_sectional_z:70` (mean/std) and `strategies/analyst_revisions.py::winsor_z:253` (mean/std then clip ±3) |
 | 24 | Winsorization | 1 / 1 | **built** | `strategies/cross_section.py::winsorize:31`, default `lower_q=0.01, upper_q=0.99`, called by `factors.category_scores:258` before every z. Parameterised, so the library's preferred 2.5/97.5 or 5/95 is a setting, not a gap (§4.4 C8) |
-| 25 | Percentile scoring | 2 / 2 | **built** | `factors.category_scores:258` maps the composite z to `percentile × 100` (tie-aware, the same semantics as `sector_rank._pct_rank`); `cross_section.py::centered_rank:140` and `quantile_split:169` are the standalone primitives. Lower-is-better is handled by a `−1` direction sign on the z *before* ranking (`category_scores`, the `sign` leg) rather than by `100×(1−P)` — equivalent up to tie handling |
+| 25 | Percentile scoring | 2 / 2 | **built** | `factors.category_scores:258` maps the composite z to `percentile × 100` (tie-aware, the same semantics as `sector_rank._pct_rank`); `cross_section.py::centered_rank:162` and `quantile_split:169` are the standalone primitives. Lower-is-better is handled by a `−1` direction sign on the z *before* ranking (`category_scores`, the `sign` leg) rather than by `100×(1−P)` — equivalent up to tie handling |
 | 26 | Fundamental momentum | 9 / 1 | **ABSENT** | No weighted Δ-factor composite exists. Nearest honest producer: `strategies/capex_quality.py::_delta:63` — a 3-lag change on NOPAT, invested capital and capex only, consumed by `incr_roic`/`cap_roi_3y`; `growth_metrics` carries `var_sales_growth`, a variance of YoY growth, not a momentum sum |
 | 27 | Fundamental acceleration | 2 / 2 | **ABSENT** | No second difference of any factor series exists anywhere in `tradingagents/`. Nearest honest producer: `capex_quality._delta:63` (first difference only) |
 | 28 | Fundamental stability | 4 / 4 | **PARTIAL** | PARTIAL: the only factor-level dispersion is `var_roa` in `quantitative_scores.py::growth_metrics:786` (variance of the 5-year `roa_series`, ≥5 annual points, G-Score G4). Elsewhere-shaped but not elsewhere-status: `strategies/alpha_health.py::score_evaluation_rows:627` reports a `stability` row (`:879`) — mean rank autocorrelation of consecutive score snapshots — which is a **score-level** stability, not the library's σ of a factor series. ABSENT: σ(ROIC), σ(operating margin), σ(FCF margin), and the `100×(1−NormalizedVolatility)` map |
-| 29 | Earnings surprise | 3 / 3 | **elsewhere** | Built, but **not this engine's to build**: `strategies/events.py::surprise_score:17` implements the library's formula **verbatim** (`(actual − estimate)/\|estimate\|` — stated in the module docstring at `events.py:5`), surfaced by `strategies/catalyst.py::last_earnings_surprise:70` and the leaf `agents/utils/analysis_tools.py::get_earnings_surprise:1645`. It is already the named producer of `NewsScore`'s `earnings_surprise` component — `strategies/news_score.py:154`, `_c("earnings_surprise", "earnings_guidance", …, "events.surprise_score:17", "surfaced by catalyst.last_earnings_surprise:70")` — so invariant 8 makes it a second producer if `FundamentalScore` scores it too. The library's revenue and operating-income surprise legs have no producer; the analyst prose carries an explicit basis-unreconciled warning about the vendor actual/estimate pairing |
+| 29 | Earnings surprise | 3 / 3 | **elsewhere** | Built, but **not this engine's to build**: `strategies/events.py::surprise_score:17` implements the library's formula **verbatim** (`(actual − estimate)/\|estimate\|` — stated in the module docstring at `events.py:5`), surfaced by `strategies/catalyst.py::last_earnings_surprise:77` and the leaf `agents/utils/analysis_tools.py::get_earnings_surprise:1671`. It is already the named producer of `NewsScore`'s `earnings_surprise` component — `strategies/news_score.py:154`, `_c("earnings_surprise", "earnings_guidance", …, "events.surprise_score:17", "surfaced by catalyst.last_earnings_surprise:77")` — so invariant 8 makes it a second producer if `FundamentalScore` scores it too. The library's revenue and operating-income surprise legs have no producer; the analyst prose carries an explicit basis-unreconciled warning about the vendor actual/estimate pairing |
 | 30 | Estimate revision | 3 / 3 | **built** | `strategies/analyst_revisions.py::revision_ratio:79` (MSCI weighted up/down counts), `estimate_change_index:176` (weighted estimate-level change, ≥5 levels), `revision_index:289` (mean of the available legs); leaf `agents/utils/analyst_revision_tools.py::get_analyst_revision_index:43`, gated `enable_analyst_revision_index` (default **off**); levels supplied by `dataflows/yfinance_sector.py:176`. Contradiction of arithmetic: the code's change is **symmetric**, and its other leg counts recommendations, not estimates (§4.4 C11) |
-| 31 | Fundamental valuation gap | 6 / 7 | **built** | `strategies/normalized.py::margin_of_safety:120` and `margin_of_safety_bases:127` (both denominator conventions printed); `strategies/dcf.py::compute_dcf:71` (discounted FCF + terminal value, `terminal_value_gordon:56`, `wacc_from_beta:28`); leaves `agents/utils/analysis_tools.py::get_dcf_valuation:2804`, `get_normalized_fcf_dcf:2953`, `get_margin_of_safety:4878`. The gap is also a VS panel factor as the caller-supplied `dcf_upside`, scaled by `fundamental_score.py::dcf_upside_scaled:488` |
+| 31 | Fundamental valuation gap | 6 / 7 | **built** | `strategies/normalized.py::margin_of_safety:120` and `margin_of_safety_bases:127` (both denominator conventions printed); `strategies/dcf.py::compute_dcf:71` (discounted FCF + terminal value, `terminal_value_gordon:56`, `wacc_from_beta:28`); leaves `agents/utils/analysis_tools.py::get_dcf_valuation:2932`, `get_normalized_fcf_dcf:2953`, `get_margin_of_safety:4878`. The gap is also a VS panel factor as the caller-supplied `dcf_upside`, scaled by `fundamental_score.py::dcf_upside_scaled:497` |
 | 32 | Margin of safety | 2 / 2 | **built** | `strategies/normalized.py::margin_of_safety:120` is `(intrinsic − price)/intrinsic` — the library's second form; `margin_of_safety_bases:127` prints the price-denominator form beside it |
-| 33 | Fundamental composite | 1 / 1 | **PARTIAL** | `strategies/fundamental_score.py::fundamental_score:243` composes **four** sub-scores (`factor_schema.py::SUBSCORE_FACTORS:399`), not the library's eight components; it ships equal weights (1/4) labelled `RESEARCH_ONLY`, with no band table, and prints that basis. The library's eight-family grouping has no producer |
+| 33 | Fundamental composite | 1 / 1 | **PARTIAL** | `strategies/fundamental_score.py::fundamental_score:252` composes **four** sub-scores (`factor_schema.py::SUBSCORE_FACTORS:497`), not the library's eight components; it ships equal weights (1/4) labelled `RESEARCH_ONLY`, with no band table, and prints that basis. The library's eight-family grouping has no producer |
 | 34 | Hierarchical FundamentalScore | 2 / 3 | **PARTIAL** | Levels 1-3 built: L1 raw metrics = the peer panel; L2 = `quality_subscore:201`, `growth_subscore:206`, `valuation_subscore:211`, `risk_subscore:221`; L3 = `fundamental_score:243`. PARTIAL: L4 `Confidence = f(coverage, data quality, freshness, agreement, sector applicability)` has only two of its five legs — coverage (`_restate_coverage_over_declared_factors:159`, `factor_gap_report:587`) and DCF data quality (`dcf_confidence:421`) — with no agreement leg (§36) and no sector-applicability leg (Q3 defers suppliers) |
 | 35 | Coverage-adjusted FundamentalScore | 2 / 2 | **built** | The engine implements the library's *floor* and refuses its *product*: `factors.category_scores:258` renormalises over present metrics and **withholds** a name below the floor with its reason, and `_restate_coverage_over_declared_factors:159` restates each name's coverage over the sub-score's own declared set (7 FQS / 3 FGS / 12 VS / 6 FRS) so the printed denominator is the sub-score's, not the panel's; `factor_gap_report:587` prints the NA set. `EffectiveScore = Score × Coverage` is **not** adopted — the library itself says not to conflate the two (§4.4 C10) |
 | 36 | Cross-metric agreement | 1 / 1 | **ABSENT** | No dispersion-of-factor-scores measure exists. Nearest honest producer: `strategies/data_quality.py::disagreement_flag:80` — a **cross-vendor** spread on *one* metric, not cross-metric dispersion |
@@ -1048,9 +1048,9 @@ categories and the engine's 4 sub-scores.
 ### 4.4 Contradictions between the library and the code
 
 The comparison points are the engine's panel/sub-score machinery
-(`factor_schema.py::FACTOR_SCHEMA:182`, `SUBSCORE_FACTORS:399`,
+(`factor_schema.py::FACTOR_SCHEMA:190`, `SUBSCORE_FACTORS:399`,
 `factors.category_scores:258`) and its coverage rule
-(`fundamental_score.py::_restate_coverage_over_declared_factors:159`, which
+(`fundamental_score.py::_restate_coverage_over_declared_factors:168`, which
 restates every name's coverage over the **sub-score's own** declared factor set —
 7 FQS / 3 FGS / 12 VS / 6 FRS — instead of the panel's whole metric set, and
 rewrites the core's `coverage floor N of M metrics` string to
@@ -1096,11 +1096,11 @@ Engine: `ratios.py:208`, `cash / current_liabilities`.
 **C6 — the percentile's reference set.** §22 requires a **within-sector**
 normalisation ("prefer `Score = f(X − sector benchmark)`, or percentile"), and
 the library's §25 then maps that percentile to 0-100. The engine demeans by
-sector at the z stage (`cross_section.py::industry_neutral_z:89`) but takes the
+sector at the z stage (`cross_section.py::industry_neutral_z:111`) but takes the
 0-100 percentile across the whole scored peer set — `factors.py:195` records the
 renaming of the 50 band from "sector median" to "peer median" for exactly this
 reason. So the library's requirement is met one stage early and dropped one stage
-late, and `fundamental_score.py::_subscore:107` inherits it unchanged.
+late, and `fundamental_score.py::_subscore:116` inherits it unchanged.
 
 **C7 — the 0-100 map.** §21: `Score = min(100, max(0, 50 + 10Z))` — linear in z,
 clipped. Engine: tie-aware percentile × 100 (`factors.category_scores:258`),

@@ -425,7 +425,7 @@ re-formatted).
 
 **Why.** `SentimentScore.md` §1 marks short interest PARTIAL: a raw level with no
 percentile or change basis, while the settlement series is already returned
-(`yfinance_short_interest.get_short_interest_yfinance:37`,
+(`yfinance_short_interest.get_short_interest_yfinance:81`,
 `massive.get_short_interest_massive:485`).
 
 **Cadence, checked 2026-09-17.** FINRA equity short interest is reported **twice
@@ -492,24 +492,30 @@ a score. Fix on sight (standing order 10); the first is a real sizing bug.
 | P0-8a | `events.position_mult_by_side`'s catalyst argument is inert | `strategies/events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, while the only caller documents `catalyst` as `0..1` (`agents/utils/analysis_tools.py:2254`) and `catalyst.get_catalyst_scale` supplies ≤1 — so `event_scale` is **always 1.0** and the multiplier is only ever 1.0 (beat) / 0.5 (miss) | compare against the documented range (`catalyst <= 1`) or take a scale explicitly | a beat with a 0.25 catalyst scale produces a multiplier below the no-catalyst case; fails before the fix **FIXED 2026-09-17** - `event_scale = catalyst if 0 < catalyst <= 1 else 1.0`; a beat at 0.25 now sizes 0.25, a value outside (0, 1] stays the no-catalyst case. Test fails pre-change. |
 | P0-8b | `get_earnings_calendar`'s `look_back_days` names a **forward** window | `agents/utils/analyst_data_tools.py:33` vs `dataflows/finnhub.py:195-196` (`[curr_date, curr_date + look_back_days]`) | rename the parameter (and its callers) to a forward name; keep the value | the leaf's argument name matches the direction it queries; a small value truncates the forward window **FIXED 2026-09-17** - renamed to `look_ahead_days` on all three vendors (finnhub, moomoo, yfinance) and on the tool; a test pins the forward `to` date. |
 | P0-8c | `get_tail_risk` passes a **close-price series as an equity curve** to CDaR | `agents/utils/analysis_tools.py:4690` (`cdar(closes, …)`), `strategies/book_risk.py:174` | either feed it the weighted book or label the proxy in the output and refuse the name "CDaR" | the printed block says which series it is; `get_book_tail_risk`'s portfolio number is not confused with it **FIXED 2026-09-17** - the proxy is labelled (`price_path_dd_tail_mean`, `price_path_dd_var`, `price_path_max_dd`) and the name 'CDaR' is refused; no bare `cdar=` token remains, so the book's CDaR has one producer. |
-| P0-8d | `book_risk.portfolio_cvar:59` and `book_risk.book_correlated_stress:146` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move **FIXED 2026-09-17** - `normalize_book_weights` is the one implementation; both callers read it, and a test replaces that single rule and shows BOTH paths move. |
-| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:7018` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled **FIXED 2026-09-17** - `_derive_macro_markers` fills all five from the run's own leaves (FRED T10Y2Y, HY OAS, EFFR and DTWEXBGS changes, and the VIX percentile); a supplied value wins, an unmeasurable one stays None, and the leaf prints which markers it derived. |
+| P0-8d | `book_risk.portfolio_cvar:61` and `book_risk.book_correlated_stress:148` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move **FIXED 2026-09-17** - `normalize_book_weights` is the one implementation; both callers read it, and a test replaces that single rule and shows BOTH paths move. |
+| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:7393` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled **FIXED 2026-09-17** - `_derive_macro_markers` fills all five from the run's own leaves (FRED T10Y2Y, HY OAS, EFFR and DTWEXBGS changes, and the VIX percentile); a supplied value wins, an unmeasurable one stays None, and the leaf prints which markers it derived. |
 
 ### 3.9 P0-9 — vendor-capability probes
 
 Two plan items depend on a vendor capability nobody has verified in this repo,
 and a probe is cheaper than a build that discovers the gap.
 
-1. **EODHD `/sentiments` coverage** — `trading_graph._sentiment_factor_read:1178`
+1. **EODHD `/sentiments` coverage** — `trading_graph._sentiment_factor_read:1420`
    hardcodes `source="eodhd"` (`:1235`) and returns `None` rather than falling
    back when EODHD has no coverage, while the leaf
-   `analysis_tools.get_sentiment_lead_lag:9332` does fall back. Probe: how many
+   `analysis_tools.get_sentiment_lead_lag:9872` does fall back. [CORRECTED
+   2026-09-26: fixed (SENT-13) — the method no longer hardcodes the source:
+   `_sentiment_points_fallback:1392` walks the EODHD → Alpha Vantage → GDELT
+   chain and the read names the feed that answered in `"source"`
+   (`trading_graph.py:1420-1500`, the method itself at `:1420`). The probe's
+   26-of-26 result stands, so the fallback stays defensive, not live.]
+   Probe: how many
    names in the current basket return a non-empty sentiment series, and what the
    fallback order should be.
 2. **The forward event calendars** (`EventScore.md` §4): FDA/clinical, court,
    investor day. Probe whether the existing moomoo economic-calendar adapter
    (`dataflows/moomoo.py:1758`) carries any of them before designing a new
-   adapter on the `catalyst._calendar_window:394` pattern.
+   adapter on the `catalyst._calendar_window:421` pattern.
 
 **Deliverable for both:** a recorded answer in the relevant engine document, not
 code. A probe that finds nothing is a result — it moves the item to "ABSENT with
@@ -604,7 +610,7 @@ acceptance, and the decision that gates it.
 **Objective.** The four category sub-scores and their composite, over the
 existing 106-factor ledger, with the weight chain of `FundamentalScore.md` §3.2
 and the status vocabulary of §3.1. **Advisory only** — owner Q1 keeps
-`opportunity_score` `null` (`execution_contract.opportunity_score:240`, validated
+`opportunity_score` `null` (`execution_contract.opportunity_score:251`, validated
 at `:363-370`).
 
 **Prerequisites.** WP-1; P0-1 for the CAGR family; nothing else — the document's
@@ -694,13 +700,13 @@ the mapped contribution.
 | Input | Producer | Band source |
 | --- | --- | --- |
 | RSI | `swing.rsi:44`, `swing.rsi_band:123` | 45-70 `strong`, >70 `hot`, <40 `broken` |
-| Stochastic K/D | `technical_factors.stochastic_oscillator:150` | `<20 oversold` |
-| StochRSI | `technical_factors.stoch_rsi:319` | `<0.2` |
-| RSI2 | `technical_factors.rsi2:351` | `<10` |
-| Williams %R | `technical_factors.williams_r:374` | `-80..-100` |
+| Stochastic K/D | `technical_factors.stochastic_oscillator:197` | `<20 oversold` |
+| StochRSI | `technical_factors.stoch_rsi:373` | `<0.2` |
+| RSI2 | `technical_factors.rsi2:405` | `<10` |
+| Williams %R | `technical_factors.williams_r:428` | `-80..-100` |
 | Bollinger %b | `value_dip.bollinger_pct_b:77` | `<=0` dip, `>1` extended |
-| MFI | `technical_factors.mf_index:116` | `>80` overbought |
-| Elder thermometer | `technical_factors.elder_thermometer:530` | `quiet` (`<0.8`) is the good dip read |
+| MFI | `technical_factors.mf_index:163` | `>80` overbought |
+| Elder thermometer | `technical_factors.elder_thermometer:648` | `quiet` (`<0.8`) is the good dip read |
 
 **Wiring the missing inputs** (each is small and each is a prerequisite for one
 category):
@@ -711,7 +717,7 @@ category):
 | RSI slope | promote `value_dip._rsi_series:472` (already a full Wilder series) and reuse `relative_strength.slope_pct:49` |
 | momentum 5D | `extended_indicators.roc:151` is already parameterised: `roc(closes, 5)` |
 | ATR percentile (per-name vol percentile) | the loop already written for realized vol at `etf_risk.etf_risk_profile:142-172`, with `size.atr:143` in place of `_realized_vol:69` |
-| OBV **value** (not just divergence) | return the cumulative OBV that `technical_factors.obv_divergence:450` already computes locally at `:404` and discards |
+| OBV **value** (not just divergence) | return the cumulative OBV that `technical_factors.obv_divergence:541` already computes locally at `:404` and discards |
 | per-name RS vs QQQ and the sector ETF | call `relative_strength.relative_strength_report:214` once per benchmark (it is benchmark-agnostic); the sector map exists (`sector_rank.sector_group_of:163`) |
 | market-wide breadth | P0-3 |
 | upside / downside semivariance | `volatility_models.semivariance` beside the existing estimators — `RS⁻ + RS⁺ = RV` **exactly**, `None` below `min_obs`, the score consuming `√RS⁻` and the ratio. Producer spec in `TechnicalScore.md` §4, unit pinning in `RiskScore.md` §0.3 |
@@ -821,8 +827,8 @@ already ship:
 | Quantity | Pinned convention | Producers that differ |
 | --- | --- | --- |
 | Tail loss | **positive loss as a fraction of book equity** | `book_risk.cvar:18` (negative), `book_correlated_stress:128` / `stress_loss:123` (positive), `min_cvar_weights` (positive, `book_risk.py:713`), executor `tail.ESResult.value_pct` (`tail.py:56`) |
-| Drawdown | **positive magnitude** | `evaluate.max_drawdown:222` / `portfolio_drawdown:100` (positive), `regime_state.regime_drawdown:146` (negative + band), `signald/engine.py:115` → `state.py:75` (negative, emitted `gate.py:865`) |
-| Correlation | **largest-cluster share of book** (a labelled proxy) | `risk_governor.default_limits:29` (% of book), `mandate.py:51-52` (dollar notional), `config.cluster_cap_pct:109` at `gate.py:369` (cluster) |
+| Drawdown | **positive magnitude** | `evaluate.max_drawdown:222` / `portfolio_drawdown:120` (positive), `regime_state.regime_drawdown:146` (negative + band), `signald/engine.py:115` → `state.py:75` (negative, emitted `gate.py:865`) |
+| Correlation | **largest-cluster share of book** (a labelled proxy) | `risk_governor.default_limits:29` (% of book), `mandate.py:51-52` (dollar notional), `config.py::cluster_cap_pct:115` at `gate.py:369` (cluster) |
 
 **The alignment happens in the score, visibly — never by changing a producer**,
 which would break that producer's other readers. Every component row prints its
@@ -878,10 +884,10 @@ one**); P0-7b for the analyst-revision category, whose binding **moves (Q4)**.
 
 | Order | Item | Why |
 | --: | --- | --- |
-| 1 | **Novelty** (15%) | known recipe (similarity to the previous stories about the firm), data present (article timestamps from every vendor; the normaliser `sentiment._normalise_headline:614` already exists for syndication dedupe), sign known (stale news reverses) |
+| 1 | **Novelty** (15%) | known recipe (similarity to the previous stories about the firm), data present (article timestamps from every vendor; the normaliser `sentiment._normalise_headline:833` already exists for syndication dedupe), sign known (stale news reverses) |
 | 2 | **Materiality** (half of 20%) | the largest weight has no producer of its own. **Decided (Q6): read `EventScore`'s materiality / expected-move output** — one authoritative producer, not a second estimate |
-| 3 | **Persistence / volume acceleration** (5%) | `sentiment.mention_volume:43` and `sentiment.decayed_weight:91` already exist; this is wiring, not building |
-| 4 | **Corporate-event typing** (10%) | extend `sec_edgar._FORM_LABELS:36` and add a keyword classifier over `get_news`, **printing its basis** |
+| 3 | **Persistence / volume acceleration** (5%) | `sentiment.mention_volume:171` and `sentiment.decayed_weight:194` already exist; this is wiring, not building |
+| 4 | **Corporate-event typing** (10%) | extend `sec_edgar._FORM_LABELS:39` and add a keyword classifier over `get_news`, **printing its basis** |
 | 5 | **Guidance change** | needs a source the engine does not have; do not fake it from the EPS estimate |
 | 6 | **Fundamental impact** (20%) | needs an estimate history (`analyst_revisions.estimate_change_index:176` documents exactly this absence); the honest answer today is `NA` |
 
@@ -920,7 +926,7 @@ owner's rule is *"don't assume positive sentiment is bullish"*.
 
 **Prerequisite zero — pin the unit.** The news-sentiment route carries **two
 scales behind one name**: EODHD/Alpha Vantage deliver −1..1, **GDELT delivers
-−100..100** (`gdelt.get_news_sentiment_gdelt:278`, `_sentiment_points_gdelt:250`,
+−100..100** (`gdelt.get_news_sentiment_gdelt:317`, `_sentiment_points_gdelt:250`,
 routed at `interface.py:488-492`) and the category is advertised as −1..1
 (`interface.py:187`, `news_data_tools.get_news_sentiment:110`). A GDELT-sourced
 `sma_7d` is therefore ~100× an EODHD one. GDELT's own documentation confirms the
@@ -934,15 +940,21 @@ comparable `sma_7d`/`innovation`, or the code refuses to mix them.
 
 | Hole | Producer |
 | --- | --- |
-| 20-day momentum (`Sentiment_today − Sentiment_20d`) | add the delta beside `sma_7d` in `sentiment.daily_sentiment_sma:511`, calendar-reindexed and `None`-safe |
-| Acceleration | surface `sentiment.sentiment_velocity:25` (OLS slope/day, `window=5`) — it has no production caller today |
+| 20-day momentum (`Sentiment_today − Sentiment_20d`) | add the delta beside `sma_7d` in `sentiment.daily_sentiment_sma:730`, calendar-reindexed and `None`-safe |
+| Acceleration | surface `sentiment.sentiment_velocity:37` (OLS slope/day, `window=5`) — it has no production caller today |
 | Per-source breadth | per-day `mean(s>0)` plus a per-host breakdown from the rows `aggregate_weighted_sentiment:616` already holds (`_article_url:612` gives the host) |
 | Institutional | bind `get_institution_holdings` to the sentiment/market surface (**decided, Q4: move the binding**) and use the period-over-period Δ in % of float, z-scored. *Which* institutional measure is still open (`SentimentScore.md` §7 Q2) |
 
-**Also in scope, as recorded defects:** `_sentiment_factor_read:1178` hardcodes
+**Also in scope, as recorded defects:** `_sentiment_factor_read:1420` hardcodes
 `source="eodhd"` (`:1235`) and returns `None` instead of falling back, and its
 `rank_ic` is a **single-name self-correlation** (`:1216-1230`), not the
 cross-sectional IC the confirmation check implies. The quadrant replaces it.
+[CORRECTED 2026-09-26: both halves are fixed (SENT-13) — the source is not
+hardcoded (`_sentiment_points_fallback:1392`, returned as `"source"` at
+`trading_graph.py:1499`) and the statistic is returned as `self_lead_lag`
+(`trading_graph.py:1479-1493`), never `rank_ic`; only
+`sentiment_research.sentiment_factor_scale`'s parameter is still spelled
+`rank_ic`. The rebuild's acceptance (b) remains the quadrant test.]
 
 **Acceptance.** (a) The scale test above; (b) four fixtures produce four distinct
 quadrant labels; (c) `mention_volume` (attention) and the tone aggregate enter as
@@ -982,7 +994,7 @@ so there is nothing to weight yet. **This plan does not invent weights.**
 | 2 | The window flags (`in_opex_week`, `post_opex_unwind`, `catalyst_window`) and the **hard block**, printed as a structured event state `{families, imminence, hard_block, coverage: 4/7}` | exists; the block stays **authoritative** |
 | 3 | A 0-100 score | **not built — decided (Q7): the structured state is the deliverable.** A score would need a per-family severity weight and a normalisation that do not exist |
 
-**The block must not move.** `catalyst.build_catalyst_snapshot:219` sets
+**The block must not move.** `catalyst.build_catalyst_snapshot:246` sets
 `hard_block` **only** on earnings (`catalyst.py:284-288`, default 5 days,
 `default_config.py:799`); macro, Fed and OPEX never set it. The executor's 17
 `GATE_PRECEDENCE` checks (`TradingExecution/signald/contracts.py:42`, verified:
@@ -1694,7 +1706,7 @@ inline in the document named below, and the question text is kept as the record.
 | `RiskScore.md` §7 Q1 | which cap family does "correlation risk 15%" mean? | the **cluster/notional concentration share**, renamed explicitly (`cluster_exposure / portfolio_exposure`) - never printed as a correlation coefficient |
 | `RiskScore.md` §7 Q2 | executor or engine owns the book-level components? | the **executor / portfolio-risk layer owns the computation**; `RiskScore` owns the per-security view and consumes the book inputs |
 | `RiskScore.md` §7 Q3 | add a `net_beta` producer? | **planned implementation, not an open question** - WP-5 owns it |
-| `RiskScore.md` §7 Q4 | do the two `expected move` producers reconcile? | `options_surface.implied_move_pct:42` **canonical** when a valid surface exists; `catalyst.implied_move_from_history:111` **fallback and validation cross-check**; no reconciliation model. `EventScore` owns the field |
+| `RiskScore.md` §7 Q4 | do the two `expected move` producers reconcile? | `options_surface.implied_move_pct:42` **canonical** when a valid surface exists; `catalyst.implied_move_from_history:138` **fallback and validation cross-check**; no reconciliation model. `EventScore` owns the field |
 | `TechnicalScore.md` §7 Q1 | score or state? | **a score composed from state/metric leaves** - `raw metric -> state -> normalised contribution -> score` |
 | `TechnicalScore.md` §7 Q2 | which benchmark for relative strength? | the **sector ETF is primary**; SPY and QQQ are contextual diagnostics. One canonical `relative_strength_vs_sector`, the other two retained as diagnostics rather than equally weighted factors |
 | `TechnicalScore.md` §7 Q4 | does the volatility category invert? | **no blanket inversion** - the category is non-monotonic/contextual, with the directional reading from the canonical semivariance method |
@@ -1746,7 +1758,7 @@ this document exists. [CORRECTED 2026-09-26: D-1...D-5 above remain as written; 
 | D-3 | **The SEC `User-Agent` carries a placeholder contact.** `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (…; contact: research@example.com)` | `sec_edgar.py:28-30` — the comment states a descriptive UA with a contact is required; `example.com` is not a deliverable address | the SEC's fair-access policy asks for a reachable contact; a non-deliverable one is the kind of thing that gets an IP throttled, and the ceiling (10 req/s) is published | **FIXED 2026-09-17** - `_UA` (`sec_edgar.py:33`) carries the owner's reachable contact, and the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` (the same defect class, found while fixing this one) |
 | D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:527` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written | **FIXED 2026-09-17** - `_us_gaap_facts` reads every tag from ONE `companyfacts` call (`_COMPANYFACTS_URL:74`); the per-tag loop stays as the **fallback**, because a multi-MB payload can fail or truncate where a small one would not, and losing every tag at once is the worse failure. `_annual_rows` holds the shared row filter. Two tests: one asserts a single fetch for the whole table, one asserts the fallback; both fail against the pre-change module. **Live smoke test 2026-09-17:** MSFT rendered 6 annual periods from **2 requests** (the ticker map + one `companyfacts`), where the pre-change path issued 12 - and the new UA was accepted, no 403 |
 | D-5 | **`enable_factor_model` is not a free name.** Three documents (`design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109`) describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:905`, `scripts/factor_model_train.py:7` | a plan that reused it for the deterministic composite would silently couple two different objects; the six engine gates in §1.1 are new names for this reason | **FIXED 2026-09-17** - all three documents now state, in the body **and** in the seam-table row, that the flag gates the **learned** model only and is not a generic score switch, naming `factor_model_train.py:7`, `default_config.py:905` and `.env.example:227` |
-| D-9 | **A component declaration cites a producer half with no call site (NewsScore `persistence`).** `news_score.COMPONENTS["persistence"].producer` reads "sentiment.mention_volume:43 + decayed_weight:91" (`tradingagents/strategies/news_score.py`'s `COMPONENTS` `persistence` row), but only the `mention_volume` half is called: `analysis_tools._news_components` computes `heat = mention_volume(...)` (`analysis_tools._news_components`'s `heat = mention_volume(...)`) and passes no decay weight — its own comment (that leaf's NOTE comment — "the declaration also cites `sentiment.decayed_weight:91`. That half is NOT called here ... The citation's second half has no call site.") states "the declaration also cites `sentiment.decayed_weight:91`. That half is NOT called here ... The citation's second half has no call site." | `news_score.COMPONENTS`'s `persistence` producer declaration; `analysis_tools._news_components`'s NOTE comment ("the declaration also cites `sentiment.decayed_weight:91`. That half is NOT called here ... The citation's second half has no call site."), the persistence leg's `heat = mention_volume(...)` | the declaration over-claims: a reader of the component table sees a decay producer where the engine has none. `NewsScore.md` §8.1 row 11 and §8.4 are right that "the news engine has no decay component at all"; the defect is the declaration string, whose fix (drop `+ decayed_weight:91` or call the producer) is deliberately not made in this pass because `news_score.py` is outside the Phase-0 scope except for the §0.1 guidance comment | **OPEN 2026-09-26** - mislabelled-declaration defect found in the Phase-0 verification pass; not a built component |
+| D-9 | **A component declaration cites a producer half with no call site (NewsScore `persistence`).** `news_score.COMPONENTS["persistence"].producer` reads "sentiment.mention_volume:171 + decayed_weight:91" (`tradingagents/strategies/news_score.py`'s `COMPONENTS` `persistence` row), but only the `mention_volume` half is called: `analysis_tools._news_components` computes `heat = mention_volume(...)` (`analysis_tools._news_components`'s `heat = mention_volume(...)`) and passes no decay weight — its own comment (that leaf's NOTE comment — "the declaration also cites `sentiment.decayed_weight:194`. That half is NOT called here ... The citation's second half has no call site.") states "the declaration also cites `sentiment.decayed_weight:194`. That half is NOT called here ... The citation's second half has no call site." | `news_score.COMPONENTS`'s `persistence` producer declaration; `analysis_tools._news_components`'s NOTE comment ("the declaration also cites `sentiment.decayed_weight:194`. That half is NOT called here ... The citation's second half has no call site."), the persistence leg's `heat = mention_volume(...)` | the declaration over-claims: a reader of the component table sees a decay producer where the engine has none. `NewsScore.md` §8.1 row 11 and §8.4 are right that "the news engine has no decay component at all"; the defect is the declaration string, whose fix (drop `+ decayed_weight:91` or call the producer) is deliberately not made in this pass because `news_score.py` is outside the Phase-0 scope except for the §0.1 guidance comment | **OPEN 2026-09-26** - mislabelled-declaration defect found in the Phase-0 verification pass; not a built component |
 
 ---
 
@@ -1766,7 +1778,7 @@ substitute.
 | P0-6 short interest | FINRA equity short interest (settlement series, 5 rolling years via the Equity API; historical files back to 2014) and Reg SHO daily short-sale volume | bi-monthly **positions** vs daily **flow** — different measures | reported on the 15th and last business day settlements, published the **7th business day** after; Reg SHO daily files posted by 18:00 ET of the trade date; batch downloads capped at 7 calendar days |
 | P0-9a EODHD `/sentiments` coverage | EODHD | per-name daily sentiment series | unverified in this repo — probe first (P0-9) |
 | P0-9b forward event calendars | moomoo economic-calendar adapter (`dataflows/moomoo.py:1758`) as the pattern | forward calendar rows | **DECIDED + BUILT 2026-09-18**: `dataflows/event_calendars.py` — pdufa.bio for FDA/clinical (free, keyless; announced-day rows only), CourtListener for court (**cannot answer**: a filing archive whose only date fields are backward-looking, so the family stays `missing`), investor-day **dropped** (no free source). Gate `enable_event_calendars`, default off |
-| Expected move (EventScore §7 Q3) | practitioner standard: annualized IV ÷ ~16 for one day, or the ATM straddle price | pins which of the two existing producers is canonical | the repo has both (`options_surface.implied_move_pct:42`, `catalyst.implied_move_from_history:111`) under one name |
+| Expected move (EventScore §7 Q3) | practitioner standard: annualized IV ÷ ~16 for one day, or the ATM straddle price | pins which of the two existing producers is canonical | the repo has both (`options_surface.implied_move_pct:42`, `catalyst.implied_move_from_history:138`) under one name |
 
 ---
 

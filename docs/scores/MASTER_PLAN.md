@@ -189,7 +189,7 @@ the plan and the only ones that cost nothing but attention.
 | DOC-17 | `SentimentScore.md` §2 says no sentiment toolset exists and `analyst_toolset` raises `KeyError`; `toolsets.py:523/577` | `SentimentScore.md` §2, §7 |
 | DOC-18 | `SentimentScore.md` §3 numbers two consecutive defects "4." | `SentimentScore.md` §3 |
 | DOC-19 | `CompositeTradeScore.md` §3.5/§6 Q3 cite "decision 12" for coverage deflation; `IMPLEMENTATION_PLAN.md` §13 Q12 is the semivariance measure — the reference dangles | `CompositeTradeScore.md` §3.5, §6 |
-| DOC-20 | `README.md` §3.1 defect 5 says `net_beta` has "neither producer nor reader"; the engine produces it (`book_risk.net_beta:177`) and the executor field is simply never written — the split is unstated | `README.md` §3.1; `ScoreUniverse.md` §4 |
+| DOC-20 | `README.md` §3.1 defect 5 says `net_beta` has "neither producer nor reader"; the engine produces it (`book_risk.net_beta:179`) and the executor field is simply never written — the split is unstated | `README.md` §3.1; `ScoreUniverse.md` §4 |
 | DOC-21 | `MEASUREMENT_FINDINGS.md` §1 still says `regime.vol_percentile` returns `0.5` (**the owner's document** — report, do not edit) | `MEASUREMENT_FINDINGS.md` §1 |
 | DOC-22 | `TechnicalScore.md` §1's volatility row, `MEASUREMENT_FINDINGS.md:126`'s "not measured" rows, and the `Strategies/scores/*.md` library-internal defects (TECH-25/26, REG-21/22, RISK-25/26, EVT-7's doc side) are the **owner's** files: report only | several |
 

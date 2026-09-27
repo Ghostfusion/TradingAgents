@@ -74,11 +74,11 @@ proposal — it is running code:
 
 | Fact | Evidence |
 | --- | --- |
-| `valuation_subscore` exists and is one of the engine's four published sub-scores | `tradingagents/strategies/fundamental_score.py::valuation_subscore:211`; registered in `SUBSCORE_FUNCS` (`fundamental_score.py:226`) and dispatched by `subscores:234` |
-| It is the `VS` band table `cheap / below-market / fair / rich / expensive / priced-for-perfection` | `tradingagents/strategies/fundamental_score.py::VS_BANDS:66`; title `"valuation"` at `fundamental_score.py:94` |
+| `valuation_subscore` exists and is one of the engine's four published sub-scores | `tradingagents/strategies/fundamental_score.py::valuation_subscore:220`; registered in `SUBSCORE_FUNCS` (`fundamental_score.py:226`) and dispatched by `subscores:234` |
+| It is the `VS` band table `cheap / below-market / fair / rich / expensive / priced-for-perfection` | `tradingagents/strategies/fundamental_score.py::VS_BANDS:75`; title `"valuation"` at `fundamental_score.py:94` |
 | It carries **12 factors**, all direction-aligned `cheap = favourable` | `tradingagents/strategies/factor_schema.py:410-422` (`SUBSCORE_FACTORS["VS"]`) |
 | Its proposed weight in the owner's master table is **20.00** (as-written 21.25) | [`FundamentalScore.md`](FundamentalScore.md) §2.4, "Valuation — proposed 20.00, as-written 21.25" |
-| The four-sub-score composite ships **equal-weight (1/4 each)** because neither weight vector is measured | `tradingagents/strategies/fundamental_score.py::fundamental_score:243` docstring; `tradingagents/strategies/factor_schema.py::weights_for` returns `None` when no `base_weight` is published, and `_spec:128` sets `base_weight=None` on every record |
+| The four-sub-score composite ships **equal-weight (1/4 each)** because neither weight vector is measured | `tradingagents/strategies/fundamental_score.py::fundamental_score:252` docstring; `tradingagents/strategies/factor_schema.py::weights_for` returns `None` when no `base_weight` is published, and `_spec:128` sets `base_weight=None` on every record |
 
 The 12 VS factors, read from `factor_schema.py` (name — direction — formula as the
 schema states it):
@@ -178,19 +178,19 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 
 | § | Library section | :line | Formulas | Status | Producer today (verified) — or the exact gap |
 | --: | --- | --: | --: | --- | --- |
-| 1 | Market-Capitalization Valuation | :13 | 5 | PARTIAL | MC + EV exist: `tradingagents/strategies/ratios.py::compute_ratios:104` returns `ev` (`:194`) and `market_cap` (`:215`), and `tradingagents/dataflows/quantitative_scores.py::enterprise_value:241` computes `MC + TotalDebt − Cash`. **Net Debt** is printed only as `net_debt=cash − debt` (`tradingagents/agents/utils/analysis_tools.py:2879`), the **negative** of the library's `TotalDebt − Cash`. Equity Value and Fully Diluted MC: ABSENT |
-| 2 | Earnings Multiples | :55 | 12 | PARTIAL | P/E `ratios.py::compute_ratios:104` (`price_to_earnings`); Forward P/E, Earnings Yield, FCF yield of an ETF basket `tradingagents/strategies/etf_valuation.py::etf_valuation:80`; forward PEG `tradingagents/agents/utils/value_dip_tools.py::_forward_peg_read:659`. **CAPE, PEGY, Growth-Adjusted P/E, Forward EY: ABSENT.** The library's `EY = EPS/Price` (equity) is *not* what the repo's `earnings_yield` computes — see §4.5 |
+| 1 | Market-Capitalization Valuation | :13 | 5 | PARTIAL | MC + EV exist: `tradingagents/strategies/ratios.py::compute_ratios:437` returns `ev` (`:194`) and `market_cap` (`:215`), and `tradingagents/dataflows/quantitative_scores.py::enterprise_value:241` computes `MC + TotalDebt − Cash`. **Net Debt** is printed only as `net_debt=cash − debt` (`tradingagents/agents/utils/analysis_tools.py:2879`), the **negative** of the library's `TotalDebt − Cash`. Equity Value and Fully Diluted MC: ABSENT |
+| 2 | Earnings Multiples | :55 | 12 | PARTIAL | P/E `ratios.py::compute_ratios:437` (`price_to_earnings`); Forward P/E, Earnings Yield, FCF yield of an ETF basket `tradingagents/strategies/etf_valuation.py::etf_valuation:80`; forward PEG `tradingagents/agents/utils/value_dip_tools.py::_forward_peg_read:659`. **CAPE, PEGY, Growth-Adjusted P/E, Forward EY: ABSENT.** The library's `EY = EPS/Price` (equity) is *not* what the repo's `earnings_yield` computes — see §4.5 |
 | 3 | EV/Earnings Valuation | :133 | 6 | PARTIAL | EV/EBITDA `ratios.py:195`; EV/EBIT `ratios.py:196` and `quantitative_scores.py::acquirers_multiple:260`; `EV/OCF`, Forward EV/EBITDA, EV/EBITDAR: ABSENT. **The section is internally duplicated** (Appendix A.1) |
 | 4 | Revenue Multiples | :178 | 5 | PARTIAL | P/S `ratios.py:200`; EV/Sales `ratios.py:197`. Forward P/S, EV/Forward Sales, Price/Revenue Growth: ABSENT |
 | 5 | Book-Value Valuation | :214 | 5 | PARTIAL | P/B `ratios.py:199` (`mc / total_equity`). Tangible BV, Tangible P/B, Price/Tangible Book, Book-Value Yield: ABSENT |
 | 6 | Enterprise Value to Assets | :249 | 4 | ABSENT | No `ev/assets`, `market_cap/assets` or `EV/InvestedCapital` anywhere. The IC *series* exists as an internal: `tradingagents/agents/utils/value_dip_tools.py:498-512` builds `invested_capital = debt + equity − cash` per year |
 | 7 | Cash-Flow Valuation | :277 | 8 | PARTIAL | P/CF `ratios.py:201`; P/FCF `ratios.py:202`; FCF yield `tradingagents/strategies/value_dip.py::fcf_yield:155` + `tradingagents/strategies/capex_quality.py::capex_quality_read:126` (`fcf_yield` key at `:247`); Cash Conversion `tradingagents/strategies/earnings_quality.py::earnings_quality_verdict:24` (`cc = o / ni` at `:64`; the key is returned at `:103`). Enterprise FCF Yield, OCF Yield, FCF Conversion, FCF Margin: ABSENT |
 | 8 | Free Cash Flow Calculations | :333 | 6 | PARTIAL | Basic FCF `= OCF − CapEx` exists twice: `tradingagents/strategies/ratios.py:169` and `tradingagents/strategies/normalized_fcf.py::maintenance_fcf:81` (`reported_fcf`); the same function's `maintenance_fcf` is `OCF − D&A`. Unlevered FCF, Levered FCF, FCF/share, FCF Growth, FCF CAGR: ABSENT |
-| 9 | DCF Valuation | :377 | 2 | **elsewhere** | `tradingagents/strategies/dcf.py::compute_dcf:71` (project → discount → Gordon TV → EV→equity→price); leaf `tradingagents/agents/utils/analysis_tools.py::get_dcf_valuation:2804` |
+| 9 | DCF Valuation | :377 | 2 | **elsewhere** | `tradingagents/strategies/dcf.py::compute_dcf:71` (project → discount → Gordon TV → EV→equity→price); leaf `tradingagents/agents/utils/analysis_tools.py::get_dcf_valuation:2932` |
 | 10 | Gordon Growth Terminal Value | :400 | 3 | **elsewhere** | `tradingagents/strategies/dcf.py::terminal_value_gordon:56` = `latest_fcf*(1+g)/(wacc−g)` |
 | 11 | Exit-Multiple Terminal Value | :423 | 3 | ABSENT | No `metric × exit multiple` TV anywhere |
 | 12 | WACC | :444 | 5 | PARTIAL | Cost of equity (CAPM) **is** the repo's WACC: `tradingagents/strategies/dcf.py::wacc_from_beta:28` = `rf + beta·erp`. The debt leg and the after-tax cost of debt do not exist; `erp` is a caller constant (`dcf.py:28`, default 0.05; the omission is documented at `:31`). ERP, after-tax Kd, the general `w_e·K_e + w_d·K_d(1−T) + w_p·K_p`: ABSENT |
-| 13 | Multi-Stage DCF | :481 | 1 | PARTIAL | A multi-year explicit projection with a fading capex ratio exists (`tradingagents/agents/utils/analysis_tools.py::get_normalized_fcf_dcf:2953`, backed by `tradingagents/strategies/normalized_fcf.py`), but growth is constant, not phased high-growth → transition → terminal |
+| 13 | Multi-Stage DCF | :481 | 1 | PARTIAL | A multi-year explicit projection with a fading capex ratio exists (`tradingagents/agents/utils/analysis_tools.py::get_normalized_fcf_dcf:3085`, backed by `tradingagents/strategies/normalized_fcf.py`), but growth is constant, not phased high-growth → transition → terminal |
 | 14 | Dividend Discount Models | :503 | 5 | PARTIAL | Dividend Yield `ratios.py:209` (`dividends_paid / market_cap`, capped at 25%). Gordon equity value, multi-stage DDM, payout ratio: ABSENT |
 | 15 | Residual Income Valuation | :543 | 3 | ABSENT | Zero producers |
 | 16 | Economic Value Added | :571 | 3 | ABSENT | NOPAT exists only as a `capex_quality` input (`tradingagents/strategies/capex_quality.py:130,149`); no EVA, EVA margin or EVA yield |
@@ -199,17 +199,17 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 19 | Growth-Based Valuation | :647 | 5 | ABSENT | No sustainable growth rate, reinvestment rate, ROIC-growth relationship or growth-quality factor |
 | 20 | PEG / Growth-Adjusted Valuation | :685 | 4 | PARTIAL | PEG only, forward basis: `tradingagents/agents/utils/value_dip_tools.py::_forward_peg_read:659` (gated `enable_analyst_estimates`). EV/EBITDA-to-growth, EV/Sales-to-growth, P/FCF-to-growth: ABSENT |
 | 21 | Rule of 40 / Growth-Profitability Valuation | :716 | 2 | ABSENT | Zero hits for `rule_of_40`/`rule40` |
-| 22 | Implied Growth From P/E | :736 | 3 | PARTIAL | Implied growth exists, but from an FCF perpetuity, not from P/E: `tradingagents/strategies/reverse_dcf.py::implied_growth_for_fcf:202`; leaf `analysis_tools.py::get_reverse_dcf:2887` |
+| 22 | Implied Growth From P/E | :736 | 3 | PARTIAL | Implied growth exists, but from an FCF perpetuity, not from P/E: `tradingagents/strategies/reverse_dcf.py::implied_growth_for_fcf:202`; leaf `analysis_tools.py::get_reverse_dcf:3019` |
 | 23 | Implied WACC | :761 | 3 | ABSENT | No producer inverts for the discount rate |
 | 24 | Implied Terminal Growth | :784 | 3 | **elsewhere** | `tradingagents/strategies/reverse_dcf.py::implied_growth_for_fcf:202` bisects `g ∈ (0, wacc)` so the perpetuity value equals the price; surfaced as `crossing_g` (`analysis_tools.py:2941`) |
 | 25 | Implied Revenue Growth | :810 | 1 | ABSENT | — |
 | 26 | Implied Margin | :826 | 2 | ABSENT | Also: the two "formulas" are labels, not equations (counting caveat above) |
-| 27 | Reverse DCF | :844 | 3 | **elsewhere** | `tradingagents/strategies/reverse_dcf.py::reverse_dcf:90`; leaf `analysis_tools.py::get_reverse_dcf:2887` |
-| 28 | Relative Valuation | :876 | 9 | PARTIAL | Peer ranking exists (`tradingagents/strategies/factors.py::percentile_rank:59`, `composite_score:115`; universe `tradingagents/strategies/peer_universe.py::resolve_peer_universe:174`), but **no peer-median premium/discount ratio**. 7 of the 9 blocks are bare multiple names (counting caveat) |
+| 27 | Reverse DCF | :844 | 3 | **elsewhere** | `tradingagents/strategies/reverse_dcf.py::reverse_dcf:90`; leaf `analysis_tools.py::get_reverse_dcf:3019` |
+| 28 | Relative Valuation | :876 | 9 | PARTIAL | Peer ranking exists (`tradingagents/strategies/factors.py::percentile_rank:59`, `composite_score:115`; universe `tradingagents/strategies/peer_universe.py::resolve_peer_universe:233`), but **no peer-median premium/discount ratio**. 7 of the 9 blocks are bare multiple names (counting caveat) |
 | 29 | Relative Valuation Z-Score | :926 | 2 | **elsewhere** | `tradingagents/strategies/cross_section.py::cross_sectional_z:70` and `industry_neutral_z:89` (winsorise → demean by sector → z); historical route `tradingagents/strategies/value_dip.py::valuation_z_read:122` |
 | 30 | Historical Valuation Percentile | :951 | 2 | **elsewhere** | `tradingagents/strategies/normalized.py::percentile_hist:53` / `percentile_hist_or_none:37`; `tradingagents/strategies/value_dip.py::valuation_z_read:122`; ETF basket percentile `tradingagents/strategies/etf_valuation.py::etf_valuation:80` |
 | 31 | Historical Premium/Discount | :977 | 2 | ABSENT | `valuation_z_read` returns a z, not `current/median − 1` |
-| 32 | Sector-Adjusted Valuation | :993 | 2 | PARTIAL | Sector neutralisation exists as a z (`cross_section.py::industry_neutral_z:89`, `group_median:344`); the company/peer-median **ratio** does not |
+| 32 | Sector-Adjusted Valuation | :993 | 2 | PARTIAL | Sector neutralisation exists as a z (`cross_section.py::industry_neutral_z:111`, `group_median:344`); the company/peer-median **ratio** does not |
 | 33 | Quality-Adjusted Valuation | :1010 | 3 | ABSENT | — |
 | 34 | PEG-ROIC | :1038 | 1 | ABSENT | — |
 | 35 | Earnings Yield vs Bond Yield | :1050 | 3 | ABSENT | No EY − Rf, no FCF-yield − Rf spread |
@@ -233,11 +233,11 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 53 | Debt-Adjusted Valuation | :1406 | 3 | ABSENT | `ratios.py:205` `debt_to_equity` is a leverage ratio, not a valuation adjustment; no Debt/EV, Net Debt/EBITDA or Net Debt/FCF |
 | 54 | Dilution-Adjusted Valuation | :1433 | 3 | ABSENT | Zero hits for share-count dilution |
 | 55 | Share-Based Compensation Adjustment | :1461 | 3 | ABSENT | Zero hits for SBC |
-| 56 | Margin-of-Safety Calculations | :1486 | 4 | **elsewhere** | `tradingagents/strategies/normalized.py::margin_of_safety:120` = `(IV − P)/IV`; `margin_of_safety_bases:127` also gives the price basis; leaf `analysis_tools.py::get_margin_of_safety:4878`; scenario mos `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` |
+| 56 | Margin-of-Safety Calculations | :1486 | 4 | **elsewhere** | `tradingagents/strategies/normalized.py::margin_of_safety:120` = `(IV − P)/IV`; `margin_of_safety_bases:127` also gives the price basis; leaf `analysis_tools.py::get_margin_of_safety:5010`; scenario mos `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` |
 | 57 | Weighted Intrinsic Value | :1518 | 3 | ABSENT | No multi-model IV weighting |
 | 58 | Valuation Dispersion | :1543 | 5 | ABSENT | No `σ(IV)/median(IV)`; no multi-model IV panel to take a σ over |
-| 59 | Intrinsic Value Confidence | :1576 | 1 | PARTIAL | `tradingagents/strategies/fundamental_score.py::dcf_confidence:421` scores a DCF from four **legs** (basis conflict, beta assumption, FCF CV, terminal share) — not from the library's `1 − σ(IV)/median(IV)` |
-| 60 | Scenario Valuation | :1592 | 3 | **elsewhere** | `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` (bear/base/bull growth + margin shocks, price band, per-scenario mos); leaf `analysis_tools.py::get_scenario_dcf:3571`. **Probabilities are absent** — the library's `P_B, P_Base, P_Bull` weights have no producer |
+| 59 | Intrinsic Value Confidence | :1576 | 1 | PARTIAL | `tradingagents/strategies/fundamental_score.py::dcf_confidence:430` scores a DCF from four **legs** (basis conflict, beta assumption, FCF CV, terminal share) — not from the library's `1 − σ(IV)/median(IV)` |
+| 60 | Scenario Valuation | :1592 | 3 | **elsewhere** | `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` (bear/base/bull growth + margin shocks, price band, per-scenario mos); leaf `analysis_tools.py::get_scenario_dcf:3703`. **Probabilities are absent** — the library's `P_B, P_Base, P_Bull` weights have no producer |
 | 61 | Monte Carlo Valuation | :1622 | 10 | ABSENT | Zero valuation-simulation producers (`monte_carlo` hits are `tradingagents/strategies/book_risk.py` drawdown envelopes and `conformal.py` bootstrap, both unrelated). 10 blocks include placeholders (counting caveat) |
 | 62 | Valuation VaR | :1676 | 3 | ABSENT | Depends on §61 |
 | 63 | Probability of Overvaluation | :1700 | 2 | ABSENT | Depends on §61 |
@@ -249,8 +249,8 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 69 | Relative Valuation Regression | :1805 | 3 | ABSENT | `tradingagents/strategies/factors.py::fama_french_5_factor:518` and `_ols5:448` regress **returns**, not multiples |
 | 70 | Cross-Sectional Residual Valuation | :1837 | 2 | ABSENT | No multiple-on-fundamentals regression |
 | 71 | Factor-Adjusted Valuation | :1868 | 2 | ABSENT | Depends on §70 |
-| 72 | Sector-Neutral Valuation Score | :1888 | 1 | PARTIAL | `tradingagents/strategies/cross_section.py::industry_neutral_z:89` gives the sector z; the within-sector **rank** does not exist |
-| 73 | Market-Neutral Valuation Score | :1904 | 1 | PARTIAL | `tradingagents/strategies/cross_section.py::centered_rank:140` and `tradingagents/strategies/factors.py::percentile_rank:59` give percentile ranks; the `100×(1 − Percentile)` inverse-multiple score is not built |
+| 72 | Sector-Neutral Valuation Score | :1888 | 1 | PARTIAL | `tradingagents/strategies/cross_section.py::industry_neutral_z:111` gives the sector z; the within-sector **rank** does not exist |
+| 73 | Market-Neutral Valuation Score | :1904 | 1 | PARTIAL | `tradingagents/strategies/cross_section.py::centered_rank:162` and `tradingagents/strategies/factors.py::percentile_rank:59` give percentile ranks; the `100×(1 − Percentile)` inverse-multiple score is not built |
 | 74 | Composite Valuation Factor | :1918 | 2 | ABSENT | The composite itself — by decision, not by omission (§5) |
 | 75 | Normalized Valuation Components | :1941 | 5 | PARTIAL | Z and percentile exist (`cross_section.py::cross_sectional_z:70`, `centered_rank:140`; `value_dip.py::zscore:104`); winsorisation exists (`cross_section.py::winsorize:31`); **Min-Max and the robust z (`1.4826·MAD`) do not** |
 | 76 | Winsorized Valuation Factors | :1987 | 1 | **elsewhere** | `tradingagents/strategies/cross_section.py::winsorize:31` (default `0.01/0.99` = the library's P1/P99) |
@@ -282,7 +282,7 @@ below was read this round.
 | `tradingagents/dataflows/quantitative_scores.py::earnings_yield:251` | **§48 Enterprise Yield / §50 EBIT Yield** (`EBIT/EV`) — *not* §2 Earnings Yield | `_ratio(ebit, ev)` |
 | `tradingagents/dataflows/quantitative_scores.py::acquirers_multiple:260` | §3 EV/EBIT | `_ratio(ev, ebit)` |
 | `tradingagents/dataflows/quantitative_scores.py::tobins_q:269` | §42 replacement cost, as a book-value proxy | `(MC + TotalLiabilities)/TotalAssets` |
-| `tradingagents/strategies/ratios.py::compute_ratios:104` | §2 P/E, §3 EV/EBIT + EV/EBITDA, §4 P/S + EV/Sales, §5 P/B, §7 P/CF + P/FCF, §8 Basic FCF, §14 Dividend Yield | returns `ev:194`, `ev_ebitda:195`, `ev_ebit:196`, `ev_sales:197`, `price_to_earnings:198`, `price_to_book:199`, `price_to_sales:200`, `price_to_cash_flow:201`, `price_to_free_cash_flow:202`, `dividend_yield:209`, `free_cash_flow:214`; `fcf = ocf − |capex|` at `:169`, `ebitda = op + dep` at `:162` |
+| `tradingagents/strategies/ratios.py::compute_ratios:437` | §2 P/E, §3 EV/EBIT + EV/EBITDA, §4 P/S + EV/Sales, §5 P/B, §7 P/CF + P/FCF, §8 Basic FCF, §14 Dividend Yield | returns `ev:194`, `ev_ebitda:195`, `ev_ebit:196`, `ev_sales:197`, `price_to_earnings:198`, `price_to_book:199`, `price_to_sales:200`, `price_to_cash_flow:201`, `price_to_free_cash_flow:202`, `dividend_yield:209`, `free_cash_flow:214`; `fcf = ocf − |capex|` at `:169`, `ebitda = op + dep` at `:162` |
 | `tradingagents/strategies/dcf.py::compute_dcf:71` | §9 DCF, §10 Gordon TV, §12 CAPM cost of equity, §13 projection | projects the **latest reported** FCF at constant `g`, discounts at `wacc`, Gordon TV anchored to the last projected year, EV→equity→price |
 | `tradingagents/strategies/dcf.py::terminal_value_gordon:56` | §10 `TV = FCF_n(1+g)/(WACC−g)` | returns `inf` when `wacc ≤ g` |
 | `tradingagents/strategies/dcf.py::wacc_from_beta:28` | §12 **cost of equity only** (`rf + beta·erp`) | consumed and printed as "WACC" |
@@ -308,26 +308,26 @@ below was read this round.
 | `tradingagents/strategies/etf_valuation.py::etf_valuation:80` | §2 P/E (harmonic), forward P/E, earnings yield; §7 FCF yield; §30 valuation percentile vs own history | ETF basket aggregate |
 | `tradingagents/strategies/cross_section.py::winsorize:31` | §76 Winsorized Valuation Factors | default `0.01/0.99` |
 | `tradingagents/strategies/cross_section.py::cross_sectional_z:70` / `industry_neutral_z:89` | §29, §32, §72 | winsorise → demean (by sector) → z |
-| `tradingagents/strategies/cross_section.py::centered_rank:140` / `quantile_split:169` / `group_median:344` | §30, §73, §32 | rank / split / sector median |
+| `tradingagents/strategies/cross_section.py::centered_rank:162` / `quantile_split:169` / `group_median:344` | §30, §73, §32 | rank / split / sector median |
 | `tradingagents/strategies/factors.py::percentile_rank:59` | §30, §73 | tie-aware percentile |
 | `tradingagents/strategies/factors.py::_coverage_floor:246` + `category_scores:258` | §77 | the honest-missing-data policy (`withheld` with a reason) |
-| `tradingagents/strategies/fundamental_score.py::dcf_confidence:421` | §59-adjacent | confidence from four measured legs, product-capped |
-| `tradingagents/strategies/fundamental_score.py::valuation_subscore:211` | §2/§3/§4/§5/§7 multiples, as a 0-100 sub-score | the boundary object of §0.2 |
+| `tradingagents/strategies/fundamental_score.py::dcf_confidence:430` | §59-adjacent | confidence from four measured legs, product-capped |
+| `tradingagents/strategies/fundamental_score.py::valuation_subscore:220` | §2/§3/§4/§5/§7 multiples, as a 0-100 sub-score | the boundary object of §0.2 |
 
 ### 2.2 Tool leaves (what the model can actually call)
 
 | Leaf | Bound in | What it returns | Library section |
 | --- | --- | --- | --- |
-| `analysis_tools.py::get_dcf_valuation:2804` | `tradingagents/agents/toolsets.py::fundamentals_company_tools:458` | fair value + WACC + TV share + bridge | §9 |
-| `analysis_tools.py::get_reverse_dcf:2887` | `toolsets.py:459` | implied steady-state FCF per `g`, `crossing_g` | §27, §24 |
-| `analysis_tools.py::get_normalized_fcf_dcf:2953` | `toolsets.py:460` | capex-fade DCF + maintenance-capex floor | §13, §8 |
-| `analysis_tools.py::get_normalized_cycle_dcf:4799` | `toolsets.py:461` | mid-cycle median-FCF perpetuity + FV-basis mos | §58-adjacent |
-| `analysis_tools.py::get_scenario_dcf:3571` | `toolsets.py:462`, `toolsets.py::market_tools:330` | bear/base/bull + band + mos | §60, §65 |
-| `analysis_tools.py::get_margin_of_safety:4878` | `toolsets.py:465` | `(IV − P)/IV` against a caller-supplied intrinsic | §56 |
+| `analysis_tools.py::get_dcf_valuation:2932` | `tradingagents/agents/toolsets.py::fundamentals_company_tools:458` | fair value + WACC + TV share + bridge | §9 |
+| `analysis_tools.py::get_reverse_dcf:3019` | `toolsets.py:459` | implied steady-state FCF per `g`, `crossing_g` | §27, §24 |
+| `analysis_tools.py::get_normalized_fcf_dcf:3085` | `toolsets.py:460` | capex-fade DCF + maintenance-capex floor | §13, §8 |
+| `analysis_tools.py::get_normalized_cycle_dcf:4931` | `toolsets.py:461` | mid-cycle median-FCF perpetuity + FV-basis mos | §58-adjacent |
+| `analysis_tools.py::get_scenario_dcf:3703` | `toolsets.py:462`, `toolsets.py::market_tools:330` | bear/base/bull + band + mos | §60, §65 |
+| `analysis_tools.py::get_margin_of_safety:5010` | `toolsets.py:465` | `(IV − P)/IV` against a caller-supplied intrinsic | §56 |
 | `value_dip_tools.py::get_fcf_yield:380` | `toolsets.py:468` | TTM FCF (OCF − \|CapEx\|, newest 4 quarters) / market cap | §7 |
 | `value_dip_tools.py::get_valuation_z_score:581` | `toolsets.py:470` | z of `pe` / `ev_ebitda` / `p_fcf` vs its own history | §29, §30 |
 | `quant_formula_tools.py::get_valuation_band:279` | `toolsets.py:472` | a **conformal** band around a model fair value (gated `enable_conformal_bands`) | §58-adjacent |
-| `analysis_tools.py::get_etf_valuation:1765` | `toolsets.py::fundamentals_etf_tools:505` | ETF basket multiples + valuation percentile | §2, §7, §30 |
+| `analysis_tools.py::get_etf_valuation:1791` | `toolsets.py::fundamentals_etf_tools:505` | ETF basket multiples + valuation percentile | §2, §7, §30 |
 | `value_dip_tools.py::get_tranche_plan:178` | `toolsets.py:303` | tranche caps for a value-dip entry | — (not a valuation) |
 
 **Which are engine components vs tool leaves.** Everything in §2.1 is an engine
@@ -354,13 +354,13 @@ is the call that already fetches them. Nothing here is implemented.
 | Rank | Piece | Library § | Inputs needed | Already fetched by | Effort | Why this rank |
 | --: | --- | --- | --- | --- | --- | --- |
 | 1 | **Valuation dispersion + confidence** | §58, §59 | ≥2 intrinsic values for one name: `compute_dcf` price, `perpetuity_value(normalized_cycle_fcf)` price, `scenario_dcf` base price | all three functions are pure and already called by leaves (`get_dcf_valuation:2804`, `get_normalized_cycle_dcf:4799`, `get_scenario_dcf:3571`) — no new fetch | **S** — one pure function `dispersion(ivs) -> {mean, median, std, dispersion, confidence}` | It is the library's stated core requirement (*"valuation + uncertainty"*, `:2255-2262`), it needs **zero** new data, and it is the one thing no producer computes today |
-| 2 | **EBITDA yield / Net Debt-to-EBITDA** | §49, §53 | EBITDA, EV, net debt | `ratios.py:162` builds `ebitda = op + dep`; `ev` at `:194`; `cash`/`debt` are already in the DCF context (`analysis_tools.py::_dcf_context:2710`) | **S** — two divisions | Cheapest real gap; `net_debt` is currently only printed with an inverted sign (`analysis_tools.py:2879`) |
+| 2 | **EBITDA yield / Net Debt-to-EBITDA** | §49, §53 | EBITDA, EV, net debt | `ratios.py:162` builds `ebitda = op + dep`; `ev` at `:194`; `cash`/`debt` are already in the DCF context (`analysis_tools.py::_dcf_context:2838`) | **S** — two divisions | Cheapest real gap; `net_debt` is currently only printed with an inverted sign (`analysis_tools.py:2879`) |
 | 3 | **Coverage + floor, printed** | §77 | the VS factor panel + which factors are `NA` | `factor_schema.availability_report` and `factors._coverage_floor:246` exist | **S** — reuse, not build | The repo already has the honest policy; the engine only needs to *print* it beside the score |
-| 4 | **Peer-relative valuation z + sector-neutral rank** | §29, §32, §72, §73 | the peer panel of multiples the VS sub-score already assembles | `strategies/peer_universe.py::resolve_peer_universe`, `factors.category_scores:258`, `cross_section.industry_neutral_z:89`, `group_median:344` | **S–M** — wire an existing panel into an existing normaliser | The hardest input (a peer set) is already built for `FundamentalScore`; this turns "how cheap" into "how cheap *for this sector*" |
+| 4 | **Peer-relative valuation z + sector-neutral rank** | §29, §32, §72, §73 | the peer panel of multiples the VS sub-score already assembles | `strategies/peer_universe.py::resolve_peer_universe`, `factors.category_scores:258`, `cross_section.industry_neutral_z:111`, `group_median:344` | **S–M** — wire an existing panel into an existing normaliser | The hardest input (a peer set) is already built for `FundamentalScore`; this turns "how cheap" into "how cheap *for this sector*" |
 | 5 | **Historical premium / mean-reversion gap** | §31, §68, §84 | the name's own multiple history | `value_dip.py::valuation_z_read:122` already builds the series from the vendor's per-period tables; leaf `get_valuation_z_score:581` | **M** — same series, a ratio instead of a z, plus a partial-adjustment `α` | High value (mean reversion is the library's §68/§84 theme) and the series is already assembled |
 | 6 | **Implied expectations beyond growth** | §23, §25, §26 | WACC / revenue growth / margin that make the DCF equal price | `reverse_dcf.py` bisects on `g` only (`implied_growth_for_fcf:202`) | **M** — three more bisections on the same machinery | Turns the library's "market-implied expectations" family from ABSENT to built with one shared solver |
 | 7 | **EV/Assets, EV/Invested Capital** | §6 | total assets, invested capital | `value_dip_tools.py:498-512` already stacks `invested_capital` per year | **M** — expose an existing internal | The series exists but is consumed only as a ΔIC denominator |
-| 8 | **CAPE / Shiller P/E** | §2 | 10 years of real EPS + real price | **not fetched today**: `dataflows/sec_edgar.py` gives up to 15 years for US filers (tool at `tradingagents/agents/utils/analysis_tools.py::get_financial_history:11360`), but no CAGR/series path consumes it | **L** — a new series producer + CPI deflation | High value (the one macro-scale valuation measure with a long literature) but it is the only item here that needs a **new data path** |
+| 8 | **CAPE / Shiller P/E** | §2 | 10 years of real EPS + real price | **not fetched today**: `dataflows/sec_edgar.py` gives up to 15 years for US filers (tool at `tradingagents/agents/utils/analysis_tools.py::get_financial_history:11900`), but no CAGR/series path consumes it | **L** — a new series producer + CPI deflation | High value (the one macro-scale valuation measure with a long literature) but it is the only item here that needs a **new data path** |
 | 9 | **Owner earnings / shareholder yield / buyback yield** | §37, §46, §47 | ΔNWC; net share repurchases | `maintenance_fcf:81` gives OCF − D&A; the `share_buybacks` key has **no reader** (`FundamentalScore.md` §1.4 #3) | **M–L** — one new statement key with a reader | Needs a canonical-vocabulary addition before it can be computed |
 | 10 | **SOTP, liquidation value, NAV, replacement cost** | §39–§42 | segment-level fair values, appraisals | nothing | **L** — data does not exist in the vendor chain | Honest ABSENT; the smallest honest producer is *no producer* until a segment data source exists |
 | 11 | **Monte Carlo valuation, valuation VaR, P(IV > price)** | §61–§63 | distributions for `g`, margin, WACC | nothing | **L** — a simulation layer over the existing DCF | The library calls it *"extremely powerful"*; it is also the only item that needs a new statistical layer. Build last, after §58's dispersion proves the IV inputs are sane |
@@ -429,7 +429,7 @@ this document makes no content claim about it. Likewise the owner's library cite
 `ValuationScore` would be **one pure aggregation over the components §1 marks
 `elsewhere`/`PARTIAL`**, returning
 `{"score": 0-100, "confidence": 0-100, "components": [...], "coverage": {...}, "withheld": {...}}`
-— mirroring the shape `fundamental_score.py::fundamental_score:243` already
+— mirroring the shape `fundamental_score.py::fundamental_score:252` already
 returns, so a reader can recompute the score from the printed contributions.
 
 It would **not** be a new fetch, and it would **not** recompute a multiple that
@@ -474,7 +474,7 @@ enter the score as numbers. Each is:
 1. **winsorised** at P1/P99 across the comparison set (`cross_section.py::winsorize:31`),
 2. **z-scored** cross-sectionally or within sector (`cross_section.py::cross_sectional_z:70`, `industry_neutral_z:89`),
 3. **sign-aligned** by the factor's declared direction (`−1` for a multiple, `+1` for a yield), and
-4. **mapped to 0-100** by a tie-aware percentile (`factors.py::percentile_rank:59`, `cross_section.py::centered_rank:140`).
+4. **mapped to 0-100** by a tie-aware percentile (`factors.py::percentile_rank:59`, `cross_section.py::centered_rank:162`).
 
 So a P/E of 8 in a sector whose median is 25 becomes a *high* aligned contribution,
 and a P/E of 8 in a sector whose median is 7 becomes a *low* one. **The raw value
@@ -495,7 +495,7 @@ Adopted from the repo's existing policy, not from the library's §77 multiplicat
 2. **A coverage floor.** `factors.py::_coverage_floor:246` already implements
    "below the floor ⇒ withheld with a reason, never scored on what it lacks". The
    proposed floor is **≥3 of the engine's factor rows present** — the same floor
-   `fundamental_score.py::_subscore:107` uses for its sub-scores (`min_coverage=3`)
+   `fundamental_score.py::_subscore:116` uses for its sub-scores (`min_coverage=3`)
    — with the exact number an OPEN item (Q3).
 3. **Coverage is printed, never multiplied into the score.** The score and
    `ValuationCoverage` are two outputs (the library's own preferred form, §77's
@@ -635,7 +635,7 @@ a separate meta-score tier for exactly this kind of quantity — is
 
 **Q7 — CAPE.** §3 rank 8 needs a 10-year real-EPS series, which does not exist.
 Is SEC EDGAR XBRL history (`dataflows/sec_edgar.py`, tool at
-`analysis_tools.py::get_financial_history:11360`) the sanctioned source, as it is
+`analysis_tools.py::get_financial_history:11900`) the sanctioned source, as it is
 for the fundamental panel (`FundamentalScore.md` §0.5 Q4), or is CAPE out of scope
 for v1?
 
