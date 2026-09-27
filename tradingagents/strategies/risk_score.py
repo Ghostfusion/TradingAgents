@@ -198,10 +198,15 @@ COMPONENTS: dict[str, Component] = {
            "preopen.premarket_rvol:65", "ratio vs the 30d average"),
         # --- correlation risk (15) - pinned: largest-cluster share (proxy) -
         _c("cluster_exposure_share", "correlation", "lower_better",
-           "executor gate._correlation_stress:369 (cluster_notional / portfolio_exposure)",
+           "executor `BookState.cluster_exposure_share` "
+           "(`../TradingExecution/signald/risk/state.py`: cluster_notional / equity)",
            "share of book 0..1", convention=PIN_CORRELATION,
            note="the pinned PROXY (Q1): not a correlation coefficient and never "
-                "printed as one"),
+                "printed as one. The method returns the LARGEST cluster's share "
+                "by default and a named cluster's share on request, and it is "
+                "None - never 0 - when equity is unmeasurable or the key maps to "
+                "no position. Built 2026-09-27 (RISK-7/RISK-12); the gate's own "
+                "`_correlation_stress` still does its per-key cap arithmetic."),
         _c("book_correlated_stress", "correlation", "lower_better",
            "book_risk.book_correlated_stress:128", "loss fraction of book equity",
            note="producer already returns a POSITIVE magnitude"),

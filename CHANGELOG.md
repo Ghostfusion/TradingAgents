@@ -13,6 +13,11 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Added
+**The cluster-exposure share producer, executor side (RISK-7/RISK-12, 2026-09-27).** `risk_score.CATEGORIES` declares `cluster_exposure_share` against the board's own arithmetic — `cluster_notional / equity` — and nothing returned it, so the number stayed an externally supplied input. `../TradingExecution/signald/risk/state.py::BookState.cluster_exposure_share` (executor `a2e74c0`) is that producer: the largest cluster's share of book equity by default, a named cluster's share on request, on the same 0..1 scale as `portfolio_hhi` and never `ownership_hhi`'s 0-10000. It is the pinned PROXY, not a correlation coefficient, and returns `None` — never `0.0` — when equity is unmeasurable or the key maps to no position.
+
+- The engine's declaration now names that method and its real divisor; it previously cited `executor gate._correlation_stress:369 (cluster_notional / portfolio_exposure)`, and the divisor is equity. The gate's own per-key cap arithmetic is unchanged.
+- **Web impact: none** — an executor-side method plus one engine declaration string. No tool, flag, gate, env key or JSON shape moved.
+
 **Fifteen of `MASTER_PLAN.md` §12.1's remaining rows closed in one pass (2026-09-27).** The Phase-2 producers that were recorded as ABSENT now exist and are tested; each names its source data and refuses with a reason rather than fabricating a value.
 
 - **TECH-19 — the sector leg.** `relative_strength.relative_strength_vs_sector` measures the stock's return excess over its **sector ETF** (the owner's primary RS reference), with the benchmark reported beside it and never blended. `get_relative_strength` resolves the ticker's sector label to its SPDR ETF and prints `vs_sector_etf=` and `excess_20d=`.
