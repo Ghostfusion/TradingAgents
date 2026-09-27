@@ -95,6 +95,19 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 - **Five regression tests** (`tests/test_report_verify.py`, one per fix; suite 231 passed), including the run-card digest, the multi-leg cell, the signed net-cash line against the still-firing R2 fixture, the shared SMA label and the sibling-template repetition case.
 - **Web impact: none.** No tool, CLI flag, gate name, config key, capability or JSON shape changed; `verify_flags.json` keeps its schema.
 
+### Added
+**The MomentumScore library, and its build rows in the plan (2026-09-27).** The owner added
+`docs/scores/momentum_score.md` - 2,064 lines, 54 sections - which is the library the survey audit had
+recorded as missing: a formula catalogue (§1-§46) ending in the architecture it recommends for this
+engine (§47-§54: **eight weighted families** - price, relative, trend strength, acceleration, breakout,
+volume confirmation, quality, risk-adjusted - each normalized to 0-100, with `Conviction` (§50),
+`Dispersion` (§51), `Divergence` (§52), `Coverage` and `RegimeCompatibility` held **outside** the score,
+and §54's own warning that 50+ correlated indicators must not vote independently). `MASTER_PLAN.md`
+gains that as a row set: **`MOM-1`..`MOM-6`** in §10 (Phase 7, `D7`), plus three §12.1 status rows.
+`docs/scores/README.md` and `docs/scores/ScoreUniverse.md` said "`MomentumScore` has no library" - both
+corrected: it has the document now, and what is still missing is the *engine*. No engine was built,
+no weight changed, no gate moved.
+
 ### Changed
 **EVT-9: EventScore is a scored engine, and the panel carries its column (2026-09-27).** `event_state` returns a 0-100 `{score, band, coverage, families}`, which is what the owner's decision affirmed — so it moved out of `scripts/score_panel.py::ENGINE_NOT_SCORED` (now empty, kept as data so the old claim's reader finds the correction) and into `ENGINE_MODULES`. The registry now lists it with its declared component table and its producers, and the panel carries its column. Its factors are event-driven, so on a price/fundamentals panel they report `measured: False` **with their own reasons** rather than a number nobody measured — the engine's own 0-100 read still comes from the run's snapshot. **Web impact: none.**
 

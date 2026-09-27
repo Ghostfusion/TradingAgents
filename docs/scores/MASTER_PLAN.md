@@ -91,7 +91,7 @@ found.
 | **4** | **Contract repairs** — one number, one producer, on the report surface | 2-3 | 3-4 | 9 `WORK` | none (but each changes printed output) |
 | **5** | **Data- and vendor-blocked work** | 3-4 | 1-3 | 14 `WORK` | the named source |
 | **6** | **Owner decisions** — the gates §2 | 1-5 | 2-5 | 21 `DECISION` | none |
-| **7** | **What the decisions unlock** — new engines and new objects | 4-5 | 4-5 | 14 `WORK` | the matching decision |
+| **7** | **What the decisions unlock** — new engines and new objects | 4-5 | 4-5 | 20 `WORK` | the matching decision |
 
 Counting note: an item that spans two documents is counted once, in the phase its
 difficulty and impact put it in, with both sources named.
@@ -592,6 +592,20 @@ gates-are-outside statement). Rows still waiting on an answer: `CTS-8`/`UNIV-AGR
 (D6), `EVT-6` (D8), `FUND-11`/`FUND-12` (need the measurement layer), and
 `UNIV-NEWENGINE` (D4 settled it: not built speculatively).
 
+**D7 gained its library on 2026-09-27.** `docs/scores/momentum_score.md` (2,064 lines,
+54 sections) is the MomentumScore library the survey audit said did not exist: a
+candidate formula catalogue (§1-§46: price, academic skip-month, multi-horizon,
+acceleration, MA, breakout, volatility-adjusted, trend quality, regression, RSI, MACD,
+ROC, volume, OBV, money-flow, relative strength, breadth, z-score, residual,
+beta-adjusted, drawdown-adjusted, persistence, reversal, Bollinger, volatility breakout,
+gaps, earnings, analyst estimates, PVT, A/D, stochastic, Williams %R, ADX, DMI,
+autocorrelation, Hurst, entropy, regime-conditioned, beta/sector/industry-neutral)
+closing with the architecture it recommends for THIS engine (§47-§54: eight weighted
+families, each normalized to 0-100; `Conviction`/`Dispersion`/`Divergence`/`Coverage`/
+`RegimeCompatibility` held OUTSIDE the score; §54's own warning that 50+ correlated
+indicators must not vote independently). It is the owner's file - this plan references
+it, never restates it. Its rows are `MOM-1`..`MOM-6` in the table below.
+
 | id | Item | Depends on | D | I |
 | --- | --- | --- | --: | --: |
 | MKT-9 | Build the `MarketScore` module over the component dicts through `score_engine.combine` (no new fetch) | D1, MKT-3 | 4 | 4 |
@@ -611,6 +625,12 @@ gates-are-outside statement). Rows still waiting on an answer: `CTS-8`/`UNIV-AGR
 | TECH-22/TECH-21/TECH-13 | Per-name ADV participation; the legacy oscillators (DPO, Ultimate, Awesome, RVI, Coppock, EOM); ATR depth | — | 3 | 1-2 |
 | EVT-1 | Supply a per-family impact/severity weight vector for the 0-100 score the code emits with equal weights, **or** decide to remove the score and keep only the structured state | — | 4 | 4 |
 | EVT-6 | Intraday event-risk sizing: a separately authorised sizing input with a max-age, provenance, idempotency and fail-closed contract — or explicitly nothing | D8 | 5 | 4 |
+| MOM-1 | Build the `MomentumScore` engine module over the **eight §54 legs** (`P` price, `R` relative, `T` trend strength, `A` acceleration, `B` breakout, `V` volume confirmation, `Q` quality, `D` risk-adjusted), each a 0-100 family sub-score, composed through `score_engine.combine` — with its own gate OFF by default, `ENGINE_GATES`/`ENGINE_TOOLS` entries, a `default_config.py` key, its own doc and the five web surfaces (the `UNIV-NEWENGINE` plumbing contract) | D7 | 4 | 5 |
+| MOM-2 | The **normalization contract**: §48 (`z` → winsorize ±3σ → `50 + 16.667z`) or §49 (percentile rank), declared once for the engine — today **neither exists** as written (no `16.667` token repo-wide; `cross_section.winsorize` is quantile 0.01/0.99, not ±3σ; `score_engine.align` maps 0-100 by band/ramp edges instead) | D7, MOM-1 | 4 | 5 |
+| MOM-3 | The meta set stays **outside** the score (D6's meta layer, §50-§52): horizon `Conviction` (**no producer**: no horizon σ and no count-above-50), horizon `Dispersion` (**no producer**: `factor_dispersion.factor_score_dispersion` is cross-metric and `technical_score.technical_disagreement` cross-category, neither over `S_5`..`S_252`), family `Divergence` (**no producer**: the existing divergences are indicator-level - price/RS, price/OBV, MACD), `Coverage` (exists: `score_engine.combine:142`), `RegimeCompatibility` (**no producer** anywhere in the repo) | D6, D7 | 3 | 4 |
+| MOM-4 | The **ownership migration** D7's matrix implies, which is the one row that edits a declared owner table: `technical_score.CATEGORY_WEIGHTS` currently carries `momentum` 18.0 and `relative_strength` 12.0 (plus `trend` 20.0, `breakout` 10.0, `volume` 10.0, `volatility` 5.0 - six of the eight §54 legs live inside TechnicalScore today), and `momentum_multihorizon` is a `get_momentum_detail` line. Either the legs move under `MomentumScore` or the plan records why they stay. **Needs the owner's signature**, same class as MF-6 | D7 | 3 | 4 |
+| MOM-5 | The §54 **redundancy audit**, which is the same defect class MF-6 measures: the library names `ROC_21 ≈ R_21`, `RSI ↔ recent returns`, `MACD ↔ MA trend`, `SMA distance ↔ trend`, `OBV/PVT/CMF ↔ price-volume` as mathematically redundant. `technical_score`'s oscillators are three deep (`stoch_k`, `stoch_rsi`, `williams_r`, plus `rsi`, `rsi2`) with `williams_r` already measured ≡ `stoch_k` | §54; MF-6 | 3 | 4 |
+| MOM-6 | The §53 sub-items with **no producer at all**, each to be built or declined in writing: efficiency ratio, positive-day ratio, price-volume correlation, a 5-day return, the 50/100/252-day breakouts (`donchian_channel` takes an `n` but only 20 is ever wired), horizon agreement, and industry-relative RS (`cross_section.industry_neutral_z` demeans by a caller group and is not wired to any RS read) | MOM-1 | 3 | 3 |
 
 ---
 
@@ -705,6 +725,9 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | RLW-2 | 4 | no `_call_engine` from the block | **MET 2026-09-27** — `_call_engine` is deleted and the fallback with it: `engine_score_block` now returns `""` without a snapshot, exactly like `scorecard_context_block` and `engine_report_section`. All four analysts pass `snapshot=state.get("quant_scorecard")`, so the run path is unchanged and one prompt can no longer carry two values for one engine. The two tests that pinned the fallback were replaced by one asserting its absence |
 | NEWS-1 | 4 | the 20-weight component stops printing NA | **MET 2026-09-27** — `_news_components` supplies `materiality` from the catalyst snapshot's `implied_move` (the same figure EventScore reads, owner Q6). Live MSFT 2026-09-25: `materiality = 0.0661`, and the absent set shrank from five components to the four with no producer at all. **And it found a defect:** the surprise leg passed the snapshot DICT to `last_earnings_surprise`, which takes the vendor calendar LIST - every row was a `str`, so `earnings_surprise` could never measure (proven: `AttributeError: 'str' object has no attribute 'get'`) |
 | the two mislabelled producer strings | 4 | the strings match the producers | **MET 2026-09-27** — the `persistence` declaration cites only `sentiment.mention_volume` (the wired half) and names `news_score.news_persistence` as a DIFFERENT measure, not this component's producer; the self-contradictory note is gone. `crowd_ratio`'s string was already correct |
+| **the survey audit's `MomentumScore has no library`** | 0 | the sentence matches the tree | **CORRECTED 2026-09-27** — `docs/scores/momentum_score.md` (the owner's, 2,064 lines, 54 sections) IS that library, so the claim in `README.md` and `ScoreUniverse.md` §Q6 was false in the same way the audit was written to catch: a document presenting as open what now exists. What remains true is the *code* half - there is still no `MomentumScore` engine module, no gate and no fifth web surface, which is what `MOM-1`..`MOM-6` are |
+| **24 of 32 declared producer strings in `technical_score.COMPONENTS`** | — | the string names the symbol it says it names | **FOUND AND FIXED 2026-09-27** — every `module.func:LINE` producer citation in that file was audited against the real `def` line: 30 were stale (off by up to +111; `technical_factors.stochastic_oscillator:146` -> `:197`, `swing.rsi:39` -> `:44`, `technical_factors.adx:179` -> `:230`, `relative_strength.divergence:113` -> `:195`). These strings are the engine's printed provenance, so a stale one names the wrong line to every reader. Same defect class as D-9's mislabelled strings, fixed on sight per the standing rule; 39 of 39 resolvable citations now match, `tests/test_technical_score.py`/`test_engine_ownership_map.py` green |
+| **the momentum wiring gaps** | — | each producer reachable, or its reason | **FOUND 2026-09-27** (the momentum inventory behind `MOM-1`..`MOM-6`): `technical_score.technical_acceleration` (TECH-23) has **no leaf consumer**; `momentum_multihorizon` returns an unweighted mean over 21/63/126/252 - **no 5-day horizon and no skip-month**, while §2/§3 of the new library prescribe both; the cross-sectional percentile (`factors.percentile_rank`) is bound to no momentum family; `squeeze_momentum` and `spectral_excess_mass` are test-only. Recorded as rows rather than fixed, because where each belongs depends on `MOM-1`'s shape |
 
 **Phase 0's two residual nits** (outside the rows §3 names): `CompositeTradeScore.md:240` still reads
 "the N-deflation question is open (decision 12)" with no marker — the same dangling reference §3.1

@@ -446,8 +446,12 @@ thing that does not exist; nothing here is an estimate of effort.
   plumbing is NOT built speculatively.** The orthogonality measurement is a
   Phase 3 (panel) row, since it is a correlation like every other one.]**
 * **Q6 — `MomentumScore`.** It is one of the survey's nine *core* engines and has
-  no library, while `MarketScore` — which has a library — is not one of the 24
-  names. Which one is the core slot for the stock's own market behaviour?
+  no engine module, while `MarketScore` — which has a library — is not one of the 24
+  names. **[CORRECTED 2026-09-27: the first half of that is no longer true in the
+  document sense — the owner's `momentum_score.md` (54 sections) is now the
+  MomentumScore library, and its §47-§54 architecture is what `MASTER_PLAN.md` §10's
+  new `MOM-1`..`MOM-6` rows build. The code half stands: no module, no gate, no
+  fifth web surface.]** Which one is the core slot for the stock's own market behaviour?
   **[ANSWERED 2026-09-26: `MomentumScore`.** *"Momentum is a characteristic of the
   security's own return behavior"*, while `MarketScore` describes the **broader
   market's** behaviour — so the core slot is `MomentumScore`, and `MarketScore`

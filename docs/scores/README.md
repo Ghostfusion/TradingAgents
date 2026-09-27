@@ -89,7 +89,11 @@ named systems in total.** The same correction applies to the sentence below that
 read "Twenty of the 24 named systems have no spec, no library and no code":
 **exactly 8 of the 24 share a name with a specified library** (fundamental,
 valuation, technical, regime, risk, news, sentiment, event), `MomentumScore` has
-no library, the library `MarketScore` is *not* one of the 24 names, and none of
+no *engine* - **[CORRECTED 2026-09-27: it gained its library on 2026-09-27
+(`momentum_score.md`, 54 sections, ending in the eight-family architecture §54
+recommends and §50-§52's Conviction/Dispersion/Divergence outside the score), so
+the missing half is the code, not the document]** - the library `MarketScore` is
+*not* one of the 24 names, and none of
 the 11 secondary or 4 meta names has a library - though three of the meta names
 have a nearest producer (`strategies/data_quality.py::aggregate_quality:46`,
 `strategies/consensus.py::agreement_score:14`,
