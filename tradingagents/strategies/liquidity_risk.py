@@ -202,6 +202,59 @@ def portfolio_hhi(weights: dict | list | None) -> float | None:
     return round(sum(v * v for v in vals), 6)
 
 
+def revenue_concentration(shares) -> dict | None:
+    """Revenue-share HHI for ONE vendor dimension (RISK-19; §50 and §51).
+
+    The library states the same statistic twice - ``RC = sum_i
+    RevenueShare_i^2`` (§50, revenue segments) and ``GeoHHI = sum_g
+    RevenueShare_g^2`` (§51, geographies) - over two decompositions of ONE
+    total, so this measures the shares it is handed and names no dimension
+    itself. Pass the shares of a single dimension (the vendor's per-dimension
+    ``ratio`` column): a three-way region split must never be pooled with a
+    four-way business split, which is exactly the merge the revenue-breakdown
+    leaf used to make (MSFT FY2026: REGION and BUSINESS each decompose the same
+    $331.8B).
+
+    Shares arrive as **fractions** (0..1) and are normalized to their own sum,
+    so a partial breakdown cannot silently depress the index; negative and
+    non-finite entries are ignored. The scale is therefore **sum of squared
+    fractions, 1/n .. 1** - the :func:`portfolio_hhi` scale, and NOT
+    :func:`ownership_hhi`'s percent scale (0-10000). The two differ by 10^4
+    (RiskScore §8.3 d4) and must never be printed as each other.
+
+    Returns ``{"hhi", "effective_n", "n", "scale", "basis"}`` - ``1/n`` is
+    maximal dispersion, ``1`` a single segment. ``None`` - never ``0`` - when
+    no positive finite share is present.
+    """
+    import math as _math
+
+    vals: list[float] = []
+    for s in shares or []:
+        try:
+            f = float(s)
+        except (TypeError, ValueError):
+            continue
+        if _math.isfinite(f) and f > 0.0:
+            vals.append(f)
+    if not vals:
+        return None
+    total = sum(vals)
+    if total <= 0.0:
+        return None
+    fracs = [v / total for v in vals]
+    hhi = sum(f * f for f in fracs)
+    return {
+        "hhi": round(hhi, 6),
+        "effective_n": round(1.0 / hhi, 3) if hhi > 0 else None,
+        "n": len(vals),
+        "scale": "sum of squared shares (fraction), 1/n .. 1",
+        "basis": (
+            f"HHI over {len(vals)} revenue shares normalized to their own sum; "
+            "the portfolio_hhi scale (0-1), NOT the 0-10000 holder HHI"
+        ),
+    }
+
+
 def liquidity_verdict(
     illiq: float | None,
     float_turnover: float | None,

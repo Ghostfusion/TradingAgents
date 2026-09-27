@@ -106,8 +106,8 @@ RiskScore: the owner's staged weights, in one direction (100 = low risk / favour
 | — ES (executor) sub-factor | — | SCORABLE | `tail.es_estimate:145`; `tail.es_historical:97`; `tail.es_parametric:117`; `tail.es_stress:125` | `BookState.es_pct` | loss | **fraction of equity** (ESResult.value_pct) | third unit for the same idea |
 | — min-CVaR book sizing sub-factor | — | SCORABLE | `book_risk.min_cvar_weights:756` | `weights`/`cvar` (**positive** at 713) | sizing (advisory) | weights sum 1; cvar positive loss fraction | sign flips vs `cvar:18`; unwired unless `enable_book_risk_sizing` |
 | **Liquidity risk** | 10 | SCORABLE | `liquidity_risk.amihud_illiquidity:71`; `float_turnover:53`; `free_float_factor:34`; `days_to_absorb:103`; `spread_estimate:442`; `kyle_lambda:262`; `roll_spread:309` | tool text (`get_liquidity_risk:361`, `get_spread_estimate:73`, `get_liquidation_days:6524`) | risk-increasing (higher = worse; verdict ILLIQUID = bad) | ILLIQ per-$; turnover/day; IWF ratio; days; spread fraction | verdict is 3-valued, not numeric |
-| — liquidity caution sub-factor | — | SCORABLE | `liquidity_risk.liquidity_verdict:205` | `verdict` = liquid/caution/illiquid + `dangers` | caution/illiquid = risk-increasing | ordinal label | consumed by `risk_governor.govern` liquidity gate (opt-in) |
-| — price-impact / slippage sub-factors | — | SCORABLE | `liquidity_risk.volume_share_slippage:272`; `market_impact_slippage:243` | per-share cost | risk-increasing | price units | — |
+| — liquidity caution sub-factor | — | SCORABLE | `liquidity_risk.liquidity_verdict:258` | `verdict` = liquid/caution/illiquid + `dangers` | caution/illiquid = risk-increasing | ordinal label | consumed by `risk_governor.govern` liquidity gate (opt-in) |
+| — price-impact / slippage sub-factors | — | SCORABLE | `liquidity_risk.volume_share_slippage:325`; `market_impact_slippage:243` | per-share cost | risk-increasing | price units | — |
 | **Gap risk** | 10 | PARTIAL | `market_session.gap_type:220` | `{type, gap_pct, fill_probability, days_to_fill}` | gap = risk-increasing; fill_prob semantics inverted-ish | gap_pct fraction; fill_prob 0..1; days int | **fill_prob/days are hardcoded constants** (§3.2); `type` is a heuristic label |
 | — pre-market gap read sub-factor | — | SCORABLE | `pre_market.premarket_gap:40` | `{gap_pct, gap_atr, through_stop, vacuum_to_stop, direction}` | through_stop = strongest reject | fraction; gap_atr in ATR units | **no fill probability / days-to-fill at all** |
 | — live pre-open gap sub-factor | — | SCORABLE | `preopen.preopen_gap:129`; `preopen.premarket_rvol:65` | `gap_pct`, `rvol` | risk-increasing | fraction / ratio | separate adapter from `gap_type`; not the same number |
@@ -375,10 +375,10 @@ since the doc's §1/§3 were written, the *current* line is cited.
 | 14 | Leverage risk | 8 | **elsewhere** | flip | `ratios.py::compute_ratios:437` (`debt_to_equity`), owned by `fundamental_score.py::risk_subscore:230` (FRS) — `factor_schema.py::SUBSCORE_FACTORS:497` puts `debt_to_equity` in FRS. Not a RiskScore category |
 | 15 | Financial distress risk | 7 | **elsewhere** | flip | `dataflows/quantitative_scores.py::altman_z_score:181`; `normalized.py::ohlson_o_score:157`, `zmijewski_score:217`; `credit_spread.py::default_probability:185` — `z`/`o`/`zmijewski_x` are FRS's (`SUBSCORE_FACTORS:399`) |
 | 16 | Merton structural credit risk | 1 | built | flip | `credit_spread.py::merton_distance_to_default:104` |
-| 17 | Credit-spread risk | 3 | built | flip | `credit_spread.py::credit_stress_level:44`, `hazard_from_spread:84`; `statistical.py::spread_zscore:393` |
+| 17 | Credit-spread risk | 3 | built | flip | `credit_spread.py::credit_stress_level:44`, `hazard_from_spread:84`; `statistical.py::spread_zscore:479` |
 | 18 | Earnings/event risk | 5 | built | flip | `catalyst.py::build_catalyst_snapshot:246`, `implied_move_from_history:111`; `events.py::surprise_score:17`, `catalyst_risk_penalty:63` |
 | 19 | Options-implied risk | 8 | built | flip | `options_surface.py::iv_percentile:15`, `iv_skew:25`, `volatility_risk_premium:140`, `put_call_oi_concentration:34`, `implied_move_pct:42`; `options_math.py::implied_vol_and_greeks:119` |
-| 20 | Market-regime risk | 4 | **elsewhere** | flip | **RegimeScore owns it**: `regime_score.py::RAMPS:91` (`vix_percentile`, `vix_term_structure`, `realized_vol_percentile`), leaf `analysis_tools.py::_vix_percentile_read:9397`; `regime_score.py::vix_term_structure:408`; `regime_state.py::regime_vol_ratio:92`. Library §20.4 itself says it "should feed RegimeScore and RiskScore separately" |
+| 20 | Market-regime risk | 4 | **elsewhere** | flip | **RegimeScore owns it**: `regime_score.py::RAMPS:91` (`vix_percentile`, `vix_term_structure`, `realized_vol_percentile`), leaf `analysis_tools.py::_vix_percentile_read:9449`; `regime_score.py::vix_term_structure:408`; `regime_state.py::regime_vol_ratio:92`. Library §20.4 itself says it "should feed RegimeScore and RiskScore separately" |
 | 21 | Systematic risk | 4 | built | flip | `statistical.py::capm_decomposition:328`; `evaluate.py::alpha:920`, `tracking_error:869`, `information_ratio:892` |
 | 22 | Factor risk | 4 | built | flip | `factors.py::fama_french_5_factor:518`; `statistical.py::ols_factors:353`, `variance_inflation_factor:570` |
 | 23 | Momentum crash risk | 2 | PARTIAL | flip | `factors.py::momentum:24`; `momentum.py::momentum_12_1:358`; `knife_guard.py::momentum_return_z:78`, `drawdown_3d_z:135`. **Gap:** the §23 reversal `R_short - R_long` leg |
@@ -391,8 +391,8 @@ since the doc's §1/§3 were written, the *current* line is cited.
 | 30 | Portfolio VaR | 1 | built | flip | `book_risk.py::_book_var:259`; `book_risk.py::var_cvar_horizon:386` |
 | 31 | Portfolio CVaR | 1 | built | flip | `book_risk.py::portfolio_cvar:61` |
 | 32 | Stress testing | 2 | built | flip | `book_risk.py::stress_loss:143`, `book_correlated_stress:146`; executor `signald/risk/tail.py::StressGrid:41` |
-| 33 | Monte Carlo risk | 2 | built | flip | `book_risk.py::copula_scenarios:912`; `conformal.py::block_bootstrap_interval:409`. **Gap:** §33's probability-of-hitting-stop and expected-terminal-loss legs |
-| 34 | Probability of loss | 2 | PARTIAL | flip | `evaluate.py::expectancy_stats:1185` (`win_rate`); `size.py::risk_of_ruin:240`. **Gap:** a return-series `P(R<0)` producer |
+| 33 | Monte Carlo risk | 2 | built | flip | `book_risk.py::copula_scenarios:912`; `conformal.py::block_bootstrap_interval:409`. **Stop-hit leg built 2026-09-27:** `book_risk.py::stop_hit_probability` measures the running-minimum breach over overlapping `horizon`-bar paths (the copula route needs two or more names), and `get_tail_risk` prints it as `stop_hit_1m` against the repo's own 2xATR stop. **Gap:** the expected-terminal-loss leg |
+| 34 | Probability of loss | 2 | built | flip | `book_risk.py::prob_loss` (the return-series `P(R < threshold)`, printed as `p_loss` by `get_tail_risk`); `evaluate.py::expectancy_stats:1185` (`win_rate`); `size.py::risk_of_ruin:240`. [CORRECTED 2026-09-27: the `P(R<0)` producer shipped, so this row's gap was stale] |
 | 35 | Expected loss | 1 | built | flip | `evaluate.py::expectancy_stats:1185` (`expectancy`, `avg_loss`) |
 | 36 | Expected downside | 1 | built | flip | `volatility_models.py::semivariance:68`; `evaluate.py::expectancy_stats:1185` |
 | 37 | Risk/reward | 1 | built | flip | `evaluate.py::expectancy_stats:1185` (`profit_factor`, `tail_ratio`) |
@@ -401,18 +401,18 @@ since the doc's §1/§3 were written, the *current* line is cited.
 | 40 | Position sizing risk | 3 | built | **size** | `risk_sizing.py::risk_money:53`, `risk_quantity:88`; `size.py::composite_position_size:70` |
 | 41 | Stop-loss risk | 2 | built | **size** | `risk_sizing.py::risk_points:20`; `size.py::stop_loss_atr:162` |
 | 42 | Liquidity-adjusted position risk | 1 | built | flip | `liquidity_risk.py::days_to_absorb:103` |
-| 43 | Market-impact-adjusted risk | 2 | built | flip | `liquidity_risk.py::market_impact_slippage:295`; `evaluate.py::implementation_shortfall:1367` |
-| 44 | Slippage risk | 3 | built | flip | `liquidity_risk.py::volume_share_slippage:272`, `spread_estimate:442`; `evaluate.py::implementation_shortfall:1367` |
+| 43 | Market-impact-adjusted risk | 2 | built | flip | `liquidity_risk.py::market_impact_slippage:348`; `evaluate.py::implementation_shortfall:1367` |
+| 44 | Slippage risk | 3 | built | flip | `liquidity_risk.py::volume_share_slippage:325`, `spread_estimate:442`; `evaluate.py::implementation_shortfall:1367` |
 | 45 | Short-interest risk | 2 | built | flip | `short_interest.py::short_interest_percentile:35`; `dataflows/massive.py::get_short_interest_massive:485` |
 | 46 | Insider / ownership concentration risk | 2 | built | flip | `liquidity_risk.py::ownership_hhi:130` (holder HHI, 0-10000); `liquidity_risk.py::free_float_factor:34` |
 | 47 | Bankruptcy / solvency risk | 3 | **elsewhere** | flip | `ratios.py::compute_ratios:437` (`current`, `quick`), owned by FRS (`SUBSCORE_FACTORS:399`). RiskScore's `portfolio_hhi` is position concentration, not solvency |
-| 48 | Cash-burn risk | 2 | **ABSENT** | flip | zero hits for `cash_runway` / `cash_burn`; **smallest honest producer**: an FCF leg in `ratios.py::compute_ratios:437` |
+| 48 | Cash-burn risk | 2 | **built 2026-09-27** | flip | `ratios.py::compute_ratios` now returns `cash_runway_years` (Cash / \|FCF<0\|) and `fcf_deterioration` (the library's CFD over the canonical FCF series); `get_ratios` renders both |
 | 49 | Earnings-quality risk | 1 | **elsewhere** | flip | `normalized.py::accruals_ratio:62`; `earnings_quality.py::dechow_dichev_aq:118`. `accruals` is FQS's (`SUBSCORE_FACTORS:399`) — FundamentalScore owns it |
-| 50 | Revenue concentration risk | 1 | **ABSENT** | flip | zero hits for `revenue_share`; no segment-revenue store; **smallest honest producer**: an HHI over segment revenue in `ratios.py` |
-| 51 | Geographic concentration | 1 | **ABSENT** | flip | zero hits; the same missing segment store |
-| 52 | Currency risk | 2 | **ABSENT** | flip | no FX-exposure or FX-VaR producer. `dataflows/fx.py::get_fx_snapshot:24` is a **data source** (`agents/utils/analysis_tools.py::get_fx_snapshot:11966`), not an exposure producer |
+| 50 | Revenue concentration risk | 1 | **built 2026-09-27** | flip | `liquidity_risk.py::revenue_concentration` — the HHI over ONE vendor dimension's shares, on the `portfolio_hhi` 0-1 scale (`1/n` .. `1`), never `ownership_hhi`'s 0-10000; `moomoo.get_revenue_breakdown_moomoo` prints it per dimension |
+| 51 | Geographic concentration | 1 | **built 2026-09-27** | flip | the same producer fed the `REGION` dimension — the vendor returns it as its own group (MSFT FY2026: HHI 0.500, effective N 2.0, vs BUSINESS 0.377 / 2.7) |
+| 52 | Currency risk | 2 | **PARTIAL 2026-09-27** | flip | `book_risk.py::fx_move_var` — the library's `FXVol × z_c` **per unit of position** (daily sigma of FRED `DTWEXBGS`, z = 1.645), printed by `get_fx_snapshot`; multiply by the notional. The balance-sheet `FXExposure` stays `book_risk.py::_fx_exposure` (private): no vendor in the chain returns a currency split of assets/liabilities |
 | 53 | Interest-rate risk | 3 | PARTIAL | flip | `fixed_income.py::macaulay_duration:69`, `modified_duration:103`, `bond_convexity:141` — bond duration, **not** an equity rate beta |
-| 54 | Commodity/input-cost risk | 1 | **ABSENT** | flip | no commodity-beta producer; `sector_drivers.py:53` maps sectors to commodity drivers; **smallest honest producer**: `statistical.py::ols_factors:353` with a commodity series |
+| 54 | Commodity/input-cost risk | 1 | **built 2026-09-27** | flip | `statistical.py::commodity_beta` — the §54 OLS beta fitted on the dates the asset and its mapped driver SHARE (≥20 returns, so a monthly driver refuses instead of tail-aligning); `get_sector_rotation_screen` prints it in the driver table's `beta` column |
 | 55 | Event concentration | 1 | built | flip | `catalyst.py::build_catalyst_snapshot:246`; `events.py::position_mult_by_side:37`; engine rows `catalyst_scale` / `event_hard_block` (`risk_score.py::COMPONENTS`) |
 | 56 | Risk-adjusted momentum | 2 | built | no flip | `factors.py::vol_adjusted_momentum:46`; `factors.py::momentum:24` |
 | 57 | Volatility-adjusted return | 1 | built | no flip | `factors.py::vol_adjusted_momentum:46` |
@@ -426,7 +426,7 @@ since the doc's §1/§3 were written, the *current* line is cited.
 | 65 | Hard risk gate | 1 | built | flip | `risk_governor.py::govern:40`; `book_risk.py::drawdown_gate:212`; `GATE_PRECEDENCE` (`../TradingExecution/signald/contracts.py:42`) |
 | 66 | Risk regime multiplier | 3 | built | flip | `regime_state.py::vol_cap_factor:169`, `regime_factor:191`; `risk_multiplier.py::combine:37`; `credit_spread.py::credit_stress_level:44` (`scale`) |
 | 67 | Correlation-adjusted risk | 1 | PARTIAL | flip | `covariance_models.py::ledoit_wolf_shrink:81`; `portfolio.py::correlation_penalty:274`. **Gap:** the `λ Σ_{i≠j} w_i w_j ρ_ij σ_i σ_j` term |
-| 68 | Liquidity-adjusted CVaR | 1 | **ABSENT** | flip | zero hits for `cvar_adj` / `liquidity_adjusted`; **smallest honest producer**: `book_risk.py::cvar:18` + `liquidity_risk.py::market_impact_slippage:295` summed in the tail leg |
+| 68 | Liquidity-adjusted CVaR | 1 | **ABSENT** | flip | zero hits for `cvar_adj` / `liquidity_adjusted`; **smallest honest producer**: `book_risk.py::cvar:18` + `liquidity_risk.py::market_impact_slippage:348` summed in the tail leg |
 | 69 | Total economic risk | 7 | PARTIAL | flip | `risk_score.py::risk_score:516` is the composite — over the owner's **eight** categories, not the library's six-bucket sum; the library's own §61 forbids the raw sum (§8.3 d7) |
 | 70 | Suggested architecture for your RiskScore engine | 2 | PARTIAL | flip | the library recommends ~10 factors; the engine ships the owner's eight (`risk_score.py::CATEGORY_WEIGHTS:58`) with equal weights inside each category (`category_score:491`) |
 | 71 | The most important distinction for your system | 0 | built | neutral | score ≠ gate: `risk_score.py::STATUS_ADVISORY:328`; `risk_governor.py::govern:40`; `GATE_PRECEDENCE` (`contracts.py:42`); the engine never imports `SCORE_BANDS` (`risk_score.py` docstring rule 6) |
@@ -440,15 +440,15 @@ defect in the engine; each is a quantity the library specifies and no module
 computes. [CORRECTED 2026-09-26 (audit): **the closing clause is stale for nine of
 the rows below** — Phases 1-2 built the quantity, and only §8.1's status column and
 this backlog table were never re-read. Built and tested since: §2.4/§2.5 σ20/σ60
-(`book_risk.py::volatility_window_ratio:1489`), §3.3/§3.4 downside/upside beta
+(`book_risk.py::volatility_window_ratio:1633`), §3.3/§3.4 downside/upside beta
 (`strategies/regime.py::upside_downside_beta:1871`), §6.4 Sterling
-(`book_risk.py::sterling_ratio:1547`), §9.4/§9.5 and §10 the loss-frequency family
-(`book_risk.py::loss_frequency_family:1582`), §23 momentum reversal
-(`book_risk.py::momentum_reversal:1666`), §34 `P(R<0)`
+(`book_risk.py::sterling_ratio:1691`), §9.4/§9.5 and §10 the loss-frequency family
+(`book_risk.py::loss_frequency_family:1726`), §23 momentum reversal
+(`book_risk.py::momentum_reversal:1810`), §34 `P(R<0)`
 (`book_risk.py::prob_loss:1464`), §58 tail-adjusted return
-(`book_risk.py::_tail_adjusted_return:1697`), §63 the nonlinear penalty
-(`book_risk.py::_nonlinear_risk_penalty:1825`) and §68 liquidity-adjusted CVaR
-(`book_risk.py::_liquidity_adjusted_cvar:1732`) — each exercised in
+(`book_risk.py::_tail_adjusted_return:1841`), §63 the nonlinear penalty
+(`book_risk.py::_nonlinear_risk_penalty:1969`) and §68 liquidity-adjusted CVaR
+(`book_risk.py::_liquidity_adjusted_cvar:1876`) — each exercised in
 `tests/test_risk_scalars.py`, and the last three stay underscore-private awaiting a
 leaf that holds both inputs. Still genuinely ABSENT, and named as such here: §33
 stop-hit probability, §48 cash runway, §50/§51 segment concentration, §52 FX
@@ -464,15 +464,15 @@ segment-revenue store).]
 | §9.4-§9.5 | extreme-loss and crash frequency | a count over the `book_risk.py::simple_var:9` threshold |
 | §10.1-§10.4 | downside frequency, large-loss frequency, average loss, worst loss | a counter beside `evaluate.py::downside_deviation:846` |
 | §23 | momentum reversal `R_short - R_long` | `momentum.py::momentum_12_1:358` at two horizons |
-| §33 | probability of hitting a stop; expected terminal loss | `book_risk.py::copula_scenarios:912` + a stop-path check |
+| §33 | probability of hitting a stop **→ built 2026-09-27** (`book_risk.py::stop_hit_probability`: the running-minimum breach over overlapping `horizon`-bar paths; printed by `get_tail_risk` against the repo's 2xATR stop); expected terminal loss still open | `book_risk.py::copula_scenarios:912` + a stop-path check |
 | §34 | return-series `P(R < 0)` | a count in `evaluate.py` beside `downside_deviation:846` |
-| §48 | cash runway; cash-flow deterioration | an FCF leg in `ratios.py::compute_ratios:437` |
-| §50-§51 | revenue and geographic concentration (HHI over segment revenue) | the `liquidity_risk.py::ownership_hhi:130` formula over a segment-revenue store that does not exist |
-| §52 | FX exposure / FX VaR | `dataflows/fx.py::get_fx_snapshot:24` fetches; nothing converts it to an exposure |
-| §54 | commodity beta | `statistical.py::ols_factors:353` with a commodity series |
+| §48 | cash runway **→ built 2026-09-27** (`ratios.py::compute_ratios` keys `cash_runway_years`); cash-flow deterioration **→ built** (the same call's `fcf_deterioration`) | an FCF leg in `ratios.py::compute_ratios:437` |
+| §50-§51 | revenue and geographic concentration **→ built 2026-09-27** (`liquidity_risk.py::revenue_concentration`, one vendor dimension at a time, on the `portfolio_hhi` 0-1 scale — NOT `ownership_hhi`'s 0-10000; the segment-revenue "store" turned out to be the moomoo leaf itself, once it stopped merging dimensions) | the `liquidity_risk.py::ownership_hhi:130` formula over a segment-revenue store that does not exist |
+| §52 | FX VaR **→ built as the per-unit factor** (`book_risk.py::fx_move_var`, FRED `DTWEXBGS` daily sigma × z; printed by `get_fx_snapshot`); FX exposure still open — `book_risk.py::_fx_exposure` is private because no vendor returns a currency split | `dataflows/fx.py::get_fx_snapshot:24` fetches; nothing converts it to an exposure |
+| §54 | commodity beta **→ built 2026-09-27** (`statistical.py::commodity_beta`: the OLS slope on the dates the asset and its mapped driver share) | `statistical.py::ols_factors:353` with a commodity series |
 | §58 | tail-adjusted return (`ExpectedReturn / CVaR`) | `evaluate.py::total_return:53` over `book_risk.py::cvar:18` |
 | §63 | nonlinear penalty `x ** γ`, γ > 1 | a `gamma` exponent inside `score_engine.py::align:69` |
-| §68 | liquidity-adjusted CVaR (`CVaR + ExecutionCost_tail`) | `book_risk.py::cvar:18` + `liquidity_risk.py::market_impact_slippage:295` |
+| §68 | liquidity-adjusted CVaR (`CVaR + ExecutionCost_tail`) | `book_risk.py::cvar:18` + `liquidity_risk.py::market_impact_slippage:348` |
 
 **Five sections are not this engine's to build.** §14 leverage, §15 distress,
 §47 solvency and §49 accruals are `FundamentalScore`'s — FRS owns

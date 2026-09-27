@@ -608,6 +608,42 @@ class MoomooSdkHandlingTests(unittest.TestCase):
         self.assertIn("iPhone", out)
         self.assertIn("Services", out)
 
+    def test_revenue_breakdown_prints_the_dimension_hhi(self):
+        # RISK-19 (§50/§51): the REGION split is 0.5147^2 + 0.4853^2 = 0.5004 on
+        # the portfolio_hhi scale - about 5004 on the holder HHI's percent
+        # scale, which is the mix-up the printed label exists to forbid.
+        data = {
+            "period": "2026/FY",
+            "currency_code": "USD",
+            "breakdown_list": [
+                {
+                    "type": "REGION",
+                    "item_list": [
+                        {
+                            "name": "United States",
+                            "main_oper_income": 1.70794e11,
+                            "ratio": 51.4689,
+                        },
+                        {
+                            "name": "Other countries",
+                            "main_oper_income": 1.61045e11,
+                            "ratio": 48.531,
+                        },
+                    ],
+                },
+            ],
+        }
+        ctx = mock.Mock()
+        ctx.get_financials_revenue_breakdown.return_value = (RET_OK, data)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.MSFT"),
+        ):
+            out = moomoo.get_revenue_breakdown_moomoo("MSFT")
+        self.assertIn("revenue HHI 0.500", out)
+        self.assertIn("effective N 2.0", out)
+        self.assertIn("NOT the 0-10000 holder HHI", out)
+
     def test_corporate_actions_formats_dividends(self):
         div = {"dividend_list": [{"statement": "Cash Dividend: 0.27 USD", "ex_date": "08/10/2026"}]}
         ctx = mock.Mock()

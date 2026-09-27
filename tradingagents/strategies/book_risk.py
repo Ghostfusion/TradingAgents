@@ -1486,6 +1486,150 @@ def prob_loss(returns: list, threshold: float = 0.0) -> float | None:
     return round(sum(1 for v in vals if v < t) / len(vals), 6)
 
 
+def stop_hit_probability(
+    returns: list,
+    stop_pct: float,
+    horizon: int = 21,
+) -> dict | None:
+    """``P(the path breaches -stop_pct within `horizon` bars)`` — RISK-16 (§33).
+
+    The library's ``probability of hitting stop`` is specified only as a Monte
+    Carlo path output (``Strategies/scores/risk_score.md`` §33), beside the
+    ``StopRisk = |Entry - Stop| / Entry`` distance (§41). This measures the same
+    event on the series it is handed, with no distributional assumption: every
+    ``horizon``-bar window of ``returns`` is compounded along the library's own
+    path (``P_T = P_0 * prod(1 + R_t)``) and counts as a hit when its **running
+    minimum** breaches the stop - a path that dips and recovers has still hit
+    it, which a terminal-value test would miss. ``copula_scenarios:912`` is the
+    library's other route and refuses fewer than two names, so it cannot answer
+    a single-name read; this can.
+
+    Returns ``{"p_hit", "hits", "n_windows", "horizon", "stop_pct", "basis"}``.
+    ``None`` - never ``0`` - when the series has fewer than ``horizon``
+    observations (not one window's worth), ``horizon`` is below 1, or
+    ``stop_pct`` is not a positive finite number. A real ``0.0`` means the
+    windows were measured and none breached. The windows **overlap**, so
+    ``n_windows`` is not an independent sample count; ``basis`` says so.
+    """
+    vals = _finite_series(returns)
+    try:
+        h = int(horizon)
+        stop = float(stop_pct)
+    except (TypeError, ValueError):
+        return None
+    if h < 1 or not math.isfinite(stop) or stop <= 0.0:
+        return None
+    if len(vals) < h:
+        return None
+    n_windows = len(vals) - h + 1
+    hits = 0
+    for i in range(n_windows):
+        path = 1.0
+        worst = 0.0
+        for r in vals[i : i + h]:
+            path *= 1.0 + r
+            worst = min(worst, path - 1.0)
+        if worst <= -stop:
+            hits += 1
+    return {
+        "p_hit": round(hits / n_windows, 6),
+        "hits": hits,
+        "n_windows": n_windows,
+        "horizon": h,
+        "stop_pct": stop,
+        "basis": (
+            f"empirical running-minimum breach at -{stop:.2%} over {h}-bar compounded "
+            f"paths; {n_windows} overlapping windows of {len(vals)} returns"
+        ),
+    }
+
+
+def fx_move_var(
+    fx_levels: list,
+    *,
+    z_c: float = 1.645,
+    horizon: int = 1,
+) -> dict | None:
+    """``FXVaR = Position * FXVol * z_c``, per unit of position — RISK-20 (§52).
+
+    The library's currency section (§52) states ``FXVaR = Position × FXVol ×
+    z_c`` beside the balance-sheet ``FXExposure``. This computes the **per-unit
+    factor** (``FXVol × z_c × sqrt(horizon)``) from an FX level series, so a
+    caller multiplies it by whatever notional it holds - the ``Position`` leg is
+    the book's, not this module's.
+
+    ``FXVol`` is the sample standard deviation of the series' **daily log
+    returns**, deliberately NOT annualized: the horizon is stated in days and
+    the two must not be mixed. ``z_c`` defaults to 1.645, the one-sided 95%
+    normal quantile. Returns ``{"var_pct", "vol_daily", "z_c", "horizon", "n",
+    "basis"}``; ``None`` - never ``0`` - below three finite levels, fewer than
+    two usable returns, a non-positive or non-finite ``z_c``, ``horizon < 1``,
+    or a zero variance.
+    """
+    vals = _finite_series(fx_levels)
+    try:
+        z = float(z_c)
+        h = int(horizon)
+    except (TypeError, ValueError):
+        return None
+    if len(vals) < 3 or not math.isfinite(z) or z <= 0.0 or h < 1:
+        return None
+    rets = [
+        math.log(vals[i] / vals[i - 1])
+        for i in range(1, len(vals))
+        if vals[i - 1] > 0.0 and vals[i] > 0.0
+    ]
+    if len(rets) < 2:
+        return None
+    vol = _window_vol(rets, 1.0)  # periods_per_year=1 -> a raw daily stdev
+    if vol is None or vol <= 0.0:
+        return None
+    var = vol * z * math.sqrt(h)
+    return {
+        "var_pct": round(var, 6),
+        "vol_daily": round(vol, 6),
+        "z_c": z,
+        "horizon": h,
+        "n": len(rets),
+        "basis": (
+            f"daily log-return sigma over {len(rets)} observations, z={z}, "
+            f"horizon={h} day(s) - a FRACTION of the position, not the position's VaR"
+        ),
+    }
+
+
+def _fx_exposure(
+    fx_assets: float | None,
+    fx_liabilities: float | None,
+    total_assets: float | None,
+) -> dict | None:
+    """``(FX assets - FX liabilities) / TotalAssets`` — RISK-20 (§52).
+
+    PRIVATE, awaiting its caller: **no vendor in the chain returns a
+    foreign-currency asset/liability split**. ``statement_parsing`` carries a
+    reporting-currency tag (which makes the USD-only metrics refuse to mix
+    currencies), not a breakdown by currency, and the balance-sheet vendors
+    report one consolidated column. The library's formula is kept here so the
+    row's producer exists and cannot be re-derived inconsistently once a source
+    arrives; :func:`fx_move_var` is the leg that IS measurable today.
+    """
+    try:
+        fa = float(fx_assets)  # type: ignore[arg-type]
+        fl = float(fx_liabilities)  # type: ignore[arg-type]
+        ta = float(total_assets)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (fa, fl, ta)) or ta <= 0.0:
+        return None
+    return {
+        "exposure": (fa - fl) / ta,
+        "fx_assets": fa,
+        "fx_liabilities": fl,
+        "total_assets": ta,
+        "basis": "net foreign-currency position over total assets (library §52)",
+    }
+
+
 def volatility_window_ratio(
     returns: list,
     short: int = 20,
@@ -1869,4 +2013,5 @@ __all__ = ["simple_var", "cvar", "normalize_book_weights", "portfolio_cvar", "po
            "var_coverage_test", "VAR_COVERAGE_MIN_N", "VAR_COVERAGE_LEVEL",
            "drawdown_envelope",
            "prob_loss", "volatility_window_ratio", "sterling_ratio",
-           "loss_frequency_family", "momentum_reversal"]
+           "loss_frequency_family", "momentum_reversal",
+           "stop_hit_probability", "fx_move_var"]

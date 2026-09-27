@@ -7,6 +7,8 @@ import pytest
 
 from tradingagents.strategies import rotation, statistical
 
+pytestmark = pytest.mark.timeout(180)
+
 
 def _iid(n=200, seed=1):
     rnd = random.Random(seed)
@@ -245,6 +247,83 @@ def test_vol_cones_short_series_empty():
 
 
 # --------------------------------------------------------------------------
+# statistical.commodity_beta (RISK-21) - the dated alignment IS the producer
+# --------------------------------------------------------------------------
+
+
+def _dated(levels, start="2026-01-01"):
+    """A dated level series in FRED's ``[(date, value)]`` shape."""
+    return [(f"{start}#{i:04d}", float(v)) for i, v in enumerate(levels)]
+
+
+def _levels(returns, base=100.0):
+    """Compound a return series into levels (the library's own path)."""
+    out = [base]
+    for r in returns:
+        out.append(out[-1] * math.exp(r))
+    return out
+
+
+def test_commodity_beta_recovers_a_known_slope():
+    driver_rets = _iid(120, seed=11)
+    # The asset's log returns are exactly TWICE the driver's, so the slope is 2
+    # with no residual: R^2 == 1.
+    asset_rets = [2.0 * v for v in driver_rets]
+    out = statistical.commodity_beta(
+        _dated(_levels(driver_rets)),
+        _dated(_levels(asset_rets, base=50.0)),
+        driver="wti",
+    )
+    assert out is not None
+    assert out["beta"] == pytest.approx(2.0, abs=1e-4)
+    assert out["rsquared"] == pytest.approx(1.0, abs=1e-6)
+    assert out["n"] == 120 and out["driver"] == "wti"
+    assert out["p_value"] is not None and "common" in out["basis"]
+
+
+def test_commodity_beta_aligns_on_shared_dates_not_tails():
+    driver_rets = _iid(120, seed=12)
+    asset_rets = [2.0 * v for v in driver_rets]
+    # The driver is MISSING its first 20 observations (a publishing lag). The
+    # dated join drops to the 100 dates the two share; a tail alignment would
+    # instead pair the driver's first observations with the asset's LAST ones
+    # and fit a slope off the wrong pairs.
+    lagged = _dated(_levels(driver_rets))[20:]
+    out = statistical.commodity_beta(lagged, _dated(_levels(asset_rets, base=50.0)), driver="wti")
+    assert out is not None and out["beta"] == pytest.approx(2.0, abs=1e-4)
+    assert out["n"] == 100  # 101 shared observations -> 100 returns
+
+
+def test_commodity_beta_refusals():
+    daily = _dated(_levels(_iid(40, seed=13)))
+    # A monthly driver (copper: ~13 obs/yr) against daily closes shares too few
+    # dates: refused rather than tail-aligned.
+    monthly = [(f"2025-{1 + i // 12:02d}-01", 100.0 + i) for i in range(12)]
+    assert statistical.commodity_beta(monthly, daily, driver="copper") is None
+    # Disjoint calendars never align.
+    disjoint = [(f"1999-01-{i + 1:02d}", 100.0 + i) for i in range(40)]
+    assert statistical.commodity_beta(disjoint, daily) is None
+    # Below min_pairs, a zero-variance driver, and junk rows.
+    assert statistical.commodity_beta(daily[:10], daily[:10]) is None
+    assert statistical.commodity_beta(_dated([1.0] * 30), daily) is None  # zero variance
+    assert statistical.commodity_beta([("x", None), ("y", "z")], daily) is None
+    # A non-positive level cannot be logged, so the pair is refused. The date
+    # must be distinct: a duplicate key would overwrite the broken level.
+    broken_day = "1998-12-31"
+    assert statistical.commodity_beta(
+        [(broken_day, 0.0), *daily], [(broken_day, 100.0), *daily]
+    ) is None
+
+
+def test_commodity_beta_ignores_unusable_rows():
+    driver_rets = _iid(60, seed=14)
+    good = _dated(_levels(driver_rets))
+    noise = [("bad", None), ("also-bad", "nope")]
+    out = statistical.commodity_beta(noise + good, _dated(_levels(driver_rets)), driver="wti")
+    assert out is not None and out["n"] == 60
+
+
+# --------------------------------------------------------------------------
 # All calculators never raise on odd input
 # --------------------------------------------------------------------------
 
@@ -262,6 +341,7 @@ def test_vol_cones_short_series_empty():
         (statistical.granger_causality, [[1.0], [2.0]]),
         (statistical.capm_decomposition, [[], []]),
         (statistical.ols_factors, [[], {}]),
+        (statistical.commodity_beta, [[], []]),
         (statistical.variance_inflation_factor, [{"a": [1.0], "b": [2.0]}]),
         (rotation.relative_rotation, [[], []]),
         (rotation.clenow_momentum, [[], 90]),

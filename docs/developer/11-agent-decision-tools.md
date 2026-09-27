@@ -152,7 +152,7 @@ but not exposed to the analysts. Each is a `@tool` wrapping an existing
 | `get_strategy_quality(ticker, returns?)` | `evaluate` (cagr/sharp/vol/max_dd) | market | a deterministic risk-adjusted quality read (net CAGR, Sharpe, max drawdown) instead of a guessed quality narrative |
 | `get_margin_of_safety(ticker, intrinsic)` | `normalized.margin_of_safety` | fundamentals | (intrinsic - price)/intrinsic band cited before any undervaluation claim |
 | `get_composite_rank(ticker, factors?)` | `factors.composite_score` | fundamentals | cross-sectional value+momentum percentile vs industry peers (leader/laggard in the group) |
-| `get_tail_risk(ticker, alpha?)` | `book_risk.cvar`/`simple_var`/`stress_loss` | market | explicit VaR/CVaR tail budget + -10% stress loss before a sizing/tail-risk claim |
+| `get_tail_risk(ticker, alpha?)` | `book_risk.cvar`/`simple_var`/`stress_loss`, plus the §8.2 family (`prob_loss`, `volatility_window_ratio`, `sterling_ratio`, `momentum_reversal`, `loss_frequency_family`) and RISK-16's `stop_hit_probability` | market | explicit VaR/CVaR tail budget + -10% stress loss before a sizing/tail-risk claim, with a one-line advisory family behind it (each field prints `n/a` when unmeasurable) |
 
 ## Value Dip + Swing hybrid batch (from `Strategies/Value_Dip_swing*.md`)
 

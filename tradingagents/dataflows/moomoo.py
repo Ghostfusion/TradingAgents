@@ -2023,6 +2023,14 @@ def get_revenue_breakdown_moomoo(ticker: str) -> str:
             "inside its own dimension and never sum revenue across dimensions."
         )
         lines.append("")
+    try:
+        # RISK-19 (§50/§51): the strategies layer owns the HHI scales, and this
+        # table's `ratio` column is the share it knows.
+        from tradingagents.strategies.liquidity_risk import (
+            revenue_concentration as _rev_conc,
+        )
+    except Exception:  # noqa: BLE001 - the table survives a math-layer problem
+        _rev_conc = None
     for label, items in groups:
         lines.append(f"### {label}")
         lines.append("")
@@ -2036,6 +2044,21 @@ def get_revenue_breakdown_moomoo(ticker: str) -> str:
             ratio_s = f"{float(ratio):.1f}%" if isinstance(ratio, (int, float)) else "-"
             lines.append(f"| {name} | {rev_s} | {ratio_s} |")
         lines.append("")
+        if _rev_conc is not None:
+            _conc = _rev_conc(
+                [
+                    it.get("ratio") / 100.0
+                    for it in items
+                    if isinstance(it.get("ratio"), (int, float))
+                ]
+            )
+            if _conc:
+                lines.append(
+                    f"- revenue HHI {_conc['hhi']:.3f} "
+                    f"(effective N {_conc['effective_n']:.1f}) - sum of squared shares on "
+                    "the portfolio_hhi scale (0-1), NOT the 0-10000 holder HHI."
+                )
+                lines.append("")
     lines.append(
         "Interpretation: segment mix and concentration WITHIN one dimension — a "
         "shrinking core segment or heavy single-segment concentration are quality "

@@ -233,7 +233,7 @@ Paths are repo-relative (`tradingagents/…`); `::symbol:line` is the definition
 | 53 | Debt-Adjusted Valuation | :1406 | 3 | ABSENT | `ratios.py:205` `debt_to_equity` is a leverage ratio, not a valuation adjustment; no Debt/EV, Net Debt/EBITDA or Net Debt/FCF |
 | 54 | Dilution-Adjusted Valuation | :1433 | 3 | ABSENT | Zero hits for share-count dilution |
 | 55 | Share-Based Compensation Adjustment | :1461 | 3 | ABSENT | Zero hits for SBC |
-| 56 | Margin-of-Safety Calculations | :1486 | 4 | **elsewhere** | `tradingagents/strategies/normalized.py::margin_of_safety:120` = `(IV − P)/IV`; `margin_of_safety_bases:127` also gives the price basis; leaf `analysis_tools.py::get_margin_of_safety:5010`; scenario mos `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` |
+| 56 | Margin-of-Safety Calculations | :1486 | 4 | **elsewhere** | `tradingagents/strategies/normalized.py::margin_of_safety:120` = `(IV − P)/IV`; `margin_of_safety_bases:127` also gives the price basis; leaf `analysis_tools.py::get_margin_of_safety:5043`; scenario mos `tradingagents/strategies/scenario_dcf.py::scenario_dcf:22` |
 | 57 | Weighted Intrinsic Value | :1518 | 3 | ABSENT | No multi-model IV weighting |
 | 58 | Valuation Dispersion | :1543 | 5 | ABSENT | No `σ(IV)/median(IV)`; no multi-model IV panel to take a σ over |
 | 59 | Intrinsic Value Confidence | :1576 | 1 | PARTIAL | `tradingagents/strategies/fundamental_score.py::dcf_confidence:430` scores a DCF from four **legs** (basis conflict, beta assumption, FCF CV, terminal share) — not from the library's `1 − σ(IV)/median(IV)` |
@@ -321,9 +321,9 @@ below was read this round.
 | `analysis_tools.py::get_dcf_valuation:2932` | `tradingagents/agents/toolsets.py::fundamentals_company_tools:458` | fair value + WACC + TV share + bridge | §9 |
 | `analysis_tools.py::get_reverse_dcf:3019` | `toolsets.py:459` | implied steady-state FCF per `g`, `crossing_g` | §27, §24 |
 | `analysis_tools.py::get_normalized_fcf_dcf:3085` | `toolsets.py:460` | capex-fade DCF + maintenance-capex floor | §13, §8 |
-| `analysis_tools.py::get_normalized_cycle_dcf:4931` | `toolsets.py:461` | mid-cycle median-FCF perpetuity + FV-basis mos | §58-adjacent |
+| `analysis_tools.py::get_normalized_cycle_dcf:4964` | `toolsets.py:461` | mid-cycle median-FCF perpetuity + FV-basis mos | §58-adjacent |
 | `analysis_tools.py::get_scenario_dcf:3703` | `toolsets.py:462`, `toolsets.py::market_tools:330` | bear/base/bull + band + mos | §60, §65 |
-| `analysis_tools.py::get_margin_of_safety:5010` | `toolsets.py:465` | `(IV − P)/IV` against a caller-supplied intrinsic | §56 |
+| `analysis_tools.py::get_margin_of_safety:5043` | `toolsets.py:465` | `(IV − P)/IV` against a caller-supplied intrinsic | §56 |
 | `value_dip_tools.py::get_fcf_yield:380` | `toolsets.py:468` | TTM FCF (OCF − \|CapEx\|, newest 4 quarters) / market cap | §7 |
 | `value_dip_tools.py::get_valuation_z_score:581` | `toolsets.py:470` | z of `pe` / `ev_ebitda` / `p_fcf` vs its own history | §29, §30 |
 | `quant_formula_tools.py::get_valuation_band:279` | `toolsets.py:472` | a **conformal** band around a model fair value (gated `enable_conformal_bands`) | §58-adjacent |
@@ -360,7 +360,7 @@ is the call that already fetches them. Nothing here is implemented.
 | 5 | **Historical premium / mean-reversion gap** | §31, §68, §84 | the name's own multiple history | `value_dip.py::valuation_z_read:122` already builds the series from the vendor's per-period tables; leaf `get_valuation_z_score:581` | **M** — same series, a ratio instead of a z, plus a partial-adjustment `α` | High value (mean reversion is the library's §68/§84 theme) and the series is already assembled |
 | 6 | **Implied expectations beyond growth** | §23, §25, §26 | WACC / revenue growth / margin that make the DCF equal price | `reverse_dcf.py` bisects on `g` only (`implied_growth_for_fcf:202`) | **M** — three more bisections on the same machinery | Turns the library's "market-implied expectations" family from ABSENT to built with one shared solver |
 | 7 | **EV/Assets, EV/Invested Capital** | §6 | total assets, invested capital | `value_dip_tools.py:498-512` already stacks `invested_capital` per year | **M** — expose an existing internal | The series exists but is consumed only as a ΔIC denominator |
-| 8 | **CAPE / Shiller P/E** | §2 | 10 years of real EPS + real price | **not fetched today**: `dataflows/sec_edgar.py` gives up to 15 years for US filers (tool at `tradingagents/agents/utils/analysis_tools.py::get_financial_history:11900`), but no CAGR/series path consumes it | **L** — a new series producer + CPI deflation | High value (the one macro-scale valuation measure with a long literature) but it is the only item here that needs a **new data path** |
+| 8 | **CAPE / Shiller P/E** | §2 | 10 years of real EPS + real price | **not fetched today**: `dataflows/sec_edgar.py` gives up to 15 years for US filers (tool at `tradingagents/agents/utils/analysis_tools.py::get_financial_history:11952`), but no CAGR/series path consumes it | **L** — a new series producer + CPI deflation | High value (the one macro-scale valuation measure with a long literature) but it is the only item here that needs a **new data path** |
 | 9 | **Owner earnings / shareholder yield / buyback yield** | §37, §46, §47 | ΔNWC; net share repurchases | `maintenance_fcf:81` gives OCF − D&A; the `share_buybacks` key has **no reader** (`FundamentalScore.md` §1.4 #3) | **M–L** — one new statement key with a reader | Needs a canonical-vocabulary addition before it can be computed |
 | 10 | **SOTP, liquidation value, NAV, replacement cost** | §39–§42 | segment-level fair values, appraisals | nothing | **L** — data does not exist in the vendor chain | Honest ABSENT; the smallest honest producer is *no producer* until a segment data source exists |
 | 11 | **Monte Carlo valuation, valuation VaR, P(IV > price)** | §61–§63 | distributions for `g`, margin, WACC | nothing | **L** — a simulation layer over the existing DCF | The library calls it *"extremely powerful"*; it is also the only item that needs a new statistical layer. Build last, after §58's dispersion proves the IV inputs are sane |
@@ -635,7 +635,7 @@ a separate meta-score tier for exactly this kind of quantity — is
 
 **Q7 — CAPE.** §3 rank 8 needs a 10-year real-EPS series, which does not exist.
 Is SEC EDGAR XBRL history (`dataflows/sec_edgar.py`, tool at
-`analysis_tools.py::get_financial_history:11900`) the sanctioned source, as it is
+`analysis_tools.py::get_financial_history:11952`) the sanctioned source, as it is
 for the fundamental panel (`FundamentalScore.md` §0.5 Q4), or is CAPE out of scope
 for v1?
 

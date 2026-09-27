@@ -617,11 +617,11 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | REG-17 | 2 | the block is emitted | `regime.regime_state_metadata:2177` exists and is tested; **emitted nowhere** |
 | RISK-5 | 2 | a producer returns named levels | `call_wall`/`put_wall` exist and print; **distance-to-spot and a ranked top-\|GEX\| list do not** |
 | RISK-7 / RISK-12 | 2 | a scalar producer with a stated scale | the proxy is pinned and the scale stated (`risk_score.py:199-203`), but **no producer returns `cluster_exposure_share`** in either repo — it is still an externally-supplied input |
-| RISK-16 | 2 | each has a named producer | **no stop-hit-probability producer** (`stop_hit` exists only as a past-outcome boolean). Not data-blocked |
-| RISK-18 | 2 | " | **no cash-runway / FCF leg**; the FCF inputs already exist in `ratios.compute_ratios`. Not data-blocked |
-| RISK-19 | 2 | " | revenue / geographic concentration — **no longer data-blocked (2026-09-27)**: the Phase-5 probe found the source feedable and the producer's dimension merge is fixed (§8.1), so what remains is the leg that turns the leaf's per-dimension shares into a concentration quantity |
-| RISK-20 | 2 | " | **no FX-exposure / FX-VaR producer**; an FX *source* exists (`dataflows/fx.py`). Not data-blocked |
-| RISK-21 | 2 | " | **no commodity-beta producer**; `statistical.ols_factors` and the sector→driver map exist. Not data-blocked |
+| RISK-16 | 2 | each has a named producer | **MET 2026-09-27** — `book_risk.stop_hit_probability` (the running-minimum breach over overlapping `horizon`-bar paths; the prescribed `copula_scenarios` route needs ≥2 names and so cannot answer a single-name read), printed as `stop_hit_1m` + `stop_dist` by `get_tail_risk` against the repo's own 2xATR stop. Live: NVDA 53.2% / 4.62%, TSLA 52.2% / 6.02% |
+| RISK-18 | 2 | " | **MET 2026-09-27** — `compute_ratios` returns `cash_runway_years` (Cash / \|FCF<0\| — `None`, never an infinite ratio, when FCF funds no burn) and `fcf_deterioration`; `get_ratios` renders both. Live: MSFT −6.45%, NVDA +58.88% deterioration, both runways `n/a` (positive FCF) |
+| RISK-19 | 2 | " | **MET 2026-09-27** — `liquidity_risk.revenue_concentration` (the §50/§51 HHI over ONE dimension's shares, on the `portfolio_hhi` 0-1 scale, never `ownership_hhi`'s 0-10000), printed per dimension by `moomoo.get_revenue_breakdown_moomoo`. Live MSFT: REGION 0.500 / N_eff 2.0 vs BUSINESS 0.377 / 2.7 |
+| RISK-20 | 2 | " | **PARTIAL 2026-09-27** — the VaR leg is built (`book_risk.fx_move_var`: the library's `FXVol × z_c` as a per-unit-of-position factor, printed by `get_fx_snapshot`; live DTWEXBGS ±0.43%/day at z=1.645). The balance-sheet `FXExposure` stays `book_risk._fx_exposure` (**private**): no vendor in the chain returns a currency split of assets and liabilities, so nothing can supply its numerator |
+| RISK-21 | 2 | " | **MET 2026-09-27** — `statistical.commodity_beta` (the §54 OLS beta fitted on the dates the asset and its mapped driver share, ≥20 returns), printed as the `beta` column of `get_sector_rotation_screen`'s driver table. Live: XLE vs wti 0.24 (t 12.1, R² 0.36, n 268); the monthly copper driver refuses |
 | SENT-7 | 2 | a negation-adjusted intensity | the **raw-NLP layer** (negation window, intensifier, subjectivity, aspect taxonomy) is absent; `text_factors.lm_tone:121` is unigram-only |
 | SENT-9 | 2 | one producer per measure | **no `N_eff`/Kish, HHI, Gini or source-breadth** on the sentiment surface |
 | SENT-10 | 2 | one producer per transform | robust z, percentile and sentiment β exist; the **asymmetry split and the event study do not** |
@@ -653,13 +653,13 @@ corrected at §3.5 — and `ScoreUniverse.md:503`'s Appendix-A citation still sa
 
 **The other direction — documents that now under-report the tree.** `RiskScore.md` §8.1/§8.2 still mark
 ABSENT nine quantities that Phases 1-2 built and tested: §2.4/§2.5 σ20/§60
-(`book_risk.py::volatility_window_ratio:1489`), §3.3/§3.4 downside/upside beta
-(`strategies/regime.py::upside_downside_beta:1871`), §6.4 Sterling (`book_risk.py::sterling_ratio:1547`),
-§9.4/§9.5 + §10 the loss-frequency family (`book_risk.py::loss_frequency_family:1582`), §23
-momentum reversal (`book_risk.py::momentum_reversal:1666`), §34 `P(R<0)` (`book_risk.py::prob_loss:1464`),
-§58 tail-adjusted return (`book_risk.py::_tail_adjusted_return:1697`), §63 the nonlinear penalty
-(`book_risk.py::_nonlinear_risk_penalty:1825`) and §68 liquidity-adjusted CVaR
-(`book_risk.py::_liquidity_adjusted_cvar:1732`) — each exercised in `tests/test_risk_scalars.py`.
+(`book_risk.py::volatility_window_ratio:1633`), §3.3/§3.4 downside/upside beta
+(`strategies/regime.py::upside_downside_beta:1871`), §6.4 Sterling (`book_risk.py::sterling_ratio:1691`),
+§9.4/§9.5 + §10 the loss-frequency family (`book_risk.py::loss_frequency_family:1726`), §23
+momentum reversal (`book_risk.py::momentum_reversal:1810`), §34 `P(R<0)` (`book_risk.py::prob_loss:1464`),
+§58 tail-adjusted return (`book_risk.py::_tail_adjusted_return:1841`), §63 the nonlinear penalty
+(`book_risk.py::_nonlinear_risk_penalty:1969`) and §68 liquidity-adjusted CVaR
+(`book_risk.py::_liquidity_adjusted_cvar:1876`) — each exercised in `tests/test_risk_scalars.py`.
 Three of them stay underscore-private, awaiting a leaf that holds both inputs.
 
 **What this audit does not say.** Every row above still respects the constraints the phases were run

@@ -93,7 +93,7 @@ quadrant label and a market-adjusted (abnormal) return do not exist.** **[CORREC
 2026-09-26: both are built. `tradingagents/strategies/sentiment_score.py::confirmation_quadrant:342`
 returns four distinct labels — `confirm-up` / `diverge-up` / `confirm-down` /
 `diverge-down`, keyed on the *price* direction — and
-`tradingagents/agents/utils/analysis_tools.py::_sentiment_price_read:6679` computes
+`tradingagents/agents/utils/analysis_tools.py::_sentiment_price_read:6712` computes
 the market-adjusted (abnormal) return (name return − benchmark return). This
 document's own §8.1 §99/§100 already record them built.]** The
 design: the quadrant **is** the interface — `sentiment = +0.72` alone is not
@@ -122,7 +122,7 @@ actionable.
 | Short interest | 5 | PARTIAL | leaf `get_short_interest` (market_position_tools:220) → `yfinance_short_interest.get_short_interest_yfinance:81` / `massive.get_short_interest_massive:485`; `get_short_sale_volume` (analysis_tools:8886); `get_short_volume` (market_position_tools:238) | shares short, days-to-cover, %float, short-sale % | high = bearish/crowding | %float, days, % of volume | raw only; no percentile/change-basis score |
 | Dispersion | 5 | SCORABLE | `sentiment.sentiment_dispersion:400` | `dispersion`, `agreement`, `n` | higher = more disagreement | weighted population std ≥0 (polarity points); agreement 0-1 | fed by `compute_social_scores:308`, `aggregate_weighted_sentiment:704` |
 | Extreme & crowding | 5 | PARTIAL | `sentiment.crowd_ratio:336` | `ratio`, `band` | crowded-bullish / crowded-bearish | 0-100 with hardcoded 40/60 bands | display-only bands, never a gate; no validated extreme measure |
-| **Sentiment × Price Confirmation** (owner-named) | — | PARTIAL | `sentiment_research.sentiment_lead_lag:172` (`innovations=True`); `sentiment_research.sentiment_factor_scale:677`; wired via `overlays.fold_sentiment_into_overlay:198` ← `trading_graph._sentiment_factor_read:1420` | `self_lead_lag`, `innovation`, `scale` | sign agreement with measured IC | corr -1..1; scale 0.5-1.2 | no four-quadrant label, no market-adjusted (abnormal) return; gate `enable_sentiment_factor` default False (default_config.py:815) **[CORRECTED 2026-09-26: both now exist — `sentiment_score.confirmation_quadrant:342` (four labels) and `analysis_tools._sentiment_price_read:6679` (abnormal return); see §0.3. The gate note applies only to the legacy sign-gate fold]** |
+| **Sentiment × Price Confirmation** (owner-named) | — | PARTIAL | `sentiment_research.sentiment_lead_lag:172` (`innovations=True`); `sentiment_research.sentiment_factor_scale:677`; wired via `overlays.fold_sentiment_into_overlay:198` ← `trading_graph._sentiment_factor_read:1420` | `self_lead_lag`, `innovation`, `scale` | sign agreement with measured IC | corr -1..1; scale 0.5-1.2 | no four-quadrant label, no market-adjusted (abnormal) return; gate `enable_sentiment_factor` default False (default_config.py:815) **[CORRECTED 2026-09-26: both now exist — `sentiment_score.confirmation_quadrant:342` (four labels) and `analysis_tools._sentiment_price_read:6712` (abnormal return); see §0.3. The gate note applies only to the legacy sign-gate fold]** |
 
 #
 
@@ -200,7 +200,7 @@ its evidence, rather than fixed speculatively.
 | Sentiment heat / mention volume | per-day mention counts | yes — StockTwits counts in `compute_social_scores:273`, `_baseline_file:265` rolling buffer | surface `mention_volume:43` on the persisted count baseline |
 | Short-interest percentile/change | short % of float over several settlements | yes — `get_short_interest_massive:485` (multi-settlement, newest-first); `get_short_interest_yfinance:37` | percentile of current short % of float vs the settlement series already returned |
 | Extreme/crowding with a stated scale | crowd ratio history | yes — `compute_social_scores:273` + `_baseline_file:265` | percentile of `crowd_ratio` ratio vs the ticker's own persisted baseline (replaces the fixed 40/60 constant) |
-| Sentiment × Price Confirmation quadrant `Sign(dSentiment) × Sign(abnormal return)` | dSentiment + market-adjusted return | sentiment: `daily_sentiment_sma:501` innovation / `_sentiment_factor_read:1420`; benchmark closes: `_ohlcv`/`get_relative_strength`/`_sentiment_factor_read` (closes passed in) | `sign(innovation) × sign(name_ret − bench_ret)` over the last session → {confirm-up, confirm-down, diverge-up, diverge-down}; no producer exists today. **[CORRECTED 2026-09-26: produced now — `sentiment_score.confirmation_quadrant:342` (four labels) + `analysis_tools._sentiment_price_read:6679` (abnormal return), see §0.3]** |
+| Sentiment × Price Confirmation quadrant `Sign(dSentiment) × Sign(abnormal return)` | dSentiment + market-adjusted return | sentiment: `daily_sentiment_sma:501` innovation / `_sentiment_factor_read:1420`; benchmark closes: `_ohlcv`/`get_relative_strength`/`_sentiment_factor_read` (closes passed in) | `sign(innovation) × sign(name_ret − bench_ret)` over the last session → {confirm-up, confirm-down, diverge-up, diverge-down}; no producer exists today. **[CORRECTED 2026-09-26: produced now — `sentiment_score.confirmation_quadrant:342` (four labels) + `analysis_tools._sentiment_price_read:6712` (abnormal return), see §0.3]** |
 
 ---
 

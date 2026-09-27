@@ -390,6 +390,92 @@ def ols_factors(y: list, factors: dict) -> dict:
         return {"rsquared": None, "params": None, "n": 0}
 
 
+def commodity_beta(
+    driver_series,
+    asset_series,
+    *,
+    driver: str | None = None,
+    min_pairs: int = 20,
+) -> dict | None:
+    """``beta = Cov(R_i, R_driver) / Var(R_driver)`` over COMMON dates — RISK-21.
+
+    The library's commodity/input-cost section (``Strategies/scores/
+    risk_score.md`` §54) states ``β_commodity = Cov(R_i, R_commodity) /
+    Var(R_commodity)`` for a company exposed to a commodity, and
+    ``sector_drivers.SECTOR_DRIVERS`` names which series plays that role for a
+    sector. Both arguments are **dated level series**, ``[(date, value)]``
+    oldest→newest — FRED's own shape for a driver, ``_ohlcv``'s ``dates`` zipped
+    with ``closes`` for the asset.
+
+    Levels are differenced to **log returns on the dates the two series share**,
+    which is the whole point of this producer: a monthly driver (copper,
+    ``PCOPPUSDM``: ~13 observations a year) must never be tail-aligned against
+    daily closes, and a driver published with a lag simply contributes fewer
+    pairs. The sign is reported as measured - the caller's direction convention
+    belongs to ``sector_drivers``, not here.
+
+    The fit is delegated to :func:`ols_factors` (one factor plus an intercept),
+    so the coefficient, its standard error/t/p and the R² come from the module's
+    only OLS. Returns ``{"beta", "std_err", "t", "p_value", "rsquared", "n",
+    "driver", "basis"}``; ``None`` - never ``0`` - below ``min_pairs`` common
+    returns, a degenerate driver variance, or malformed input.
+    """
+    def _dated(series) -> list[tuple[str, float]]:
+        out: list[tuple[str, float]] = []
+        for row in series or []:
+            try:
+                d, v = row
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(f):
+                out.append((str(d), f))
+        return out
+
+    drv = _dated(driver_series)
+    ast = _dated(asset_series)
+    if len(drv) < min_pairs + 1 or len(ast) < min_pairs + 1:
+        return None
+    by_driver = dict(drv)
+    by_asset = dict(ast)
+    common = sorted(d for d in by_asset if d in by_driver)
+    if len(common) < min_pairs + 1:
+        return None
+
+    def _returns(by_date: dict[str, float]) -> list[float] | None:
+        out: list[float] = []
+        for i in range(1, len(common)):
+            a, b = by_date[common[i - 1]], by_date[common[i]]
+            if a <= 0.0 or b <= 0.0:
+                return None  # a non-positive level cannot be logged
+            out.append(math.log(b / a))
+        return out
+
+    r_asset = _returns(by_asset)
+    r_driver = _returns(by_driver)
+    if r_asset is None or r_driver is None or len(r_asset) < min_pairs:
+        return None
+    name = str(driver or "driver")
+    fit = ols_factors(r_asset, {name: r_driver})
+    params = fit.get("params") or {}
+    got = params.get(name)
+    if not got:
+        return None  # fewer rows than columns + 2, or a singular design
+    return {
+        "beta": got.get("coef"),
+        "std_err": got.get("std_err"),
+        "t": got.get("t"),
+        "p_value": got.get("p_value"),
+        "rsquared": fit.get("rsquared"),
+        "n": fit.get("n"),
+        "driver": name,
+        "basis": (
+            f"OLS beta of log returns on '{name}' over {fit.get('n')} common "
+            f"returns ({len(common)} shared dated observations)"
+        ),
+    }
+
+
 def spread_zscore(x: list, y: list, window: int = 60) -> dict | None:
     """Rolling spread + z-score for a cointegrated pair (cookbook recipe 3).
 
@@ -601,6 +687,6 @@ def variance_inflation_factor(columns: dict) -> dict:
 __all__ = [
     "normality", "unit_root", "omega", "correlation_matrix",
     "cointegration_pair", "granger_causality", "capm_decomposition",
-    "ols_factors", "variance_inflation_factor",
+    "ols_factors", "commodity_beta", "variance_inflation_factor",
     "spread_zscore", "pair_signal", "pair_quantities", "ecm_loading",
 ]

@@ -4333,21 +4333,28 @@ def get_sector_rotation_screen(
             driver_aliases,
             sector_driver_read,
         )
+        from tradingagents.strategies.statistical import commodity_beta
 
         _today = _dt.date.today().isoformat()
         series: dict = {}
+        # RISK-21 needs the DATES, not just the levels: its beta aligns the
+        # driver against the ETF's closes on the dates the two share.
+        dated: dict = {}
         for alias in driver_aliases():
             try:
                 obs = get_series_values(alias, _today, look_back_days=400) or []
             except Exception:  # noqa: BLE001 - one series must not sink the block
                 obs = []
             series[alias] = [v for _, v in obs if v is not None]
+            dated[alias] = [(d, v) for d, v in obs if v is not None]
         etfs = [r.get("etf") for r in rows if r.get("etf")]
         if etfs:
             lines.append("")
             lines.append("## Sector macro drivers (mapped, advisory - never a gate)")
-            lines.append("| sector | driver | level | 1m change | 3m change | helps 1m | helps 3m | n |")
-            lines.append("|---|---|---|---|---|---|---|---|")
+            lines.append(
+                "| sector | driver | level | 1m change | 3m change | helps 1m | helps 3m | n | beta |"
+            )
+            lines.append("|---|---|---|---|---|---|---|---|---|")
             for etf in etfs:
                 d = sector_driver_read(etf, series)
                 if not d.get("mapped"):
@@ -4360,11 +4367,34 @@ def get_sector_rotation_screen(
                 def _flag(v) -> str:
                     return "n/a" if v is None else ("yes" if v else "no")
 
+                # RISK-21 (§54): the sector ETF's beta to its OWN mapped driver,
+                # fitted on the dates the two series share. A monthly driver
+                # (copper) yields too few pairs and reads n/a - it is never
+                # tail-aligned against daily closes. The row is the SECTOR's
+                # beta, not a single name's, and it is a fitted coefficient.
+                beta_cell = "n/a"
+                try:
+                    _ohl = _ohlcv(etf)
+                    _b = commodity_beta(
+                        dated.get(d.get("driver")) or [],
+                        list(
+                            zip(
+                                _ohl.get("dates") or [],
+                                _ohl.get("closes") or [],
+                                strict=False,
+                            )
+                        ),
+                        driver=d.get("driver"),
+                    )
+                    if _b:
+                        beta_cell = f"{_b['beta']:.2f}"
+                except Exception:  # noqa: BLE001 - a beta must not sink the row
+                    beta_cell = "n/a"
                 lines.append(
                     f"| {etf} | {d.get('driver')} | {_num(d.get('level'))} | "
                     f"{_num(d.get('change_1m'))} | {_num(d.get('change_3m'))} | "
                     f"{_flag(d.get('favourable_1m'))} | {_flag(d.get('favourable_3m'))} | "
-                    f"{d.get('observations')} |"
+                    f"{d.get('observations')} | {beta_cell} |"
                 )
             lines.append("")
             lines.append(
@@ -4372,7 +4402,10 @@ def get_sector_rotation_screen(
                 "daily series fill both windows, the monthly ones (copper, industrial "
                 "production) read n/a at 21/63 observations); the "
                 "mapping is conventional, never a fitted coefficient - a mapped driver "
-                "and a favourable sign are context, not a signal."
+                "and a favourable sign are context, not a signal. The `beta` column IS "
+                "fitted (OLS of the ETF's daily log returns on the driver's, aligned on "
+                "the dates they share, at least 20 returns), and it is the SECTOR ETF's "
+                "beta to its driver - not a single name's commodity exposure."
             )
     except Exception:  # noqa: BLE001 - an advisory block degrades, never blocks the screen
         pass
@@ -7222,7 +7255,14 @@ def get_tail_risk(
     weight: Annotated[float, "allocation weight for stress-loss exposure, default 1.0"] = 1.0,
 ) -> str:
     """Book & tail-risk read: historical VaR and CVaR over the trailing
-    return series, plus a uniform -10% stress loss on the given weight."""
+    return series, plus a uniform -10% stress loss on the given weight.
+
+    The appended family reads the same series, and each prints ``n/a`` (never a
+    zero) when it cannot be measured: P(R<0), the two-window sigma ratio and
+    expansion, Sterling, the momentum-reversal read, the loss-frequency family,
+    and RISK-16's stop-hit probability - the share of trailing month-long paths
+    that touched a **2xATR stop** (the G1 contract's own stop), printed with
+    that stop's distance."""
     try:
         from tradingagents.strategies.book_risk import cvar, stress_loss
     except Exception as exc:  # noqa: BLE001
@@ -7279,8 +7319,10 @@ def get_tail_risk(
             momentum_reversal as _rev,
             prob_loss as _p_loss,
             sterling_ratio as _sterling,
+            stop_hit_probability as _stop_hit,
             volatility_window_ratio as _vol_ratio,
         )
+        from tradingagents.strategies.size import atr as _atr
 
         def _fmt(value, spec: str) -> str:
             """The number, or `n/a` — an unmeasurable read is never a zero."""
@@ -7291,6 +7333,14 @@ def get_tail_risk(
         lf = _loss_freq(returns) or {}
         sterling = _sterling(returns)
         reversal = _rev(returns)
+        # RISK-16: the stop is the repo's OWN contract rule (G1, 2 x ATR), so
+        # the read is "P(this name touches its 2xATR stop inside a month)" — a
+        # level the repo already uses, never one invented here.
+        _ohl = _ohlcv(ticker)
+        _highs, _lows = _ohl.get("highs") or [], _ohl.get("lows") or []
+        atr14 = _atr(_highs, _lows, closes, 14) if (_highs and _lows) else None
+        stop_dist = 2.0 * atr14 / closes[-1] if (atr14 and closes[-1]) else None
+        shp = _stop_hit(returns, stop_dist) if stop_dist else None
         extra = (
             f" p_loss={_fmt(pl, '.1%')}"
             f" sigma_ratio={_fmt(vwr.get('ratio'), '.3f')}"
@@ -7299,6 +7349,8 @@ def get_tail_risk(
             f" reversal={_fmt(reversal, '.2%')}"
             f" downside_freq={_fmt(lf.get('downside_freq'), '.1%')}"
             f" worst_loss={_fmt(lf.get('worst_loss'), '.2%')}"
+            f" stop_hit_1m={_fmt((shp or {}).get('p_hit'), '.1%')}"
+            f" stop_dist={_fmt(stop_dist, '.2%')}"
         )
     except Exception:  # noqa: BLE001 - the advisory extras must not cost the tool
         extra = ""
@@ -11967,11 +12019,32 @@ def get_fx_snapshot() -> str:
     """FX snapshot: DXY + major pairs with 1d/5d changes (delayed, advisory).
 
     Returns the latest levels for the US dollar index and the major FX pairs
-    (EUR/USD, USD/JPY, GBP/USD, USD/CNH, AUD/USD) via yfinance. Use before any
-    'USD strength / EUR-weakness / currency move' claim; delayed data, never a
-    gate.
+    (EUR/USD, USD/JPY, GBP/USD, USD/CNH, AUD/USD) via yfinance, plus RISK-20's
+    **per-unit** FX move: the daily sigma of FRED's broad dollar index
+    (DTWEXBGS) times z = 1.645, i.e. what a one-day 95% FX move costs PER UNIT
+    of exposure. Multiply it by the notional you actually hold - a position's
+    VaR is that product, and this leaf does not know your position.
+    Use before any 'USD strength / EUR-weakness / currency move' claim;
+    delayed data, never a gate.
     """
-    return route_to_vendor("get_fx_snapshot")
+    snapshot = route_to_vendor("get_fx_snapshot")
+    try:
+        from datetime import date
+
+        from tradingagents.dataflows.fred import get_series_values
+        from tradingagents.strategies.book_risk import fx_move_var
+
+        obs = get_series_values("dollar_index", date.today().isoformat(), look_back_days=400)
+        move = fx_move_var([v for _, v in (obs or [])])
+        if isinstance(snapshot, str) and move:
+            snapshot = (
+                f"{snapshot}\n- per-unit 1d 95% FX move: +/-{move['var_pct']:.2%} "
+                f"(daily sigma {move['vol_daily']:.2%} over {move['n']} observations, "
+                "z=1.645; multiply by the notional you hold - FRED DTWEXBGS, advisory)"
+            )
+    except Exception:  # noqa: BLE001 - the snapshot survives an FX-math problem
+        pass
+    return snapshot
 
 
 @tool

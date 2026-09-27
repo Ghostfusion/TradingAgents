@@ -10,20 +10,24 @@ import math
 import pytest
 
 from tradingagents.strategies.book_risk import (
+    _fx_exposure,
     _liquidity_adjusted_cvar,
     _nonlinear_risk_penalty,
     _tail_adjusted_return,
     cvar,
+    fx_move_var,
     loss_frequency_family,
     momentum_reversal,
     prob_loss,
     sterling_ratio,
+    stop_hit_probability,
     volatility_window_ratio,
 )
 from tradingagents.strategies.liquidity_risk import (
     market_impact_slippage,
     ownership_hhi,
     portfolio_hhi,
+    revenue_concentration,
 )
 
 pytestmark = pytest.mark.timeout(180)
@@ -56,6 +60,38 @@ def test_portfolio_hhi_cash_sleeve_and_over_allocation():
     assert portfolio_hhi({"a": 0.5}) == 0.25
     # Sum > 1.0 (config error) normalizes down to a valid book.
     assert portfolio_hhi({"a": 1.5, "b": 0.5}) == 0.625
+
+
+# ---------------------------------------------------------------------------
+# RISK-19 - revenue-share HHI for ONE vendor dimension (§50/§51)
+# ---------------------------------------------------------------------------
+
+
+def test_revenue_concentration_is_on_the_portfolio_hhi_scale():
+    # One segment = 1.0; two equal = 0.5 (effective N 2); four equal = 0.25.
+    assert revenue_concentration([1.0])["hhi"] == 1.0
+    two = revenue_concentration([0.5, 0.5])
+    assert two["hhi"] == 0.5 and two["effective_n"] == 2.0 and two["n"] == 2
+    assert revenue_concentration([0.25] * 4)["hhi"] == 0.25
+    # MSFT FY2026 REGION (probed live): 51.47% + 48.53% -> 0.5004.
+    region = revenue_concentration([0.5147, 0.4853])
+    assert region["hhi"] == pytest.approx(0.500432, abs=1e-6)
+    # The SAME split on the holder HHI's percent scale is 10^4 larger - the
+    # mix-up the producer's own `scale`/`basis` strings forbid.
+    assert ownership_hhi([51.47, 48.53]) == pytest.approx(5004.3218, abs=1e-3)
+    assert ownership_hhi([51.47, 48.53]) / region["hhi"] == pytest.approx(10000.0)
+
+
+def test_revenue_concentration_normalizes_and_ignores_non_shares():
+    # A partial breakdown is normalized to its own sum, so a reported subset
+    # measures the concentration AMONG the segments it carries.
+    assert revenue_concentration([3.0, 1.0])["hhi"] == pytest.approx(0.625)
+    # A zero share does not dilute; negatives, None and junk are ignored.
+    mixed = revenue_concentration([0.0, -1.0, "x", None, 0.5, 0.5])
+    assert mixed["hhi"] == 0.5 and mixed["n"] == 2
+    assert revenue_concentration([0.0, 0.0]) is None
+    assert revenue_concentration([]) is None
+    assert revenue_concentration(None) is None
 
 
 def test_portfolio_hhi_refusals():
@@ -270,3 +306,86 @@ def test_nonlinear_risk_penalty_refusals():
     assert _nonlinear_risk_penalty(None, 2.0) is None
     assert _nonlinear_risk_penalty(0.5, 0.0) is None
     assert _nonlinear_risk_penalty(0.5, 2.0, lo=1.0, hi=1.0) is None
+
+
+# ---------------------------------------------------------------------------
+# RISK-20 - the per-unit FX VaR factor (§52), and the exposure formula that
+# has no caller yet
+# ---------------------------------------------------------------------------
+
+
+def test_fx_move_var_is_sigma_times_z_per_position_unit():
+    levels = [100.0]
+    for i in range(60):
+        levels.append(levels[-1] * math.exp(0.01 if i % 2 == 0 else -0.01))
+    out = fx_move_var(levels)
+    assert out is not None
+    # The library's FXVaR = Position * FXVol * z_c - this is the factor that
+    # multiplies a position, never billed as the position's own VaR.
+    assert out["var_pct"] == pytest.approx(out["vol_daily"] * 1.645, abs=1e-6)
+    assert out["horizon"] == 1 and out["n"] == 60 and out["z_c"] == 1.645
+    # A 4-day horizon scales by sqrt(4) = 2, not by 4.
+    longer = fx_move_var(levels, horizon=4)
+    assert longer["var_pct"] == pytest.approx(out["var_pct"] * 2.0, abs=1e-6)
+
+
+def test_fx_move_var_refusals():
+    assert fx_move_var([100.0] * 30) is None  # a flat series has no variance
+    assert fx_move_var([100.0, 101.0]) is None  # fewer than three levels
+    assert fx_move_var([100.0] * 30, z_c=0.0) is None
+    assert fx_move_var([100.0] * 30, z_c=float("nan")) is None
+    assert fx_move_var([100.0] * 30, horizon=0) is None
+    assert fx_move_var([]) is None
+
+
+def test_fx_exposure_is_private_and_awaiting_a_caller():
+    # RISK-20's balance-sheet leg: the library's formula is kept, but no vendor
+    # in the chain returns a foreign-currency asset/liability split, so nothing
+    # can supply the numerator today. Private = not wired behind a fake caller.
+    out = _fx_exposure(400.0, 100.0, 1000.0)
+    assert out is not None and out["exposure"] == pytest.approx(0.3)
+    assert _fx_exposure(400.0, 400.0, 1000.0)["exposure"] == 0.0
+    assert _fx_exposure(400.0, 100.0, 0.0) is None  # zero denominator
+    assert _fx_exposure(None, 100.0, 1000.0) is None
+
+
+# ---------------------------------------------------------------------------
+# RISK-16 - P(hitting stop) over the trailing path (§33)
+# ---------------------------------------------------------------------------
+
+
+def test_stop_hit_probability_counts_breaching_windows():
+    # One -10% bar in an 11-bar series, 3-bar windows: the three windows that
+    # contain it breach a 5% stop; nine windows in total.
+    out = stop_hit_probability([0.0] * 5 + [-0.10] + [0.0] * 5, 0.05, horizon=3)
+    assert out is not None
+    assert out["n_windows"] == 9 and out["hits"] == 3
+    # p_hit is rounded to 6 dp on purpose; compare at that precision.
+    assert out["p_hit"] == pytest.approx(3 / 9, abs=1e-6)
+    assert out["horizon"] == 3 and out["stop_pct"] == 0.05
+    assert "overlapping" in out["basis"]
+
+
+def test_stop_hit_probability_is_a_path_test_not_a_terminal_test():
+    """A window that dips below the stop and recovers has still hit it."""
+    # -10% then +20% ends POSITIVE (-0.10 + 0.20 + the cross term = +8%), so a
+    # terminal-value test would score 0.0; the running minimum breaches.
+    dipped = stop_hit_probability([-0.10, 0.20], 0.05, horizon=2)
+    assert dipped is not None and dipped["p_hit"] == 1.0
+    assert dipped["hits"] == 1 and dipped["n_windows"] == 1
+    # A path that never dips is a real 0.0 - measured, not refused.
+    calm = stop_hit_probability([0.01, 0.01, 0.01, 0.01], 0.05, horizon=2)
+    assert calm["p_hit"] == 0.0 and calm["hits"] == 0 and calm["n_windows"] == 3
+
+
+def test_stop_hit_probability_refusals():
+    # Fewer observations than the horizon leaves no window at all - while
+    # exactly `horizon` of them is one window (the two-bar case above).
+    assert stop_hit_probability([0.0], 0.05, horizon=2) is None
+    assert stop_hit_probability([0.0] * 10, 0.05, horizon=11) is None
+    assert stop_hit_probability([], 0.05) is None
+    # A stop is a positive distance; zero, negative and NaN are not.
+    assert stop_hit_probability([0.0] * 10, 0.0) is None
+    assert stop_hit_probability([0.0] * 10, -0.05) is None
+    assert stop_hit_probability([0.0] * 10, float("nan")) is None
+    assert stop_hit_probability([0.0] * 10, 0.05, horizon=0) is None

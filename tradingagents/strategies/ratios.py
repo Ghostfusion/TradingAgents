@@ -595,6 +595,18 @@ def compute_ratios(fin: dict, price: float | None = None,
         ]
     normalized_fcf = _median(fcf_values) if fcf_values else None
 
+    # --- RISK-18 cash-burn risk (§48) -------------------------------------
+    # The library's own CFD = (FCF_t - FCF_{t-1}) / |FCF_{t-1}|, read from the
+    # SAME canonical series the stability leg reads, so FCF_t and FCF_{t-1}
+    # cannot drift apart. A zero prior FCF is refused: the library's +epsilon
+    # guard would divide by nothing. (The runway half lives in the returned
+    # dict below, where the current ``cash`` and ``fcf`` are in scope.)
+    fcf_deterioration = None
+    if fcf_values and len(fcf_values) >= 2:
+        _fcf_t, _fcf_prev = fcf_values[-1], fcf_values[-2]
+        if _fcf_t is not None and _fcf_prev not in (None, 0):
+            fcf_deterioration = (_fcf_t - _fcf_prev) / abs(_fcf_prev)
+
     # --- FUND-18: turnover / working-capital family (§6) ------------------
     inv_basis = _avg_basis(fin, "inventory", inv)
     ar_basis = _avg_basis(fin, "net_receivables", ar)
@@ -694,6 +706,15 @@ def compute_ratios(fin: dict, price: float | None = None,
         "cash_conversion_stability": _stability(
             _series_ratio(fin, "operating_cashflow", "net_income")
         ),
+        # ---- RISK-18 cash-burn risk (§48) --------------------------------
+        # CashRunway = Cash / |FCF_negative|. Only meaningful while FCF is
+        # NEGATIVE (it is funding a burn), so a positive/zero FCF yields None
+        # rather than an infinite ratio - the reader sees `free_cash_flow`
+        # beside it and knows which case it is. Units: YEARS of the current
+        # annual/TTM burn.
+        "cash_runway_years": (_ratio_min(cash, -fcf) if (fcf is not None and fcf < 0) else None),
+        # CFD = (FCF_t - FCF_{t-1}) / |FCF_{t-1}|, from the canonical series.
+        "fcf_deterioration": fcf_deterioration,
         # ---- FUND-9 growth / working capital (§7) ------------------------
         "asset_growth": _first_difference(
             (_series_entry(fin, "total_assets") or {}).get("values")
@@ -798,6 +819,11 @@ RENDER_ORDER = [
     ("normalized_fcf_yield", "Normalized FCF yield", "pct"),
     ("fcf_stability", "FCF stability", "float"),
     ("cash_conversion_stability", "CFO/NI stability", "float"),
+    # RISK-18 cash-burn risk (§48, RiskScore.md §8.2): the runway is YEARS of
+    # the current burn and prints `n/a` whenever FCF is not funding one; the
+    # deterioration leg is the library's signed YoY FCF change.
+    ("cash_runway_years", "Cash runway (years)", "float"),
+    ("fcf_deterioration", "FCF deterioration", "pct"),
     ("asset_growth", "Asset growth", "pct"),
     ("debt_growth", "Debt growth", "pct"),
     ("receivables_growth", "AR growth", "pct"),

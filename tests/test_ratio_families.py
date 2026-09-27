@@ -1,4 +1,5 @@
-"""FundamentalScore ratio families in ``strategies/ratios.py`` (FUND-1..FUND-19).
+"""FundamentalScore ratio families in ``strategies/ratios.py`` (FUND-1..FUND-19),
+plus the RISK-18 cash-burn legs (§48) that land in the same module.
 
 One synthetic-fixture test per library family (``Strategies/scores/
 fundamental_score.md``, ranked in ``docs/scores/FundamentalScore.md`` §3.6),
@@ -398,3 +399,59 @@ def test_screener_carries_the_roc_and_sy_columns():
     header = md.splitlines()[2]
     assert "ROC" in header and "SY" in header
     assert "18.0%" in md and "3.5%" in md
+
+
+# ---------------------------------------------------------------------------
+# RISK-18 - cash-burn risk (§48): the runway, the deterioration leg, printing
+# ---------------------------------------------------------------------------
+
+def test_risk18_cash_runway_measures_only_a_real_burn():
+    # CashRunway = Cash / |FCF_negative|: cash 50 / burn 100 = 0.5 years, over
+    # the canonical FCF = OCF - |capex| = -70 - 30.
+    burn = compute_ratios(_fin(cash=50e6, operating_cashflow=-70e6, capex=30e6))
+    assert burn["free_cash_flow"] == pytest.approx(-100e6)
+    assert burn["cash_runway_years"] == pytest.approx(0.5)
+
+    # A non-negative FCF funds no burn: None, never an infinite or negative
+    # runway (the base fixture's FCF is +60e6, and 30-30 is exactly zero).
+    assert compute_ratios(_fin())["cash_runway_years"] is None
+    assert compute_ratios(_fin(operating_cashflow=30e6))["cash_runway_years"] is None
+    # Missing cash refuses even while the burn is real.
+    no_cash = compute_ratios(_fin(cash=None, operating_cashflow=-70e6, capex=30e6))
+    assert no_cash["cash_runway_years"] is None
+
+
+def test_risk18_fcf_deterioration_reads_the_canonical_series():
+    # CFD = (FCF_t - FCF_{t-1}) / |FCF_{t-1}| = (-300 + 100) / 100 = -2.0
+    worse = compute_ratios(_fin(fcf_series=_series([-100e6, -300e6])))
+    assert worse["fcf_deterioration"] == pytest.approx(-2.0)
+    # An improving cash flow is a POSITIVE change, not a magnitude.
+    better = compute_ratios(_fin(fcf_series=_series([-300e6, -100e6])))
+    assert better["fcf_deterioration"] == pytest.approx(200e6 / 300e6)
+    # One point is not a change, and a zero prior is the epsilon guard's no-op.
+    assert compute_ratios(_fin(fcf_series=_series([-100e6])))["fcf_deterioration"] is None
+    assert compute_ratios(_fin(fcf_series=_series([0.0, -100e6])))["fcf_deterioration"] is None
+    # No series at all (the plain vendor stack) refuses rather than guessing.
+    assert compute_ratios(_fin())["fcf_deterioration"] is None
+
+
+def test_risk18_renders_the_burn_family_and_refuses_a_non_burn():
+    from tradingagents.strategies.ratios import render_ratios
+
+    burning = render_ratios(
+        compute_ratios(
+            _fin(
+                cash=50e6,
+                operating_cashflow=-70e6,
+                capex=30e6,
+                fcf_series=_series([-40e6, -100e6]),
+            )
+        )
+    )
+    assert "- Cash runway (years): 0.50" in burning
+    assert "- FCF deterioration: -150.00%" in burning
+    # The calm fixture has a positive FCF, so the runway row reads n/a while
+    # both keys exist - a reader never sees an invented number.
+    calm = render_ratios(compute_ratios(_fin()))
+    assert "- Cash runway (years): n/a" in calm
+    assert "- FCF deterioration: n/a" in calm

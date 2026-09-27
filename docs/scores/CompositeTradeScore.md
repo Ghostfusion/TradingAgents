@@ -89,7 +89,7 @@ fetched this round, in Appendix A.
 | **Opportunity Score** | `opportunity_score`, the **executor-owned** 0-100 slot that this repo leaves `None`; the key is deliberately **absent** from the composite's return dict | `execution_contract.py::opportunity_score:240`, `trade_score.py:314` |
 | Alpha Score (Composite Alpha) | `alpha_eval.alpha_score`, a **forecast-accuracy** scorer (predicted direction/magnitude vs realized return), and the Phase C signal statistics (`ic`, rank IC, ICIR, decile spread) — neither is an expected excess return | `strategies/alpha_eval.py::alpha_score:229`, `strategies/alpha_health.py::score_evaluation_rows:627` |
 | Confidence | `coverage` — a printed **weight fraction**, not a multiplier; and `alpha_eval`'s caller-supplied `confidence` parameter | `strategies/score_engine.py::combine:142`, `alpha_eval.py:231` |
-| "composite score / ranking score" (the industry names the note lists) | `get_composite_rank`, the **vendor screener's** per-name rank, an unrelated object | `agents/utils/analysis_tools.py::get_composite_rank:5121` |
+| "composite score / ranking score" (the industry names the note lists) | `get_composite_rank`, the **vendor screener's** per-name rank, an unrelated object | `agents/utils/analysis_tools.py::get_composite_rank:5154` |
 
 `RegimeConfidence` deserves its own line: the master's four-outputs rule
 (`README.md` §1.4) illustrates the fourth output with `RegimeConfidence 0.75`, and
@@ -117,7 +117,7 @@ clarification for this (§2.3).
 | Status ladder | `RESEARCH_ONLY` → `VALIDATED` → `CONTRACT_MIGRATION` → `PRODUCTION`, contiguously, each rung needing a **record** | `trade_score.py::promotion_state:185` |
 | Printed block | weights, per-engine rows, coverage, excluded names, basis | `trade_score.py::format_trade_score:432` |
 | Gate | `enable_trade_score`, default **False** | `trade_score.py::GATE_NAME:58`, `default_config.py:1246` |
-| Leaf | `get_trade_score`, assembled by `_trade_score_engines` | `agents/utils/analysis_tools.py::get_trade_score:6199`, `::_trade_score_engines:6000` |
+| Leaf | `get_trade_score`, assembled by `_trade_score_engines` | `agents/utils/analysis_tools.py::get_trade_score:6232`, `::_trade_score_engines:6000` |
 | Registry entries | `trade` in `ENGINE_GATES` / `COMPOSITE_ENGINES` / `ENGINE_TOOLS` | `strategies/quant_scorecard.py::ENGINE_GATES:78`, `::COMPOSITE_ENGINES:94`, `::ENGINE_TOOLS:97` |
 | Report position | printed **last** of the eight engines | `agents/utils/report_hygiene.py:246` |
 
@@ -651,7 +651,7 @@ not a preference.
 | the name collision on `alpha_score` | `strategies/alpha_eval.py::alpha_score:229` |
 | the Phase C signal statistics | `strategies/alpha_health.py::score_evaluation_rows:627` |
 | the single z implementation | `strategies/cross_section.py::cross_sectional_z:70` |
-| composite consumers | `agents/utils/analysis_tools.py::get_trade_score:6199`, `::_trade_score_engines:6000`, `strategies/quant_scorecard.py::ENGINE_GATES:78`, `agents/utils/report_hygiene.py:246` |
+| composite consumers | `agents/utils/analysis_tools.py::get_trade_score:6232`, `::_trade_score_engines:6000`, `strategies/quant_scorecard.py::ENGINE_GATES:78`, `agents/utils/report_hygiene.py:246` |
 | the engines the note names | `strategies/fundamental_score.py::fundamental_score:252`, `::valuation_subscore:211`, `strategies/technical_score.py::technical_score:308`, `strategies/regime_score.py::regime_score:265`, `strategies/risk_score.py::risk_score:516`, `strategies/news_score.py::news_score:210`, `strategies/sentiment_score.py::sentiment_score:467`, `strategies/event_state.py::event_state:591` |
 | the survey's multiplicative confidence layer, and its direction | `../../Strategies/other_score.md:1061` (§32), `:1027` (§31), `:1177` (the four meta-scores) |
 | the nearest producers to that object's legs | `strategies/data_quality.py::aggregate_quality:46`, `strategies/score_disagreement.py::risk_disagreement:128`, `strategies/consensus.py::agreement_score:14` |
