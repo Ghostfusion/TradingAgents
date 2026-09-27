@@ -135,7 +135,7 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 | → guidance change | — | **ABSENT** | — | — | — | — | no guidance field; `get_earnings_calendar:30` carries EPS estimate only [CORRECTED 2026-09-26: stale — a producer exists (`benzinga_tools.get_guidance_revisions:34`, forward revenue/EPS range **with the prior range**, bound at `toolsets.py:411`, `enable_benzinga_surface` default off); the engine still does not consume it, so the gap is `NA` with that reason, not "no guidance field".] |
 | corporate events | 10 | **PARTIAL** | `sec_edgar.get_sec_filings:426` + `_FORM_LABELS:36` | form-type label | n/a (fact) | label only | only SEC form typing ("8-K (material event / M&A / guidance)"); rest is LLM prose |
 | → M&A / partnership / contract / product | — | ABSENT | — | — | — | — | no classifier; prompt tells analyst not to over-read 8-K (`news_analyst.py:102`) |
-| → dividend / buyback announcement | — | PARTIAL | `moomoo_extra_tools.get_dividends:157`, `get_corporate_actions:131`, `market_position_tools.get_share_buyback_authorization:49` | facts, not score | n/a | amounts/dates | remaining buyback authorization explicitly unavailable (`market_position_tools.py:112`) |
+| → dividend / buyback announcement | — | PARTIAL | `moomoo_extra_tools.get_dividends:160`, `get_corporate_actions:131`, `market_position_tools.get_share_buyback_authorization:49` | facts, not score | n/a | amounts/dates | remaining buyback authorization explicitly unavailable (`market_position_tools.py:112`) |
 | → bankruptcy / distress | — | PARTIAL | `analysis_tools.get_analyst_verdict:1580` (Altman Z, Ohlson O, Zmijewski, trap-risk) | `altman_z/ohlson_o/zmijewski_x/trap_risk` | higher Z = safer (distress = Z low) | model scores | statement-driven, not news-driven |
 | regulatory & legal | 5 | **PARTIAL** | `text_factors.lm_tone:121` (litigious count) | `litigious` | higher = more legal language | raw word count | no legal/regulatory event classifier; count only, no scale |
 | → regulatory action | — | ABSENT | — | — | — | — | grep `regulatory_action` = 0 |
@@ -172,8 +172,8 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 | `analyst_data_tools.get_analyst_ratings:10` | fundamentals_company_tools :386 | recommendation trend + price-target consensus | Yes (not in news set) |
 | `analyst_data_tools.get_earnings_calendar:30` | news_tools :359 | next earnings date + EPS est/actual + surprise_pct | Yes |
 | `analyst_revision_tools.get_analyst_revision_index:43` | fundamentals_company_tools :393 | weighted up/down revision ratio | Gated `enable_analyst_revision_index` (default False) → DISABLED sentinel |
-| `moomoo_extra_tools.get_corporate_actions:138` | fundamentals_company_tools :389 | dividends + splits | Yes |
-| `moomoo_extra_tools.get_dividends:157` | fundamentals_company_tools :390 | dividend rows (declaration/ex/pay) | Yes |
+| `moomoo_extra_tools.get_corporate_actions:141` | fundamentals_company_tools :389 | dividends + splits | Yes |
+| `moomoo_extra_tools.get_dividends:160` | fundamentals_company_tools :390 | dividend rows (declaration/ex/pay) | Yes |
 | `market_position_tools.get_share_buyback_authorization:49` | fundamentals :362 | trailing buyback/repurchase rows; authorization = unavailable | Yes |
 | `quant_formula_tools.get_disclosure_tone:381` | news_tools :361 | LM tone counts + readability + filing-vs-news gaps | Yes (litigious channel only) |
 | `macro_data_tools.get_macro_indicators:9` | news_tools :354 | FRED macro series | Yes |

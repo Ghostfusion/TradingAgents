@@ -556,7 +556,7 @@ producer anywhere, with the nearest honest symbol where one exists.
 | 29 | Volatility Shock | 2 | ABSENT | none |
 | 30 | Implied Volatility Event Signal | 1 | elsewhere | `catalyst.implied_move_from_history:138` |
 | 31 | IV Skew Event Signal | 2 | elsewhere | `options_surface.iv_skew:25` |
-| 32 | Options-Implied Event Move | 2 | elsewhere | `options_surface.implied_move_pct:42`; `moomoo_extra_tools.get_expected_move:274` |
+| 32 | Options-Implied Event Move | 2 | elsewhere | `options_surface.implied_move_pct:42`; `moomoo_extra_tools.get_expected_move:277` |
 | 33 | Event Surprise vs Market Move | 1 | ABSENT | none |
 | 34 | Price Reaction Residual | 2 | ABSENT | none |
 | 35 | Event Drift | 1 | PARTIAL | `events.expected_drift_after:56` -> `get_earnings_event_read:660` `post_event_drift` |

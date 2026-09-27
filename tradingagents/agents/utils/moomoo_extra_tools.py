@@ -120,9 +120,12 @@ def get_revenue_breakdown(
     ticker: Annotated[str, "ticker symbol"],
 ) -> str:
     """
-    Retrieve the latest period's revenue breakdown by segment/region with each
-    segment's share of total revenue. Segment mix shifts and concentration are
-    quality flags for the fundamentals analyst beyond aggregate revenue growth.
+    Retrieve the latest period's revenue breakdown, printed as ONE TABLE PER
+    VENDOR DIMENSION (product / business / region / industry). Each dimension is
+    a COMPLETE decomposition of the same total revenue, so a segment's share is
+    comparable only inside its own dimension and revenue must not be summed
+    across dimensions. Segment mix shifts and concentration are quality flags
+    for the fundamentals analyst beyond aggregate revenue growth.
     Uses the configured revenue_breakdown vendor.
 
     Args:

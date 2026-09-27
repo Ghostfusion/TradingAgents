@@ -304,7 +304,7 @@ TOOLS_CATEGORIES = {
         "tools": ["get_market_breadth"],
     },
     "revenue_breakdown": {
-        "description": "Segment/regional revenue breakdown for the latest period",
+        "description": "Segment/regional revenue breakdown for the latest period, one table per vendor dimension",
         "tools": ["get_revenue_breakdown"],
     },
     "corporate_actions": {

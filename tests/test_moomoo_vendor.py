@@ -10,6 +10,7 @@ from datetime import datetime
 from unittest import mock
 
 import pandas as pd
+import pytest
 
 import tradingagents.dataflows.config as config_module
 from tradingagents.dataflows import interface, moomoo
@@ -23,6 +24,9 @@ from tradingagents.dataflows.moomoo import (
     MoomooNotConfiguredError,
     _moomoo_code,
 )
+
+pytestmark = pytest.mark.timeout(180)
+
 
 RET_OK = 0
 
@@ -506,6 +510,103 @@ class MoomooSdkHandlingTests(unittest.TestCase):
             out = moomoo.get_revenue_breakdown_moomoo("AAPL")
         self.assertIn("iPhone", out)
         self.assertIn("$54.00B", out)  # 5.4e10 / 1e9 = 54.00B
+
+    def test_revenue_breakdown_renders_one_table_per_dimension(self):
+        # MSFT FY2026, verbatim shape (probed live 2026-09-27): the vendor sends
+        # ONE GROUP PER DIMENSION, each a complete decomposition of the SAME
+        # total revenue. Flattened, "United States 51.5%" sat in the same Share
+        # column as "Intelligent Cloud 41.5%", and the five rows together double
+        # counted the $331.8B total.
+        data = {
+            "period": "2026/FY",
+            "currency_code": "USD",
+            "breakdown_list": [
+                {
+                    "type": "REGION",
+                    "item_list": [
+                        {
+                            "name": "United States",
+                            "main_oper_income": 1.70794e11,
+                            "ratio": 51.4689,
+                        },
+                        {
+                            "name": "Other countries",
+                            "main_oper_income": 1.61045e11,
+                            "ratio": 48.531,
+                        },
+                    ],
+                },
+                {
+                    "type": "BUSINESS",
+                    "item_list": [
+                        {
+                            "name": "Productivity and Business Processes",
+                            "main_oper_income": 1.39996e11,
+                            "ratio": 42.1879,
+                        },
+                        {
+                            "name": "Intelligent Cloud",
+                            "main_oper_income": 1.37791e11,
+                            "ratio": 41.5234,
+                        },
+                        {
+                            "name": "More Personal Computing",
+                            "main_oper_income": 5.4052e10,
+                            "ratio": 16.2886,
+                        },
+                    ],
+                },
+            ],
+        }
+        ctx = mock.Mock()
+        ctx.get_financials_revenue_breakdown.return_value = (RET_OK, data)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.MSFT"),
+        ):
+            out = moomoo.get_revenue_breakdown_moomoo("MSFT")
+        # Each dimension owns a table, and each row lands under its own label.
+        self.assertIn("### REGION", out)
+        self.assertIn("### BUSINESS", out)
+        self.assertLess(out.index("### REGION"), out.index("United States"))
+        self.assertLess(out.index("Other countries"), out.index("### BUSINESS"))
+        self.assertLess(out.index("### BUSINESS"), out.index("Intelligent Cloud"))
+        self.assertIn("| United States | $170.79B | 51.5% |", out)
+        # Two dimensions decompose one total, so the output says so.
+        self.assertIn("2 dimensions returned", out)
+        self.assertIn("never sum revenue across dimensions", out)
+
+    def test_revenue_breakdown_does_not_invent_a_dimension_name(self):
+        # An absent field arrives as the literal "None" (an unknown number as
+        # "N/A"), and neither names a dimension - so neither is printed as one.
+        data = {
+            "period": "2026/Q3",
+            "currency_code": "USD",
+            "breakdown_list": [
+                {
+                    "type": "None",
+                    "item_list": [
+                        {"name": "iPhone", "main_oper_income": 5.4e10, "ratio": 49.5},
+                    ],
+                },
+                {
+                    "item_list": [
+                        {"name": "Services", "main_oper_income": 2.4e10, "ratio": 22.0},
+                    ],
+                },
+            ],
+        }
+        ctx = mock.Mock()
+        ctx.get_financials_revenue_breakdown.return_value = (RET_OK, data)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            out = moomoo.get_revenue_breakdown_moomoo("AAPL")
+        self.assertIn("### (unlabelled)", out)
+        self.assertNotIn("### None", out)
+        self.assertIn("iPhone", out)
+        self.assertIn("Services", out)
 
     def test_corporate_actions_formats_dividends(self):
         div = {"dividend_list": [{"statement": "Cash Dividend: 0.27 USD", "ex_date": "08/10/2026"}]}

@@ -1971,8 +1971,32 @@ def get_market_breadth_moomoo() -> str:
     return "\n".join(lines)
 
 
+def _dimension_label(raw: object) -> str:
+    """The vendor's own group label, or a marker when it sent none.
+
+    The SDK fills ``type`` from ``RevenueBreakdownType`` (``PRODUCT`` /
+    ``INDUSTRY`` / ``REGION`` / ``BUSINESS``), but an absent field arrives as
+    the literal ``"None"`` and an unknown number as ``"N/A"``. Neither names a
+    dimension, so neither is passed off as one.
+    """
+    text = str(raw).strip()
+    if not text or text.upper() in {"NONE", "N/A", "?"}:
+        return "(unlabelled)"
+    return text
+
+
 def get_revenue_breakdown_moomoo(ticker: str) -> str:
-    """Segment/regional revenue breakdown for the latest reported period."""
+    """Segment/regional revenue breakdown for the latest reported period.
+
+    The SDK answers with one group PER DIMENSION — ``breakdown_list`` is a list
+    of ``{"type": "REGION"|"BUSINESS"|"PRODUCT"|"INDUSTRY", "item_list": [...]}``
+    — and every dimension decomposes the SAME total revenue. Measured live on
+    MSFT FY2026: the ``REGION`` group (51.47% + 48.53%) and the ``BUSINESS``
+    group (42.19% + 41.52% + 16.29%) each sum to 100% and each sum to the same
+    $331.839B. Flattening the groups into one table therefore put a region's
+    share in the same column as a business's AND double counted the revenue
+    total, so each dimension is rendered under its own label.
+    """
     code = _moomoo_code(ticker)
     ctx = _ensure_ctx()
     ret, data = _sdk_call(ctx.get_financials_revenue_breakdown, code)
@@ -1981,26 +2005,41 @@ def get_revenue_breakdown_moomoo(ticker: str) -> str:
         raise NoMarketDataError(ticker, code, detail="unexpected revenue breakdown response")
     period = data.get("period", "?")
     currency = data.get("currency_code", "")
-    items: list[dict] = []
+    groups: list[tuple[str, list[dict]]] = []
     for bd in data.get("breakdown_list") or []:
-        items.extend(bd.get("item_list") or [])
-    if not items:
+        if not isinstance(bd, dict):
+            continue
+        items = [it for it in (bd.get("item_list") or []) if isinstance(it, dict)]
+        if items:
+            groups.append((_dimension_label(bd.get("type")), items))
+    if not groups:
         raise NoMarketDataError(ticker, code, detail="no revenue breakdown items")
     lines = [f"## Revenue Breakdown — {ticker} ({period}, {currency}) (moomoo)", ""]
-    lines.append("| Segment | Revenue | Share |")
-    lines.append("| --- | --- | --- |")
-    for item in items:
-        name = str(item.get("name", "?"))
-        rev = item.get("main_oper_income")
-        rev_s = _fmt_fin_val(rev, currency)
-        ratio = item.get("ratio")
-        ratio_s = f"{float(ratio):.1f}%" if isinstance(ratio, (int, float)) else "-"
-        lines.append(f"| {name} | {rev_s} | {ratio_s} |")
-    lines.append("")
+    if len(groups) > 1:
+        lines.append(
+            f"**{len(groups)} dimensions returned** ({', '.join(lab for lab, _ in groups)}), "
+            "each a COMPLETE decomposition of the same total revenue: shares are "
+            "within-dimension and sum to ~100% per dimension, so compare a share only "
+            "inside its own dimension and never sum revenue across dimensions."
+        )
+        lines.append("")
+    for label, items in groups:
+        lines.append(f"### {label}")
+        lines.append("")
+        lines.append("| Segment | Revenue | Share |")
+        lines.append("| --- | --- | --- |")
+        for item in items:
+            name = str(item.get("name", "?"))
+            rev = item.get("main_oper_income")
+            rev_s = _fmt_fin_val(rev, currency)
+            ratio = item.get("ratio")
+            ratio_s = f"{float(ratio):.1f}%" if isinstance(ratio, (int, float)) else "-"
+            lines.append(f"| {name} | {rev_s} | {ratio_s} |")
+        lines.append("")
     lines.append(
-        "Interpretation: segment mix and concentration — a shrinking core segment "
-        "or heavy single-segment concentration are quality flags beyond aggregate "
-        "revenue growth."
+        "Interpretation: segment mix and concentration WITHIN one dimension — a "
+        "shrinking core segment or heavy single-segment concentration are quality "
+        "flags beyond aggregate revenue growth."
     )
     return "\n".join(lines)
 
