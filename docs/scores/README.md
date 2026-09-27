@@ -29,6 +29,11 @@ The composite layer has its own document:
 `TradeScore`, its renormalised aggregation rule and printed-block contract, and
 the owner's 2026-09-26 *Composite Trade Score* proposal (a claim-by-claim ledger,
 the invariants it would break as written, and the eight questions it leaves open).
+The systems *outside* the set have their own document too:
+[`ScoreUniverse.md`](ScoreUniverse.md) - the owner's `Strategies/other_score.md`
+survey, section by section: what the tree already computes under another name, what
+is half-built, what is absent, and the invariant map that governs any attempt to
+build one.
 
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
@@ -62,14 +67,30 @@ changes because they exist: no weight, no gate and no composite entry has been
 added for either.
 
 **[ADDED 2026-09-26] The owner's survey of the larger score universe sits beside
-the set.** `Strategies/other_score.md` (staged 2026-09-26) catalogs the industry's
-quantitative scoring systems in 32 sections and then gives his own hierarchy: **9
-core investment engines** (Fundamental, Valuation, Technical, *Momentum*, Regime,
-Risk, News, Sentiment, Event), **20 secondary / specialised engines** (Earnings,
-Flow, Options, Breadth, RelativeStrength, Quality, CapitalAllocation, Moat,
-AIAdoption, AIThreat, Crowding, …) and **4 meta-scores** (DataConfidence,
-SignalAgreement, ForecastUncertainty, ModelConsensus) - with his own warning
-against turning all of them into 30-40 top-level scores.
+the set.** `Strategies/other_score.md` catalogs the industry's quantitative scoring
+systems in 32 sections and then gives his own hierarchy - with his own warning
+against turning all of them into 30-40 top-level scores. **Its own document is
+[`ScoreUniverse.md`](ScoreUniverse.md)**, which ledgers every section against the
+tree: which quantity already exists, which is half-built, which is absent, and
+where a survey system would double-count a built engine.
+
+**[CORRECTED 2026-09-26]** This block first read "**9 core investment engines**
+… **20 secondary / specialised engines** … and **4 meta-scores**", which cannot be
+right: the survey's secondary list is numbered **10-20, i.e. eleven entries**, and
+9 + 20 + 4 = 33, not 24. Counted from the list: **9 core** (Fundamental,
+Valuation, Technical, *Momentum*, Regime, Risk, News, Sentiment, Event), **11
+secondary** (Earnings, Flow, Options, Breadth, RelativeStrength, Quality,
+CapitalAllocation, Moat, AIAdoption, AIThreat, Crowding) and **4 meta-scores**
+(DataConfidence, SignalAgreement, ForecastUncertainty, ModelConsensus) - **24
+named systems in total.** The same correction applies to the sentence below that
+read "Twenty of the 24 named systems have no spec, no library and no code":
+**exactly 8 of the 24 share a name with a specified library** (fundamental,
+valuation, technical, regime, risk, news, sentiment, event), `MomentumScore` has
+no library, the library `MarketScore` is *not* one of the 24 names, and none of
+the 11 secondary or 4 meta names has a library - though three of the meta names
+have a nearest producer (`strategies/data_quality.py::aggregate_quality:46`,
+`strategies/consensus.py::agreement_score:14`,
+`strategies/tail_risk.py::_uncertainty:103`).
 
 Two divergences are worth naming rather than smoothing over. (1) The survey's core
 slot for the stock's own market behaviour is **`MomentumScore`**, not the
@@ -78,10 +99,9 @@ and the libraries do not agree on the core set either. (2) The survey makes
 `ValuationScore` a **core** engine, which sharpens the boundary question
 `ValuationScore.md` §7 puts to the owner: the built `FundamentalScore` already
 carries a `valuation_subscore` (`fundamental_score.py:211`, 20 per cent of that
-engine). **Twenty of the 24 named systems have no spec, no library and no code**;
-only the nine in `Strategies/scores/` are specified, and only seven of those are
-built. Whether any of the remaining systems becomes a document - let alone an
-engine - is an owner decision, not one this set may take.
+engine). Whether any of the remaining systems becomes a document - let alone an
+engine - is an owner decision, not one this set may take; the survey's seven
+questions are in [`ScoreUniverse.md`](ScoreUniverse.md) §8.
 
 Scope of this master: the architecture, the cross-engine rules, the composite and
 its gate rules, the weight reconciliation between the owner's two iterations, the
@@ -536,7 +556,7 @@ of them code" until they were repaired.
 | D-1 | **This document's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md` as committed at `68931f3` | the set had **no wiring contract and no phase plan** - the two things an implementation needs. §4 and §5 above are now the pointer and the summary; the bodies are the plan's §3-§8 and §9 | **FIXED** - §4/§5 above are the pointers; re-verified 2026-09-17 |
 | D-2 | **Cross-references to sections that no longer exist.** §6 cited §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; §7 cited §5.2/§5.3 and "§6 Phase C/D"; §1.4 cited §8.3. `FundamentalScore.md` cited "§8", §5.2/§5.3 and §6 Phase C/D | the master's headings end at §7 plus appendices; `FundamentalScore.md`'s end at §3.6 plus appendices. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) carried §3.7 (the four-score architecture), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E) and §8 (the decision record with §8.3) | a reader following a cross-reference landed nowhere. Every reference is now repointed at the live section (this document, the plan, or the engine document that owns the material) | **FIXED** - every reference repointed; re-verified 2026-09-17 by a headings-vs-references scan (the dead names survive only in this row, as the record) |
 | D-3 | **The SEC `User-Agent` carries a placeholder contact** | `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (... contact: research@example.com)`; the comment at `:28` states a descriptive UA with a contact is required | `example.com` is not a deliverable address; the SEC's published fair-access ceiling is 10 requests/second per IP and a reachable contact is what the policy asks for | **FIXED 2026-09-17** - `sec_edgar.py:33` carries the owner's reachable contact; the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` |
-| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do** | `sec_edgar.get_financial_history:173` loops `_TAG_MAP:56-65` calling `_COMPANYCONCEPT_URL:66` once per tag (`:206-215`) | the `companyfacts` endpoint returns every tag in one payload; 11x the requests against a 10 req/s ceiling for the same data, and it is why extending the tag set is expensive as written | **FIXED 2026-09-17** - one `companyfacts` call for every tag (`_us_gaap_facts`), with the per-tag loop kept as the fallback; two tests, both failing against the pre-change module. Live smoke test 2026-09-17: MSFT rendered 6 annual periods from 2 requests (pre-change: 12), UA accepted |
+| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do** | `sec_edgar.get_financial_history:527` loops `_TAG_MAP:56-65` calling `_COMPANYCONCEPT_URL:66` once per tag (`:206-215`) | the `companyfacts` endpoint returns every tag in one payload; 11x the requests against a 10 req/s ceiling for the same data, and it is why extending the tag set is expensive as written | **FIXED 2026-09-17** - one `companyfacts` call for every tag (`_us_gaap_facts`), with the per-tag loop kept as the fallback; two tests, both failing against the pre-change module. Live smoke test 2026-09-17: MSFT rendered 6 annual periods from 2 requests (pre-change: 12), UA accepted |
 | D-5 | **`enable_factor_model` is not a free name.** Three design documents describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:905`; `design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109` | a plan that reused it for the deterministic composite would silently couple two different objects; the plan's six engine gates are new names for this reason | **FIXED 2026-09-17** - all three documents now name the flag as the **learned** model's gate only, in the body and the seam table |
 
 ---
@@ -618,8 +638,8 @@ differs by an order of magnitude:
 
 **Two couplings the wiring must respect** (rule 3): `get_news_sentiment_series` is
 bound to both `news_tools()` (`agents/toolsets.py:352`) and `market_tools()`
-(`:279`), and `news_relevance.score_news_article:53` **is** the confidence weight
-of `sentiment.aggregate_weighted_sentiment:616`. One producer feeding two readers
+(`:279`), and `news_relevance.score_news_article:56` **is** the confidence weight
+of `sentiment.aggregate_weighted_sentiment:626`. One producer feeding two readers
 is the repo's rule; the separation is enforced by **naming the producer per
 component**, which is what `IMPLEMENTATION_PLAN.md` §5 does row by row.
 ---
@@ -847,6 +867,39 @@ and `retained_earnings`, which are read only inside Beneish/GP-A/Altman.
 ---
 ---
 
+### C.1 Method, decisions and the factor table — recovered 2026-09-26
+
+**[RECOVERED 2026-09-26] This appendix was missing from this master, and the gap
+was visible in C.2's own numbering.** The document split (`68931f3`, 2026-09-18)
+carried `C.2` into this file but **dropped `C.1`**, so the ledger below numbered
+itself from **13** with its first twelve sources nowhere in the set - a reader
+following a citation to "source 8" had no source 8 to read. The table is restored
+**verbatim** from the pre-split document the split deleted
+(`docs/design_fundamental_factor_weight_model.md` at `68931f3^`, "Appendix C -
+source ledger", `### C.1`); its "Used for" column still names **that** document's
+own sections, and each row's subject is now carried by the engine documents in
+this directory.
+
+| # | Source | Used for |
+| --: | --- | --- |
+| 1 | DeMiguel, Garlappi & Uppal, "Optimal Versus Naive Diversification" (RFS 2009) — 14 models, 7 datasets, none consistently beats `1/N`; estimation windows of 3,000+ months needed for 25 assets | equal weights as the default; refusing unmeasured "production weights" |
+| 2 | Grinold & Kahn, *Active Portfolio Management* — `IR ≈ TC·IC·√BR`; rank IC as the robust form; IC/covariance-aware signal weighting | Phase C before Phase D; rank IC as the factor metric |
+| 3 | Asness, Frazzini & Pedersen, "Quality Minus Junk" — `quality = z(Profitability + Growth + Safety + Payout)`; lower prices for quality predict higher returns | the Q/G/BS/payout category split; valuation must not be cancelled by quality |
+| 4 | Novy-Marx, "The Other Side of Value: The Gross Profitability Premium" — GP/A roughly matches book-to-market and subsumes earnings-based measures | GP/A ≥ ROE ordering (the one ordering with literature behind it) |
+| 5 | Titman, Wei & Xie (2004); Cooper, Gulen & Schill (2008) | asset growth and capex as **risk flags**, not short signals |
+| 6 | Cohen, Malloy & Pomorski, "Decoding Inside Information" — routine trades ~zero, opportunistic-only 82bps/month VW | insider category stays small; the lever is the routine/opportunistic split |
+| 7 | Sloan (1996), accruals anomaly | Earnings-Quality direction conventions (already implemented) |
+| 8 | McLean & Pontiff (2016), 97 predictors — ~26% out-of-sample decay, ~58% post-publication | refusing weights fitted to one sample; DSR/PBO discipline |
+| 9 | Asness, Chandra, Ilmanen, Israel & Moskowitz, "Contrarian Factor Timing is Deceptively Difficult" | refusing default regime/conditional weights |
+| 10 | Valuation practitioner consensus on terminal value share (60-80% of DCF) and 50bp WACC/`g` sensitivity (~10-20% of value) | the confidence-scaled DCF weight and its thresholds |
+| 11 | Sector-valuation consensus (bank P/B ↔ ROE/ROTCE with NIM and CET1; REIT P/FFO/AFFO, NAV, occupancy) | sector overlays are structurally right but data-blocked here |
+| 12 | Factor-combination practice (measure correlation → cluster → orthogonalise → weight by unique predictive value; naive summation inflates exposure) | redundancy as structure; reject the untested constant |
+
+*(The pre-split document's own closing sentence for this table, kept with it:
+"Primary-source retrieval was performed for every row; the two claims this
+document leans on hardest (1 and 8) are also the two that most directly
+contradict the source's Phase 1 and Phase 4.")*
+
 ### C.2 Evidence ledger for the score architecture
 
 | # | Source | Used for |
@@ -870,3 +923,17 @@ and `retained_earnings`, which are read only inside Beneish/GP-A/Altman.
 | 29 | OECD / European Union / Joint Research Centre (2008), *Handbook on Constructing Composite Indicators: Methodology and User Guide* — DOI `10.1787/9789264043466-en` (the citable source behind row 21) | normalization, weighting and aggregation are **normative choices** to be declared and robustness-tested: the composite's own vector stays `RESEARCH_ONLY` until Phase C measures it, and a standardized or nonlinear composite needs the same treatment (CompositeTradeScore.md §3.6-§3.7) |
 | 30 | Grinold, R. C. (1989), "The fundamental law of active management", *Journal of Portfolio Management* — DOI `10.3905/jpm.1989.409211` | a 0-100 band score is **not** an expected excess return; the bridge is information coefficient × volatility × standardized score, which is what Phase C measures (`strategies/alpha_health.py::score_evaluation_rows:627`) rather than a formula (CompositeTradeScore.md §3.8) |
 | 31 | Munda, G. & Nardo, M. (2009), "Noncompensatory/nonlinear composite indicators for ranking countries: a defensible setting", *Applied Economics* — DOI `10.1080/00036840601019364` | nonlinear/noncompensatory aggregation is a defensible **design choice** that must be declared, because it changes what a ranking means (a weak leg can dominate) — the reason interaction terms need an owner decision plus a measurement (CompositeTradeScore.md §3.7) |
+| 32 | Diether, K. B., Malloy, C. J. & Scherbina, A. (2002), "Differences of Opinion and the Cross Section of Stock Returns", *The Journal of Finance* — DOI `10.1111/0022-1082.00490` | analyst-forecast dispersion predicts **lower** returns and the paper states the evidence is *inconsistent* with dispersion proxying for risk — so a dispersion measure carries a **sign** and belongs in the evidence layer, not only in a meta-uncertainty one (ScoreUniverse.md §5 D-15) |
+| 33 | Kuncheva, L. I. & Whitaker, C. J. (2003), "Measures of Diversity in Classifier Ensembles and Their Relationship with the Ensemble Accuracy", *Machine Learning* — DOI `10.1023/A:1022859003006` | disagreement among members is a measurable quantity **distinct from their mean** — the reason agreement/dispersion is a separate output rather than a term inside the average (ScoreUniverse.md §1 §31) |
+| 34 | Triantaphyllou, E. (2000), *Multi-criteria Decision Making Methods: A Comparative Study*, Springer — DOI `10.1007/978-1-4757-3157-6` | the multiplicative (weighted-product) aggregation shape is **noncompensatory** — a different object from the weighted sum, which is why a `Conviction` product must not be a reshaping of `TradeScore` (ScoreUniverse.md §5 D-1) |
+| 35 | Wang, R. Y. & Strong, D. M. (1996), "Beyond Accuracy: What Data Quality Means to Data Consumers", *Journal of Management Information Systems* — DOI `10.1080/07421222.1996.11518099` | data quality is multi-dimensional (accuracy, timeliness, completeness, consistency, believability), so a single weighted mean is a simplification to **declare** — `strategies/data_quality.py::aggregate_quality:46` does exactly that (ScoreUniverse.md §2.3) |
+
+**[ADDED 2026-09-26] The survey's own systems have their own evidence ledger.**
+[`ScoreUniverse.md`](ScoreUniverse.md) Appendix A carries the ~50 sources for the
+systems in `Strategies/other_score.md` — Piotroski 2000, Altman 1968, Beneish
+1999, Banz 1981, Jegadeesh-Titman 1993, Zweig 1986, Hamilton 1989, Carr-Wu 2009,
+Gârleanu et al. 2009, Pontiff-Woodgate 2008, Frankel-Litov 2009 and the rest —
+each fetched this round with its DOI record. They are **not** repeated here: this
+table is the ledger for the **architecture**, that one is the ledger for the
+**systems**. The four rows above are the exceptions, because each constrains an
+architecture choice rather than a single system.

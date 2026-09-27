@@ -198,7 +198,7 @@ outputs.
 **Why.** `FundamentalScore.md` §1.4 records that `annual_series` now stacks
 revenue / net income / total assets / operating cashflow / ROA over 4 annual
 periods, and that the CAGR family plus G-Score G4/G5 stay blocked on **EPS, EBIT,
-EBITDA, FCF** and on the 5-period bar. `sec_edgar.get_financial_history:173` is
+EBITDA, FCF** and on the 5-period bar. `sec_edgar.get_financial_history:527` is
 the only free source that clears it, and it does not feed the path.
 
 **What exists, verified at the definition site.** `sec_edgar.py`:
@@ -332,7 +332,7 @@ manual.
 
 **Why.** `RegimeScore.md` §1 marks market-wide A/D, new highs/lows and
 percent-above-MA as ABSENT; §4 names the smallest honest producer, and it needs
-**no new vendor**: `sector_breadth.multi_breadth:60` already takes a
+**no new vendor**: `sector_breadth.multi_breadth:165` already takes a
 `{name: closes}` map and returns per-key percentages, and the sector screens
 already build that map in bulk
 (`agents/utils/analysis_tools.py:3646-3748` over
@@ -342,7 +342,7 @@ already build that map in bulk
 *, windows=(20,50,200)) -> dict` returning `{pct_above_<w>: 0-100, n,
 advance_decline: int, new_highs: int, new_lows: int, coverage}` — the first three
 from `multi_breadth`, the last three computed from the same map. `n`-gated the
-way the sector path already is (`sector_screener.breadth_with_gate:511`): below
+way the sector path already is (`sector_screener.breadth_with_gate:519`): below
 `n = 20` the row is `n/a`, not zero.
 
 **Acceptance - MET 2026-09-17.** `strategies/market_breadth.py::market_breadth`
@@ -377,7 +377,7 @@ it needs no new vendor (ground rule 7).
 regime input.
 
 **Deliverable.** A percentile rank of the latest `VIXCLS` value over its own
-trailing history, reusing the existing shape (`regime.vol_percentile:49`), inside
+trailing history, reusing the existing shape (`regime.vol_percentile:59`), inside
 the market-level regime path, plus binding the FRED read to the market surface.
 
 **Acceptance - MET 2026-09-17.** A monotone synthetic series gives a percentile
@@ -393,7 +393,7 @@ marker, and the FRED read is now bound to `market_tools()` as well as
 ### 3.5 P0-5 — VIX term structure
 
 **Why.** `RegimeScore.md` §1 and §4: the equity-IV slope
-(`options_surface.term_structure_slope:152`) is **not** a VIX term structure, and
+(`options_surface.term_structure_slope:227`) is **not** a VIX term structure, and
 the document forbids substituting it silently.
 
 **Sources, checked 2026-09-17.** FRED carries **VXVCLS** (Cboe 3-Month
@@ -492,8 +492,8 @@ a score. Fix on sight (standing order 10); the first is a real sizing bug.
 | P0-8a | `events.position_mult_by_side`'s catalyst argument is inert | `strategies/events.py:42` uses `event_scale = catalyst if catalyst > 1 else 1.0`, while the only caller documents `catalyst` as `0..1` (`agents/utils/analysis_tools.py:2254`) and `catalyst.get_catalyst_scale` supplies ≤1 — so `event_scale` is **always 1.0** and the multiplier is only ever 1.0 (beat) / 0.5 (miss) | compare against the documented range (`catalyst <= 1`) or take a scale explicitly | a beat with a 0.25 catalyst scale produces a multiplier below the no-catalyst case; fails before the fix **FIXED 2026-09-17** - `event_scale = catalyst if 0 < catalyst <= 1 else 1.0`; a beat at 0.25 now sizes 0.25, a value outside (0, 1] stays the no-catalyst case. Test fails pre-change. |
 | P0-8b | `get_earnings_calendar`'s `look_back_days` names a **forward** window | `agents/utils/analyst_data_tools.py:33` vs `dataflows/finnhub.py:195-196` (`[curr_date, curr_date + look_back_days]`) | rename the parameter (and its callers) to a forward name; keep the value | the leaf's argument name matches the direction it queries; a small value truncates the forward window **FIXED 2026-09-17** - renamed to `look_ahead_days` on all three vendors (finnhub, moomoo, yfinance) and on the tool; a test pins the forward `to` date. |
 | P0-8c | `get_tail_risk` passes a **close-price series as an equity curve** to CDaR | `agents/utils/analysis_tools.py:4690` (`cdar(closes, …)`), `strategies/book_risk.py:174` | either feed it the weighted book or label the proxy in the output and refuse the name "CDaR" | the printed block says which series it is; `get_book_tail_risk`'s portfolio number is not confused with it **FIXED 2026-09-17** - the proxy is labelled (`price_path_dd_tail_mean`, `price_path_dd_var`, `price_path_max_dd`) and the name 'CDaR' is refused; no bare `cdar=` token remains, so the book's CDaR has one producer. |
-| P0-8d | `book_risk.portfolio_cvar:28` and `book_risk.book_correlated_stress:128` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move **FIXED 2026-09-17** - `normalize_book_weights` is the one implementation; both callers read it, and a test replaces that single rule and shows BOTH paths move. |
-| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:4782` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled **FIXED 2026-09-17** - `_derive_macro_markers` fills all five from the run's own leaves (FRED T10Y2Y, HY OAS, EFFR and DTWEXBGS changes, and the VIX percentile); a supplied value wins, an unmeasurable one stays None, and the leaf prints which markers it derived. |
+| P0-8d | `book_risk.portfolio_cvar:59` and `book_risk.book_correlated_stress:146` re-implement the same cash-sleeve/equal-weight/normalise rules | `strategies/book_risk.py` ~50-60 and ~150-160 | extract the normalisation once (ground rule 2), both callers read it | a test changes the cash-sleeve rule in one place and both paths move **FIXED 2026-09-17** - `normalize_book_weights` is the one implementation; both callers read it, and a test replaces that single rule and shows BOTH paths move. |
+| P0-8e | `get_macro_regime_read:6492` requires caller-supplied markers while the FRED leaves hold the same data | `macro_data_tools.get_macro_indicators:9`, `analysis_tools.get_credit_spread_read:7018` | derive the five markers from those two leaves when not supplied; a supplied value still overrides | with no arguments the label resolves from the run's own data; with arguments the override is labelled **FIXED 2026-09-17** - `_derive_macro_markers` fills all five from the run's own leaves (FRED T10Y2Y, HY OAS, EFFR and DTWEXBGS changes, and the VIX percentile); a supplied value wins, an unmeasurable one stays None, and the leaf prints which markers it derived. |
 
 ### 3.9 P0-9 — vendor-capability probes
 
@@ -503,7 +503,7 @@ and a probe is cheaper than a build that discovers the gap.
 1. **EODHD `/sentiments` coverage** — `trading_graph._sentiment_factor_read:1178`
    hardcodes `source="eodhd"` (`:1235`) and returns `None` rather than falling
    back when EODHD has no coverage, while the leaf
-   `analysis_tools.get_sentiment_lead_lag:6821` does fall back. Probe: how many
+   `analysis_tools.get_sentiment_lead_lag:9332` does fall back. Probe: how many
    names in the current basket return a non-empty sentiment series, and what the
    fallback order should be.
 2. **The forward event calendars** (`EventScore.md` §4): FDA/clinical, court,
@@ -560,7 +560,7 @@ engine's own, master rule 6).
 | Symbol | Contract |
 | --- | --- |
 | `align(value, *, direction, band=None, lo=None, hi=None) -> float \| None` | `higher_better` / `lower_better` ramp, or a `band` lookup over the producer's own edges. `None` in → `None` out. Never returns a neutral 50 for a missing value |
-| `combine(components, *, weights, min_coverage=3, bands=None) -> dict` | `{"score": 0-100 \| None, "coverage": present_weight/total_weight, "components": [...], "withheld": reason \| None, "basis": str}`; renormalises over present components; withholds below the floor **with its reason** — the semantics `factors._coverage_floor:245` and `category_scores:258` already implement, extracted rather than re-derived |
+| `combine(components, *, weights, min_coverage=3, bands=None) -> dict` | `{"score": 0-100 \| None, "coverage": present_weight/total_weight, "components": [...], "withheld": reason \| None, "basis": str}`; renormalises over present components; withholds below the floor **with its reason** — the semantics `factors._coverage_floor:246` and `category_scores:258` already implement, extracted rather than re-derived |
 | `band_label(score, bands) -> str` | the engine's own advisory band table (master rule 2 — nothing here touches `decision_guardrail.SCORE_BANDS`) |
 
 **Non-goals, stated so they are not added later:** the kernel holds no weight
@@ -693,26 +693,26 @@ the mapped contribution.
 
 | Input | Producer | Band source |
 | --- | --- | --- |
-| RSI | `swing.rsi:39`, `swing.rsi_band:118` | 45-70 `strong`, >70 `hot`, <40 `broken` |
-| Stochastic K/D | `technical_factors.stochastic_oscillator:146` | `<20 oversold` |
-| StochRSI | `technical_factors.stoch_rsi:283` | `<0.2` |
-| RSI2 | `technical_factors.rsi2:315` | `<10` |
-| Williams %R | `technical_factors.williams_r:338` | `-80..-100` |
-| Bollinger %b | `value_dip.bollinger_pct_b:75` | `<=0` dip, `>1` extended |
-| MFI | `technical_factors.mf_index:112` | `>80` overbought |
-| Elder thermometer | `technical_factors.elder_thermometer:476` | `quiet` (`<0.8`) is the good dip read |
+| RSI | `swing.rsi:44`, `swing.rsi_band:123` | 45-70 `strong`, >70 `hot`, <40 `broken` |
+| Stochastic K/D | `technical_factors.stochastic_oscillator:150` | `<20 oversold` |
+| StochRSI | `technical_factors.stoch_rsi:319` | `<0.2` |
+| RSI2 | `technical_factors.rsi2:351` | `<10` |
+| Williams %R | `technical_factors.williams_r:374` | `-80..-100` |
+| Bollinger %b | `value_dip.bollinger_pct_b:77` | `<=0` dip, `>1` extended |
+| MFI | `technical_factors.mf_index:116` | `>80` overbought |
+| Elder thermometer | `technical_factors.elder_thermometer:530` | `quiet` (`<0.8`) is the good dip read |
 
 **Wiring the missing inputs** (each is small and each is a prerequisite for one
 category):
 
 | Missing | Smallest honest producer |
 | --- | --- |
-| MACD line / histogram **values** and slope | promote `value_dip._macd_hist:500` to public and surface the three series in `get_extended_indicators`; slope = last minus prior bar (the same delta `rule_eval.rule_signal_macd_hist_rising:103` already computes) |
-| RSI slope | promote `value_dip._rsi_series:470` (already a full Wilder series) and reuse `relative_strength.slope_pct:49` |
-| momentum 5D | `extended_indicators.roc:149` is already parameterised: `roc(closes, 5)` |
-| ATR percentile (per-name vol percentile) | the loop already written for realized vol at `etf_risk.etf_risk_profile:163-172`, with `size.atr:131` in place of `_realized_vol:69` |
-| OBV **value** (not just divergence) | return the cumulative OBV that `technical_factors.obv_divergence:396` already computes locally at `:404` and discards |
-| per-name RS vs QQQ and the sector ETF | call `relative_strength.relative_strength_report:132` once per benchmark (it is benchmark-agnostic); the sector map exists (`sector_rank.sector_group_of:163`) |
+| MACD line / histogram **values** and slope | promote `value_dip._macd_hist:502` to public and surface the three series in `get_extended_indicators`; slope = last minus prior bar (the same delta `rule_eval.rule_signal_macd_hist_rising:103` already computes) |
+| RSI slope | promote `value_dip._rsi_series:472` (already a full Wilder series) and reuse `relative_strength.slope_pct:49` |
+| momentum 5D | `extended_indicators.roc:151` is already parameterised: `roc(closes, 5)` |
+| ATR percentile (per-name vol percentile) | the loop already written for realized vol at `etf_risk.etf_risk_profile:142-172`, with `size.atr:143` in place of `_realized_vol:69` |
+| OBV **value** (not just divergence) | return the cumulative OBV that `technical_factors.obv_divergence:450` already computes locally at `:404` and discards |
+| per-name RS vs QQQ and the sector ETF | call `relative_strength.relative_strength_report:214` once per benchmark (it is benchmark-agnostic); the sector map exists (`sector_rank.sector_group_of:163`) |
 | market-wide breadth | P0-3 |
 | upside / downside semivariance | `volatility_models.semivariance` beside the existing estimators — `RS⁻ + RS⁺ = RV` **exactly**, `None` below `min_obs`, the score consuming `√RS⁻` and the ratio. Producer spec in `TechnicalScore.md` §4, unit pinning in `RiskScore.md` §0.3 |
 
@@ -821,8 +821,8 @@ already ship:
 | Quantity | Pinned convention | Producers that differ |
 | --- | --- | --- |
 | Tail loss | **positive loss as a fraction of book equity** | `book_risk.cvar:18` (negative), `book_correlated_stress:128` / `stress_loss:123` (positive), `min_cvar_weights` (positive, `book_risk.py:713`), executor `tail.ESResult.value_pct` (`tail.py:56`) |
-| Drawdown | **positive magnitude** | `evaluate.max_drawdown:108` / `portfolio_drawdown:100` (positive), `regime_state.regime_drawdown:146` (negative + band), `signald/engine.py:115` → `state.py:75` (negative, emitted `gate.py:865`) |
-| Correlation | **largest-cluster share of book** (a labelled proxy) | `risk_governor.default_limits:20` (% of book), `mandate.py:51-52` (dollar notional), `config.cluster_cap_pct:109` at `gate.py:369` (cluster) |
+| Drawdown | **positive magnitude** | `evaluate.max_drawdown:222` / `portfolio_drawdown:100` (positive), `regime_state.regime_drawdown:146` (negative + band), `signald/engine.py:115` → `state.py:75` (negative, emitted `gate.py:865`) |
+| Correlation | **largest-cluster share of book** (a labelled proxy) | `risk_governor.default_limits:29` (% of book), `mandate.py:51-52` (dollar notional), `config.cluster_cap_pct:109` at `gate.py:369` (cluster) |
 
 **The alignment happens in the score, visibly — never by changing a producer**,
 which would break that producer's other readers. Every component row prints its
@@ -830,7 +830,7 @@ raw value with units and sign beside its aligned contribution.
 
 **Deliverable.** `strategies/risk_score.py::risk_score(components) -> dict`; a
 `net_beta` producer in the executor's book builder (`sum(w_i · beta_i)`, with
-`etf_risk._beta:38` as the per-name beta — the field is `None` today and a frozen
+`etf_risk._beta:39` as the per-name beta — the field is `None` today and a frozen
 dataclass cannot be assigned post-hoc); the book-level components either in the
 executor or in a book-mode of the same function. **Decided (Q3): both are reported** — only the book-level components feed the composite; name-level risk is diagnostic.
 
@@ -878,7 +878,7 @@ one**); P0-7b for the analyst-revision category, whose binding **moves (Q4)**.
 
 | Order | Item | Why |
 | --: | --- | --- |
-| 1 | **Novelty** (15%) | known recipe (similarity to the previous stories about the firm), data present (article timestamps from every vendor; the normaliser `sentiment._normalise_headline:604` already exists for syndication dedupe), sign known (stale news reverses) |
+| 1 | **Novelty** (15%) | known recipe (similarity to the previous stories about the firm), data present (article timestamps from every vendor; the normaliser `sentiment._normalise_headline:614` already exists for syndication dedupe), sign known (stale news reverses) |
 | 2 | **Materiality** (half of 20%) | the largest weight has no producer of its own. **Decided (Q6): read `EventScore`'s materiality / expected-move output** — one authoritative producer, not a second estimate |
 | 3 | **Persistence / volume acceleration** (5%) | `sentiment.mention_volume:43` and `sentiment.decayed_weight:91` already exist; this is wiring, not building |
 | 4 | **Corporate-event typing** (10%) | extend `sec_edgar._FORM_LABELS:36` and add a keyword classifier over `get_news`, **printing its basis** |
@@ -934,7 +934,7 @@ comparable `sma_7d`/`innovation`, or the code refuses to mix them.
 
 | Hole | Producer |
 | --- | --- |
-| 20-day momentum (`Sentiment_today − Sentiment_20d`) | add the delta beside `sma_7d` in `sentiment.daily_sentiment_sma:501`, calendar-reindexed and `None`-safe |
+| 20-day momentum (`Sentiment_today − Sentiment_20d`) | add the delta beside `sma_7d` in `sentiment.daily_sentiment_sma:511`, calendar-reindexed and `None`-safe |
 | Acceleration | surface `sentiment.sentiment_velocity:25` (OLS slope/day, `window=5`) — it has no production caller today |
 | Per-source breadth | per-day `mean(s>0)` plus a per-host breakdown from the rows `aggregate_weighted_sentiment:616` already holds (`_article_url:612` gives the host) |
 | Institutional | bind `get_institution_holdings` to the sentiment/market surface (**decided, Q4: move the binding**) and use the period-over-period Δ in % of float, z-scored. *Which* institutional measure is still open (`SentimentScore.md` §7 Q2) |
@@ -1056,7 +1056,7 @@ full EODHD US panel is the validation universe; the named basket is
 
 **Prerequisites.** P0-2; at least WP-2 (the most complete engine) to measure.
 
-**The harness already exists** — `alpha_health.score_evaluation_rows:440` returns
+**The harness already exists** — `alpha_health.score_evaluation_rows:627` returns
 IC + ICIR, deciles + monotonicity, coverage and stability over any
 `{date: {ticker: score}}` panel, gated by `enable_score_eval_rows` (`:1048`,
 consumed by `scripts/strategy_quality_report.py:340` and
@@ -1689,7 +1689,7 @@ inline in the document named below, and the question text is kept as the record.
 | Where | Question | Decision |
 | --- | --- | --- |
 | `RegimeScore.md` §7 Q2 | does the 5% event category survive `EventScore`? | **remove it** when `EventScore` ships - the same producer feeds both, so a second factor double-counts one catalyst. Regime = environment, Event = catalyst |
-| `RegimeScore.md` §7 Q3 | Hurst / variance ratio as the persistence producer? | **variance ratio is canonical** (`mean_reversion.variance_ratio:216`); **Hurst stays a diagnostic/research input** and does not also enter the score |
+| `RegimeScore.md` §7 Q3 | Hurst / variance ratio as the persistence producer? | **variance ratio is canonical** (`mean_reversion.variance_ratio:259`); **Hurst stays a diagnostic/research input** and does not also enter the score |
 | `RegimeScore.md` §7 Q4 | how is a regime *change* scored? | as a **separate state/flag** (CUSUM / EWMA control / BOCPD), not another weighted category |
 | `RiskScore.md` §7 Q1 | which cap family does "correlation risk 15%" mean? | the **cluster/notional concentration share**, renamed explicitly (`cluster_exposure / portfolio_exposure`) - never printed as a correlation coefficient |
 | `RiskScore.md` §7 Q2 | executor or engine owns the book-level components? | the **executor / portfolio-risk layer owns the computation**; `RiskScore` owns the per-security view and consumes the book inputs |
@@ -1744,7 +1744,7 @@ this document exists.
 | D-1 | **The master's §4 and §5 were stubs.** The restructure of `68931f3` left "Wiring and contracts" as two sentences and "Phased plan" as one paragraph that stopped mid-sentence | `README.md:291-304` at `0ce42b3` — §5's paragraph ended at *"…if they land"* and the next line was a `---` | the design set had **no wiring contract and no phase plan**, which is exactly what an implementation plan needs. §3-§8 and §9 of this document are their replacement, and the master's §4/§5 are now pointers to it | **FIXED** - re-verified 2026-09-17: no stub text remains, and §4 names the cheap path (a tool leaf) against the expensive path (a number on the wire) |
 | D-2 | **Both the master and `FundamentalScore.md` cited sections that no longer exist** (repointed in the same pass). The master's §6 cites §3.7.1/3.7.3/3.7.4/3.7.5/3.7.6, §3.8.2, §3.8.4 and §4.2; its §7 cites §5.2/§5.3 and "§6 Phase C/D"; its §1.4 cites §8.3. `FundamentalScore.md`'s §0.5 cites "§8", its §3.1 cites §6 Phase C/D and §5.2/§5.3 | `README.md` headings end at §7 + appendices; `FundamentalScore.md` headings end at §3.6 + appendices | a reader following a cross-reference lands nowhere. The pre-split document (`git show 68931f3^:docs/design_fundamental_factor_weight_model.md`) had §3.7 (the four-score architecture, ~340 lines), §3.8 (news/sentiment/event), §4 (decisions and refusals), §5 (wiring, with §5.1-§5.3), §6 (Phases A-E), §8 (the decision record + §8.3 open questions) | **FIXED** - re-verified 2026-09-17 by a headings-vs-references scan of all nine documents: the dead names appear only inside this row, as the record |
 | D-3 | **The SEC `User-Agent` carries a placeholder contact.** `dataflows/sec_edgar.py:30` sends `TradingAgentsResearch/1.0 (…; contact: research@example.com)` | `sec_edgar.py:28-30` — the comment states a descriptive UA with a contact is required; `example.com` is not a deliverable address | the SEC's fair-access policy asks for a reachable contact; a non-deliverable one is the kind of thing that gets an IP throttled, and the ceiling (10 req/s) is published | **FIXED 2026-09-17** - `_UA` (`sec_edgar.py:33`) carries the owner's reachable contact, and the same string replaced the Wikipedia placeholder at `sp500_universe.py:124` (the same defect class, found while fixing this one) |
-| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:173` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written | **FIXED 2026-09-17** - `_us_gaap_facts` reads every tag from ONE `companyfacts` call (`_COMPANYFACTS_URL:74`); the per-tag loop stays as the **fallback**, because a multi-MB payload can fail or truncate where a small one would not, and losing every tag at once is the worse failure. `_annual_rows` holds the shared row filter. Two tests: one asserts a single fetch for the whole table, one asserts the fallback; both fail against the pre-change module. **Live smoke test 2026-09-17:** MSFT rendered 6 annual periods from **2 requests** (the ticker map + one `companyfacts`), where the pre-change path issued 12 - and the new UA was accepted, no 403 |
+| D-4 | **The per-tag fetch pattern is 11 requests where 1 would do.** `sec_edgar.get_financial_history:527` loops `_TAG_MAP` and calls `companyconcept` once per tag | `sec_edgar.py:206-215`; the `companyfacts` endpoint returns every tag in one payload | not a correctness bug, but it is 11× the requests against a 10 req/s ceiling for the same data, and it is the reason the tag extension in P0-1 is expensive as written | **FIXED 2026-09-17** - `_us_gaap_facts` reads every tag from ONE `companyfacts` call (`_COMPANYFACTS_URL:74`); the per-tag loop stays as the **fallback**, because a multi-MB payload can fail or truncate where a small one would not, and losing every tag at once is the worse failure. `_annual_rows` holds the shared row filter. Two tests: one asserts a single fetch for the whole table, one asserts the fallback; both fail against the pre-change module. **Live smoke test 2026-09-17:** MSFT rendered 6 annual periods from **2 requests** (the ticker map + one `companyfacts`), where the pre-change path issued 12 - and the new UA was accepted, no 403 |
 | D-5 | **`enable_factor_model` is not a free name.** Three documents (`design_qlib_integration.md:217`, `design_finrl_integration.md:251`, `implementation_plan_finrl.md:109`) describe it as "the score" gate, and `scripts/factor_model_train.py:7` consumes it for the **learned** advisory model | `default_config.py:905`, `scripts/factor_model_train.py:7` | a plan that reused it for the deterministic composite would silently couple two different objects; the six engine gates in §1.1 are new names for this reason | **FIXED 2026-09-17** - all three documents now state, in the body **and** in the seam-table row, that the flag gates the **learned** model only and is not a generic score switch, naming `factor_model_train.py:7`, `default_config.py:905` and `.env.example:227` |
 
 ---
@@ -1759,7 +1759,7 @@ substitute.
 | --- | --- | --- | --- |
 | P0-1 multi-year statements | SEC EDGAR XBRL — `https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json` (all tags, one call) or `.../companyconcept/.../{tag}.json` (one tag per call, what the repo uses today) | JSON; annual 10-K FY rows; coverage starts at the filer's XBRL adoption (~2009-2011 for large filers) | descriptive `User-Agent` with a contact **required**; published fair-access ceiling **10 requests/second** per IP |
 | P0-2 validation panel | EODHD bulk fundamentals | stocks only; JSON or CSV; **500 symbols max** per request; **100 calls** per whole-exchange request, **100 + N** with a `symbols` list | needs the **Extended Fundamentals** plan (support-gated); paid plans **100,000 calls/day**, **1,000 req/min**; the *snapshot* variant 404s on the generic `US` code (use `NASDAQ`/`NYSE`/`AMEX`/`BATS`); ETFs and funds not supported |
-| P0-3 market breadth | **the repo's own** `sector_breadth.multi_breadth:60` over the S&P map it already fetches | `{name: closes}` → per-key percentages | no new vendor (ground rule 7). Third-party fallbacks if the in-repo path proves insufficient: Barchart `getMomentum` exposes `percentAbove200dMAtoday`; TheTradingTools publishes A/D and new-high/new-low datasets |
+| P0-3 market breadth | **the repo's own** `sector_breadth.multi_breadth:165` over the S&P map it already fetches | `{name: closes}` → per-key percentages | no new vendor (ground rule 7). Third-party fallbacks if the in-repo path proves insufficient: Barchart `getMomentum` exposes `percentAbove200dMAtoday`; TheTradingTools publishes A/D and new-high/new-low datasets |
 | P0-4 VIX percentile | FRED `VIXCLS` (already aliased at `dataflows/fred.py:68`) | daily level series | — |
 | P0-5 VIX term structure | Cboe CDN CSVs: `https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv`, `.../VIX3M_History.csv`; FRED `VXVCLS` (3-month, active) | daily levels → slope → contango/backwardation | VIX9D is **not** on FRED; FRED's discontinued 3-month series is `VXOCLS`, not `VXVCLS` |
 | P0-6 short interest | FINRA equity short interest (settlement series, 5 rolling years via the Equity API; historical files back to 2014) and Reg SHO daily short-sale volume | bi-monthly **positions** vs daily **flow** — different measures | reported on the 15th and last business day settlements, published the **7th business day** after; Reg SHO daily files posted by 18:00 ET of the trade date; batch downloads capped at 7 calendar days |

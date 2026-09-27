@@ -315,7 +315,7 @@ existing implementation.
 | 5 | Operating margin | 2.00 | **P** | vendor passthrough only (`y_finance.py:396`, Finnhub `operatingMargin*`) |
 | 6 | Gross margin | 1.50 | **P** | computed at `statement_parsing.py:841`, never rendered |
 | 7 | EBITDA margin | 1.00 | **A** | EBITDA only as an intermediate for `ev_ebitda` (`ratios.py:162`) |
-| 8 | EBIT margin | 1.00 | **P** | series built inside `normalized.median_norm_ebit:24`, never exposed |
+| 8 | EBIT margin | 1.00 | **P** | series built inside `normalized.median_norm_ebit:14`, never exposed |
 | 9 | FCF margin | 1.50 | **A** | — |
 | 10 | Operating-margin stability (−std) | 1.00 | **A** | no std of any margin series anywhere |
 | 11 | Gross-margin stability (−std) | 0.50 | **A** | — |
@@ -327,10 +327,10 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 13 | Revenue growth YoY | 2.00 | **C** | `statement_parsing.sane_revenue_yoy:755`; leaf `Revenue YoY` (`analysis_tools.py:1448`) |
+| 13 | Revenue growth YoY | 2.00 | **C** | `statement_parsing.sane_revenue_yoy:1048`; leaf `Revenue YoY` (`analysis_tools.py:1448`) |
 | 14 | Revenue CAGR 3Y | 1.50 | **A** | no 3-year CAGR anywhere |
 | 15 | Revenue CAGR 5Y | 1.00 | **C** | `capex_quality_read` key `rev_cagr5` (`capex_quality.py:252`), leaf `Rev CAGR5=` (`value_dip_tools.py:571`); needs ≥6 annual points |
-| 16 | EPS growth YoY | 1.50 | **C** | `statement_parsing.sane_eps_yoy:735` (vendor-sourced, degenerate-base guard >300% nulled) |
+| 16 | EPS growth YoY | 1.50 | **C** | `statement_parsing.sane_eps_yoy:1028` (vendor-sourced, degenerate-base guard >300% nulled) |
 | 17 | EPS CAGR 3Y | 1.00 | **A** | no EPS series exists |
 | 18 | EPS CAGR 5Y | 0.75 | **A** | — |
 | 19 | FCF growth YoY | 1.50 | **A** | `fcf_growth` is a caller-supplied argument to `earnings_quality_verdict`; no producer |
@@ -348,7 +348,7 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 27 | FCF yield | 3.00 | **C** | `value_dip.fcf_yield:153`; leaf `get_fcf_yield` (`value_dip_tools.py:380`); also `capex_quality` key `fcf_yield` (`capex_quality.py:247`) |
+| 27 | FCF yield | 3.00 | **C** | `value_dip.fcf_yield:155`; leaf `get_fcf_yield` (`value_dip_tools.py:380`); also `capex_quality` key `fcf_yield` (`capex_quality.py:247`) |
 | 28 | OCF yield | 1.00 | **A** | only FCF/mcap exists |
 | 29 | FCF margin | 1.50 | **A** | — |
 | 30 | OCF margin | 1.00 | **P** | printed as `cash_margin=` by `get_normalized_fcf_dcf` (`analysis_tools.py:2860`) |
@@ -384,7 +384,7 @@ existing implementation.
 | 53 | FCF yield | 2.00 | **C** | see #27 (duplicate of #27 in the source's own table — a redundancy the source flags) |
 | 54 | Earnings yield | 1.00 | **C** | `quantitative_scores.earnings_yield:251` (EBIT/EV); leaf `EY` |
 | 55 | EV / FCF | 1.00 | **A** | — |
-| 56 | DCF upside | 1.50 | **P** | `normalized.margin_of_safety:104` needs a caller-supplied intrinsic; `get_margin_of_safety` leaves print `price/fv` |
+| 56 | DCF upside | 1.50 | **P** | `normalized.margin_of_safety:120` needs a caller-supplied intrinsic; `get_margin_of_safety` leaves print `price/fv` |
 | 57 | Normalized DCF upside | 1.50 | **P** | `get_normalized_cycle_dcf` prints `MoS(fv-basis)`; `get_normalized_fcf_dcf` prints no upside line |
 | 58 | PEG-adjusted FCF | 0.50 | **A** | — |
 | 59 | EV/FCF growth | 0.50 | **A** | — |
@@ -396,7 +396,7 @@ existing implementation.
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
 | 60 | Net debt / EBITDA | 1.50 | **A** | no EBITDA denominator anywhere; `net_debt` exists only as a DCF bridge line |
-| 61 | Debt / equity | 1.00 | **C** | `ratios.compute_ratios:205`; `value_dip.balance_sheet_health:381` leaf |
+| 61 | Debt / equity | 1.00 | **C** | `ratios.compute_ratios:205`; `value_dip.balance_sheet_health:383` leaf |
 | 62 | Debt / assets | 0.75 | **A** | only the Piotroski `f_dlever` boolean; the moomoo vendor filter is server-side |
 | 63 | Net debt / FCF | 1.00 | **A** | — |
 | 64 | Interest coverage | 1.00 | **A** | alias exists (`statement_parsing.py:105`), zero consumers |
@@ -416,7 +416,7 @@ existing implementation.
 | -: | --- | --: | :-: | --- |
 | 72 | Piotroski F-Score | 1.25 | **C** | `quantitative_scores.piotroski_f_score:202`; detailed paper-basis variant gated `enable_f_score_detail` |
 | 73 | Beneish M-Score | 1.00 | **C** | `quantitative_scores.beneish_m_score:113`, `_M_WEIGHTS:97` |
-| 74 | Accrual ratio | 1.25 | **C** | `normalized.accruals_ratio:46`; key `accrual` in `earnings_quality_verdict` |
+| 74 | Accrual ratio | 1.25 | **C** | `normalized.accruals_ratio:62`; key `accrual` in `earnings_quality_verdict` |
 | 75 | CFO − Net Income | 0.75 | **C** | same gap, two normalisations (`earnings_quality.py:68-103`) |
 | 76 | Asset growth | 0.50 | **P** | boolean (`overpriced_score` C6) |
 | 77 | Receivables growth vs revenue | 0.75 | **P** | DSRI internal to Beneish; C2 boolean |
@@ -424,7 +424,7 @@ existing implementation.
 | 79 | Deferred revenue growth | 0.50 | **A** | no canonical key; `revenue` explicitly excludes deferred/unearned labels |
 | 80 | Earnings volatility (−std) | 0.50 | **P** | G-Score G4/G5 read `roa_series`/`revenue_series` — the producer now exists (`statement_parsing.annual_series`, §1.4) but needs 5+ annual periods, and vendor history is 4-5; below that the leg is excluded with its `n` printed |
 | 81 | OCF/NI divergence | 0.50 | **P** | the LEVEL is computed (`cash_conversion`); the growth-rate divergence is not |
-| 82 | Quality of earnings | 1.00 | **C** | `earnings_quality_verdict:24` + `normalized.trap_verdict:57`; leaves `get_earnings_quality` |
+| 82 | Quality of earnings | 1.00 | **C** | `earnings_quality_verdict:24` + `normalized.trap_verdict:73`; leaves `get_earnings_quality` |
 
 ---
 
@@ -445,7 +445,7 @@ existing implementation.
 
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
-| 89 | Dividend Yield | 0.50 | **C** | `ratios.compute_ratios:209` (nulled >25% as a scale artifact); `capital_income.indicated_yield:52` |
+| 89 | Dividend Yield | 0.50 | **C** | `ratios.compute_ratios:209` (nulled >25% as a scale artifact); `capital_income.indicated_yield:55` |
 | 90 | Dividend growth | 0.50 | **P** | only raw history via `get_corporate_actions`; no growth RATE computed |
 | 91 | Payout ratio | 0.50 | **P** | vendor passthrough (`finnhub.py:346`) |
 | 92 | Buyback yield | 1.00 | **A** | alias `share_buybacks` exists (`statement_parsing.py:189`) with **no consumer**; repurchase $ surfaced only as raw trailing-4Q |
@@ -459,7 +459,7 @@ existing implementation.
 | # | Factor | Prop. wt | St | Existing implementation |
 | -: | --- | --: | :-: | --- |
 | 95 | Altman Z | 0.50 | **C** | `quantitative_scores.altman_z_score:181` + variant family (`:409`, `:482`, `:511`) with zone bands |
-| 96 | Ohlson O-Score | 0.40 | **C** | `normalized.ohlson_o_score:141`; leaf `ohlson_o:` |
+| 96 | Ohlson O-Score | 0.40 | **C** | `normalized.ohlson_o_score:157`; leaf `ohlson_o:` |
 | 97 | Distance to Default (Merton) | 0.40 | **P** | `credit_spread.merton_distance_to_default:104` exists but requires **caller-supplied** equity/debt/equity-vol; no tool resolves them |
 | 98 | Interest-coverage stress | 0.25 | **A** | see #64 |
 | 99 | Liquidity stress | 0.20 | **P** | market-liquidity verdict only (`liquidity_risk.liquidity_verdict:153`); balance-sheet side is `get_balance_sheet_health` + the capex funding-cover DISTRESS regime (`OCF/capex < 0.6`) |

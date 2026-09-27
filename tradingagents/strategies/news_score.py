@@ -140,7 +140,7 @@ COMPONENTS: dict[str, Component] = {
     c.name: c
     for c in (
         _c("relevance", "relevance_materiality", "higher_better",
-           "news_relevance.score_news_article:53",
+           "news_relevance.score_news_article:56",
            "0-100; the article set is the source shared with SentimentScore, the "
            "number is not"),
         _c("materiality", "relevance_materiality", "higher_better",

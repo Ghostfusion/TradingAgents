@@ -47,11 +47,11 @@ carry both meanings today.
 | Same producer | `EventScore` reads it as | `RiskScore`'s event leg reads it as |
 | --- | --- | --- |
 | `catalyst.build_catalyst_snapshot:219` → `scale` | **occurrence**: is an event inside the window | **exposure**: `contract.build_position_contract`'s `catalyst_scale` (`contract.py:115`, applied `:208-212`); `fold_catalyst_into_overlay:362`; `pre_market.catalyst_window_read:103` |
-| `events.catalyst_risk_penalty:53` | (invoked inside the snapshot, `catalyst.py:266`) | the exposure multiplier itself — implied move vs baseline |
+| `events.catalyst_risk_penalty:63` | (invoked inside the snapshot, `catalyst.py:266`) | the exposure multiplier itself — implied move vs baseline |
 | `catalyst.implied_move_from_history:111` → `implied_move` | event sizing context | intended `contract.build_position_contract`'s `implied_move_pct` (`contract.py:118`, `:262-267`) — **never populated** (§3 D1) |
 | `events.position_mult_by_side:37` | the side label via `drift_side:26` | `get_beat_miss_sizing:2252`'s position multiplier |
-| `book_risk.book_correlated_stress:128` | — | macro-event correlated tail loss |
-| `regime.regime_gate_read:178`'s `catalyst_window` | an event-regime veto input | an entry veto — **deliberately not fed** (owner decision 2026-09-18; §3 D3, closed) |
+| `book_risk.book_correlated_stress:146` | — | macro-event correlated tail loss |
+| `regime.regime_gate_read:850`'s `catalyst_window` | an event-regime veto input | an entry veto — **deliberately not fed** (owner decision 2026-09-18; §3 D3, closed) |
 
 **The design rule**: `EventScore`'s components are the **occurrence** measures
 (imminence day-counts, window flags, the hard block); `RiskScore`'s event leg
@@ -71,7 +71,7 @@ through three places:
 2. `pre_market.catalyst_window_read:103` → `{hard_block: True, scale: 0.0}`;
    `review_decision:198` (branch `:240-245`) → REJECT — **unreachable from its
    own leaf** (§3 D2).
-3. `regime.regime_gate_read:261` — advisory, and deliberately unfed (§3 D3, closed 2026-09-18).
+3. `regime.regime_gate_read:850` — advisory, and deliberately unfed (§3 D3, closed 2026-09-18).
 
 The executor's 17 fail-closed checks (`../TradingExecution/signald/contracts.py:42`)
 contain **no event check at all** — so the engine's `hard_block` is the
@@ -392,7 +392,7 @@ underlying event keeps its own scope. **Market events do not become hard blocker
 (plan §13 Q7).
 5. **Do product/clinical, court and investor-day calendars get built?** They are
    ABSENT, and the smallest honest producer is a forward-calendar adapter
-   modelled on `moomoo.get_economic_calendar_moomoo:1758` + `catalyst._calendar_window:394`.
+   modelled on `moomoo.get_economic_calendar_moomoo:1813` + `catalyst._calendar_window:394`.
 **DECIDED 2026-09-17:** this is **implementation coverage, not an architecture
 question**. Define the four calendar interfaces (product, clinical, court, investor
 day) each returning `available | missing | not_applicable`, and **never convert

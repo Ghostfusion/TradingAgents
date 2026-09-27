@@ -282,7 +282,7 @@ tree (several sibling docs' anchors have drifted by 4-120 lines — see §2 note
 | 114 | Days to cover | 1 | ABSENT | no `days_to_cover` producer |
 | 115 | Short-interest change | 1 | elsewhere | `short_interest.short_interest_percentile:35` (`change_pct`) |
 | 116 | Short squeeze pressure | 1 | ABSENT | no squeeze producer; the library's own `f(...)` is unspecified |
-| 117 | Institutional ownership change | 1 | PARTIAL | `orderflow.institutional_net:45` (flow, not ownership change); leaf `analysis_tools.get_ownership_concentration:7322` |
+| 117 | Institutional ownership change | 1 | PARTIAL | `orderflow.institutional_net:45` (flow, not ownership change); leaf `analysis_tools.get_ownership_concentration:7329` |
 | 118 | Insider transaction pressure | 2 | elsewhere | `analysis_tools.get_insider_activity:2075`, `get_form4_insider:2130`; `news_data_tools.get_insider_transactions:152` — **library itself says this belongs to Event/Sentiment** (§118) |
 | 119 | Market microstructure | 2 | elsewhere | `liquidity_risk.spread_estimate:442`, `roll_spread:309` |
 | 120 | Effective spread | 2 | elsewhere | `liquidity_risk.spread_estimate:442` (Corwin-Schultz / Abdi-Ranaldo — OHLC **proxies** for the effective spread, not quotes) |
@@ -299,7 +299,7 @@ tree (several sibling docs' anchors have drifted by 4-120 lines — see §2 note
 | 131 | Factor normalization | 1 | elsewhere | `factors.z_score:68`; `cross_section.cross_sectional_z:70` |
 | 132 | Robust normalization | 2 | PARTIAL | `cross_section.winsorize:31`; `analyst_revisions.winsor_z:253` — no MAD-based robust z |
 | 133 | Percentile transformation | 2 | elsewhere | `factors.percentile_rank:59`; `factor_expressions.cross_sectional_rank:268` |
-| 134 | Direction normalization | 2 | PARTIAL | `score_engine.align:61` (direction-aware mapping exists as the kernel) — no per-factor inversion table |
+| 134 | Direction normalization | 2 | PARTIAL | `score_engine.align:69` (direction-aware mapping exists as the kernel) — no per-factor inversion table |
 | 135 | Market factor subscores | 10 | ABSENT | no subscores; the built engines' subscores belong to those engines |
 | 136 | Composite MarketScore | 1 | ABSENT | the whole engine |
 | 137 | A practical initial weighting | 0 | ABSENT | library-only weight table (§5) |
@@ -318,7 +318,7 @@ These are the producers the library's formulas would **reuse**, not re-derive
 
 | Library family | Producer (`path::symbol`) | What it returns | Reuse note |
 | --- | --- | --- | --- |
-| §1-§2, §34, §37, §49-§51, §54, §60, §73 raw values | `strategies/factor_expressions.py::alpha158_subset:373` (+ `mom:216`, `rsi:175`, `bias:208`, `std:155`, `zscore:160`, `high_low_range:251`, `avg_vol:246`, `corr:224`, `_max_high:411`, `_min_low:420`, `_side_vol:437`) | 16-series Alpha158-style vector off `{closes, opens, highs, lows, volumes}` | the closest thing in the repo to the library's §1-§6 raw layer; surfaced as text by `domain_bundles.get_factor_profile:124` / leaf `analysis_tools.get_factor_profile:11142` under `enable_factor_profile` |
+| §1-§2, §34, §37, §49-§51, §54, §60, §73 raw values | `strategies/factor_expressions.py::alpha158_subset:373` (+ `mom:216`, `rsi:175`, `bias:208`, `std:155`, `zscore:160`, `high_low_range:251`, `avg_vol:246`, `corr:224`, `_max_high:411`, `_min_low:420`, `_side_vol:437`) | 16-series Alpha158-style vector off `{closes, opens, highs, lows, volumes}` | the closest thing in the repo to the library's §1-§6 raw layer; surfaced as text by `domain_bundles.get_factor_profile:124` / leaf `analysis_tools.get_factor_profile:11149` under `enable_factor_profile` |
 | §3, §105 | `strategies/momentum.py::momentum_12_1:358`; `strategies/factors.py::momentum:24` | 12-1 momentum (skip 21, window 252) | one number, two callers already |
 | §12-§14, §75 | `strategies/cross_section.py::momentum_book:376` (+ `cross_sectional_z:70`, `centered_rank:140`, `quantile_split:169`, `residualize_returns:201`, `neutralize_book:237`) | risk-adjusted momentum book over a caller panel, dollar/beta neutralised | leaf `analysis_tools.get_cross_section_momentum:5106`; panel = caller names or the ticker + ≤8 vendor peers (`dataflows/finnhub.py::get_company_peers_finnhub:380`, `peer_symbols:398`) |
 | §10-§11 | `strategies/relative_strength.py::rs_series:33`, `slope_pct:49`, `rs_position:89`, `divergence:195`, `relative_strength_report:214` | ratio series, OLS slope, new-high flags, divergence, verdict | benchmark from `analysis_tools._benchmark_closes:322` (`benchmark_ticker`, default SPY); sector ETF via `analysis_tools._bench_ohlcv:1893` + `sector_rank.sector_group_of:163` |
@@ -328,7 +328,7 @@ These are the producers the library's formulas would **reuse**, not re-derive
 | §23-§24, §89-§90 | `strategies/evaluate.py::beta:901`, `rolling_beta:939`; `strategies/etf_risk.py::_beta:39`; `strategies/lottery.py::idiosyncratic_vol:51`; `strategies/book_risk.py::net_beta:177` | β, rolling β, per-name β, residual vol, book net beta | `net_beta` is a pure `sum(w·β)` helper with no book builder wiring it (`RiskScore.md` §3.3) |
 | §34-§36, §119-§120, §124 | `strategies/liquidity_risk.py::amihud_illiquidity:71`, `float_turnover:53`, `free_float_factor:34`, `days_to_absorb:103`, `spread_estimate:442`, `kyle_lambda:262`, `roll_spread:309`, `volume_share_slippage:220`, `market_impact_slippage:243`, `liquidity_verdict:153` | ILLIQ, turnover, IWF, days-to-absorb, spread, Kyle λ, Roll spread, slippage, 3-valued verdict | `float_turnover`/`days_to_absorb` take ADV and float shares as **arguments** — no ADV producer (§35 PARTIAL) |
 | §38-§45, §54-§62 | `strategies/technical_factors.py::ema:32`, `kst:57`, `mf_index:116`, `stochastic_oscillator:150`, `adx:183`, `pivot_points:243`, `stoch_rsi:319`, `rsi2:351`, `williams_r:374`, `keltner_channel:385`, `donchian_channel:413`, `obv_divergence:450`, `parabolic_sar:486`, `elder_thermometer:530`, `aroon:549`, `chaikin_oscillator:614`, `supertrend:673`, `volume_profile:708` | the indicator family | these are the same producers `TechnicalScore.md` §1 reads — the overlap in §0.2 |
-| §39-§44, §60, §63 | `strategies/extended_indicators.py::golden_death_cross:55`, `ichimoku:80`, `roc:151`, `momentum_oscillator:162`, `force_index:206`, `accumulation_distribution:224`, `vpt:248`, `chaikin_money_flow:263`, `anchored_vwap:289`, `scan_candlesticks:603` | Ichimoku, crosses, ROC, A/D, VPT, CMF, VWAP, candlestick scan | leaf `analysis_tools.get_extended_indicators:7653` |
+| §39-§44, §60, §63 | `strategies/extended_indicators.py::golden_death_cross:55`, `ichimoku:80`, `roc:151`, `momentum_oscillator:162`, `force_index:206`, `accumulation_distribution:224`, `vpt:248`, `chaikin_money_flow:263`, `anchored_vwap:289`, `scan_candlesticks:603` | Ichimoku, crosses, ROC, A/D, VPT, CMF, VWAP, candlestick scan | leaf `analysis_tools.get_extended_indicators:7660` |
 | §5, §64-§66 | `strategies/swing.py::trend_architecture:76`, `rsi:44`, `rsi_band:123`, `pullback_setup:161`, `vcp_setup:342`, `swing_low_stop:190`, `fib_levels:295`, `swing_report:457` | MA stack booleans, RSI + band, pullback/VCP candidates | leaf `analysis_tools.get_swing_set:465` |
 | §49-§53, §56, §57, §73 | `strategies/value_dip.py::bollinger_pct_b:77`, `zscore:104`, `_rsi_series:472`, `_macd_hist:502`, `macd_divergence:542`, `volume_dry_up:603`, `trigger_candle:661`, `vdu_entry_setup:747`, `support_structure:833`, `range_expansion_guard:1043` | %b, z, RSI series, MACD lines, divergence verdict, VDU ladder | `_rsi_series:472` and `_macd_hist:502` are private — the series the library's §55/§58 need exist but are not public |
 | §94-§104 | `strategies/sector_breadth.py::multi_breadth:165`, `mcclellan_read:213`, `rrg_heading:286`, `msi_zone:307`; `strategies/sector_rank.py::_momentum:27`, `sector_standing:176`, `_acceleration:289`, `rrg_quadrant:370`, `rank_sectors_multifactor:391`, `rank_industry_group:600`, `constituent_breadth:664`, `leadership_ratio:684`, `sector_group_of:163`; `strategies/sector_screener.py::classify_regime:110`, `dispersion_trend:163`, `_rel_outperformance:248`, `setup_a:270`, `setup_b:318`, `constituent_universe:456`, `leadership_ratio_ewcw:535` | sector-level breadth (% >20/50/200d), McClellan/MSI, RRG, sector and industry ranks, constituent breadth, EW/CW leadership | **sector/ETF level only**; market-wide numeric breadth is ABSENT (`moomoo_extra_tools.get_market_breadth:98` → `dataflows/moomoo.py::get_market_breadth_moomoo:1932` returns text) |
@@ -355,7 +355,7 @@ fetched on the normal run path unless stated otherwise.
 
 | # | Producer to build | Library sections it unlocks | Exact inputs | Supplied by |
 | --: | --- | --- | --- | --- |
-| 1 | **A MarketScore component list over the existing factor-expression vector** — a pure function that takes the already-computed dicts and returns `{"score", "components", "coverage"}` via `score_engine.combine:134` | §131-§136 (the composite + normalisation) | `alpha158_subset:373` output + the component values §1 already lists | `analysis_tools._ohlcv:214` (vendor chain `load_ohlcv:254`); no new fetch |
+| 1 | **A MarketScore component list over the existing factor-expression vector** — a pure function that takes the already-computed dicts and returns `{"score", "components", "coverage"}` via `score_engine.combine:142` | §131-§136 (the composite + normalisation) | `alpha158_subset:373` output + the component values §1 already lists | `analysis_tools._ohlcv:214` (vendor chain `load_ohlcv:254`); no new fetch |
 | 2 | **Cross-sectional percentile of a multi-horizon momentum blend** | §2, §12, §13, §103, §133 | closes (320 bars) per name + a peer panel | `_ohlcv:214`; panel from `get_company_peers_finnhub:380`/`peer_symbols:398`, or a caller list (as `get_cross_section_momentum:5106` does) |
 | 3 | **The time-series vs cross-sectional momentum split, named** (MOP vs JT) | §2, §3, §14, §128 | the name's own 12-1 return + the panel's ranked returns | `momentum.momentum_12_1:358` (TS) and `cross_section.momentum_book:376` (CS) — **both already exist**; the work is naming, not maths |
 | 4 | **Distance-from-52-week-high as a first-class field** | §6, §129 | highs, closes (252-bar window) | `factor_expressions._max_high:411` is the 20-bar form; `overlays.build_strategy_overlays:20` already computes a 52-week distance — promote it to a named output |
@@ -495,11 +495,11 @@ Nothing here is implemented. The design constraints, in the order they bind:
    taking the already-computed component dicts (every input is the run's OHLCV,
    `analysis_tools._ohlcv:214`) and returning
    `{"score": 0-100 | None, "components": [...], "coverage": {...}}` through the
-   shared kernel `score_engine.combine:134`. **No new fetch.**
+   shared kernel `score_engine.combine:142`. **No new fetch.**
 2. **The kernel, not a copy.** `combine` renormalises over the present components
    (`Σ w_i·v_i / Σ w_i for present i`), reports `coverage = Σ w present / Σ w
    total`, and **withholds** the score below `coverage_floor(min_coverage, n)`
-   with its reason (`score_engine.coverage_floor:45`; `score = None`, never 0 and
+   with its reason (`score_engine.coverage_floor:53`; `score = None`, never 0 and
    never 50). `align:61` maps a raw value to a 0-100 contribution in the
    favourable direction via a two-sided ramp or the producer's own band table, and
    refuses to invent a neutral value. `NON_MONOTONIC_INPUTS:41` already names the
@@ -575,7 +575,7 @@ built. These are the master's §6 requirements instantiated for this engine.
    the *available* factors — never toward 0 and never toward 50. A missing factor
    never enters the denominator as a zero.
 4. **A no-data run returns `None`** with the floor in the reason — never 0, never
-   50 (`score_engine.combine:134`).
+   50 (`score_engine.combine:142`).
 5. **Reproducibility.** A reader recomputing `Σ w·s / Σ w` from the printed
    attribution block must get the printed score to within rounding, and the
    printed raw value with its units and sign must sit beside each aligned

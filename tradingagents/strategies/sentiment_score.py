@@ -197,13 +197,13 @@ COMPONENTS: dict[str, Component] = {
     for c in (
         # news sentiment (15)
         _c("weighted_tone", "news_sentiment", "higher_better",
-           "sentiment.aggregate_weighted_sentiment:616 (weighted)",
+           "sentiment.aggregate_weighted_sentiment:626 (weighted)",
            "tone - kept separate from attention", "tone"),
         _c("sma_7d", "news_sentiment", "higher_better",
-           "sentiment.daily_sentiment_sma:501 (sma_7d)", "tone", "tone"),
+           "sentiment.daily_sentiment_sma:511 (sma_7d)", "tone", "tone"),
         # momentum (15)
         _c("tone_innovation", "momentum", "higher_better",
-           "sentiment.daily_sentiment_sma:501 (innovation)", "tone", "tone"),
+           "sentiment.daily_sentiment_sma:511 (innovation)", "tone", "tone"),
         _c("tone_velocity", "momentum", "higher_better",
            "sentiment.sentiment_velocity:25 (OLS slope/day, canonical per Q4)",
            "tone", "tone"),
@@ -211,7 +211,7 @@ COMPONENTS: dict[str, Component] = {
         _c("bull_share", "breadth", "higher_better",
            "aggregate_weighted_sentiment per-article score (share > 0)"),
         _c("neutral_share", "breadth", "lower_better",
-           "sentiment.aggregate_weighted_sentiment:616 (neutral_share)"),
+           "sentiment.aggregate_weighted_sentiment:626 (neutral_share)"),
         # institutional (15)
         _c("inst_flow_z", "institutional", "higher_better",
            "get_institution_holdings period-over-period change in % of float, "
