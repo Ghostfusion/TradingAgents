@@ -420,7 +420,7 @@ statement** that no vendor publishes the input.
 | FUND-17 | R&D / intangible-investment set | a stacked R&D series | `FundamentalScore.md` §4.1 §12 |
 | FUND-10 | Deferred-revenue growth and debt-maturity risk | a canonical deferred/unearned key; a maturity-wall feed | `FundamentalScore.md` §2.6/§2.9 |
 | RISK-3/RISK-8/RISK-9 | Gap fill probability and days-to-fill calibration | a stored gap-fill outcome sample (the constants are already labelled fallbacks) | `RiskScore.md` §4 |
-| RISK-19 | Revenue and geographic concentration | a segment-revenue store | `RiskScore.md` §8.2 §50/§51 |
+| RISK-19 | Revenue and geographic concentration | a **concentration leg** over the per-dimension revenue leaf — the source is feedable and its dimension merge is fixed (2026-09-27, §8.1) | `RiskScore.md` §8.2 §50/§51 |
 | REG-19 | MOVE / Treasury-volatility source | an external MOVE source or a DGS10 realised-vol proxy | `RegimeScore.md` §4 |
 | NEWS-2/NEWS-6/NEWS-16 | Fundamental-impact surprises, price-target revisions, the estimate-level series | an estimate history (revenue/margin consensus, a persisted PT series, 3-4 quarters of estimates) | `NewsScore.md` §4, §8.2 |
 | MKT-* | MarketScore's panel-dependent components | the cross-sectional universe decision (MKT-4) — the library's own warning is that a percentile over nine names is not a decile | `MarketScore.md` §7 Q4 |
@@ -619,7 +619,7 @@ was recorded as open anywhere. **44 rows, counted by id.**
 | RISK-7 / RISK-12 | 2 | a scalar producer with a stated scale | the proxy is pinned and the scale stated (`risk_score.py:199-203`), but **no producer returns `cluster_exposure_share`** in either repo — it is still an externally-supplied input |
 | RISK-16 | 2 | each has a named producer | **no stop-hit-probability producer** (`stop_hit` exists only as a past-outcome boolean). Not data-blocked |
 | RISK-18 | 2 | " | **no cash-runway / FCF leg**; the FCF inputs already exist in `ratios.compute_ratios`. Not data-blocked |
-| RISK-19 | 2 | " | revenue / geographic concentration — **data-blocked (Phase 5)**: no segment-revenue store |
+| RISK-19 | 2 | " | revenue / geographic concentration — **no longer data-blocked (2026-09-27)**: the Phase-5 probe found the source feedable and the producer's dimension merge is fixed (§8.1), so what remains is the leg that turns the leaf's per-dimension shares into a concentration quantity |
 | RISK-20 | 2 | " | **no FX-exposure / FX-VaR producer**; an FX *source* exists (`dataflows/fx.py`). Not data-blocked |
 | RISK-21 | 2 | " | **no commodity-beta producer**; `statistical.ols_factors` and the sector→driver map exist. Not data-blocked |
 | SENT-7 | 2 | a negation-adjusted intensity | the **raw-NLP layer** (negation window, intensifier, subjectivity, aspect taxonomy) is absent; `text_factors.lm_tone:121` is unigram-only |
