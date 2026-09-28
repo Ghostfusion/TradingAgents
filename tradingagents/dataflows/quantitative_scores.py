@@ -784,7 +784,7 @@ def signal_summary(read, denominator: int) -> str:
 
 
 def growth_metrics(fin) -> dict:
-    """The seven per-name inputs the G-Score's peer medians are built from.
+    """The per-name inputs the G-Score's peer medians are built from.
 
     One definition for both consumers (rule 2): ``growth_score`` compares these
     values against medians that a peer cross-section of THIS function produces,
@@ -794,7 +794,8 @@ def growth_metrics(fin) -> dict:
     Keys: ``roa``, ``cfo`` (CFO / beginning-of-year TA), ``var_roa`` (needs the
     5-year ``roa_series``), ``var_sales_growth`` (needs the 5-year
     ``revenue_series``), ``rd_intensity``, ``capex_intensity``,
-    ``ad_intensity``. ``roa_series_n`` / ``revenue_series_n`` carry the
+    ``ad_intensity``, ``deferred_revenue_growth`` (FUND-10: the liability's own
+    year-over-year change). ``roa_series_n`` / ``revenue_series_n`` carry the
     observed series lengths so a caller can print why a variance leg is
     missing.
     """
@@ -836,6 +837,14 @@ def growth_metrics(fin) -> dict:
     adv_int = _ratio(adv, rev)
     if adv_int is not None:
         out["ad_intensity"] = adv_int
+    # FUND-10: the deferred-revenue balance's own year-over-year change. A
+    # deferred balance is a LIABILITY (``_ROW_LABEL_EXCLUDES`` keeps it out of
+    # ``revenue``), and its growth is the forward-bookings read the factor table
+    # asks for. Absent when either year is missing - never 0.
+    dr = _num(fin.get("deferred_revenue"))
+    dr_p = _num(_prv(fin.get("deferred_revenue")))
+    if dr is not None and dr_p:
+        out["deferred_revenue_growth"] = dr / dr_p - 1.0
     return out
 
 

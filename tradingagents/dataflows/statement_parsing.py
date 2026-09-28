@@ -60,6 +60,9 @@ _ROW_LABEL_EXCLUDES = {
     # Deferred / unearned revenue is a liability, never revenue: yfinance's
     # balance sheet is the only payload in play here whose rows carry the word.
     "revenue": ("deferred", "unearned"),
+    # A deferred-INCOME-TAX balance is not deferred revenue (the alias list
+    # carries "deferred income", which the tax rows also contain).
+    "deferred_revenue": ("tax",),
 }
 
 #: Tokens that NEGATE the item an alias names. The exclusion list above cannot
@@ -78,6 +81,25 @@ _ROW_ALIASES = {
     "revenue": ["total revenue", "revenue", "sales", "operating income"],
     "cogs": ["cost of revenue", "cost of goods sold"],
     "sga": ["selling general", "sg&a", "sga expense", "selling and admin"],
+    # FUND-17 / FUND-10 (2026-09-28): the vendor spellings for the two rows the
+    # 106-factor table found absent. ``research_development`` is the key
+    # ``quantitative_scores.growth_metrics`` already reads for ``rd_intensity``
+    # (the G-Score's G6 peer median). ``deferred_revenue`` is deliberately NOT a
+    # ``revenue`` alias - a deferred balance is a liability, which is what
+    # ``_ROW_LABEL_EXCLUDES['revenue']`` enforces - and it excludes 'tax' so the
+    # deferred-INCOME-TAX rows cannot stand in for it.
+    "research_development": [
+        "research and development",
+        "research & development",
+        "research development",
+        "r&d expense",
+    ],
+    "deferred_revenue": [
+        "deferred revenue",
+        "unearned revenue",
+        "contract liability",
+        "deferred income",
+    ],
     "depreciation": [
         "depreciation",
         "depreciation & amortization",
@@ -708,9 +730,15 @@ def income_series(payload: str) -> list[dict] | None:
 # value for the same key.
 
 #: Canonical keys a series is emitted for, in emission order. Only keys with a
-#: consumer: ``revenue``/``roa`` feed the G-Score, the other three feed
-#: Dechow-Dichev (accruals = (NI - CFO) / total assets).
-SERIES_KEYS: tuple = ("revenue", "net_income", "total_assets", "operating_cashflow")
+#: consumer: ``revenue``/``roa`` feed the G-Score and ``research_development``
+#: feeds its G6 peer-median leg (``quantitative_scores.growth_metrics`` ->
+#: ``rd_intensity``); ``net_income``/``operating_cashflow``/``total_assets``
+#: feed Dechow-Dichev (accruals = (NI - CFO) / total assets) and
+#: ``deferred_revenue`` feeds the deferred-revenue growth read (FUND-10).
+SERIES_KEYS: tuple = (
+    "revenue", "net_income", "total_assets", "operating_cashflow",
+    "research_development", "deferred_revenue",
+)
 
 #: SEC XBRL row label -> canonical series key, for ``sec_annual_series``. The
 #: labels are ``sec_edgar._TAG_MAP``'s, so the two files must move together.
@@ -732,6 +760,13 @@ _SEC_SERIES_KEYS: dict = {
     "Total liabilities": "total_liabilities",
     "Stockholders equity": "stockholders_equity",
     "Cash & equivalents": "cash_and_equivalents",
+    # FUND-17 / FUND-10: the two rows the 106-factor table found absent while
+    # the bytes already rode the one companyfacts fetch (see
+    # ``sec_edgar._TAG_MAP``). Declared here so the R&D line reaches the
+    # G-Score's G6 peer median (``quantitative_scores.growth_metrics``) and the
+    # deferred-revenue balance reaches its ratio read.
+    "Research and development": "research_development",
+    "Deferred revenue": "deferred_revenue",
 }
 
 

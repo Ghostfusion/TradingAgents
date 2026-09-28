@@ -749,9 +749,15 @@ Every row is a **wiring** job unless stated; §1.3 gives the evidence.
 | 9 | Normalized FCF yield (#42), FCF stability std (#37), cash-conversion stability (#39) | normalized FCF and cycle-FCF stats already exist; only the division/std is missing | `normalized_fcf.py`, `cycle_dcf.py` |
 | 10 | Asset growth numeric (#76), receivables/inventory-days exposure (#77, #78), WC/assets (#69), debt growth numeric (#70) | boolean-only today; the underlying values exist inside Beneish/C-score | `quantitative_scores` + `normalized` |
 
-Explicitly **not** in Phase A: deferred revenue (#79, no canonical key and
-`revenue` deliberately excludes unearned labels), debt-maturity risk (#100, no
-maturity data), capital-employed turnover (#85, no definition in the repo),
+Explicitly **not** in Phase A: debt-maturity risk (#100, no maturity data) and
+capital-employed turnover (#85, no definition in the repo). Deferred revenue (#79) has
+left this list — **[CORRECTED 2026-09-28: FUND-10 gave it a canonical key.]**
+`sec_edgar._TAG_MAP` declares the contract-liability / deferred-revenue tags,
+`statement_parsing._ROW_ALIASES['deferred_revenue']` reads the vendor spelling (with a
+`('tax',)` exclude, so a deferred-INCOME-TAX balance cannot stand in), `SERIES_KEYS`
+emits `deferred_revenue_series` (MSFT n=20, latest $72.965bn) and `growth_metrics`
+gains `deferred_revenue_growth`. `revenue` still excludes unearned labels — which is
+exactly why the row needed a key of its own.
 Dechow-Dichev (#unreachable as currently wired). [CORRECTED 2026-09-26: the
 Dechow-Dichev AQ is **built and reachable**, not deferred.
 `tradingagents/strategies/earnings_quality.py:115` defines `DD_MIN_PERIODS = 8`
@@ -818,7 +824,7 @@ sections §2 already ledgered, and under which row:
 | §9 Debt-service capacity | §2.5 (#64, #71), §2.9 (#98) |
 | §10 Capital allocation | §2.8 (#89-#94), §2.7 (#86) |
 | §11 Share dilution | §2.8 (#92-#94) |
-| §12 R&D and intangible investment | **nothing** — the 106-factor table has no R&D row |
+| §12 R&D and intangible investment | **stacked R&D series BUILT 2026-09-28 (FUND-17)** — `sec_edgar._TAG_MAP` declares `ResearchAndDevelopmentExpense` and `statement_parsing.SERIES_KEYS` emits `research_development_series` (SEC path: MSFT n=19, 2008-06-30..2026-06-30, latest $35.562bn). Still ABSENT: R&D/operating expense, R&D efficiency |
 | §13 Valuation factors | §2.4 (#43-#59) |
 | §14 Earnings yield relative to bonds | **nothing** — #54 is the earnings-yield *level*, not the bond spread |
 | §15 EV-based valuation | §2.4 (#46-#55) |
@@ -888,7 +894,7 @@ factors, of which FQS reads 7, FGS 3, VS 12, FRS 6.
 | 9 | Debt-service capacity | 5 / 5 | **ABSENT** | The canonical alias exists and nothing reads it: `dataflows/statement_parsing.py:105` (`interest_expense`) — the docstring's own vocabulary mentions it, and it has zero consumers in `tradingagents/` + `scripts/`. Nearest honest producer: one division in `ratios.compute_ratios` (`operating_income / interest_expense`). All five formulas (EBIT/interest, EBITDA/interest, CFO/interest paid, FCCR, DSCR) are absent; `strategies/credit_spread.py::merton_distance_to_default:104` is a *market* default-probability read with caller-supplied E/D/σ, not a coverage ratio |
 | 10 | Capital allocation | 7 / 6 | **PARTIAL** | Dividend yield built: `strategies/ratios.py:209` (`dividend_yield`, nulled above 25% as a scale artifact) and `strategies/capital_income.py::indicated_yield:55`. PARTIAL: the payout ratio has no repo-side producer — only Finnhub's generic metric passthrough (`dataflows/finnhub.py::get_basic_financials_finnhub:321` emits every vendor metric key verbatim). ABSENT: retention, buyback yield (alias `share_buybacks` at `statement_parsing.py:196` has no consumer), shareholder yield (promised in prose at `scripts/value_screener.py:19`, no symbol), total payout ratio, reinvestment rate, ROIC × reinvestment |
 | 11 | Share dilution | 4 / 4 | **PARTIAL** | Shares-outstanding growth built: `enrich_screen_ratios` sets `fin["shares_issued"]` (net share change), consumed by the Piotroski F7 leg. The library's `Dilution rate` is the **same expression** as its `Shares outstanding growth` (§4.3 D2e). PARTIAL: net issuance is that same share delta, with no dollar magnitude. ABSENT: net issuance yield |
-| 12 | R&D and intangible investment | 5 / 5 | **PARTIAL** | R&D intensity built inside `dataflows/quantitative_scores.py::growth_metrics:786` (key `rd_intensity`, line 828), which reaches the peer panel (`strategies/peer_universe.py:324`) and the G-Score G6 boolean (`growth_score:842`) — never a rendered leaf. ABSENT: R&D growth, R&D/operating expense, R&D efficiency |
+| 12 | R&D and intangible investment | 5 / 5 | **PARTIAL** | R&D intensity built inside `dataflows/quantitative_scores.py::growth_metrics:786` (key `rd_intensity`, line 828), which reaches the peer panel (`strategies/peer_universe.py:324`) and the G-Score G6 boolean (`growth_score:842`) — never a rendered leaf. **UPDATED 2026-09-28:** the R&D *series* exists now, so the growth leg is computable; still ABSENT: R&D/operating expense, R&D efficiency |
 | 13 | Valuation factors | 13 / 13 | **PARTIAL** | Built: `price_to_earnings:198`, `price_to_book:199`, `price_to_sales:200`, `price_to_cash_flow:201`, `price_to_free_cash_flow:202`, `ev_ebitda:195`, `ev_ebit:196`, `ev_sales:197` (all `strategies/ratios.py`), plus `fcf_yield` (`value_dip.py:155`). PARTIAL: forward P/E and PEG are vendor passthroughs (`dataflows/y_finance.py:382`, `:384`); the library's `Earnings yield = EPS/Price` has **no** producer — the engine's `earnings_yield` is `EBIT/EV` (§4.4 C1). ABSENT: EV/FCF, book yield |
 | 14 | Earnings yield relative to bonds | 2 / 2 | **ABSENT** | No producer: no risk-free subtraction on any earnings or FCF yield exists in `tradingagents/`. Nearest honest producers, both of a different quantity: `strategies/credit_spread.py::credit_stress_level:44` (OAS bands) and the `risk_free` parameter of `strategies/evaluate.py::sharpe:94` (a Sharpe input, not a yield spread) |
 | 15 | EV-based valuation | 4 / 4 | **PARTIAL** | EV built `dataflows/quantitative_scores.py::enterprise_value:241` (= market cap + total debt − cash; no preferred, no minority — §4.4 C3); EBIT yield built as the engine's `earnings_yield` key (`quantitative_scores.py:251`). ABSENT: EBITDA yield, FCF yield on EV (the library's second listing of the same quantity as §3's Enterprise FCF Yield, §4.3 D2c) |
@@ -963,9 +969,9 @@ metric and a `MaximumPossibleStd` the library leaves unspecified.
 **Needs data the repo does not fetch at all.** Cash-conversion cycle and the
 turnover family (§6: DIO, DSO, DPO, payables turnover, fixed-asset turnover,
 working-capital turnover) need inventory/AR/AP day inputs exposed — the
-day-ratios exist only inside `overpriced_score`'s C2/C3 booleans; R&D growth,
-R&D/opex and R&D efficiency (§12) need an R&D series, not the single line
-`growth_metrics` reads; the R&D and intangibles category is the **one library
+day-ratios exist only inside `overpriced_score`'s C2/C3 booleans; R&D/opex and R&D efficiency (§12) still need more than the stacked series that
+now exists (`research_development_series`, added 2026-09-28), which
+`growth_metrics` reduces to the single `rd_intensity` line; the R&D and intangibles category is the **one library
 section with no ledger row at all**, and it is also the one the ledger's own
 Appendix B would call data-blocked.
 

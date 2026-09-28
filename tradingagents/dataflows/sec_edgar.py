@@ -74,6 +74,16 @@ _TAG_MAP = {
     "Diluted EPS": ("EarningsPerShareDiluted",),
     "Operating income": ("OperatingIncomeLoss",),
     "D&A": ("DepreciationDepletionAndAmortization", "DepreciationAmortizationAndAccretionNet"),
+    # Research and development (FUND-17): the income statement's R&D expense,
+    # which the 106-factor table's §12 row found absent even though the whole
+    # ``us-gaap`` namespace is already in hand - ``_company_facts`` fetches the
+    # entire companyfacts payload in ONE request and ``annual_facts`` merely
+    # filters it by this map, so declaring the row costs no extra fetch.
+    # Verified live on MSFT's companyfacts (2026-09-28): the tag is present
+    # under units ``USD``. The canonical key it feeds is what the G-Score's
+    # peer-median leg reads (``quantitative_scores.growth_metrics`` ->
+    # ``rd_intensity``); a filer that does not file it stays absent, never 0.
+    "Research and development": ("ResearchAndDevelopmentExpense",),
     "Gross profit": ("GrossProfit",),
     "Operating cash flow": ("NetCashProvidedByUsedInOperatingActivities",),
     "Capex (-)": ("PaymentsToAcquirePropertyPlantAndEquipment",),
@@ -105,6 +115,19 @@ _TAG_MAP = {
     "Retained earnings": ("RetainedEarningsAccumulatedDeficit",),
     "Cost of revenue": ("CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"),
     "Liabilities and equity": ("LiabilitiesAndStockholdersEquity",),
+    # Deferred / unearned revenue (FUND-10): a LIABILITY, and the reason
+    # ``_ROW_LABEL_EXCLUDES['revenue']`` refuses the word from the revenue
+    # alias. Live MSFT companyfacts (2026-09-28) carries both spellings - the
+    # contract-liability family and the older deferred-revenue family - so the
+    # candidate list prefers the CURRENT contract liability (the standard
+    # balance-sheet "unearned revenue" line) and falls back through the other
+    # three, the same specific-first ordering ``Long-term debt`` uses.
+    "Deferred revenue": (
+        "ContractWithCustomerLiabilityCurrent",
+        "DeferredRevenueCurrent",
+        "ContractWithCustomerLiability",
+        "DeferredRevenue",
+    ),
 }
 
 #: The annual-report forms whose XBRL facts are annual statements. ``10-K`` is the
