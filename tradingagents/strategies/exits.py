@@ -186,8 +186,132 @@ def max_giveback_exit(entry: float, peak: float, current: float,
     }
 
 
+#: The §101 exit precedence for a long. Terminal risk leads - the repo's own
+#: hierarchy (``trailing_stop_exit``'s docstring: terminal risk > stop >
+#: trailing > min-holding) - then the price levels, the structural/thesis
+#: exits, the clock, and finally a negative expected value.
+EXIT_PRECEDENCE = (
+    "risk_gate",
+    "stop",
+    "trailing_stop",
+    "target",
+    "thesis_break",
+    "time_exit",
+    "expected_value",
+)
+
+
+def time_exit(
+    days_held: int | None,
+    max_holding_days: int | None,
+    min_holding_days: int | None = None,
+) -> dict:
+    """Time-based exit (§58 of ``Strategies/entry_exit.md``).
+
+    A position held past its horizon is exited; one still inside its minimum
+    holding period is reported as not-yet-eligible, so a time exit can never
+    fire before the minimum. ``exit`` is ``None`` - not ``False`` - when
+    ``days_held`` or the horizon is unknown: an unmeasurable time exit is
+    absent, never "no exit".
+    """
+    if days_held is None or max_holding_days is None:
+        return {
+            "exit": None,
+            "days_held": days_held,
+            "max_holding_days": max_holding_days,
+            "min_elapsed": None,
+            "reason": "days held or holding horizon unavailable",
+        }
+    held = int(days_held)
+    horizon = int(max_holding_days)
+    min_elapsed = None if min_holding_days is None else held >= int(min_holding_days)
+    if held < horizon:
+        return {
+            "exit": False, "days_held": held, "max_holding_days": horizon,
+            "min_elapsed": min_elapsed, "reason": f"held {held}d < horizon {horizon}d",
+        }
+    if min_elapsed is False:
+        return {
+            "exit": False, "days_held": held, "max_holding_days": horizon,
+            "min_elapsed": False,
+            "reason": (
+                f"held {held}d past the {horizon}d horizon but still inside "
+                f"the {int(min_holding_days)}d minimum"
+            ),
+        }
+    return {
+        "exit": True, "days_held": held, "max_holding_days": horizon,
+        "min_elapsed": min_elapsed, "reason": f"held {held}d >= horizon {horizon}d",
+    }
+
+
+#: Which price to transact at when each price-level condition fires.
+_PRICE_CONDITIONS = frozenset({"stop", "trailing_stop", "target"})
+
+
+def exit_decision(
+    *,
+    close: float | None,
+    stop: float | None = None,
+    trailing_stop: float | None = None,
+    target: float | None = None,
+    thesis_break: bool | None = None,
+    risk_gate: str | None = None,
+    time_exit_fired: bool | None = None,
+    expected_value: float | None = None,
+) -> dict:
+    """The §101 exit predicate for a long.
+
+    Six independent exits, evaluated independently and reported in
+    ``conditions``; the first to fire in ``EXIT_PRECEDENCE`` names the
+    ``reason``. A condition that could not be evaluated is **absent** from
+    ``conditions`` and shrinks ``coverage`` - it is never read as "no exit".
+    With nothing decidable, ``exit`` is ``None`` rather than ``False``.
+
+    ``exit_price`` is the level that fired for a price condition, otherwise
+    the close (a non-price exit is taken at market). Flags only - this never
+    blocks a decision by itself.
+    """
+    conditions: dict[str, bool] = {}
+    if risk_gate is not None:
+        conditions["risk_gate"] = str(risk_gate).strip().upper() == "REJECT"
+    if close is not None and stop is not None:
+        conditions["stop"] = float(close) <= float(stop)
+    if close is not None and trailing_stop is not None:
+        conditions["trailing_stop"] = float(close) <= float(trailing_stop)
+    if close is not None and target is not None:
+        conditions["target"] = float(close) >= float(target)
+    if thesis_break is not None:
+        conditions["thesis_break"] = bool(thesis_break)
+    if time_exit_fired is not None:
+        conditions["time_exit"] = bool(time_exit_fired)
+    if expected_value is not None:
+        conditions["expected_value"] = float(expected_value) < 0.0
+
+    if not conditions:
+        return {
+            "exit": None,
+            "reason": "no exit condition could be evaluated",
+            "exit_price": None,
+            "conditions": {},
+            "coverage": 0,
+        }
+
+    reason = next((name for name in EXIT_PRECEDENCE if conditions.get(name)), None)
+    levels = {"stop": stop, "trailing_stop": trailing_stop, "target": target}
+    price = levels.get(reason) if reason in _PRICE_CONDITIONS else close
+    return {
+        "exit": reason is not None,
+        "reason": reason or "no exit condition fired",
+        "exit_price": float(price) if price is not None else None,
+        "conditions": conditions,
+        "coverage": len(conditions),
+    }
+
+
 __all__ = [
     "stop_to_breakeven", "stop_to_breakeven_r", "breakeven_after_confirmation",
     "target_level", "net_of_cost", "rebalance_due", "exit_check",
-    "trailing_stop_exit", "max_giveback_exit",
+    "trailing_stop_exit", "max_giveback_exit", "time_exit", "exit_decision",
+    "EXIT_PRECEDENCE",
 ]
