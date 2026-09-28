@@ -24,6 +24,7 @@ from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceilin
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
 from tradingagents.strategies.risk_entry import risk_adjusted_entry
+from tradingagents.strategies.stop_mae import mae_stop_distance
 
 
 def _pct(v) -> str:
@@ -66,6 +67,7 @@ def build_trade_plan(
     max_stop_fraction: float | None = None,
     name_cvar: float | None = None,
     cvar_budget: float | None = None,
+    mae_samples=None,
     config: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
@@ -196,6 +198,18 @@ def build_trade_plan(
                 f"- Risk-adjusted max entry (advisory): {_num(risk_entry['value'])} "
                 f"(stop within {_pct(risk_entry['stop_fraction'])}; CVaR: "
                 f"{risk_entry['cvar_status']})"
+            )
+    # Measured stop (advisory, §93): the stop distance the MAE distribution of
+    # past closed decisions implies. Rendered only when the sample clears the
+    # floor - below it the read is a count, not a distance, and a default
+    # distance would be a constant standing in for a measurement.
+    if mae_samples:
+        mae = mae_stop_distance(mae_samples)
+        if mae["status"] == "OK":
+            lines.append(
+                f"- Measured stop (advisory, §93): {_pct(mae['stop_fraction'])} of "
+                f"entry at the {_pct(mae['quantile'])} MAE quantile "
+                f"(n={mae['sample']}; median MAE {_pct(mae['median'])})"
             )
     # Setup rows (advisory, measured).
     if setup:
