@@ -906,9 +906,25 @@ def get_analysis_date():
             )
 
 
-def save_report_to_disk(final_state, ticker: str, save_path: Path):
-    """Save the complete analysis report to disk (shared CLI/API writer)."""
-    return write_report_tree(final_state, ticker, save_path)
+def save_report_to_disk(final_state, ticker: str, save_path: Path, trade_date: str | None = None):
+    """Save the complete analysis report to disk (shared CLI/API writer).
+
+    Writes the tree, then runs the same post-run annotations the batch path
+    writes (``batch.post_save_annotations``: the same-night pre-market re-check
+    and the TypeSafe verdict on the analyst reports). An interactive run writes
+    its tree here rather than through ``batch.analyze``, so without this call it
+    was the one kind of tree missing ``jev_verdict.json``.
+
+    ``trade_date`` names the pre-market file; the jev hook does not need it.
+    """
+    written = write_report_tree(final_state, ticker, save_path)
+    try:
+        from batch import post_save_annotations
+
+        post_save_annotations(ticker, save_path, trade_date)
+    except Exception as exc:  # noqa: BLE001 - an annotation never fails a saved run
+        print(f"[post-run] annotations skipped for {ticker}: {exc}")
+    return written
 
 
 def display_complete_report(final_state):
@@ -1443,7 +1459,12 @@ def run_analysis(
         default_path = resolve_output_path("reports") / f"{selections['ticker']}_{timestamp}"
         save_path = save_path_arg or default_path
         try:
-            report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
+            report_file = save_report_to_disk(
+                final_state,
+                selections["ticker"],
+                save_path,
+                selections["analysis_date"],
+            )
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
         except Exception as e:

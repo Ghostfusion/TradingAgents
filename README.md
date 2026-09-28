@@ -30,6 +30,22 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-28] **The interactive CLI's report tree now carries the same post-run artefacts as a batch
+  tree** — `cli/main.py::save_report_to_disk` writes its tree with `write_report_tree` directly, so it
+  never went through `batch.analyze` and ran neither post-save hook. It was the one producer whose trees
+  lacked `jev_verdict.json`, against the owner's instruction that the verdict is written each time a
+  report has finished generating. Measured, not inferred: `reports/TROW_20260928_124933` and
+  `reports/PBR_20260925_142907` are 9-entry trees against 10 for every batch tree, and both record the
+  same `commit` as the batch trees written the same day — so the difference was the entry point, not the
+  code. The shared dispatcher is now public (`batch.py::post_save_annotations`, renamed from
+  `_post_save_annotations` because it has a caller in another module), the CLI's writer calls it after
+  writing, and a caller with no trade date skips the pre-market check rather than writing
+  `pre_market_review_None.md`. A recorded backlog row — "`pipeline.py` never writes a jev verdict" — was
+  **stale**: `pipeline.py` calls `batch.analyze`, which has run the hook since 2026-09-21, and no
+  `pipeline_<stamp>.md` exists anywhere, so it has not produced a recent tree at all. Still open:
+  `trading_graph.py::save_reports`, the writer for ad-hoc `propagate()` + `save_reports()` calls,
+  annotates nothing. Live proof (a copy of the TROW tree went 9 -> 10 entries) and web impact in
+  `CHANGELOG.md`.
 - [2026-09-27] **ValuationScore row 55 gets its producer, and the Dream-RSI replay simulator is declined
   on the record** — two items that needed a producer or a written decision rather than a wiring pass. The
   **SBC-adjusted free-cash-flow read** (`us-gaap:ShareBasedCompensation` -> the canonical `sbc` key) now

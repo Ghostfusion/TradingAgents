@@ -106,7 +106,7 @@ def test_gate_off_never_calls_the_judge(monkeypatch, tmp_path):
     called: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: called.append(d))
 
-    batch._post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
     assert called == [], "the gate was ignored - the judge ran while switched off"
 
@@ -116,7 +116,7 @@ def test_gate_on_calls_the_judge(monkeypatch, tmp_path):
     called: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: called.append(d))
 
-    batch._post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
     assert called == [tmp_path]
 
@@ -131,9 +131,78 @@ def test_the_two_post_save_gates_are_independent(monkeypatch, tmp_path):
     monkeypatch.setattr(batch, "_batch_pre_market_check", lambda *a: pre.append(a))
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: None)
 
-    batch._post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
     assert pre == []
+
+
+def test_a_missing_trade_date_skips_the_pre_market_check(monkeypatch, tmp_path):
+    """The pre-market file is named after the trade date.
+
+    A caller that cannot supply one (the interactive CLI always can, but the
+    parameter is optional) must skip the check rather than write
+    ``pre_market_review_None.md``. The verdict needs no date and still runs.
+    """
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pre_market_review": True},
+    )
+    pre: list = []
+    jev_calls: list = []
+    monkeypatch.setattr(batch, "_batch_pre_market_check", lambda *a: pre.append(a))
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: jev_calls.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, None)
+
+    assert pre == [], "a date-less caller wrote a date-named file"
+    assert jev_calls == [tmp_path], "the verdict does not need the date"
+
+
+def test_the_interactive_cli_writer_runs_the_same_annotations(monkeypatch, tmp_path):
+    """`cli.main.save_report_to_disk` must annotate the tree it writes.
+
+    The interactive CLI writes its tree directly (it never goes through
+    ``batch.analyze``), so until 2026-09-28 it was the one producer that ran
+    neither post-save hook. Measured: ``reports/TROW_20260928_124933`` and
+    ``reports/PBR_20260925_142907`` are 9-entry trees with no
+    ``jev_verdict.json``, against 10 entries for every batch tree.
+    """
+    from cli import main as cli_main
+
+    seen: list = []
+    monkeypatch.setattr(
+        cli_main, "write_report_tree",
+        lambda state, ticker, path: Path(path) / "complete_report.md",
+    )
+    monkeypatch.setattr(
+        batch, "post_save_annotations",
+        lambda symbol, report_dir, trade_date: seen.append((symbol, str(report_dir), trade_date)),
+    )
+
+    written = cli_main.save_report_to_disk({}, "TROW", tmp_path, "2026-09-28")
+
+    assert seen == [("TROW", str(tmp_path), "2026-09-28")]
+    assert written == tmp_path / "complete_report.md"
+
+
+def test_the_cli_writer_survives_an_annotation_that_explodes(monkeypatch, tmp_path, capsys):
+    """A saved run is already on disk; annotation failure must not undo that."""
+    from cli import main as cli_main
+
+    monkeypatch.setattr(
+        cli_main, "write_report_tree",
+        lambda state, ticker, path: Path(path) / "complete_report.md",
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("hooks are broken")
+
+    monkeypatch.setattr(batch, "post_save_annotations", boom)
+
+    written = cli_main.save_report_to_disk({}, "TROW", tmp_path, "2026-09-28")
+
+    assert written == tmp_path / "complete_report.md"
+    assert "annotations skipped for TROW" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

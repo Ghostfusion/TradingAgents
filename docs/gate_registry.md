@@ -233,7 +233,7 @@ exactly the tree it produced before the gate existed.
 | Key | Env var | What it can do | Enforced at | Proven by | Status |
 | --- | --- | --- | --- | --- | --- |
 | `enable_security_context` | `TRADINGAGENTS_ENABLE_SECURITY_CONTEXT` | writes the deterministic classification block: the provider's sector and industry **verbatim with the source that produced them**, the canonical sector, the SPDR key, the SEC SIC when an earlier step already fetched a submissions payload, and the declared theme priority order with its matrix version. It makes **no network call of its own** and adds **zero** decision-context characters - it never enters the decision channel. The prior **cannot gate**: `candidate_themes` is a union, so every registered theme stays a candidate and a wrong cell costs a missed *earlier* check, never a missed theme | `tradingagents/reporting.py`::`_run_card_security_context` (the block), `tradingagents/strategies/security_context.py`::`build_security_context` / `::candidate_themes` / `::theme_priority_order` / `::render_security_context_basis` | `test_security_context.py` (provenance, the widening property, the validator, the gate both ways), `test_gate_env_toggles.py` (the registry) | wired |
-| `enable_jev_verdict` | `TRADINGAGENTS_ENABLE_JV_VERDICT` | judges the four **analyst** reports with the TypeSafe decisions model, their position language neutralised, and writes `jev_verdict.json` (buy/hold/sell per report) into the report tree | `batch.py::_batch_jev_verdict` (the hook, called after `save_reports`), `tradingagents/jev.py::judge_tree` (the pass) | `test_jev_verdict_hook.py` (the gate fires both ways and the JSON lands in the tree), `test_jev_decide.py` (the recipe) | wired |
+| `enable_jev_verdict` | `TRADINGAGENTS_ENABLE_JV_VERDICT` | judges the four **analyst** reports with the TypeSafe decisions model, their position language neutralised, and writes `jev_verdict.json` (buy/hold/sell per report) into the report tree | `batch.py::post_save_annotations` (the dispatcher - called by `analyze` after `save_reports`, and by `cli/main.py::save_report_to_disk` for an interactive run), `batch.py::_batch_jev_verdict` (the hook), `tradingagents/jev.py::judge_tree` (the pass) | `test_jev_verdict_hook.py` (the gate fires both ways, the JSON lands in the tree, and the interactive CLI's writer calls the same dispatcher), `test_jev_decide.py` (the recipe) | wired |
 
 `enable_jev_verdict` is the only gate that writes an artefact rather than
 reading a surface, which is why it is not in §6, §7 or §7b. It is also the only
@@ -241,6 +241,17 @@ one whose dependency can be absent without being an error: the engine does not
 require `OPENROUTER_API_KEY`, so the hook skips with a log line rather than
 failing. It is best-effort like `enable_pre_market_review` - a judge that
 annotates a finished run must never fail it.
+
+**Every writer of a finished tree calls `post_save_annotations`, and there are three.**
+`batch.py::analyze` (the batch CLI and trading_web's in-process `run_batch`),
+`cli/main.py::save_report_to_disk` (the interactive CLI) and `pipeline.py` (which
+goes through `analyze`). The interactive CLI was the missing one until
+2026-09-28, which is why two trees written that way are 9-entry trees with no
+`jev_verdict.json` against 10 for every batch tree. A fourth writer,
+`tradingagents/graph/trading_graph.py::save_reports` (documented for ad-hoc
+`propagate()` + `save_reports()` calls), still annotates nothing. No observed
+tree came from it, and adding the hook there would put a network call inside the
+widely-tested tree writer, so it is recorded here rather than changed.
 
 ## 7d. Paper-survey instrument gates - these add a diagnostic, never a decision
 

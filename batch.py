@@ -248,13 +248,19 @@ _probe_start: float = 0.0
 config_probe = None
 
 
-def _post_save_annotations(symbol: str, report_dir, trade_date: str) -> None:
+def post_save_annotations(symbol: str, report_dir, trade_date: str | None) -> None:
     """Everything that annotates a just-written report tree, in one place.
 
-    Runs immediately after ``save_reports`` so the CLI batch and the in-process
-    web caller (trading_web's run_batch, which calls ``analyze`` directly) both
-    get it — the pre-market check used to live in ``main()``'s ``as_completed``
-    loop, so the web path silently skipped it.
+    Called by every writer of a finished run's tree: :func:`analyze` (so the
+    batch CLI and the in-process web caller, trading_web's ``run_batch``, get
+    it) and ``cli.main.save_report_to_disk`` (the interactive CLI, which writes
+    its tree itself instead of going through ``analyze``).
+
+    The pre-market check used to live in ``main()``'s ``as_completed`` loop, so
+    the web path silently skipped it. The interactive CLI skipped **both**
+    hooks until 2026-09-28 — that is the whole difference between
+    ``reports/TROW_20260928_124933`` (9 entries) and every batch tree (10), and
+    why those two runs carry no ``jev_verdict.json``.
 
     Both hooks are best-effort and both are gated. Neither can change the
     decision: the tree is already written, so this only adds files to it.
@@ -262,8 +268,10 @@ def _post_save_annotations(symbol: str, report_dir, trade_date: str) -> None:
     # Same-night pre-market re-check (choice (a) of the design): a
     # catalyst/quality re-read of the just-written decision, not a gap
     # re-anchor (that is the pre-open standalone script). Writes
-    # pre_market_review_<trade_date>.md.
-    if DEFAULT_CONFIG.get("enable_pre_market_review"):
+    # pre_market_review_<trade_date>.md. It names its output file after the
+    # trade date, so a caller that cannot supply one skips it rather than
+    # inventing "pre_market_review_None.md".
+    if trade_date and DEFAULT_CONFIG.get("enable_pre_market_review"):
         _batch_pre_market_check(symbol, report_dir, trade_date)
     # TypeSafe verdict on the just-written analyst reports. Owner instruction
     # 2026-09-21: judge each time a report finishes generating, and store the
@@ -354,7 +362,7 @@ def analyze(
         / f"{safe_ticker_component(symbol).upper()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     ta.save_reports(final_state, symbol, save_path=report_dir)
-    _post_save_annotations(symbol, report_dir, trade_date)
+    post_save_annotations(symbol, report_dir, trade_date)
     return symbol, decision, report_dir, wall_seconds, rating
 
 

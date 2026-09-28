@@ -199,7 +199,7 @@ def test_cli_applies_strategy_overlays_and_seeds_risk_context(monkeypatch, tmp_p
         "tradingagents.dataflows.utils.resolve_output_path", lambda *a, **k: tmp_path
     )
 
-    def _fake_save(state, ticker, save_path):
+    def _fake_save(state, ticker, save_path, trade_date=None):
         calls.append("save")
         saved.append((state, ticker))
         return Path(save_path) / "decision.md"
