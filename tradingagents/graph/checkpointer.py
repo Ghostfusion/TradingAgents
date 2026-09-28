@@ -144,13 +144,23 @@ def checkpoint_step(
 
 
 def clear_all_checkpoints(data_dir: str | Path) -> int:
-    """Remove all checkpoint DBs and run markers. Returns number of DBs deleted."""
+    """Remove all checkpoint DBs and run markers. Returns number of DBs deleted.
+
+    The SQLite ``-wal``/``-shm`` sidecars are removed with each DB. In WAL mode
+    committed pages live in the ``-wal`` until a checkpoint folds them into the
+    main file, so deleting only the ``.db`` can leave a "cleared" checkpoint
+    whose state is still recoverable from the sidecar.
+    """
     cp_dir = Path(data_dir) / "checkpoints"
     if not cp_dir.exists():
         return 0
     dbs = list(cp_dir.glob("*.db"))
     for db in dbs:
         db.unlink()
+        for sidecar in (db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
+            if sidecar.exists():
+                with suppress(OSError):
+                    sidecar.unlink()
     for marker in cp_dir.glob("*.run*"):
         with suppress(OSError):
             marker.unlink()

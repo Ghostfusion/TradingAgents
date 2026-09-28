@@ -220,3 +220,23 @@ class TestCheckpointSignature(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_clear_all_checkpoints_removes_the_wal_and_shm_sidecars(tmp_path):
+    """A cleared checkpoint must not survive in its SQLite sidecar files.
+
+    In WAL mode committed pages live in ``-wal`` until a checkpoint folds them
+    into the main file, so deleting only the ``.db`` left state recoverable.
+    """
+    from tradingagents.graph.checkpointer import clear_all_checkpoints
+
+    cp_dir = tmp_path / "checkpoints"
+    cp_dir.mkdir()
+    (cp_dir / "MSFT.db").write_bytes(b"db")
+    (cp_dir / "MSFT.db-wal").write_bytes(b"committed pages")
+    (cp_dir / "MSFT.db-shm").write_bytes(b"shared memory")
+
+    assert clear_all_checkpoints(tmp_path) == 1
+    assert not (cp_dir / "MSFT.db").exists()
+    assert not (cp_dir / "MSFT.db-wal").exists()
+    assert not (cp_dir / "MSFT.db-shm").exists()
