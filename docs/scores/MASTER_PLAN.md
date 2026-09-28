@@ -195,10 +195,11 @@ the plan and the only ones that cost nothing but attention.
 
 ---
 
-## 4. Phase 1 — wire what exists (`WORK`, D1-2, I1-3)
+## 4. Phase 1 — wire what exists (`WORK`, D1-2, I1-3) — **CLOSED 2026-09-28**
 
-Everything here reads data the repo already fetches; the producer or the key
-exists and no reader uses it. No new vendor, no new measurement.
+**CLOSED 2026-09-28: all 28 rows are MET — see §4.1 for the per-row proof.** The
+table is kept as the record of what the phase asked for, not as a work queue;
+every producer it names exists in the tree and is rendered by a leaf.
 
 | id | Item | Source | D | I | Verification |
 | --- | --- | --- | --: | --: | --- |
@@ -239,6 +240,48 @@ exists and no reader uses it. No new vendor, no new measurement.
 | EVT-5 | Raise `catalyst.next_earnings`' `lookahead_days` above the 60-day read horizon (the fetch already spans +95d) | `EventScore.md` §4 | 1 | 1 | the read returns >60d — **MET, and it had been for a while: see the §12.1 row** |
 
 ---
+
+
+### 4.1 RE-VERIFIED 2026-09-28 — all 27 Phase-1 rows are MET
+
+The table above is the record of what Phase 1 *asked for*; the tree has answered
+every row in it. Each was re-checked against the **code**, not against the table,
+after three rows turned out to be long since satisfied while still listed as open
+(`EVT-5`, and `§5.1`'s eight ids). No row below needs building — reading them as a
+work queue would rebuild what exists. Proof, one line per row:
+
+| id | proof (file:symbol) |
+| --- | --- |
+| SENT-14 | the three helpers are gone — no `def`/caller for `weighted_sentiment`, `blended_score`, `consensus_verdict`; `sentiment.py:18-22` records the deletion, only `aggregate_weighted_sentiment` survives |
+| TECH-1 | `technical_factors.obv_divergence:542` returns the level (`"obv": obv_series[-1]` at `:596`), printed by `get_mean_reversion_tech` (`analysis_tools.py:1430`) |
+| TECH-2/3/4 | `_momentum_components:6034` (roc5), `technical_factors.range_position:1012`, `technical_factors.sma_legs:1050` — all rendered by the momentum/technical leaves |
+| FUND-4 | `ratios.compute_ratios` gains `ocf_yield:806`, `fcf_margin:810`, `fcf_to_net_income:812`, `fcf_to_ebitda:814`, `ocf_to_ebitda:813`, `capex_to_ocf:815`, `ev_to_fcf:816`, the growth divergence at `:817`; in `RENDER_ORDER:947-958`, printed by `get_ratios` |
+| FUND-1 | `ratios.interest_coverage:800` (plus EBITDA/cash/fixed-charge/debt-service variants `:801-804`) reading `interest_expense` at `:638`; `RENDER_ORDER:942-946`; `get_ratios` prints them |
+| FUND-5 | `net_debt_to_ebitda:824`, `debt_to_assets:826`, `net_debt_to_fcf:827`, `cash_to_debt:828`, `net_cash_yield:829`, `ocf_to_debt:830`, over the shared `_ebitda:256` helper; `RENDER_ORDER:960-966` |
+| FUND-2 | `ratios.return_on_capital:307` exposes the LEVEL `roic:341`, `invested_capital_turnover:344` and `capital_employed:336`; `RENDER_ORDER:967-972` |
+| FUND-3 | `ratios.shareholder_yield:370` reads `share_buybacks:394`, folded in at `:717` and `:839-841`, with the net-issuance sign stated at `:374-382`; `RENDER_ORDER:973-975` |
+| FUND-6 | `gross_margin:853`, `ebit_margin:854`, the two margin SERIES `:862-863` and the stability legs `:857-858`; `RENDER_ORDER:986-992` |
+| FUND-9 | `asset_growth:884`, `debt_growth:887`, `receivables_growth:888`, `inventory_growth:891`, `working_capital_to_assets:894` — numeric, not booleans; `RENDER_ORDER:1002-1006` |
+| FUND-22 | `factor_schema.FACTOR_SCHEMA:428-490` declares all six `insider_*` `_spec` rows under category `Insider Activity` with `availability=NA` and deliberately keeps them out of `SUBSCORE_FACTORS` — the row's own stated alternative (declared-not-fed, closing D-16) |
+| SENT-1 | `sentiment.aggregate_daily_sentiment:1560` emits `bull_share`; `analysis_tools.py:7161` sets it |
+| SENT-2/SENT-4 | `sentiment_research.inst_flow_z:67`; `analysis_tools.py:7270` sets it — the 15-weight institutional leg |
+| SENT-5 | `options_surface.iv_skew:25` and `put_call_oi_concentration:34`; `analysis_tools.py:7228/7239` |
+| SENT-3 | `yfinance_short_interest.short_interest_fields:37` (decimal fraction); `analysis_tools.py:7253-7255` reads `short_pct_float` structurally |
+| SENT-13 | `trading_graph._sentiment_factor_read:1382/1420` uses the `_sentiment_points_fallback` chain — no hardcoded `eodhd` — and returns `self_lead_lag`, not the mislabelled `rank_ic` |
+| SENT-12 | `dataflows/gdelt.py:243` always refuses (`None`), `sentiment_score.SCALE_TABLE:61` pins the unit and `:399` refuses to mix tone sources |
+| NEWS-8 | `news_score.news_volume_acceleration:443` — first difference, flat to `0.0`; pinned by `test_news_score.py:558` |
+| NEWS-14 | `_news_components` builds the per-article evidence pairs at `analysis_tools.py:7744`; the renderer prints them highest-first at `:7939` |
+| REG-1 | `overlays.build_strategy_overlays:95` uses `regime.vol_percentile`; the 3-bucket proxy survives only as `_legacy_vol_bucket:20`, for the basis note |
+| REG-2 | `overlays.py:121-129` maps `estimator_pct` to `label_pct`; `test_regime_depth.py:132` pins that the estimator moves the label |
+| REG-3 | `regime.vol_percentile:59` has a strictly-below rank floor of 0; `test_regime_depth.py:155` prints `0.0`, below the old 1/15 floor |
+| README-5 | `test_analysis_tools.py:935` asserts `len(windows) == len(closes) - 21 + 1` — every overlapping window, against the old ~15-sample stride |
+| RISK-2 | `liquidity_risk.portfolio_hhi:153` over POSITION weights (0..1), consumed at `analysis_tools.py:9447` in `get_book_tail_risk` — not the 0..10000 holder HHI |
+| RISK-6 | `get_tail_risk` still passes closes to `cdar` but labels the output `price_path_dd_tail_mean` / `price_path_dd_var` / `price_path_max_dd` with the literal "(this name's own price path, not the book CDaR)" — the labelling half the row asked for |
+| RISK-1 | `book_risk.py:31` `normalize_book_weights`; `portfolio_cvar:61` and `book_correlated_stress:148` both delegate to it (P0-8d, 2026-09-17) |
+| TECH-6/9/11/16 | public `technical_factors.macd_depth:1106` (macd/signal/hist + slopes + `hist_accel` + crossover), `mean_reversion_z:1237`, `volume_depth:1272`; `get_technical_factors` prints all three |
+
+`EVT-5` is the twenty-eighth row and is recorded in `§12.1` (the constant is 95).
+This leaves **Phase 1 closed**; the live backlog is Phase 2's open-only rows.
 
 ## 5. Phase 2 — small new producers (`WORK`, D2-3, I2-4)
 
