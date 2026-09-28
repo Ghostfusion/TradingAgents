@@ -13,6 +13,9 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Fixed
+**EVT-7's backward subset was already built and bound (2026-09-28).** `moomoo.get_earnings_surprise_history_moomoo:2708` (the sole vendor for it) is registered at `interface.py:637`, wrapped by `moomoo_extra_tools.get_earnings_surprise_history:256`, exported via `agent_utils` and bound in `toolsets.py:446`; the fundamentals analyst's prompt names it. The leaf's docstring returns per past print the EPS estimate vs actual (surprise %), the day-of price reaction, the option-implied move and IV crush — which is the "reaction + base rates" half of the row verbatim. The **estimates** half stays NOT-FEEDABLE. Recorded, not rebuilt; this is the fourth already-satisfied row found in a day.
+- **Web impact: none** — documentation only.
+
 **UNIV-GOV re-probed: it is a build item, not the parse item its row claims (2026-09-28).** The `§8.1` verdict read "FEEDABLE-WITH-PARSING — DEF 14A is free and the URL is already built". The URL is in fact the **only** thing built: `_FORM_LABELS:47` names the form and `get_sec_filings:552` prints the archive link, and nothing else touches a proxy. A tree-wide grep for an HTML-table reader (`read_html`, BeautifulSoup, lxml, `html.parser`, `HTMLParser`) over `tradingagents/` returns **zero hits** — the repo has no HTML parsing capability at all — and DEF 14A carries no XBRL, so the SEC financial machinery cannot be reused. Reaching the governance tables therefore means a fetch path for a multi-megabyte document, a table-extraction policy, a new dependency or a hand-rolled parser, a schema, a leaf and its prompt wiring. The verdict cell now says so, so the next reader does not start it as a small parse.
 - **Web impact: none** — documentation only.
 
