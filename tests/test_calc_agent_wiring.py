@@ -27,6 +27,13 @@ REFERENCE_DOMAINS = (
 
 # Audited legacy/dead set: module:function -> why it is exempt from wiring.
 LEGACY_WHITELIST = {
+    # html.parser.HTMLParser dispatches on these EXACT method names, so they
+    # cannot be renamed to _-private or inlined. They are the override hooks
+    # of `_TableParser`, the class the reachable `extract_tables` /
+    # `governance_tables` drive.
+    "dataflows/proxy.py:handle_starttag": "HTMLParser protocol override (name fixed by stdlib)",
+    "dataflows/proxy.py:handle_endtag": "HTMLParser protocol override (name fixed by stdlib)",
+    "dataflows/proxy.py:handle_data": "HTMLParser protocol override (name fixed by stdlib)",
     "dataflows/moomoo.py:close_all_contexts": (
         "lifecycle helper, not a computed read: closes the SDK's OpenQuoteContexts "
         "by code (the web app's jobs.shutdown() and its test suite call it)"

@@ -13634,3 +13634,59 @@ def get_cape_ratio(
         f"multiple is comparable across years; it is a valuation read, never a "
         f"rating or a position size."
     )
+
+
+@tool
+def get_proxy_governance(
+    ticker: Annotated[str, "ticker symbol"],
+    max_rows: Annotated[int, "rows to print per table"] = 12,
+) -> str:
+    """
+    Retrieve the governance tables from a company's newest DEF 14A proxy
+    statement: executive and director compensation, outstanding equity awards,
+    beneficial ownership, and the equity-compensation-plan table, extracted
+    verbatim from the filing. A proxy carries no XBRL, so these figures exist
+    nowhere in the financial statements - this is the only path to them. Use it
+    for compensation, ownership and dilution-of-control reads; it is evidence a
+    reader inspects, never a rating, a gate or a position size.
+
+    Args:
+        ticker (str): Ticker symbol
+        max_rows (int): Rows to print per table
+
+    Returns:
+        str: The governance tables, each with the heading that names it
+    """
+    from tradingagents.dataflows.proxy import fetch_proxy_html, governance_tables
+
+    url, html = fetch_proxy_html(ticker)
+    if not html:
+        return (
+            f"proxy governance unavailable for {ticker}: no DEF 14A document was "
+            f"retrieved (no CIK, no proxy on file, or the fetch failed)."
+        )
+    tables = governance_tables(html)
+    if not tables:
+        return (
+            f"proxy governance {ticker}: the DEF 14A was retrieved ({len(html)} "
+            f"chars) but no governance table was identified by its heading - the "
+            f"document may caption its tables differently."
+        )
+
+    lines = [
+        f"DEF 14A governance tables {ticker}",
+        f"- source: {url}",
+        f"- {len(tables)} governance table(s) identified by heading",
+        "",
+    ]
+    for table in tables[:6]:
+        lines.append(f"### {table['heading']}")
+        lines.append(f"({table['n_rows']} rows x {table['n_cols']} columns)")
+        for row in table["rows"][: max(0, int(max_rows))]:
+            lines.append(" | ".join(row))
+        lines.append("")
+    lines.append(
+        "Extracted verbatim from the proxy statement; cells are as filed and are "
+        "not normalised. Informs the read, never a rating or a position size."
+    )
+    return "\n".join(lines)
