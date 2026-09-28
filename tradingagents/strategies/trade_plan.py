@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
+from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 
 
 def _pct(v) -> str:
@@ -53,6 +54,9 @@ def build_trade_plan(
     valuation_ceiling: float | None = None,
     expected_return_ceiling: float | None = None,
     rr_ceiling: float | None = None,
+    valuation_price: float | None = None,
+    technical_price: float | None = None,
+    tranche_price: float | None = None,
     config: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
@@ -117,6 +121,29 @@ def build_trade_plan(
         lines.append(
             f"- Ceiling headroom: distance {_pct(ceiling['ceiling_distance'])} "
             f"| margin {_pct(ceiling['ceiling_margin'])}"
+        )
+    # Target entry (advisory): §100's P_entry,target over the PRICE anchors
+    # that exist. The score-weighted blend is deliberately NOT implemented -
+    # our engines emit 0-100 scores, not prices, and no calibrated
+    # score -> price bridge exists (the owner's Phase-2 decision), so the
+    # regime/risk adjustment terms stay absent rather than invented.
+    target = entry_target(
+        valuation_price=valuation_price,
+        technical_price=technical_price,
+        tranche_price=tranche_price,
+    )
+    target_coverage = f"{target['coverage']}/{len(ANCHOR_SOURCES)}"
+    if target["value"] is None:
+        lines.append(
+            f"- Target entry (advisory): unavailable - status {target['status']} "
+            f"(coverage {target_coverage}); {target['reason']}"
+        )
+    else:
+        lines.append(
+            f"- Target entry (advisory): {_num(target['value'])} - status "
+            f"{target['status']} (anchors: {', '.join(target['available_sources'])}; "
+            f"coverage {target_coverage}; adjustments missing: "
+            f"{', '.join(target['adjustments_missing'])})"
         )
     # Setup rows (advisory, measured).
     if setup:
@@ -215,7 +242,12 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
     )
     if not read.get("valid"):
         return {}
-    out: dict = {"tranche": read, "targets": read.get("targets")}
+    out: dict = {
+        "tranche": read,
+        "targets": read.get("targets"),
+        # §100 price anchor: the tranche's own measured entry.
+        "tranche_price": read.get("avg_entry"),
+    }
     # Entry-ceiling R:R term: the highest entry at which the tranche's own
     # target still pays the configured minimum R:R given its stop. Solving
     # (T - E) / (E - S) = R for E gives E = (T + R*S) / (1 + R). A row that

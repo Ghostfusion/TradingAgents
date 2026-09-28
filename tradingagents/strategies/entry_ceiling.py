@@ -45,11 +45,13 @@ CEILING_STATUSES = ("PASS", "ABOVE_CEILING", "NO_SOURCE")
 _DENOMINATOR = len(CEILING_SOURCES)
 
 
-def _level(v) -> float | None:
+def usable_price_level(v) -> float | None:
     """A usable price level, or ``None``.
 
-    A ceiling is a positive, finite number; anything else (``None``, bool,
-    NaN, inf, <= 0) is an *absent* source rather than a zero ceiling.
+    A price anchor is a positive, finite number; anything else (``None``,
+    bool, NaN, inf, <= 0) is an *absent* source rather than a zero price.
+    Shared by :func:`entry_ceiling` and ``entry_target`` so the two agree on
+    what "measurable" means.
     """
     if v is None or isinstance(v, bool):
         return None
@@ -89,9 +91,9 @@ def entry_ceiling(
         verdict could be formed.
     """
     supplied: dict[str, float | None] = {
-        "valuation": _level(valuation_ceiling),
-        "expected_return": _level(expected_return_ceiling),
-        "risk_reward": _level(rr_ceiling),
+        "valuation": usable_price_level(valuation_ceiling),
+        "expected_return": usable_price_level(expected_return_ceiling),
+        "risk_reward": usable_price_level(rr_ceiling),
     }
     # ``pairs`` narrows float | None -> float once, for both the min and the
     # binding-source lookup, so no ``type: ignore`` is needed.
@@ -123,7 +125,7 @@ def entry_ceiling(
     value = min(lv for _, lv in pairs)
     binding = next(s for s, lv in pairs if lv == value)
 
-    p = _level(price)
+    p = usable_price_level(price)
     distance = margin = None
     reason = ""
     status = "NO_SOURCE"
@@ -150,4 +152,6 @@ def entry_ceiling(
     }
 
 
-__all__ = ["CEILING_SOURCES", "CEILING_STATUSES", "entry_ceiling"]
+__all__ = [
+    "CEILING_SOURCES", "CEILING_STATUSES", "entry_ceiling", "usable_price_level",
+]
