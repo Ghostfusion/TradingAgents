@@ -202,7 +202,21 @@ def test_the_report_lands_under_its_own_prefix_and_spares_the_sibling(
 
 def test_the_default_fundamental_cut_is_fifty():
     """The owner's number, pinned where the CLI reads it."""
-    assert vss.DEFAULT_SCORE_MIN == 50.0
+    assert vss.DEFAULT_FUNDAMENTAL_SCORE_MIN == 50.0
+
+
+def test_the_fundamental_cut_is_spelled_fundamental_score_min():
+    """The old `--score-min` spelling must be GONE, not silently accepted.
+
+    The sibling adapter once shipped `value_screener.py`'s `--max-chg5d` /
+    `--max-rsi` spellings for this script, and argparse exited 2 only after the
+    job had been queued. A rename has the same failure mode, so the new spelling
+    is exercised and the old one is pinned as rejected.
+    """
+    assert vss.main(["--offline-demo", "--fundamental-score-min", "70"]) == 0
+    with pytest.raises(SystemExit) as err:
+        vss.main(["--offline-demo", "--score-min", "70"])
+    assert err.value.code == 2
 
 
 def test_the_technical_default_is_the_engines_own_neutral_edge():
@@ -221,7 +235,7 @@ def _tech_args(**kw):
         "pe_max": 33.0, "pb_max": 9.0, "ps_max": 8.0, "pcf_max": 25.0,
         "max_chg": -2.0, "roe_min": 0.0, "chg5d_max": 0.0, "rsi_max": 0.0,
         "no_moomoo": False, "show_excluded": True,
-        "score_min": vss.DEFAULT_SCORE_MIN,
+        "fundamental_score_min": vss.DEFAULT_FUNDAMENTAL_SCORE_MIN,
         "tech_score_min": vss.DEFAULT_TECH_SCORE_MIN,
     }
     base.update(kw)

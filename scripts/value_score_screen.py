@@ -89,11 +89,11 @@ DEFAULT_PE_MAX = 33.0
 DEFAULT_PB_MAX = 9.0
 DEFAULT_PS_MAX = 8.0
 DEFAULT_PCF_MAX = 25.0
-DEFAULT_SCORE_MIN = 50.0
+DEFAULT_FUNDAMENTAL_SCORE_MIN = 50.0
 
 #: The technical cut. On ``technical_score``'s own 0-100 composite scale, 50.0
 #: IS the engine's published ``TECH_BANDS`` "neutral" edge - so unlike the
-#: fundamental ``--score-min`` (no band table, a pure research cut) this one is
+#: fundamental ``--fundamental-score-min`` (no band table, a pure research cut) this one is
 #: an engine boundary: at or above it the composite reads neutral or better.
 #: ``0`` disables the pass, which is the only value that costs no vendor call.
 DEFAULT_TECH_SCORE_MIN = 50.0
@@ -609,10 +609,10 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
     scored_n = len([r for r in rows if scores.get(r["symbol"]) is not None])
     miss = [r for r in rows if scores.get(r["symbol"]) is None]
     scored_ok = [r for r in rows if scores.get(r["symbol"]) is not None
-                 and scores[r["symbol"]] >= args.score_min]
+                 and scores[r["symbol"]] >= args.fundamental_score_min]
     qual = [r for r in scored_ok if _passes_tech(r["symbol"])]
     below = [r for r in rows if scores.get(r["symbol"]) is not None
-             and scores[r["symbol"]] < args.score_min]
+             and scores[r["symbol"]] < args.fundamental_score_min]
     # Two DIFFERENT failures of the technical cut, kept apart: a measured
     # composite below the edge, and a composite that could not be measured at
     # all. One section for both would turn "no measurement" into "weak".
@@ -620,11 +620,11 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
                   if r["symbol"] in tech and not _passes_tech(r["symbol"])]
     tech_miss = [r for r in scored_ok if tech_on and r["symbol"] not in tech]
     panel_n = len([s for s in scores.values() if s is not None])
-    cuts = (f"the {args.score_min:g} cut" if not tech_on
-            else f"both cuts ({args.score_min:g} fundamental, "
+    cuts = (f"the {args.fundamental_score_min:g} cut" if not tech_on
+            else f"both cuts ({args.fundamental_score_min:g} fundamental, "
                  f"{tech_min:g} technical)")
     lines = [
-        f"# Value screen: candidates clearing FundamentalScore >= {args.score_min:g}"
+        f"# Value screen: candidates clearing FundamentalScore >= {args.fundamental_score_min:g}"
         + (f" and TechnicalScore >= {tech_min:g}" if tech_on else ""),
         "",
         f"- Run: {datetime.now():%Y-%m-%d %H:%M} · date {args.date} · "
@@ -681,7 +681,7 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
                      f"TechnicalScore." if tech_on else "")
                   + " Re-run with --show-excluded to list them."]
     if below and args.show_excluded:
-        lines += ["", f"### Scored, below the {args.score_min:g} cut", "",
+        lines += ["", f"### Scored, below the {args.fundamental_score_min:g} cut", "",
                   "| " + " | ".join(_HEAD) + " |",
                   "| " + " | ".join("---" for _ in _HEAD) + " |"]
         for row in below:
@@ -778,8 +778,8 @@ def offline_demo(args) -> int:
     print(f"offline demo: {len(panel)} synthetic names, {len(kept)} scored, "
           f"{(scored.get('withheld') or {}) and len(scored['withheld']) or 0} withheld")
     print(f"status: {scored.get('status')}")
-    print(f"keeping score >= {args.score_min:g}: "
-          f"{sum(1 for _, v in kept if v >= args.score_min)} names")
+    print(f"keeping score >= {args.fundamental_score_min:g}: "
+          f"{sum(1 for _, v in kept if v >= args.fundamental_score_min)} names")
     print(f"the technical cut (>= {args.tech_score_min:g}) is NOT exercised here: "
           f"this mode makes no vendor call and so has no bars.")
     print()
@@ -824,9 +824,9 @@ def main(argv: list[str] | None = None) -> int:
                              "more than +3%% over the last 5 days)")
     parser.add_argument("--rsi-max", type=float, default=0.0,
                         help="max RSI(14) on its 0-100 scale (0 disables)")
-    parser.add_argument("--score-min", type=float, default=DEFAULT_SCORE_MIN,
+    parser.add_argument("--fundamental-score-min", type=float, default=DEFAULT_FUNDAMENTAL_SCORE_MIN,
                         help=f"keep the FundamentalScore composite >= this "
-                             f"(default {DEFAULT_SCORE_MIN:g}; the composite has "
+                             f"(default {DEFAULT_FUNDAMENTAL_SCORE_MIN:g}; the composite has "
                              "no band table, so this is a research cut, not an "
                              "engine boundary)")
     parser.add_argument("--tech-score-min", type=float,

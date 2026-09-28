@@ -1418,10 +1418,12 @@ cap ≥ $10B, 0 < P/E (TTM) ≤ 33, P/B ≤ 9, P/S (TTM) ≤ 8, Price-to-Cash-Fl
 keeps only the names **down ≥ 2% on the day**, adds optional anchors (`--roe-min`,
 `--chg5d-max`, `--rsi-max`, and the NYSE/Nasdaq common-stock gate), then ranks the
 survivors by the engine's own `fundamental_score` composite and prints only the names
-clearing `--score-min` (default 50), then filters that list again on the engine's own
-`technical_score` composite, keeping only the names at or above `--tech-score-min`
+clearing `--fundamental-score-min` (default 50 — the flag was `--score-min` before
+2026-09-28), then filters that list again on the engine's own `technical_score`
+composite, keeping only the names at or above `--tech-score-min`
 (default 50 — the `TECH_BANDS` `neutral` edge, so that cut is an engine boundary and not
-a free research cut like `--score-min`; `0` skips the pass and its per-name OHLCV fetch):
+a free research cut like `--fundamental-score-min`; `0` skips the pass and its per-name
+OHLCV fetch):
 
 ```
 py -3.12 scripts/value_score_screen.py --roe-min 15 --chg5d-max 3 --rsi-max 55 --limit 60

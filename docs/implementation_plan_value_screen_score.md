@@ -205,7 +205,8 @@ run he had not made, which is the reported defect. `save_watchlist` now takes th
 `prefix` (`watchlist_` for the Screener, `value_score_` here) and deletes only `<prefix>*.md`, so
 each screen keeps its single-newest rule without destroying its sibling's report.
 
-**The default output is the qualifying set alone.** The `--score-min` cut is the owner's criterion, so
+**The default output is the qualifying set alone.** The `--fundamental-score-min` cut (spelled
+`--score-min` until 2026-09-28) is the owner's criterion, so
 a name that scores below it is not listed at all; `--show-excluded` adds the below-cut table and the
 withheld table for inspection. An empty result always states that nothing cleared the cut and names the
 best few, so a threshold never returns silence — the failure mode that made the first three runs of this
