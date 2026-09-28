@@ -304,9 +304,9 @@ question* — not data.
 
 | verdict | rows | the one-line finding |
 | --- | --- | --- |
-| `FEEDABLE_NOW` | TECH-19, NEWS-7, NEWS-5 | the label, the series and the classifier are all in the chain today |
+| `FEEDABLE_NOW` | TECH-19, NEWS-7, NEWS-5 | the label, the series and the classifier are all in the chain today. **ALL THREE LANDED 2026-09-27** — TECH-19 (`relative_strength_vs_sector` + its leaf), NEWS-7 (`industry_shock`, wired into `_news_components` with the sector label resolved to its SPDR ETF) and NEWS-5 (`tag_category_read` over the declared 69-tag vocabulary, fed from the AV feed's per-article `topics[]`). See the `§12.1` rows |
 | `FEEDABLE_NOW` (probed 2026-09-27) | ValuationScore §55 (SBC-adjusted FCF) | the tag had never been probed because row 55 belonged to no `VAL-*` id: live on 60 large US filers, **55** file `us-gaap:ShareBasedCompensation` with an annual FY value (CVX and XOM file none), and the producer is now built (2026-09-27) — a filer without the tag refuses with the reason, never adjusts by zero |
-| `REPO_SIDE` | TECH-7/TECH-12, TECH-14, TECH-23, REG-4, REG-16, REG-17, RISK-5, RISK-7/RISK-12, SENT-7 (negation/intensifier half), SENT-9, SENT-10, SENT-11, FUND-15, FUND-16, NEWS-9, NEWS-12/NEWS-13, EVT-9 | a producer, an emitter or a definition — no fetch |
+| `REPO_SIDE` | **LANDED 2026-09-27** (12 of 17): TECH-7/TECH-12, TECH-14, TECH-23, TECH-19, REG-4, FUND-15, FUND-16, NEWS-5, NEWS-7, NEWS-9, NEWS-12/NEWS-13 (wired; its measurement is open), EVT-9 — **STILL OPEN, and none of them blocked**: REG-16, REG-17, RISK-5, RISK-7/RISK-12, SENT-7 (negation/intensifier half), SENT-9, SENT-10, SENT-11 | a producer, an emitter or a definition — no fetch |
 | `VENDOR_ONLY` | SENT-7 (aspect-taxonomy half) | the only leg with no cheap source |
 | `NO_SOURCE` | RISK-20 (balance-sheet `FXExposure`) | probed against three real SEC XBRL instances: nothing files a currency split of total assets and liabilities |
 | superseded | MKT-13, VAL-10/12/13/14/15/17 | belong to engines that D1/D2 move to Phase 7 |
