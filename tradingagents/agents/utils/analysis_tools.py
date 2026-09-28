@@ -13564,3 +13564,73 @@ def get_skill_read(
     elif baseline_score is not None:
         lines.append("Folded score (advisory): none - no skills selected")
     return "\n".join(lines)
+
+
+@tool
+def get_cape_ratio(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str | None, "current date yyyy-mm-dd (optional)"] = None,
+) -> str:
+    """
+    Retrieve a name's CAPE (Shiller P/E): the cyclically adjusted price-to-earnings
+    ratio, i.e. price divided by the mean INFLATION-ADJUSTED EPS over a trailing
+    10-year window, with the band it falls in and the coverage it was computed
+    over. This is a real (deflated) multiple, so it is comparable across years in
+    a way a trailing nominal P/E is not; a high CAPE is a valuation observation,
+    never a rating, a position size or a gate. Every input is an existing
+    producer: the FRED CPI deflator, the SEC 10-K diluted-EPS history and the
+    run's own price series. No new data source is fetched.
+
+    Args:
+        ticker (str): Ticker symbol
+        curr_date (str): Optional current date
+
+    Returns:
+        str: The CAPE, its band, the window and the coverage behind it
+    """
+    from datetime import datetime
+
+    from tradingagents.dataflows import fred as _fred
+    from tradingagents.dataflows.statement_parsing import sec_annual_series
+    from tradingagents.strategies.cape import cape_band, cape_ratio
+
+    name = str(ticker).upper()
+    date = curr_date or datetime.now().strftime("%Y-%m-%d")
+
+    closes = _ohlcv(name, days=260).get("closes") or []
+    if not closes:
+        return f"CAPE unavailable for {name}: no price series."
+    price = closes[-1]
+
+    series = (sec_annual_series(name, years=15) or {}).get("diluted_eps_series") or {}
+    eps_pts = list(zip(series.get("periods") or [], series.get("values") or [], strict=False))
+    if not eps_pts:
+        return (
+            f"CAPE unavailable for {name}: the SEC XBRL history carries no "
+            f"diluted-EPS series (a non-US filer, a pre-XBRL filer, or a "
+            f"reporting hole)."
+        )
+
+    # 11 years of monthly CPI so every period in the 10-year window has a
+    # deflator at or before it.
+    cpi: list = []
+    with contextlib.suppress(Exception):
+        cpi = list(_fred.get_series_values("CPIAUCSL", date, look_back_days=365 * 11) or [])
+    if not cpi:
+        return f"CAPE unavailable for {name}: the FRED CPI series did not answer."
+
+    out = cape_ratio(price, eps_pts, cpi)
+    if out["cape"] is None:
+        return f"CAPE {name} @ {date}: absent ({out['reason']})."
+
+    first, last = out["window"]
+    return (
+        f"CAPE (Shiller P/E) {name} @ {date}\n"
+        f"- CAPE {out['cape']} | band {cape_band(out['cape'])}\n"
+        f"- mean REAL EPS {out['mean_real_eps']} over {out['years_used']} year(s) "
+        f"({first}..{last}), deflated to the latest CPI\n"
+        f"- price {price} | CPI as of {out['cpi_as_of']}\n"
+        f"- the deflation base cancels between numerator and denominator, so this "
+        f"multiple is comparable across years; it is a valuation read, never a "
+        f"rating or a position size."
+    )
