@@ -127,6 +127,23 @@ def test_the_floor_accepts_a_fraction_of_the_component_set():
     got = combine({"a": 90.0, "b": None, "c": None, "d": 10.0}, min_coverage=0.5)
     assert got["score"] == pytest.approx(50.0)  # 2 of 4 present meets the 0.5 floor
 
+def test_a_fractional_floor_is_resolved_against_the_declared_set():
+    """`0.5 of four` is two even when only one survives.
+
+    The failure this pins: `ceil(f * n) <= n` for any `f` in `(0, 1]`, so
+    resolving the fraction against the PRESENT count makes the floor
+    unreachable - a lone component would then be published as a "composite",
+    which is that component mislabelled.
+    """
+    got = combine({"a": 90.0, "b": None, "c": None, "d": None}, min_coverage=0.5)
+    assert got["floor"] == 2
+    assert got["score"] is None
+    assert got["withheld"] is not None
+    # the floor does not shrink as components drop out
+    two = combine({"a": 90.0, "b": 80.0, "c": None, "d": None}, min_coverage=0.5)
+    assert two["floor"] == 2
+    assert two["score"] == pytest.approx(85.0)
+
 
 # --- the label table belongs to the engine -----------------------------------
 

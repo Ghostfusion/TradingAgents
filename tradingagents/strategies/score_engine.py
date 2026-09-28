@@ -159,9 +159,12 @@ def combine(
       denominator rather than contributing a zero.
     - ``coverage`` is ``sum(w present) / sum(w total)`` - the fraction of the
       engine's own weight that was measured.
-    - Below the floor (``coverage_floor(min_coverage, n_present)`` components) the
+    - Below the floor (``coverage_floor(min_coverage, n_declared)`` components) the
       score is **withheld** with its reason; ``score`` is ``None``, never 0 and
-      never 50.
+      never 50. The floor is resolved against the **declared** component set, not
+      the survivors: ``ceil(f * n) <= n`` for any ``f`` in ``(0, 1]``, so resolving
+      a fraction against the present count makes it unreachable and a single
+      component would be published as a "composite".
     - ``bands`` supplies the advisory label; the kernel holds no table.
 
     Returns ``{"score", "coverage", "floor", "components", "present",
@@ -201,7 +204,7 @@ def combine(
     total_w = sum(w.values())
     present_w = sum(w[name] for name in present)
     coverage = (present_w / total_w) if total_w > 0 else 0.0
-    floor = coverage_floor(min_coverage, len(present))
+    floor = coverage_floor(min_coverage, len(comps))
     basis_bits = [weight_basis]
     if dropped:
         basis_bits.append(f"dropped (no weight): {', '.join(dropped)}")
