@@ -241,6 +241,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_TRANCHE_STOP_MULT": "tranche_stop_mult",
     "TRADINGAGENTS_TRANCHE_RISK_PCT": "tranche_risk_pct",
     "TRADINGAGENTS_TRANCHE_ACCOUNT": "tranche_account",
+    "TRADINGAGENTS_MIN_RR": "min_rr",
     # Liquidity / ownership gate (Strategies/risk2.md): when on, the risk
     # governor REJECTs ILLIQUID names and WARNs on CAUTION ones (Amihud ILLIQ,
     # float turnover, days-to-absorb, IWF, HHI). Off by default - preserves
@@ -1081,6 +1082,11 @@ SHIPPED_DEFAULTS = {
         "tranche_stop_mult": 1.5,
         "tranche_risk_pct": 0.015,
         "tranche_account": 100_000.0,
+        # The minimum risk/reward the tranche's own target must still pay at
+        # entry. The entry ceiling's R:R term is the highest entry at which
+        # (target - entry) / (entry - stop) still equals this ratio; it is an
+        # advisory ceiling row, never a gate.
+        "min_rr": 2.0,
         # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
         # item 1). When on, allocation_block / get_allocation down-weight names
         # whose average pairwise correlation with the rest of the book exceeds
@@ -1457,6 +1463,7 @@ def validate_config(config: dict) -> list[str]:
         "min_holding_days",
         "max_trades_per_period",
         "tranche_stop_mult",
+        "min_rr",
         "atr_mult",
         "target_atr",
         "debate_max_rounds",

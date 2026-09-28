@@ -72,3 +72,34 @@ def test_card_without_closes_stays_unavailable(monkeypatch):
     assert "- Reference price: unavailable" in card
     assert "- **Unified stop (invalidation): unavailable**" in card
     assert "- Tranche execution: unavailable" in card
+
+
+def test_card_renders_the_advisory_entry_ceiling_row(monkeypatch):
+    """Phase 0: the card carries the long-entry ceiling as an advisory row.
+
+    The R:R term is measurable from the closes alone, so a price-only card
+    reports it and *names* the two statement-path sources it could not see -
+    coverage 1/3, never a silent 3/3.
+    """
+    card = _card(monkeypatch, _closes())
+
+    ceiling_line = _line(card, "Entry ceiling (advisory)")
+    assert "unavailable" not in ceiling_line
+    assert "binding: risk_reward" in ceiling_line
+    assert "coverage 1/3" in ceiling_line
+    assert "missing: valuation, expected_return" in ceiling_line
+
+    headroom = _line(card, "Ceiling headroom")
+    assert "distance" in headroom and "margin" in headroom
+
+
+def test_card_without_closes_reports_no_ceiling_source(monkeypatch):
+    """No closes -> no measurable ceiling source -> NO_SOURCE, never a price."""
+    card = _card(monkeypatch, [])
+
+    ceiling_line = _line(card, "Entry ceiling (advisory)")
+    assert ceiling_line.startswith(
+        "- Entry ceiling (advisory): unavailable - status NO_SOURCE"
+    )
+    assert "coverage 0/3" in ceiling_line
+    assert "Ceiling headroom" not in card

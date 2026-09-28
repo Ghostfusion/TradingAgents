@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import contextlib
 
+from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
+
 
 def _pct(v) -> str:
     if v is None:
@@ -48,6 +50,9 @@ def build_trade_plan(
     be_rule: dict | None = None,
     targets: dict | None = None,
     trail: dict | None = None,
+    valuation_ceiling: float | None = None,
+    expected_return_ceiling: float | None = None,
+    rr_ceiling: float | None = None,
     config: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
@@ -63,6 +68,11 @@ def build_trade_plan(
         be_rule  - ``exits.breakeven_after_confirmation`` result.
         targets  - ``swing.targets_rr`` result OR ``tranche_plan['targets']``.
         trail    - ``swing.trail_ema`` / ``chandelier_exit`` result.
+        valuation_ceiling / expected_return_ceiling / rr_ceiling - the entry
+                   ceiling sources (advisory): the price above which that
+                   construct's economics fail. Whichever is absent simply
+                   shrinks the ceiling's coverage; none of them is ever
+                   defaulted to the current price.
         config   - settings (``min_holding_days``, ``max_trades_per_period``,
                    ``stop_never_widen``).
     """
@@ -77,6 +87,37 @@ def build_trade_plan(
         f"- **Unified stop (invalidation): {_num(stop)}** - never widened "
         f"(policy: {'stop_never_widen=ON' if stop_never_widen else 'off'})"
     )
+    # Entry ceiling (advisory): the hard maximum price for this long, and the
+    # upper bound the unified stop is the lower bound of. A source that could
+    # not be measured shrinks coverage rather than being defaulted; with none
+    # available the ceiling reads 'unavailable', never the current price.
+    ceiling = entry_ceiling(
+        price=price,
+        valuation_ceiling=valuation_ceiling,
+        expected_return_ceiling=expected_return_ceiling,
+        rr_ceiling=rr_ceiling,
+    )
+    coverage = f"{ceiling['coverage']}/{len(CEILING_SOURCES)}"
+    if ceiling["value"] is None:
+        lines.append(
+            f"- Entry ceiling (advisory): unavailable - status "
+            f"{ceiling['status']} (coverage {coverage}); {ceiling['reason']}"
+        )
+    else:
+        missing = (
+            f"; missing: {', '.join(ceiling['missing_sources'])}"
+            if ceiling["missing_sources"]
+            else ""
+        )
+        lines.append(
+            f"- Entry ceiling (advisory): {_num(ceiling['value'])} - status "
+            f"{ceiling['status']} (binding: {ceiling['binding_source']}; "
+            f"coverage {coverage}{missing})"
+        )
+        lines.append(
+            f"- Ceiling headroom: distance {_pct(ceiling['ceiling_distance'])} "
+            f"| margin {_pct(ceiling['ceiling_margin'])}"
+        )
     # Setup rows (advisory, measured).
     if setup:
         rows = setup.get("rows") or {}
@@ -175,6 +216,19 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
     if not read.get("valid"):
         return {}
     out: dict = {"tranche": read, "targets": read.get("targets")}
+    # Entry-ceiling R:R term: the highest entry at which the tranche's own
+    # target still pays the configured minimum R:R given its stop. Solving
+    # (T - E) / (E - S) = R for E gives E = (T + R*S) / (1 + R). A row that
+    # cannot be measured is simply absent, which shrinks the ceiling's
+    # coverage - it never becomes a zero ceiling.
+    with contextlib.suppress(Exception):
+        stop_px = read.get("stop")
+        t1 = (read.get("targets") or {}).get("t1")
+        min_rr = float(cfg.get("min_rr", 2.0))
+        if stop_px is not None and t1 is not None and min_rr > 0.0:
+            s, t = float(stop_px), float(t1)
+            if t > s > 0.0:
+                out["rr_ceiling"] = (t + min_rr * s) / (1.0 + min_rr)
     # The BE row and the trail are single rows of the card: a failure there
     # must not hide the tranche numbers.
     with contextlib.suppress(Exception):
