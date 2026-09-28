@@ -1418,7 +1418,10 @@ cap ≥ $10B, 0 < P/E (TTM) ≤ 33, P/B ≤ 9, P/S (TTM) ≤ 8, Price-to-Cash-Fl
 keeps only the names **down ≥ 2% on the day**, adds optional anchors (`--roe-min`,
 `--chg5d-max`, `--rsi-max`, and the NYSE/Nasdaq common-stock gate), then ranks the
 survivors by the engine's own `fundamental_score` composite and prints only the names
-clearing `--score-min` (default 64):
+clearing `--score-min` (default 50), then filters that list again on the engine's own
+`technical_score` composite, keeping only the names at or above `--tech-score-min`
+(default 50 — the `TECH_BANDS` `neutral` edge, so that cut is an engine boundary and not
+a free research cut like `--score-min`; `0` skips the pass and its per-name OHLCV fetch):
 
 ```
 py -3.12 scripts/value_score_screen.py --roe-min 15 --chg5d-max 3 --rsi-max 55 --limit 60
@@ -1429,7 +1432,11 @@ date (`data_cache_dir/panels/<date>.json`, one file per date, cached forever) in
 of the run's own cross-section, so the percentile is market-relative; the report prints
 which denominator it used, and a candidate the panel does not carry is refused by name
 rather than scored as 0. The composite is `RESEARCH_ONLY` — a tie-aware percentile with
-no band table — and reaches no executor gate. OpenD supplies the server-side Screening
+no band table — and reaches no executor gate. The `tech` column is the engine's
+`technical_score` over the name's own bars (the same components the run card and the
+`get_technical_score` tool read), band-labelled by its own table; a name whose composite
+cannot be measured is **withheld, never passed**, so it does not appear in the qualifying
+table and its reason is printed instead. OpenD supplies the server-side Screening
 V2 stage; `--no-moomoo` falls back to the deepest decliners and labels the run a
 partial scan. Runnable from the `trading_web` app as its **Value score** screen
 (`/value-score`) - every flag above is a field, blank keeps this script's own

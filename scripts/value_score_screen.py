@@ -6,7 +6,9 @@ The screen is the owner's, taken from the broker app's filter panel:
     P/B <= 9                   P/S TTM <= 8       Price-to-Cash-Flow TTM <= 25
 
 plus a same-day move filter (default: down 2% or more), then the engine's
-``fundamental_score`` composite over the survivors, keeping score >= 64.
+``fundamental_score`` composite over the survivors, keeping score >= 50, and
+then the engine's ``technical_score`` composite over those same survivors,
+keeping it >= 50.
 
 Why this shape - what the vendors can and cannot do (verified 2026-09-24):
 
@@ -18,11 +20,17 @@ Why this shape - what the vendors can and cannot do (verified 2026-09-24):
   403s on the current plan, Massive's ratios endpoint 403s on the free plan - so
   those two are computed client-side by ``ratios.compute_ratios``, their sole
   producer (``market_cap / revenue``, ``market_cap / operating_cashflow``).
-* The scoring pass costs ZERO extra vendor calls. ``fundamental_score(panel)``
-  scores a whole cross-section in one pass, and the panel is the run's own
-  screened set - the same convention ``scripts/value_screener.py`` uses
-  (``resolve_peer_universe(tickers=..., financials=...)`` over the financials
-  the screen already fetched).
+* The FUNDAMENTAL scoring pass costs ZERO extra vendor calls.
+  ``fundamental_score(panel)`` scores a whole cross-section in one pass, and the
+  panel is the run's own screened set - the same convention
+  ``scripts/value_screener.py`` uses (``resolve_peer_universe(tickers=...,
+  financials=...)`` over the financials the screen already fetched).
+* The TECHNICAL pass DOES cost vendor calls, and says so: one OHLCV fetch per
+  name that survived the ratio gates (so ``--limit`` bounds it), through the
+  same date-aware loader the run card uses, then the engine's own
+  ``technical_score`` over ``_technical_components`` - the producers' own
+  output, no re-derived formula. ``--tech-score-min 0`` disables the pass and
+  restores the zero-call shape.
 
 Two facts about the composite that this tool prints rather than hides, because
 they change what the threshold means:
@@ -81,10 +89,17 @@ DEFAULT_PE_MAX = 33.0
 DEFAULT_PB_MAX = 9.0
 DEFAULT_PS_MAX = 8.0
 DEFAULT_PCF_MAX = 25.0
-DEFAULT_SCORE_MIN = 64.0
+DEFAULT_SCORE_MIN = 50.0
+
+#: The technical cut. On ``technical_score``'s own 0-100 composite scale, 50.0
+#: IS the engine's published ``TECH_BANDS`` "neutral" edge - so unlike the
+#: fundamental ``--score-min`` (no band table, a pure research cut) this one is
+#: an engine boundary: at or above it the composite reads neutral or better.
+#: ``0`` disables the pass, which is the only value that costs no vendor call.
+DEFAULT_TECH_SCORE_MIN = 50.0
 
 # The composite has no band table; these are the nearest PUBLISHED edges in the
-# sub-score band tables, printed so a reader can see 64 does not sit on one.
+# sub-score band tables, printed so a reader can see 50 does not sit on one.
 NEAREST_PUBLISHED_EDGES = (60.0, 65.0)
 
 #: This screen's report-file prefix inside the shared screens folder
@@ -445,12 +460,76 @@ def stage_score(args, fin_by_ticker: dict) -> tuple[dict, dict, str, dict, str]:
 
 
 # --------------------------------------------------------------------------
+# Stage 4 - the technical cut, from the run's own bars
+# --------------------------------------------------------------------------
+
+
+def stage_technical(kept: list) -> tuple[dict, dict]:
+    """``({symbol: {score, band, coverage}}, {symbol: reason})`` from the bars.
+
+    One OHLCV fetch per SURVIVOR - run AFTER the ratio gates, so only a name
+    that can reach the table pays for it, and ``--limit`` bounds the count - via
+    the same loader the run card uses (``analysis_tools._ohlcv`` ->
+    ``load_ohlcv``), then the engine's own ``technical_score`` over
+    ``_technical_components``. No formula is re-derived here: the components are
+    the producers' own output, the same set the ``get_technical_score`` tool and
+    ``run_card.json`` are built from.
+
+    A name whose bars are too short, or whose components cannot be measured, is
+    WITHHELD with its reason. It is never scored as 0 and never as the neutral
+    50 - the engine's own rule (``NA`` is not ``0``) - which is exactly why a
+    cut on this column can never be read as a pass for an unmeasured name.
+    """
+    from tradingagents.agents.utils.analysis_tools import _technical_components
+    from tradingagents.strategies.technical_score import technical_score
+
+    measured: dict = {}
+    withheld: dict = {}
+    for row in kept:
+        sym = row["symbol"]
+        try:
+            vals = _technical_components(sym)
+        except Exception as exc:  # noqa: BLE001 - one name never aborts the screen
+            withheld[sym] = (
+                f"technical components unavailable ({type(exc).__name__}: {exc})"
+            )
+            logger.info("technical leg unavailable for %s: %s", sym, exc)
+            continue
+        if not vals:
+            # _technical_components returns {} (not a dict of Nones) when it has
+            # fewer than 30 bars; that is a reason, not a zero.
+            withheld[sym] = ("no component measurable from the run's bars "
+                             "(fewer than 30 bars, or every producer short)")
+            continue
+        _bump("per-name OHLCV bars (TechnicalScore)")
+        try:
+            res = technical_score(vals)
+        except Exception as exc:  # noqa: BLE001
+            withheld[sym] = f"technical_score failed ({type(exc).__name__}: {exc})"
+            continue
+        score = _f(res.get("score"))
+        if score is None:
+            # The composite is withheld below its own coverage floor; the
+            # engine's reason is the honest one, never this script's guess.
+            withheld[sym] = str(res.get("withheld") or "composite withheld")
+            continue
+        measured[sym] = {
+            "score": score,
+            "band": res.get("bands") or "",
+            "coverage": res.get("coverage"),
+        }
+    logger.info("technical score: %d of %d candidate(s) measured",
+                len(measured), len(kept))
+    return measured, withheld
+
+
+# --------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------
 
 _HEAD = (
     "ticker", "1d%", "mcap$B", "P/E", "P/B", "P/S", "P/CF",
-    "FQS", "VS", "FRS", "FGS", "score",
+    "FQS", "VS", "FRS", "FGS", "score", "tech",
 )
 
 
@@ -463,7 +542,23 @@ def _sub_cell(subs: dict, sub: str, name: str) -> str:
     return f"{_f(val):.0f} {band}".strip()
 
 
-def _row_cells(row: dict, scores: dict, subs: dict) -> list:
+def _tech_cell(tech: dict, name: str, on: bool) -> str:
+    """The ``tech`` column: the engine's composite and its own band label.
+
+    ``n/a`` when the pass is off (the column is not a measurement then), and
+    ``withheld`` when no composite could be measured - the reason for that lives
+    in the Withheld table, never fabricated into a number here.
+    """
+    if not on:
+        return "n/a"
+    entry = tech.get(name)
+    if not entry:
+        return "withheld"
+    return f"{_f(entry.get('score')):.0f} {entry.get('band') or ''}".strip()
+
+
+def _row_cells(row: dict, scores: dict, subs: dict, tech: dict,
+               tech_on: bool) -> list:
     """One table row: the screen's own columns, then the engine's reads."""
     sym = row["symbol"]
     caps = row.get("ratios") or {}
@@ -481,25 +576,56 @@ def _row_cells(row: dict, scores: dict, subs: dict) -> list:
         _sub_cell(subs, "FRS", sym),
         _sub_cell(subs, "FGS", sym),
         "withheld" if score is None else f"{_f(score):.2f}",
+        _tech_cell(tech, sym, tech_on),
     ]
 
 
 def render(kept: list, scores: dict, withheld: dict, subs: dict,
-           args, basis: str, panel_note: str = "") -> str:
+           args, basis: str, panel_note: str = "",
+           tech: dict | None = None,
+           tech_withheld: dict | None = None) -> str:
     """The markdown report: the screen's own columns, then the engine's reads."""
     rows = sorted(kept, key=lambda r: -(scores.get(r["symbol"]) or -1.0))
+    tech = tech or {}
+    tech_withheld = tech_withheld or {}
+    tech_min = float(getattr(args, "tech_score_min", 0.0) or 0.0)
+    tech_on = tech_min > 0.0
+
+    def _passes_tech(sym: str) -> bool:
+        """True when the name clears the technical cut, or the cut is off.
+
+        A name with NO measured composite is never a pass - the engine's own
+        ``NA`` is not ``0`` rule, and the reason the withheld table below exists
+        rather than a fabricated number here.
+        """
+        if not tech_on:
+            return True
+        entry = tech.get(sym)
+        return entry is not None and _f(entry.get("score")) >= tech_min
+
     # These counts are over the CANDIDATES. The panel is wider than they are -
     # every name stage 2 fetched enters it - so scores.values() is the panel's
     # size, not this list's, and counting over it inverted the header.
     scored_n = len([r for r in rows if scores.get(r["symbol"]) is not None])
     miss = [r for r in rows if scores.get(r["symbol"]) is None]
-    qual = [r for r in rows if scores.get(r["symbol"]) is not None
-            and scores[r["symbol"]] >= args.score_min]
+    scored_ok = [r for r in rows if scores.get(r["symbol"]) is not None
+                 and scores[r["symbol"]] >= args.score_min]
+    qual = [r for r in scored_ok if _passes_tech(r["symbol"])]
     below = [r for r in rows if scores.get(r["symbol"]) is not None
              and scores[r["symbol"]] < args.score_min]
+    # Two DIFFERENT failures of the technical cut, kept apart: a measured
+    # composite below the edge, and a composite that could not be measured at
+    # all. One section for both would turn "no measurement" into "weak".
+    tech_below = [r for r in scored_ok
+                  if r["symbol"] in tech and not _passes_tech(r["symbol"])]
+    tech_miss = [r for r in scored_ok if tech_on and r["symbol"] not in tech]
     panel_n = len([s for s in scores.values() if s is not None])
+    cuts = (f"the {args.score_min:g} cut" if not tech_on
+            else f"both cuts ({args.score_min:g} fundamental, "
+                 f"{tech_min:g} technical)")
     lines = [
-        f"# Value screen: candidates clearing FundamentalScore >= {args.score_min:g}",
+        f"# Value screen: candidates clearing FundamentalScore >= {args.score_min:g}"
+        + (f" and TechnicalScore >= {tech_min:g}" if tech_on else ""),
         "",
         f"- Run: {datetime.now():%Y-%m-%d %H:%M} · date {args.date} · "
         f"universe: {args.exchanges or 'any'} common stocks",
@@ -512,7 +638,9 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         f"- Panel: {panel_note}",
         f"- Scoring pass: {scored_n} of {len(rows)} candidates scored, {panel_n} "
         f"panel name(s) carrying a composite, {len(miss)} withheld, "
-        f"{len(qual)} clear the {args.score_min:g} cut",
+        f"{len(qual)} clear {cuts}"
+        + (f"; {len(tech_below)} measured below the {tech_min:g} technical cut, "
+           f"{len(tech_miss)} with no measured TechnicalScore" if tech_on else ""),
         *(["- Candidate set: the deepest decliners with --no-moomoo, so this is "
            "a PARTIAL scan - the server-side screen needs OpenD and was skipped."]
           if args.no_moomoo else []),
@@ -524,34 +652,61 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         "`ADVISORY` output that does carry band tables. Neither the composite "
         "nor the sub-scores reaches `opportunity_score`, and neither may gate a "
         "trade.",
+        *(["",
+           f"**The `tech` column is `ADVISORY`** - the engine's own "
+           f"`technical_score` composite over the same bars the run card reads, "
+           f"band-labelled by its own table ({tech_min:g} is that table's "
+           f"`neutral` edge, so this cut is an engine boundary and not a free "
+           f"research cut like `score`). A name whose composite could not be "
+           f"measured reads `withheld` and never clears the cut; the reason is "
+           f"in the table at the end."] if tech_on else []),
         "",
-        f"### Clear the {args.score_min:g} cut",
+        f"### Clear {cuts}",
         "| " + " | ".join(_HEAD) + " |",
         "| " + " | ".join("---" for _ in _HEAD) + " |",
     ]
     for row in qual:
-        lines.append("| " + " | ".join(_row_cells(row, scores, subs)) + " |")
+        lines.append("| " + " | ".join(
+            _row_cells(row, scores, subs, tech, tech_on)) + " |")
     if not qual:
         # The cut is the owner's criterion, so an empty result must say so and
         # name the best few rather than printing an empty table in silence.
         best = ", ".join(f"{r['symbol']} {scores[r['symbol']]:.2f}" for r in below[:3])
         lines += ["", f"**None of the {len(rows)} scored candidate(s) cleared "
-                  f"{args.score_min:g}.**"
-                  + (f" Highest: {best}." if best else "")
+                  f"{cuts}.**"
+                  + (f" Highest on the fundamental cut: {best}." if best else "")
                   + (f" {len(miss)} withheld." if miss else "")
+                  + (f" {len(tech_below)} fell below the {tech_min:g} technical "
+                     f"cut and {len(tech_miss)} carried no measured "
+                     f"TechnicalScore." if tech_on else "")
                   + " Re-run with --show-excluded to list them."]
     if below and args.show_excluded:
         lines += ["", f"### Scored, below the {args.score_min:g} cut", "",
                   "| " + " | ".join(_HEAD) + " |",
                   "| " + " | ".join("---" for _ in _HEAD) + " |"]
         for row in below:
-            lines.append("| " + " | ".join(_row_cells(row, scores, subs)) + " |")
+            lines.append("| " + " | ".join(
+                _row_cells(row, scores, subs, tech, tech_on)) + " |")
+    if tech_below and args.show_excluded:
+        lines += ["", f"### Cleared the fundamental cut, below the {tech_min:g} "
+                  "technical cut", "",
+                  "| " + " | ".join(_HEAD) + " |",
+                  "| " + " | ".join("---" for _ in _HEAD) + " |"]
+        for row in tech_below:
+            lines.append("| " + " | ".join(
+                _row_cells(row, scores, subs, tech, tech_on)) + " |")
     if miss and args.show_excluded:
         lines += ["", "### Withheld - no composite", "",
                   "| ticker | reason |", "| --- | --- |"]
         for row in miss:
             lines.append(f"| {row['symbol']} | "
                          f"{withheld.get(row['symbol'], 'no reason recorded')} |")
+    if tech_miss and args.show_excluded:
+        lines += ["", "### Withheld - no TechnicalScore", "",
+                  "| ticker | reason |", "| --- | --- |"]
+        for row in tech_miss:
+            lines.append(f"| {row['symbol']} | "
+                         f"{tech_withheld.get(row['symbol'], 'no reason recorded')} |")
     if basis:
         lines += ["", f"`basis` (the engine's own words): {basis}"]
     lines += [
@@ -569,6 +724,11 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         "- **Panel dependence.** The percentile is relative to the panel named "
         "above, not to the market as a whole: a different panel changes every "
         "score.",
+        *(["- **Two different clocks.** `score` is cross-sectional - a rank "
+           "INSIDE the panel above, so a strong name scores low when its peers "
+           "are stronger. `tech` is the name's own tape, read from its own "
+           "bars and against no peer set. The two answer different questions; "
+           "a high one does not excuse a low one."] if tech_on else []),
         "- **Liquidity/execution are not checked here.** Nothing in this list "
         "has been reviewed for spread, depth or a session window; the "
         "pre-market and risk gates are separate reads.",
@@ -620,6 +780,8 @@ def offline_demo(args) -> int:
     print(f"status: {scored.get('status')}")
     print(f"keeping score >= {args.score_min:g}: "
           f"{sum(1 for _, v in kept if v >= args.score_min)} names")
+    print(f"the technical cut (>= {args.tech_score_min:g}) is NOT exercised here: "
+          f"this mode makes no vendor call and so has no bars.")
     print()
     print("rank  name   score   FQS(band)          VS(band)")
     subs = scored.get("subscores") or {}
@@ -663,9 +825,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rsi-max", type=float, default=0.0,
                         help="max RSI(14) on its 0-100 scale (0 disables)")
     parser.add_argument("--score-min", type=float, default=DEFAULT_SCORE_MIN,
-                        help=f"keep composite >= this (default {DEFAULT_SCORE_MIN:g}; "
-                             "the composite has no band table, so this is a "
-                             "research cut, not an engine boundary)")
+                        help=f"keep the FundamentalScore composite >= this "
+                             f"(default {DEFAULT_SCORE_MIN:g}; the composite has "
+                             "no band table, so this is a research cut, not an "
+                             "engine boundary)")
+    parser.add_argument("--tech-score-min", type=float,
+                        default=DEFAULT_TECH_SCORE_MIN,
+                        help=f"keep the TechnicalScore composite >= this "
+                             f"(default {DEFAULT_TECH_SCORE_MIN:g} - the engine's "
+                             "own `neutral` band edge; 0 disables the pass and "
+                             "its per-name OHLCV fetch). A name whose composite "
+                             "cannot be measured is withheld, never passed")
     parser.add_argument("--limit", type=int, default=60,
                         help="max names to fetch financials for (default 60)")
     parser.add_argument("--top", type=int, default=40, help="rows to render (default 40)")
@@ -724,6 +894,12 @@ def main(argv: list[str] | None = None) -> int:
               "Raise --limit, or run with OpenD up for the full screen.")
         return 0
     scores, withheld, basis, subs, panel_note = stage_score(args, fin_by_ticker)
+    tech, tech_withheld = ({}, {})
+    if args.tech_score_min:
+        tech, tech_withheld = stage_technical(kept)
+        print(f"[technical] {len(tech)} of {len(kept)} candidate(s) carry a "
+              f"TechnicalScore composite; {len(tech_withheld)} withheld "
+              f"(no measurable score - never passed)")
     if kept and not any(s is not None for s in scores.values()):
         print(f"[score] the engine produced NO composite for {len(kept)} "
               f"candidate(s) over a {len(fin_by_ticker)}-name panel; the "
@@ -731,7 +907,8 @@ def main(argv: list[str] | None = None) -> int:
               f"cross-sectional percentile is not computed over a handful of "
               f"names, so a peer set below the floor yields nothing rather than "
               f"noise (factors.category_scores, min_peers=8).")
-    report = render(kept, scores, withheld, subs, args, basis, panel_note)
+    report = render(kept, scores, withheld, subs, args, basis, panel_note,
+                    tech=tech, tech_withheld=tech_withheld)
     print(report)
     if not args.no_save:
         try:

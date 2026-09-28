@@ -18,9 +18,12 @@ import pytest
 import scripts.score_panel as sp
 import scripts.value_score_screen as vss
 
-# Every test file carries a deadline (AGENT_ONBOARDING rule 5); 120s is what the
-# sibling script tests use.
-pytestmark = pytest.mark.timeout(120)
+# Every test file carries a deadline (AGENT_ONBOARDING rule 5). 600s, not the
+# sibling script tests' 120s: the technical-cut tests import the module that
+# produces the components (``analysis_tools``), and a file-level deadline
+# overrides --timeout, so a cold interpreter has to fit inside it (a cold start
+# spends 280-400s in conftest alone).
+pytestmark = pytest.mark.timeout(600)
 
 
 def _fixture(n: int) -> dict:
@@ -186,3 +189,194 @@ def test_the_report_lands_under_its_own_prefix_and_spares_the_sibling(
     written = sorted(p.name for p in out.glob("value_score_*.md"))
     assert len(written) == 1, written
     assert sibling.exists(), "the Screener's report is not the Value screen's to delete"
+
+
+# --- the two cuts: 50 fundamental, 50 technical -----------------------------
+#
+# The owner set the fundamental cut at 50 (it was 64) and added a technical cut
+# at 50. The contract these tests defend is that the technical column can never
+# be read as a PASS when it was never measured: the engine's own rule is that
+# `NA` is not `0`, and a cut that treated a missing composite as a pass would
+# report an unmeasured name as a qualified one.
+
+
+def test_the_default_fundamental_cut_is_fifty():
+    """The owner's number, pinned where the CLI reads it."""
+    assert vss.DEFAULT_SCORE_MIN == 50.0
+
+
+def test_the_technical_default_is_the_engines_own_neutral_edge():
+    """50 is not a free research cut - it is `TECH_BANDS`' own `neutral` edge."""
+    from tradingagents.strategies.score_engine import band_label
+    from tradingagents.strategies.technical_score import TECH_BANDS
+
+    assert vss.DEFAULT_TECH_SCORE_MIN == 50.0
+    assert band_label(vss.DEFAULT_TECH_SCORE_MIN, TECH_BANDS) == "neutral"
+
+
+def _tech_args(**kw):
+    """The arg surface `render` reads, with both cuts at their defaults."""
+    base = {
+        "date": "2026-09-24", "exchanges": "NYSE,NASDAQ", "min_mcap": 10e9,
+        "pe_max": 33.0, "pb_max": 9.0, "ps_max": 8.0, "pcf_max": 25.0,
+        "max_chg": -2.0, "roe_min": 0.0, "chg5d_max": 0.0, "rsi_max": 0.0,
+        "no_moomoo": False, "show_excluded": True,
+        "score_min": vss.DEFAULT_SCORE_MIN,
+        "tech_score_min": vss.DEFAULT_TECH_SCORE_MIN,
+    }
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def _section(text: str, title: str) -> str:
+    """The body of ``### {title}``, up to the next ``###`` heading."""
+    marker = f"### {title}"
+    start = text.index(marker)
+    rest = text[start + len(marker):]
+    nxt = rest.find("\n### ")
+    return rest if nxt < 0 else rest[:nxt]
+
+
+def _rows(*symbols):
+    """Candidate rows with the two fields `render` reads off them."""
+    return [{"symbol": s, "ratios": {}} for s in symbols]
+
+
+_BOTH = "Clear both cuts (50 fundamental, 50 technical)"
+
+
+def test_a_measured_score_below_the_cut_is_not_a_qualifier():
+    """The technical cut's own side of the gate: measured, and below 50."""
+    out = vss.render(
+        _rows("PASS", "BELOW"), {"PASS": 80.0, "BELOW": 80.0}, {}, {},
+        _tech_args(), "", "panel",
+        tech={"PASS": {"score": 70.0, "band": "constructive"},
+              "BELOW": {"score": 30.0, "band": "weak"}},
+        tech_withheld={},
+    )
+
+    assert "| PASS " in _section(out, _BOTH)
+    assert "| BELOW " not in _section(out, _BOTH)
+    assert "| BELOW " in _section(
+        out, "Cleared the fundamental cut, below the 50 technical cut")
+
+
+def test_an_unmeasured_technical_score_is_withheld_never_passed():
+    """`NA` is not `0` - and it is not a pass either.
+
+    A name whose composite was never measured must not appear as qualified, and
+    the reason printed for it must be the engine's, not a fabricated number.
+    """
+    out = vss.render(
+        _rows("GAP", "PASS"), {"GAP": 80.0, "PASS": 80.0}, {}, {},
+        _tech_args(), "", "panel",
+        tech={"PASS": {"score": 70.0, "band": "constructive"}},
+        tech_withheld={"GAP": "no component measurable from the run's bars"},
+    )
+
+    assert "| GAP " not in _section(out, _BOTH)
+    withheld = _section(out, "Withheld - no TechnicalScore")
+    assert "| GAP " in withheld
+    assert "no component measurable" in withheld
+
+
+def test_the_technical_cut_is_off_at_zero():
+    """``--tech-score-min 0`` disables the pass, and the column reads `n/a`."""
+    out = vss.render(
+        _rows("ONLY"), {"ONLY": 80.0}, {}, {}, _tech_args(tech_score_min=0.0),
+        "", "panel", tech={}, tech_withheld={},
+    )
+
+    assert "| ONLY " in _section(out, "Clear the 50 cut")
+    assert "and TechnicalScore" not in out.splitlines()[0]
+
+
+def test_the_report_names_both_cuts_in_its_title():
+    """A reader must see both gates without reading the engine."""
+    def title(**kw):
+        out = vss.render(_rows("A"), {"A": 80.0}, {}, {}, _tech_args(**kw), "",
+                         "panel", tech={"A": {"score": 70.0}}, tech_withheld={})
+        return out.splitlines()[0]
+
+    assert "and TechnicalScore >= 50" in title()
+    assert "and TechnicalScore >= 50" not in title(tech_score_min=0.0)
+
+
+def _patch_components(monkeypatch, fn):
+    """Patch the component producer at its own module (it is imported lazily)."""
+    import tradingagents.agents.utils.analysis_tools as at
+
+    monkeypatch.setattr(at, "_technical_components", fn)
+
+
+def _patch_score(monkeypatch, fn):
+    """Patch the composite at its own module (imported lazily inside the stage)."""
+    import tradingagents.strategies.technical_score as ts
+
+    monkeypatch.setattr(ts, "technical_score", fn)
+
+
+def test_stage_technical_reads_the_engines_own_components_and_composite(monkeypatch):
+    """No formula is re-derived here: the components and the score are the engine's."""
+    _patch_components(monkeypatch, lambda sym: {"sma_stack": 1.0})
+    _patch_score(monkeypatch, lambda vals, **kw: {
+        "score": 62.5, "bands": "constructive", "coverage": 4})
+
+    tech, withheld = vss.stage_technical(_rows("OK"))
+
+    assert tech["OK"] == {"score": 62.5, "band": "constructive", "coverage": 4}
+    assert withheld == {}
+
+
+def test_stage_technical_never_invents_a_score_from_too_few_bars(monkeypatch):
+    """Fewer than 30 bars -> withheld with the reason, never a 0 and never a 50."""
+    _patch_components(monkeypatch, lambda sym: {})
+
+    tech, withheld = vss.stage_technical(_rows("SHORT"))
+
+    assert tech == {}
+    assert "30 bars" in withheld["SHORT"]
+
+
+def test_a_withheld_composite_keeps_the_engines_own_reason(monkeypatch):
+    """Below the coverage floor the engine's words are the reason, not a guess."""
+    _patch_components(monkeypatch, lambda sym: {"sma_stack": 1.0})
+    _patch_score(monkeypatch, lambda vals, **kw: {
+        "score": None, "withheld": "coverage 1 < 3"})
+
+    tech, withheld = vss.stage_technical(_rows("THIN"))
+
+    assert tech == {}
+    assert withheld["THIN"] == "coverage 1 < 3"
+
+
+def test_one_unmeasurable_name_never_aborts_the_screen(monkeypatch):
+    """A producer failure on one name is that name's problem, not the run's."""
+    def _boom(sym):
+        raise RuntimeError("vendor down")
+
+    _patch_components(monkeypatch, _boom)
+
+    tech, withheld = vss.stage_technical(_rows("BAD", "BAD2"))
+
+    assert tech == {}
+    assert "vendor down" in withheld["BAD"]
+    assert "vendor down" in withheld["BAD2"]
+
+
+def test_zero_skips_the_technical_pass_entirely(tmp_path, monkeypatch):
+    """The only value that costs no vendor call: the stage is never called."""
+    out = tmp_path / "screener"
+    monkeypatch.setattr(vss, "stage_decliners", lambda args: ({"AAPL": -3.0}, set()))
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+    monkeypatch.setattr(
+        vss, "stage_score",
+        lambda args, fins: ({"AAPL": 70.0}, {}, "basis", {}, "note"),
+    )
+    monkeypatch.setattr(
+        vss, "stage_technical",
+        lambda kept: pytest.fail("the technical pass ran with the cut disabled"),
+    )
+
+    assert vss.main(["--no-moomoo", "--tech-score-min", "0",
+                     "--out-dir", str(out), "-d", "2026-09-24"]) == 0
