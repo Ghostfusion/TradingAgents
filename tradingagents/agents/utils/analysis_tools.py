@@ -10898,6 +10898,89 @@ def get_sentiment_computed(
         return f"computed sentiment unavailable for {ticker}: {exc}"
 
 
+def _sentiment_depth_rows(ticker: str, start: str, end: str) -> str:
+    """SENT-7/9/10/11 emitters: the raw-NLP, attention and uncertainty reads.
+
+    These producers shipped with **no emitter outside their own module** - rule
+    1b's wiring half, not a missing producer: ``sentiment.negation_adjusted_
+    polarity`` (SENT-7's negation/intensifier half), ``source_breadth`` and
+    ``effective_sample_size`` (SENT-9's attention set), ``sentiment_asymmetry``
+    (SENT-10) and ``sentiment_uncertainty`` / ``sentiment_output_map``
+    (SENT-11). They are pure, local and cheap - each reads the points or the
+    articles this leaf has ALREADY fetched, so they add no vendor call - and
+    they are emitted unconditionally rather than behind another flag: the
+    NewsScore flags the owner closed (NEWS-15) stay off, and a read that cannot
+    be made is omitted here rather than zeroed.
+    """
+    from tradingagents.strategies.sentiment import (
+        effective_sample_size,
+        negation_adjusted_polarity,
+        sentiment_asymmetry,
+        sentiment_output_map,
+        sentiment_uncertainty,
+        source_breadth,
+    )
+
+    lines: list[str] = []
+    points = _news_sentiment_points(ticker, start, end)
+    if points:
+        scores = [p.get("score") for p in points]
+        asym = sentiment_asymmetry(scores)
+        if asym.get("asymmetry") is not None:
+            lines.append(
+                f"- asymmetry {asym['asymmetry']:+.3f} "
+                f"(upside {asym['upside']:.3f} vs downside {asym['downside']:.3f}, "
+                f"n={asym['n']})"
+            )
+        unc = sentiment_uncertainty(scores)
+        if unc.get("confidence") is not None:
+            lines.append(
+                f"- uncertainty: entropy {unc['entropy']:.3f} nats "
+                f"(H* {unc['uncertainty']:.3f}, confidence {unc['confidence']:.3f}, "
+                f"n={unc['n']}, {unc['bins']} bins)"
+            )
+            latest = next((s for s in reversed(scores) if s is not None), None)
+            mapped = sentiment_output_map(latest)
+            if mapped.get("confidence") is not None:
+                lines.append(
+                    f"- output map {mapped['map']}: {mapped['confidence']:.3f} "
+                    f"(raw {mapped['raw']:+.3f})"
+                )
+    articles = _av_news_articles(ticker, start, end)
+    if articles:
+        adjusted = [
+            negation_adjusted_polarity(str(a.get("title") or a.get("headline") or ""))
+            for a in articles
+            if (a.get("title") or a.get("headline"))
+        ]
+        polars = [p["polarity"] for p in adjusted if p.get("polarity") is not None]
+        if polars:
+            negated = sum(len(p.get("negated_terms") or []) for p in adjusted)
+            lines.append(
+                f"- negation-adjusted polarity {sum(polars) / len(polars):+.3f} "
+                f"over {len(polars)} headline(s), {negated} negated term(s)"
+            )
+        counts: dict = {}
+        for a in articles:
+            src = str(a.get("source") or a.get("source_name") or "unknown")
+            counts[src] = counts.get(src, 0) + 1
+        breadth = source_breadth(counts)
+        if breadth.get("breadth") is not None:
+            lines.append(
+                f"- source breadth: {breadth['n_sources']} source(s), breadth "
+                f"{breadth['breadth']:.3f}, independence {breadth['independence']:.3f}"
+                + (" [single source]" if breadth.get("single_source") else "")
+            )
+        eff = effective_sample_size(list(counts.values()))
+        if eff.get("n_eff") is not None:
+            lines.append(
+                f"- N_eff (Kish) over source counts: {eff['n_eff']:.2f} of {eff['n']}"
+            )
+    if not lines:
+        return ""
+    return "\n**Sentiment depth (computed):**\n" + "\n".join(lines)
+
+
 @tool
 def get_news_sentiment_series(
     ticker: Annotated[str, "ticker symbol"],
@@ -10922,6 +11005,8 @@ def get_news_sentiment_series(
             extra = _sentiment_agg_rows(ticker, start, end)
         except Exception:  # noqa: BLE001 - optional rows must not break the base series
             extra = ""
+        with contextlib.suppress(Exception):  # optional rows must not break the base series
+            extra += _sentiment_depth_rows(ticker, start, end)
         return base + extra if extra else base
     except Exception as exc:  # noqa: BLE001 - degrades, never crashes
         return f"news sentiment series unavailable for {ticker}: {exc}"

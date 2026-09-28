@@ -189,3 +189,48 @@ def test_output_map_refuses_unknown_kind():
     out = sentiment_output_map(1.0, kind="sqrt")
     assert out["confidence"] is None
     assert "reason" in out
+
+
+# ---------------------------------------------------------------------------
+# The emitter the four producers were missing (rule 1b's wiring half)
+# ---------------------------------------------------------------------------
+
+
+def test_sentiment_depth_rows_emit_the_producers_that_had_no_emitter(monkeypatch):
+    """SENT-7/9/10/11 shipped as producers with no emitter outside their module.
+    `_sentiment_depth_rows` is that emitter; it must report what the producers
+    actually compute, over data the leaf already fetched."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.sentiment import sentiment_asymmetry
+
+    # 12 points: three is below `sentiment_uncertainty`'s declared point floor,
+    # and an absent read must be omitted rather than zeroed (pinned separately)
+    scores = [0.4, -0.2, 0.1, 0.3, -0.5, 0.2, 0.05, -0.1, 0.35, 0.15, -0.25, 0.1]
+    monkeypatch.setattr(
+        at, "_news_sentiment_points",
+        lambda t, s, e: [{"date": f"2026-09-0{i + 1}", "score": v}
+                         for i, v in enumerate(scores)])
+    monkeypatch.setattr(
+        at, "_av_news_articles",
+        lambda t, s, e: [{"title": "Strong growth, not disappointing", "source": "Reuters"},
+                         {"title": "Margins beat", "source": "Reuters"}])
+    out = at._sentiment_depth_rows("MSFT", "2026-08-01", "2026-09-05")
+    assert "Sentiment depth" in out
+    # the asymmetry row carries the producer's own number, not a re-derivation
+    assert f"{sentiment_asymmetry(scores)['asymmetry']:+.3f}" in out
+    assert "uncertainty: entropy" in out
+    assert "output map" in out
+    assert "negation-adjusted polarity" in out
+    # two articles from one host is a REAL low-breadth answer, not a refusal
+    assert "source breadth" in out and "single source" in out
+    assert "N_eff (Kish)" in out
+
+
+def test_sentiment_depth_rows_are_omitted_when_nothing_measures(monkeypatch):
+    """No points and no articles means no rows - never a zeroed or invented
+    read, and never a heading with nothing under it."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    monkeypatch.setattr(at, "_news_sentiment_points", lambda t, s, e: [])
+    monkeypatch.setattr(at, "_av_news_articles", lambda t, s, e: [])
+    assert at._sentiment_depth_rows("MSFT", "2026-08-01", "2026-09-05") == ""

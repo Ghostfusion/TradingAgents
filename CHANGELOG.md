@@ -13,6 +13,13 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Fixed
+**The four sentiment producers get the emitter they were missing (2026-09-28).** `sentiment.negation_adjusted_polarity` (SENT-7's negation/intensifier half), `source_breadth` and `effective_sample_size` (SENT-9), `sentiment_asymmetry` (SENT-10) and `sentiment_uncertainty` / `sentiment_output_map` (SENT-11) all existed and passed their acceptance cells, but **nothing outside their own module called them** — rule 1b's wiring half, which none of those rows had ever asked for.
+
+- `analysis_tools._sentiment_depth_rows` is that emitter, appended by `get_news_sentiment_series` beside the existing gated rows: asymmetry and entropy/confidence over the daily sentiment points, and negation-adjusted polarity, source breadth and `N_eff` over the Alpha Vantage articles. **It adds no vendor call** — every input is already fetched by that leaf.
+- An unmeasurable read is **omitted, never zeroed**: three points is below the entropy point floor, so that row does not appear at all (pinned by a test).
+- Emitted unconditionally rather than behind a fifth flag: the four NewsScore gates the owner closed in NEWS-15 stay off, so a new gate would have shipped an emitter that never runs.
+- **Web impact: none** — `get_news_sentiment_series` is an existing bound leaf; only its printed text grows.
+
 **Phase 1 of the score plan was already complete; the tracker never said so (2026-09-28).** All 28 rows in `docs/scores/MASTER_PLAN.md` §4 ("Phase 1 — wire what exists") were re-checked against the **code** and every one is MET, with a named producer and a live consumer: `SENT-14` (the three dead helpers are deleted), `TECH-1` (the OBV level is returned and printed), `TECH-2/3/4`, `FUND-4`/`FUND-1`/`FUND-5`/`FUND-2`/`FUND-3`/`FUND-6`/`FUND-9` (all in `ratios.RENDER_ORDER` and printed by `get_ratios`), `FUND-22` (the six Insider-Activity factors are declared-not-fed, the row's own stated alternative), `SENT-1`/`SENT-5`/`SENT-3`/`SENT-13`/`SENT-12`, `NEWS-8`/`NEWS-14`, `REG-1`/`REG-2`/`REG-3`, `README-5`, `RISK-1`/`RISK-2`/`RISK-6` and `TECH-6/9/11/16` — plus `EVT-5`. The phase is closed; §4.1 records the per-row proof and the table is retained as the record of what was asked, not as a work queue. This is the third stale-row finding of the day (with §5.1 and `EVT-5`) and it is the argument for checking a row against the tree before treating it as work.
 - **Web impact: none** — documentation only.
 
