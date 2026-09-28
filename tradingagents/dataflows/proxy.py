@@ -193,7 +193,11 @@ def fetch_proxy_html(ticker: str, timeout: int = 30) -> tuple[str, str]:
         for form, accession, doc in zip(forms, accessions, docs, strict=False):
             if str(form).strip().upper() != "DEF 14A" or not doc:
                 continue
-            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession}/{doc}"
+            # The archive path takes the accession with its dashes STRIPPED -
+            # the same transform sec_edgar applies (sec_edgar.py:507). With the
+            # dashed form the URL 404s.
+            acc = str(accession).replace("-", "")
+            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{doc}"
             req = urllib.request.Request(url, headers={"User-Agent": _UA})
             with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310
                 return url, response.read().decode("utf-8", errors="replace")
