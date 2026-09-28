@@ -113,15 +113,24 @@ ENGINE_TOOLS: dict[str, str] = {
 #: for report-level. **This is the ownership map: one place decides where an
 #: engine's result appears, so the model never chooses.**
 #:
-#: Two surfaces derive from it and therefore cannot drift from each other or
+#: Three surfaces derive from it and therefore cannot drift from each other or
 #: from this table:
 #:
-#: * the tool binding - `agents/toolsets.py` gives each analyst exactly the
-#:   leaves of the engines it owns, so an analyst can never be handed a tool for
-#:   a domain it does not own (the `get_technical_score`-on-the-fundamentals-
-#:   analyst defect this table fixes);
-#: * the prompt fragment - `agents/utils/report_hygiene.engine_score_rules`
-#:   tells each analyst which of its own scores to call and cite.
+#: * the prompt fragment - `agents/utils/report_hygiene.engine_score_block`
+#:   hands each analyst its OWN engines' numbers, read from the run's
+#:   `quant_scorecard` snapshot (call sites: `market_analyst.py:314`,
+#:   `news_analyst.py:166`, `fundamentals_analyst.py:329`,
+#:   `sentiment_analyst.py:167`). The number is SUPPLIED, not merely offered -
+#:   a tool the model may or may not call would let it decide whether the
+#:   authoritative result appears at all;
+#: * the report section - `report_hygiene.engine_report_section` places the
+#:   result in the owning analyst's report;
+#: * the scorecard - `reporting.py::_run_card_*` writes each engine's card.
+#:
+#: **No score-engine leaf is bound as a tool.** `agents/toolsets.py` binds none
+#: of them, gate or no gate - each builder states that explicitly. The
+#: `get_technical_score`-on-the-fundamentals-analyst defect this table fixes is
+#: prevented by the section column above, not by toolset membership.
 #:
 #: `regime`, `risk` and `trade` are report-level **by decision, not omission**:
 #: regime describes the operating environment, risk is a cross-cutting
