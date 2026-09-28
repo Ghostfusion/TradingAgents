@@ -135,7 +135,17 @@ def test_news_tool_appends_weighted_rows_only_when_gated(monkeypatch):
     config_module.set_config(
         {"enable_weighted_sentiment_agg": False, "enable_weighted_sentiment_window": False}
     )
-    assert tool.invoke({"ticker": "AAPL"}) == "## base series"
+    # Absence of the GATED rows, not whole-string equality with the base series.
+    # This tool also appends the UNGATED sentiment-depth rows
+    # (`_sentiment_depth_rows`, SENT-7/9/10/11 - emitted unconditionally by
+    # design, see its docstring: the NewsScore flags the owner closed in NEWS-15
+    # stay off), so "== base series" was never this test's invariant. It is the
+    # gate proof itself, so it asserts exactly that: the gated row is absent,
+    # and the base series is still the head of the output.
+    off = tool.invoke({"ticker": "AAPL"})
+    assert off.startswith("## base series"), off
+    assert "Weighted news aggregation" not in off, off
+    assert "Weighted rolling sentiment" not in off, off
     config_module.set_config({"enable_weighted_sentiment_agg": True})
     on = tool.invoke({"ticker": "AAPL"})
     assert on.startswith("## base series")
