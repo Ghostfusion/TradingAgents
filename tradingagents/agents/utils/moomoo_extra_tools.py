@@ -11,6 +11,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -33,7 +34,7 @@ def get_capital_flow(
     Returns:
         str: A formatted report of capital flow by order size
     """
-    return route_to_vendor("get_capital_flow", ticker, curr_date)
+    return route_to_vendor("get_capital_flow", ticker, as_of(curr_date, get_run_trade_date()))
 
 
 @tool
@@ -77,6 +78,7 @@ def get_economic_calendar(
     """
     if look_days is None:
         look_days = 14
+    curr_date = as_of(curr_date, get_run_trade_date())
     return route_to_vendor("get_economic_calendar", curr_date, look_days)
 
 
@@ -270,7 +272,9 @@ def get_earnings_surprise_history(
     Returns:
         str: Earnings surprise + reaction history table
     """
-    return route_to_vendor("get_earnings_surprise_history", ticker, curr_date)
+    return route_to_vendor(
+        "get_earnings_surprise_history", ticker, as_of(curr_date, get_run_trade_date())
+    )
 
 
 @tool
@@ -291,4 +295,4 @@ def get_expected_move(
     Returns:
         str: Expected move % and band
     """
-    return route_to_vendor("get_expected_move", ticker, curr_date)
+    return route_to_vendor("get_expected_move", ticker, as_of(curr_date, get_run_trade_date()))

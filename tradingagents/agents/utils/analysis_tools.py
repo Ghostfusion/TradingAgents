@@ -26,6 +26,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, as_of_window, get_run_trade_date
 from tradingagents.dataflows.errors import VendorError
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.strategies import factor_expressions as fe
@@ -717,6 +718,7 @@ def get_earnings_event_read(
         Surprise / side / day-0 move / volume ratio / PEAD verdict lines, or
         the surprise + an 'insufficient bars' note for the entry part.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.catalyst import (
             fetch_catalyst_data,
@@ -818,6 +820,7 @@ def get_catalyst_scale(
         scale + verdict + the per-factor reasons; 'unavailable (neutral)' when
         the catalyst data cannot be fetched (treat scale = 1.0).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.config import get_config
         from tradingagents.strategies.catalyst import (
@@ -1638,6 +1641,7 @@ def get_analyst_verdict(
         One line per computed screen (missing figures render n/a); an
         'unavailable' message when the vendor chain yields no statements.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.statement_parsing import _latest, fetch_ticker, screen_ticker
     except Exception as exc:  # noqa: BLE001
@@ -1726,6 +1730,7 @@ def get_earnings_surprise(
         surprise % + side + date; 'no reported surprise' when the calendar
         carries no quantifiable print.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.catalyst import (
             fetch_catalyst_data,
@@ -1849,6 +1854,7 @@ def get_etf_valuation(
         A ``Metric: value`` block, or an explicit 'unavailable' message when
         the ticker is not a known ETF or no constituent metrics resolve.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.etf_valuation import etf_valuation
         from tradingagents.strategies.sector_rank import SECTOR_CONSTITUENTS
@@ -2158,6 +2164,7 @@ def get_insider_activity(
         window summary lines, or an explicit 'unavailable' message when
         Finnhub has no insider data for the symbol.
     """
+    curr_date = as_of(curr_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.finnhub import get_insider_activity_finnhub
 
@@ -2213,6 +2220,7 @@ def get_form4_insider(
         net open-market $ + buy/sell tx counts + sample transactions, or an
         explicit 'unavailable' message.
     """
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.massive import get_form4_insider_massive
 
@@ -3057,6 +3065,7 @@ def get_dcf_valuation(
     years: Annotated[int, "explicit forecast years, default 5"] = 5,
 ) -> str:
     "Pragmatic discounted-cash-flow valuation from provider-sourced free cash flow."
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.dcf import compute_dcf
     except Exception as exc:  # noqa: BLE001
@@ -3151,6 +3160,7 @@ def get_reverse_dcf(
     must be true for this price to be right" instead of printing one point fair
     value that the price can only contradict. Advisory; None-safe.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.reverse_dcf import reverse_dcf
     except Exception as exc:  # noqa: BLE001
@@ -3223,6 +3233,7 @@ def get_normalized_fcf_dcf(
     permanent, which is the assumption the price is actually disputing. Advisory;
     None-safe.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.dcf import terminal_value_gordon
         from tradingagents.strategies.normalized_fcf import (
@@ -3364,6 +3375,7 @@ def get_cycle_tilt(
         dates, or an explicit 'n/a' when no macro signal resolves (never
         fabricated).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.fred import get_macro_value, get_series_values
         from tradingagents.strategies import cycle_tilt
@@ -3627,6 +3639,7 @@ def get_opex_read(
     'pinned into expiry / the move may be OPEX-driven / post-expiry breakout'
     claim. Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from datetime import date
 
@@ -3661,6 +3674,7 @@ def get_derivatives_flow(
     the options IV read (skew/PCR/expected move). Use before any 'options
     flow / pinning / structural wall / expiration-effect' claim. Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from datetime import date
 
@@ -3781,6 +3795,7 @@ def get_dupont_read(
     ``DuPont on the latest quarter (net margin 0.637 ...)`` whose margin was the
     TTM figure, i.e. a label over a mixed basis nothing could check.
     """
+    curr_date = as_of(curr_date, get_run_trade_date())
     try:
         from tradingagents.strategies.dupont import dupont_3, dupont_5
 
@@ -5117,6 +5132,7 @@ def get_normalized_cycle_dcf(
     cycle span; degrades to "unavailable" when <3 annual FCF years exist or
     shares/price cannot resolve.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.cycle_dcf import (
             normalized_cycle_fcf,
@@ -5303,6 +5319,7 @@ def get_composite_rank(
 
     Returns the percentile composite (0-1) and the per-factor percentile ranks.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.factors import composite_score, high_distance, momentum
     except Exception as exc:  # noqa: BLE001
@@ -5646,6 +5663,7 @@ def get_fundamental_score(
     than scored on the factors it lacks. Advisory only - it never sets a rating,
     a position size or a gate. Gated by ``enable_fundamental_score``.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_fundamental_score"):
         return (
             "fundamental score unavailable: the engine is gated off "
@@ -6612,6 +6630,7 @@ def get_trade_score(
     panel as-of that date, and omitting it scores a backdated run against
     today's panel.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_trade_score"):
         return "trade score unavailable: the engine is gated off (enable_trade_score)"
     try:
@@ -6743,6 +6762,7 @@ def get_event_state(
     - no weight vector is published for this engine. Advisory only: never a gate,
     never a size, never a forecast. Gated by ``enable_event_state``.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_event_state"):
         return "event state unavailable: the engine is gated off (enable_event_state)"
     try:
@@ -7345,6 +7365,7 @@ def get_sentiment_score(
     Advisory only - it never sets a rating, a position size or a gate. Gated by
     ``enable_sentiment_score``.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_sentiment_score"):
         return (
             "sentiment score unavailable: the engine is gated off "
@@ -7633,6 +7654,7 @@ def get_news_horizon_read(
     cannot separate the horizons. Advisory only: it never sets a rating, a size
     or a gate.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_news_score"):
         return (
             "news horizon read unavailable: the engine is gated off "
@@ -8027,6 +8049,7 @@ def get_news_score(
     Advisory only - never a gate, never a size, never a forecast. Gated by
     ``enable_news_score``.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _r3_flag("enable_news_score"):
         return "news score unavailable: the engine is gated off (enable_news_score)"
     try:
@@ -8187,6 +8210,7 @@ def get_ratios(
     Returns:
         A ``key: value`` block of the computable ratios.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.ratios import (
             RENDER_ORDER,
@@ -8254,6 +8278,7 @@ def get_credit_spread_read(
     band (low/moderate/high/severe) + a 0..1 de-risk scale. Call before any
     'credit stress / risk-off / debt market' claim; the CCC spread is the
     leading risk-off sentinel."""
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.credit_spread import (
             credit_stress_level,
@@ -8428,6 +8453,7 @@ def get_earnings_quality(
         consensus concern verdict + forensic trap lines, or an explicit
         'unavailable' message when the vendor chain yields no statements.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.statement_parsing import fetch_ticker
     except Exception as exc:  # noqa: BLE001
@@ -8577,6 +8603,7 @@ def get_ownership_concentration(
     Returns:
         IWF + HHI lines, or an explicit 'unavailable' message.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.float_shares import fetch_float_shares
         from tradingagents.dataflows.statement_parsing import fetch_ticker
@@ -10514,6 +10541,7 @@ def get_macro_regime_read(
     unmeasured inputs leave the label None, a partial set uses what exists - never
     fabricates. Use before any 'the tape is risk-on / we are in a liquidity
     crunch' claim. Advisory."""
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.regime_performance import macro_regime as _mr
     except Exception as exc:  # noqa: BLE001 - degrades
@@ -11796,6 +11824,7 @@ def get_sofr_curve(
     (no key). Rows of {date, rate} plus distribution percentiles. Use before
     any 'risk-free rate / overnight funding' claim. Opt-in (default off).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     gate = _feature_gate("enable_risk_free_curve", "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE")
     if gate:
         return gate
@@ -11810,6 +11839,7 @@ def get_treasury_curve(
     (no key). Rows of {maturity, rate}. Use before any 'yield curve / term
     premium / carry' claim. Opt-in (default off).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     gate = _feature_gate("enable_risk_free_curve", "TRADINGAGENTS_ENABLE_RISK_FREE_CURVE")
     if gate:
         return gate
@@ -13588,6 +13618,7 @@ def get_cape_ratio(
     Returns:
         str: The CAPE, its band, the window and the coverage behind it
     """
+    curr_date = as_of(curr_date, get_run_trade_date())
     from datetime import datetime
 
     from tradingagents.dataflows import fred as _fred

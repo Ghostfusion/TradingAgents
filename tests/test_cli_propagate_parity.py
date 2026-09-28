@@ -130,7 +130,7 @@ class TestPreGraphParity:
         log = tmp_path / "memory" / "trading_memory.md"
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(
-            "[2026-09-01 | NVDA | BUY | +3.1% | +1.2% | 5d]\n\n"
+            "[2026-09-01 | NVDA | BUY | +3.1% | +1.2% | 5d | resolved:2026-09-05]\n\n"
             "DECISION:\nBought the breakout.\n\n"
             "REFLECTION:\nWorked as intended.\n\n"
             "<!-- ENTRY_END -->\n\n",
@@ -141,6 +141,29 @@ class TestPreGraphParity:
 
         assert "Bought the breakout." in state["past_context"]
         assert "Worked as intended." in state["past_context"]
+
+    def test_a_lesson_resolved_after_the_run_date_is_not_reachable(
+        self, tmp_path, monkeypatch
+    ):
+        """A historical run must not learn from an outcome it could not know.
+
+        The parity test above proves the memory log reaches state; this one
+        proves the point-in-time guard still applies to that path (NEWS/#1251).
+        """
+        ta = _graph(tmp_path, monkeypatch)
+        log = tmp_path / "memory" / "trading_memory.md"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(
+            "[2026-09-01 | NVDA | BUY | +3.1% | +1.2% | 5d | resolved:2026-09-25]\n\n"
+            "DECISION:\nBought the breakout.\n\n"
+            "REFLECTION:\nWorked as intended.\n\n"
+            "<!-- ENTRY_END -->\n\n",
+            encoding="utf-8",
+        )
+
+        state = ta.prepare_initial_state("NVDA", "2026-09-23")
+
+        assert "Bought the breakout." not in state["past_context"]
 
     def test_the_run_ticker_is_available_to_the_state_log(self, tmp_path, monkeypatch):
         """``_log_state`` names the log with ``self.ticker``.

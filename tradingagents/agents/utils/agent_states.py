@@ -89,6 +89,15 @@ class AgentState(MessagesState):
     ]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
     risk_context: Annotated[dict, "Deterministic risk snapshot (CVaR/stress) precomputed for the Portfolio Manager prompt before the graph runs"]
+    portfolio_context: Annotated[
+        dict | None,
+        "The caller's book at the analysis date, or None when NO book was "
+        "supplied. Three states MUST stay distinct: a position, a genuinely "
+        "flat book (positions=[]), and no context at all (None) - rendering "
+        "'not provided' as 'flat' would invent a fact about the account "
+        "(upstream portfolio.py). Plain dict so the checkpointer can "
+        "serialise it and fingerprint() can hash it",
+    ]
     computed_decision_context: Annotated[
         str,
         "Deterministic Phase A-E advisory context (regime gate / trade plan "

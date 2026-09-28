@@ -4,6 +4,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, as_of_window, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 _REPURCHASE_KEY = re.compile(r"(?i)repurchase|buyback|treasury\s+stock")
@@ -66,6 +67,7 @@ def get_share_buyback_authorization(
     Use before any 'buybacks / share-purchase / capital-return' claim so the
     insider-selling narrative is balanced against actual corporate repurchases.
     """
+    curr_date = as_of(curr_date, get_run_trade_date())
     try:
         cf = route_to_vendor("get_cashflow", ticker, "quarterly", curr_date)
         bs = route_to_vendor("get_balance_sheet", ticker, "quarterly", curr_date)
@@ -134,7 +136,7 @@ def get_options_chain(
     Returns:
         str: A formatted report of implied volatility and put/call positioning
     """
-    return route_to_vendor("get_options_chain", ticker, curr_date)
+    return route_to_vendor("get_options_chain", ticker, as_of(curr_date, get_run_trade_date()))
 
 
 @tool
@@ -255,6 +257,7 @@ def get_short_volume(
     """
     from tradingagents.dataflows.massive import get_short_volume_massive
 
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     try:
         return get_short_volume_massive(ticker, start_date, end_date)
     except Exception as exc:  # noqa: BLE001
@@ -370,6 +373,7 @@ def get_liquidity_risk(
     shares. Use before any 'liquid enough to trade / thin book / slippage
     risk' claim. Missing inputs render n/a - never fabricated.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.liquidity_risk import (
             amihud_illiquidity,
@@ -460,6 +464,7 @@ def get_crypto_prices(
     """
     from tradingagents.dataflows.tiingo import _crypto_code, get_crypto_prices_tiingo
 
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     try:
         return get_crypto_prices_tiingo(_crypto_code(ticker), start_date, end_date)
     except Exception as exc:  # noqa: BLE001 - Tiingo first, then Twelve Data

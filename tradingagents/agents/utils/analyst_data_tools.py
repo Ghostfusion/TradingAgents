@@ -3,6 +3,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -48,7 +49,9 @@ def get_earnings_calendar(
     Returns:
         str: A formatted report of upcoming earnings and EPS surprise
     """
-    return route_to_vendor("get_earnings_calendar", ticker, curr_date, look_ahead_days)
+    return route_to_vendor(
+        "get_earnings_calendar", ticker, as_of(curr_date, get_run_trade_date()), look_ahead_days
+    )
 
 def _pt_revision_note(ticker: str) -> str:
     """Record this run's PT consensus, then print the accumulated revision.

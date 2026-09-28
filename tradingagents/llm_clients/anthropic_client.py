@@ -7,7 +7,7 @@ from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "default_request_timeout", "max_retries", "api_key", "max_tokens", "temperature",
+    "timeout", "default_request_timeout", "max_retries", "api_key", "temperature",
     "callbacks", "http_client", "http_async_client", "effort", "top_p",
 )
 
@@ -79,6 +79,10 @@ class AnthropicClient(BaseLLMClient):
             llm_kwargs[key] = self.kwargs[key]
 
         llm_kwargs.setdefault("default_request_timeout", 300)
+
+        # Shared output-token cap -> Anthropic's ``max_tokens`` (base
+        # translation; unset is a no-op).
+        llm_kwargs.update(self.output_token_kwargs())
 
         return NormalizedChatAnthropic(**llm_kwargs)
 

@@ -2,6 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
 
@@ -22,7 +23,9 @@ def get_verified_market_snapshot(
     resistance, or historical comparisons, and treat it as the source of truth.
     """
     try:
-        return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+        return build_verified_market_snapshot(
+            symbol, as_of(curr_date, get_run_trade_date()), look_back_days
+        )
     except (NoMarketDataError, ValueError) as exc:
         # Match the router's degradation contract: an unknown/delisted/stale
         # symbol surfaces the same honest "no data" signal every other tool

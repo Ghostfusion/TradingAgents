@@ -51,6 +51,10 @@ class AzureOpenAIClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        # Shared output-token cap -> ``max_tokens`` (Azure speaks the OpenAI
+        # Chat Completions wire format; base translation, unset is a no-op).
+        llm_kwargs.update(self.output_token_kwargs())
+
         return NormalizedAzureChatOpenAI(**llm_kwargs)
 
     def validate_model(self) -> bool:

@@ -19,6 +19,8 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
+
 __all__ = ["get_analyst_revision_index", "ANALYST_REVISION_TOOLS"]
 
 
@@ -57,6 +59,7 @@ def get_analyst_revision_index(
     index before any 'analysts are revising up/down' claim; it informs the read,
     it never gates a decision (MSCI publishes no validation for the recipe).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_analyst_revision_index"):
         return _disabled("get_analyst_revision_index", "enable_analyst_revision_index")
 

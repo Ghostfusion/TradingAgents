@@ -50,6 +50,10 @@ class GoogleClient(BaseLLMClient):
                 thinking_level = "low"
             llm_kwargs["thinking_level"] = thinking_level
 
+        # Shared output-token cap -> Gemini's own field name
+        # (``max_output_tokens``) via the base translation.
+        llm_kwargs.update(self.output_token_kwargs())
+
         return NormalizedChatGoogleGenerativeAI(**llm_kwargs)
 
     def validate_model(self) -> bool:

@@ -2,6 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -26,6 +27,7 @@ def get_indicators(
     # LLMs sometimes pass multiple indicators as a comma-separated string;
     # split and process each individually.
     indicators = [i.strip().lower() for i in indicator.split(",") if i.strip()]
+    curr_date = as_of(curr_date, get_run_trade_date())
     results = []
     for ind in indicators:
         try:

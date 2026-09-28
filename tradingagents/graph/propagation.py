@@ -30,7 +30,17 @@ class Propagator:
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
+
+        Also publishes the run's ``trade_date`` for the dated tool leaves
+        (:mod:`tradingagents.dataflows.date_window`) - this is the single
+        pre-graph point every entry point (``propagate``/``_run_graph`` and the
+        interactive CLI, both via ``prepare_initial_state``) runs, so a
+        model-supplied date can never reach past the run date. Thread-scoped
+        via contextvars; an empty date leaves the clamp a no-op.
         """
+        from tradingagents.dataflows.date_window import set_run_trade_date
+
+        set_run_trade_date(trade_date)
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,

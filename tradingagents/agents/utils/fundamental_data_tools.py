@@ -2,6 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -19,7 +20,7 @@ def get_fundamentals(
     Returns:
         str: A formatted report containing comprehensive fundamental data
     """
-    return route_to_vendor("get_fundamentals", ticker, curr_date)
+    return route_to_vendor("get_fundamentals", ticker, as_of(curr_date, get_run_trade_date()))
 
 
 @tool
@@ -38,7 +39,7 @@ def get_balance_sheet(
     Returns:
         str: A formatted report containing balance sheet data
     """
-    return route_to_vendor("get_balance_sheet", ticker, freq, curr_date)
+    return route_to_vendor("get_balance_sheet", ticker, freq, as_of(curr_date, get_run_trade_date()))
 
 
 @tool
@@ -57,7 +58,7 @@ def get_cashflow(
     Returns:
         str: A formatted report containing cash flow statement data
     """
-    return route_to_vendor("get_cashflow", ticker, freq, curr_date)
+    return route_to_vendor("get_cashflow", ticker, freq, as_of(curr_date, get_run_trade_date()))
 
 
 @tool
@@ -76,4 +77,4 @@ def get_income_statement(
     Returns:
         str: A formatted report containing income statement data
     """
-    return route_to_vendor("get_income_statement", ticker, freq, curr_date)
+    return route_to_vendor("get_income_statement", ticker, freq, as_of(curr_date, get_run_trade_date()))

@@ -66,9 +66,12 @@ class BedrockClient(BaseLLMClient):
         bearer_token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
         if bearer_token:
             llm_kwargs["api_key"] = bearer_token
-        for key in ("temperature", "max_tokens", "max_retries", "callbacks"):
+        for key in ("temperature", "max_retries", "callbacks"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
+        # Shared output-token cap -> ``max_tokens`` (base translation; unset is
+        # a no-op).
+        llm_kwargs.update(self.output_token_kwargs())
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:

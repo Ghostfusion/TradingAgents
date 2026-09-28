@@ -61,7 +61,9 @@ def test_fetch_returns_normalizes_symbol(monkeypatch):
 
     graph = object.__new__(TradingAgentsGraph)
     graph.config = dc.DEFAULT_CONFIG.copy()
-    raw, alpha, days = graph._fetch_returns("XAUUSD", "2025-01-02", holding_days=5, benchmark="SPY")
+    raw, alpha, days, _resolution_date = graph._fetch_returns(
+        "XAUUSD", "2025-01-02", holding_days=5, benchmark="SPY"
+    )
 
     assert queried[0] == "GC=F"  # stock symbol normalized (#984)
     assert queried[1] == "SPY"  # benchmark left as the canonical symbol

@@ -3,6 +3,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.config import get_config
+from tradingagents.dataflows.date_window import as_of, as_of_window, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.news_cache import CoalescingCache
 from tradingagents.strategies import news_relevance
@@ -100,6 +101,7 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     result = _cached_news(
         ("get_news", ticker, start_date, end_date),
         route_to_vendor, "get_news", ticker, start_date, end_date,
@@ -121,6 +123,7 @@ def get_news_sentiment(
     the reason. Cite before any "news sentiment is turning" claim; an explicit
     unavailable string when no feed has coverage.
     """
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return route_to_vendor("get_news_sentiment", ticker, start_date, end_date)
 
 
@@ -144,6 +147,7 @@ def get_global_news(
     Returns:
         str: A formatted string containing global news data
     """
+    curr_date = as_of(curr_date, get_run_trade_date())
     result = _cached_news(
         ("get_global_news", curr_date, look_back_days, limit),
         route_to_vendor, "get_global_news", curr_date, look_back_days, limit,
@@ -188,6 +192,7 @@ def get_massive_news(
     """
     from tradingagents.dataflows.massive import get_news_massive
 
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     try:
         return _degrade_note(get_news_massive(ticker, start_date, end_date))
     except Exception as exc:  # noqa: BLE001

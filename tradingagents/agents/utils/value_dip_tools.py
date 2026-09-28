@@ -22,6 +22,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.agents.utils.analysis_tools import _ohlcv, _scale_note
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -388,6 +389,7 @@ def get_fcf_yield(
     Use before any 'strong cash generation / FCF yield supports the value'
     claim.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.value_dip import fcf_yield
     except Exception as exc:  # noqa: BLE001
@@ -531,6 +533,7 @@ def get_capex_quality(
     DISTRESS) before any 'FCF is bad' claim. n/a fields when the annual
     series is too short or a row is missing.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.capex_quality import capex_quality_read
     except Exception as exc:  # noqa: BLE001
@@ -595,6 +598,7 @@ def get_valuation_z_score(
     Use before any 'trades below its historical norm / cheap vs its own
     history' claim.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.value_dip import valuation_z_read
     except Exception as exc:  # noqa: BLE001
@@ -724,6 +728,7 @@ def get_value_dip_setup(
     even if an oscillator looks oversold. Call before any 'value dip setup /
     discounted entry with oversold timing' claim.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.value_dip import fcf_yield, value_dip_setup
     except Exception as exc:  # noqa: BLE001
@@ -970,6 +975,7 @@ def get_balance_sheet_health(
     claim on a value-dip candidate. Degrades to 'unavailable' when neither
     input is measurable.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.value_dip import balance_sheet_health
     except Exception as exc:  # noqa: BLE001
@@ -1178,6 +1184,7 @@ def get_decline_driver_check(
     Use before proposing any value dip - a 'structural' verdict means the
     decline looks company-specific and the setup should be rejected.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.value_dip import decline_driver_check
     except Exception as exc:  # noqa: BLE001
@@ -1436,6 +1443,7 @@ def get_value_floors(
     assets / below book / earnings-power floor' claim; missing inputs render
     n/a (never fabricated).
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.strategies.fundamental_floors import (
             earnings_power_value as _epv,

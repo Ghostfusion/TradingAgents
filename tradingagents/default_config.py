@@ -46,6 +46,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_FREQUENCY_PENALTY": "frequency_penalty",
     "TRADINGAGENTS_PRESENCE_PENALTY": "presence_penalty",
     "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
+    "TRADINGAGENTS_MAX_TOKENS": "max_tokens",
     "TRADINGAGENTS_FINNHUB_API_KEY": "finnhub_api_key",
     "TRADINGAGENTS_FMP_API_KEY": "fmp_api_key",
     "TRADINGAGENTS_EODHD_API_KEY": "eodhd_api_key",
@@ -627,6 +628,12 @@ SHIPPED_DEFAULTS = {
         # provider/SDK at its own default (usually 2). Raise it to ride out bursty
         # 429 throttling on rate-limited deployments instead of aborting a run (#1091).
         "llm_max_retries": None,
+        # Hard cap on output tokens forwarded to EVERY provider chat client
+        # (Gemini as `max_output_tokens`). None leaves each provider at its own
+        # default; set it to bound a model that emits unbounded reasoning/output
+        # and hangs or trips a gateway idle timeout (#1204). Wins over the
+        # per-tier `max_output_tokens_*` defaults when set.
+        "max_tokens": None,
         # Checkpoint/resume: when True, LangGraph saves state after each node
         # so a crashed run can resume from the last successful step.
         "checkpoint_enabled": False,

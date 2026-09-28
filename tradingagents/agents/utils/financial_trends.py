@@ -25,6 +25,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -418,4 +419,6 @@ def get_financial_trends(
     Returns:
         str: Markdown tables of quarterly trends, or "unavailable: <reason>"
     """
-    return build_financial_trends_report(ticker, curr_date, items, periods)
+    return build_financial_trends_report(
+        ticker, as_of(curr_date, get_run_trade_date()), items, periods
+    )

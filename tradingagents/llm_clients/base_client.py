@@ -2,6 +2,22 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Any
 
+# The shared output-token cap arrives under ONE key (``max_tokens``, from
+# config/env ``max_tokens`` / ``TRADINGAGENTS_MAX_TOKENS``). Each provider
+# spells the request field differently: Gemini's langchain wrapper uses
+# ``max_output_tokens``; the OpenAI-compatible family, Azure, Anthropic and
+# Bedrock all use ``max_tokens``. One row per provider that differs.
+_OUTPUT_TOKEN_PARAM = {
+    "google": "max_output_tokens",
+}
+_DEFAULT_OUTPUT_TOKEN_PARAM = "max_tokens"
+
+
+def output_token_param(provider: str | None) -> str:
+    """The provider's own request-field name for the shared output-token cap."""
+    key = str(provider or "").strip().lower()
+    return _OUTPUT_TOKEN_PARAM.get(key, _DEFAULT_OUTPUT_TOKEN_PARAM)
+
 
 def content_to_text(content) -> str:
     """Normalize LLM response content to a plain string.
@@ -61,6 +77,20 @@ class BaseLLMClient(ABC):
         if provider:
             return str(provider)
         return self.__class__.__name__.removesuffix("Client").lower()
+
+    def output_token_kwargs(self) -> dict[str, Any]:
+        """The shared output-token cap, translated to this provider's field.
+
+        Reads the unified ``max_tokens`` kwarg (config/env ``max_tokens`` /
+        ``TRADINGAGENTS_MAX_TOKENS``) and returns ``{provider_param: value}`` -
+        e.g. ``{"max_output_tokens": n}`` for Gemini, ``{"max_tokens": n}`` for
+        OpenAI-compatible / Anthropic / Bedrock / Azure. Returns ``{}`` when the
+        cap is unset, so an unconfigured run is byte-identical to today.
+        """
+        cap = self.kwargs.get("max_tokens")
+        if cap is None:
+            return {}
+        return {output_token_param(self.get_provider_name()): cap}
 
     def warn_if_unknown_model(self) -> None:
         """Warn when the model is outside the known list for the provider."""

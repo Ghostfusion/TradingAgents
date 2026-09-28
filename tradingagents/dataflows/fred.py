@@ -160,6 +160,47 @@ def _resolve_series_id(indicator: str) -> str:
     return candidate
 
 
+def _vintage_params(asof: str) -> dict:
+    """FRED params pinning the DATA VINTAGE to the as-of date, or ``{}``.
+
+    ``observation_start``/``observation_end`` bound the *observation* date, not
+    the data vintage: without a vintage pin FRED serves every row as revised
+    *today*, so a historical request leaks later revisions into a backtest (the
+    Nov-2019 CPI vintage printed 257.936; today's revised row is 257.879).
+    ``realtime_start``/``realtime_end`` select the ALFRED vintage instead.
+
+    Pinned only when the as-of date is strictly in the past. For today (or any
+    later date) the live vintage *is* the requested one, so a pin is a no-op at
+    best and could return an empty response at worst; leaving it unpinned keeps
+    a live run byte-identical to the previous behaviour.
+
+    ``realtime_start == realtime_end == asof`` was verified against the live API
+    (CPIAUCSL, DGS10, T10Y2Y): it returns the vintage as it stood that day, and a
+    non-release date (e.g. a Saturday) serves the latest vintage at or before it,
+    so a weekend backtest window is not emptied.
+
+    Returns ``{}`` (unpinned) for a missing/malformed/today-or-future as-of date.
+    """
+    try:
+        asof_dt = datetime.strptime(asof, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return {}
+    if asof_dt >= datetime.now().date():
+        return {}
+    return {"realtime_start": asof, "realtime_end": asof}
+
+
+def _observation_params(series_id: str, asof: str, **extra) -> dict:
+    """Shared ``series/observations`` params: as-of window + pinned vintage.
+
+    Every observation caller builds its query through here so the look-ahead
+    guard cannot drift between them.
+    """
+    params = {"series_id": series_id, "observation_end": asof, **extra}
+    params.update(_vintage_params(asof))
+    return params
+
+
 def _request(path: str, params: dict) -> dict:
     """GET a FRED endpoint, surfacing FRED's JSON error body on a bad request."""
     api_params = {**params, "api_key": get_api_key(), "file_type": "json"}
@@ -194,12 +235,7 @@ def get_macro_value(indicator: str, curr_date: str) -> float | None:
             return None
         observations = _request(
             "series/observations",
-            {
-                "series_id": series_id,
-                "observation_end": curr_date,
-                "sort_order": "desc",
-                "limit": 1,
-            },
+            _observation_params(series_id, curr_date, sort_order="desc", limit=1),
         ).get("observations", [])
         for o in observations:
             v = o.get("value")
@@ -240,12 +276,9 @@ def get_series_values(
             start = (
                 datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=int(look_back_days))
             ).strftime("%Y-%m-%d")
-        params = {
-            "series_id": series_id,
-            "observation_end": curr_date,
-            "sort_order": "desc",
-            "limit": max(2, int(limit)),
-        }
+        params = _observation_params(
+            series_id, curr_date, sort_order="desc", limit=max(2, int(limit))
+        )
         if start:
             params["observation_start"] = start
         rows = _request("series/observations", params).get("observations", [])
@@ -310,12 +343,12 @@ def get_macro_data(
 
     observations = _request(
         "series/observations",
-        {
-            "series_id": series_id,
-            "observation_start": start_date,
-            "observation_end": curr_date,
-            "sort_order": "asc",
-        },
+        _observation_params(
+            series_id,
+            curr_date,
+            observation_start=start_date,
+            sort_order="asc",
+        ),
     ).get("observations", [])
 
     # FRED encodes a missing observation as ".".

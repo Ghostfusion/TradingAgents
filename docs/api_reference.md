@@ -66,6 +66,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_FREQUENCY_PENALTY` | `frequency_penalty` | default `None` |
 | `TRADINGAGENTS_PRESENCE_PENALTY` | `presence_penalty` | default `None` |
 | `TRADINGAGENTS_LLM_MAX_RETRIES` | `llm_max_retries` | default `None` |
+| `TRADINGAGENTS_MAX_TOKENS` | `max_tokens` | default `None`; a hard cap on output tokens forwarded to every provider chat client (Gemini as `max_output_tokens`) |
 | `TRADINGAGENTS_FINNHUB_API_KEY` | `finnhub_api_key` |  |
 | `TRADINGAGENTS_FMP_API_KEY` | `fmp_api_key` |  |
 | `TRADINGAGENTS_EODHD_API_KEY` | `eodhd_api_key` | EODHD daily OHLCV (free 20 calls/day; EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) — a replacement for the moomoo K-line quota (100 calls/7 days) |

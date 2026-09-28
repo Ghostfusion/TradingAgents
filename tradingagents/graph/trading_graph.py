@@ -157,10 +157,14 @@ class TradingAgentsGraph:
             OpenRouter / Anthropic / Bedrock all do).
             """
             cfg = self.config or {}
+            # The shared `max_tokens` / TRADINGAGENTS_MAX_TOKENS cap (upstream
+            # #1204) wins over the per-tier defaults when set; unset (None) is
+            # byte-identical to the per-tier behavior. Forwarded to every
+            # provider, translated per provider in llm_clients.
             if tier == "deep":
-                v = cfg.get("max_output_tokens_deep") or cfg.get("max_output_tokens")
+                v = cfg.get("max_tokens") or cfg.get("max_output_tokens_deep") or cfg.get("max_output_tokens")
             else:
-                v = cfg.get("max_output_tokens_quick") or cfg.get("max_output_tokens")
+                v = cfg.get("max_tokens") or cfg.get("max_output_tokens_quick") or cfg.get("max_output_tokens")
             out = dict(llm_kwargs)
             if v:
                 out["max_tokens"] = int(v)
@@ -200,7 +204,8 @@ class TradingAgentsGraph:
             try:
                 _backup_kwargs = dict(self._get_provider_kwargs(_backup_provider))
                 _backup_cap = (
-                    self.config.get("max_output_tokens_quick")
+                    self.config.get("max_tokens")
+                    or self.config.get("max_output_tokens_quick")
                     or self.config.get("max_output_tokens")
                 )
                 if _backup_cap:
@@ -388,6 +393,17 @@ class TradingAgentsGraph:
                 return benchmark
         return benchmark_map.get("", "SPY")
 
+    def _memory_as_of(self, trade_date) -> str | None:
+        """Point-in-time cutoff for past-context lessons (#1251).
+
+        A historical/backtest run (trade date before today) filters lessons to
+        those already resolved by the trade date. A current-date run returns
+        None, disabling the filter so live behavior and pre-migration entries
+        (which have no stored resolution date) are unaffected.
+        """
+        td = str(trade_date)
+        return td if td < datetime.now().strftime("%Y-%m-%d") else None
+
     def _resolve_returns_end(self, ticker: str, trade_date: str, holding_days: int) -> datetime:
         """Pick an end date whose window contains ~``holding_days`` trading days.
 
@@ -419,13 +435,15 @@ class TradingAgentsGraph:
         trade_date: str,
         holding_days: int = 5,
         benchmark: str = "SPY",
-    ) -> tuple[float | None, float | None, int | None]:
+    ) -> tuple[float | None, float | None, int | None, str | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
-        actual_holding_days)`` or ``(None, None, None)`` if price data is
-        unavailable (too recent, delisted, or network error).
+        actual_holding_days, resolution_date)`` where ``resolution_date`` is the
+        date of the last price bar the return was computed from (the day the
+        outcome became knowable, ``YYYY-MM-DD``), or ``(None, None, None, None)``
+        if price data is unavailable (too recent, delisted, or network error).
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
@@ -441,7 +459,7 @@ class TradingAgentsGraph:
             bench = _fetch_cached_history(benchmark, trade_date, end_str)
 
             if len(stock) < 2 or len(bench) < 2:
-                return None, None, None
+                return None, None, None, None
 
             actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
             raw = float(
@@ -451,7 +469,13 @@ class TradingAgentsGraph:
                 (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0]) / bench["Close"].iloc[0]
             )
             alpha = raw - bench_ret
-            return raw, alpha, actual_days
+            # The last bar the return was computed from: the date the outcome
+            # became knowable, used to gate historical lessons (#1251).
+            try:
+                resolution_date = stock.index[actual_days].strftime("%Y-%m-%d")
+            except (AttributeError, IndexError):
+                resolution_date = None
+            return raw, alpha, actual_days, resolution_date
         except Exception as e:
             logger.warning(
                 "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
@@ -460,7 +484,7 @@ class TradingAgentsGraph:
                 benchmark,
                 e,
             )
-            return None, None, None
+            return None, None, None, None
 
     def _resolve_pending_entries(self, ticker: str) -> None:
         """Resolve pending log entries for ticker at the start of a new run.
@@ -481,7 +505,7 @@ class TradingAgentsGraph:
         forecasts: list[float] = []
         realized: list[float] = []
         for entry in pending:
-            raw, alpha, days = self._fetch_returns(
+            raw, alpha, days, resolution_date = self._fetch_returns(
                 ticker,
                 entry["date"],
                 benchmark=benchmark,
@@ -506,6 +530,7 @@ class TradingAgentsGraph:
                     "alpha_return": alpha,
                     "holding_days": days,
                     "reflection": reflection,
+                    "resolution_date": resolution_date,
                 }
             )
 
@@ -621,6 +646,10 @@ class TradingAgentsGraph:
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
+            from tradingagents.agents.utils.portfolio_context import (
+                build_portfolio_context,
+            )
+
             signature = self._run_signature(asset_type)
             run_id = resolve_run_id(
                 data_dir,
@@ -628,6 +657,7 @@ class TradingAgentsGraph:
                 str(trade_date),
                 signature,
                 str(self.config.get("run_id") or ""),
+                portfolio_context=build_portfolio_context(self.config),
             )
             self._checkpoint_scope = (signature, run_id)
             step = checkpoint_step(data_dir, company_name, str(trade_date), signature, run_id)
@@ -689,7 +719,11 @@ class TradingAgentsGraph:
         self.ticker = company_name
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
-        past_context = self.memory_log.get_past_context(company_name)
+        # A historical/backtest trade date filters out lessons whose outcome
+        # was not yet knowable on that date (#1251); a live run passes None.
+        past_context = self.memory_log.get_past_context(
+            company_name, as_of=self._memory_as_of(trade_date)
+        )
         # Append the aggregate track record (win rate / mean return / mean
         # alpha) so the Portfolio Manager can weigh its own historical accuracy,
         # not just individual past decisions.
@@ -791,6 +825,19 @@ class TradingAgentsGraph:
             )
 
             init_agent_state[DECISION_PACKET_CLOSES_KEY] = list(closes)
+
+        # The caller's book (upstream portfolio.py), as a declared state
+        # channel so the decision agents can tell "no context" from "flat".
+        # None when no book is configured (the PM then renders the explicit
+        # no-context line, never a flat-book claim).
+        try:
+            from tradingagents.agents.utils.portfolio_context import (
+                build_portfolio_context,
+            )
+
+            init_agent_state["portfolio_context"] = build_portfolio_context(self.config)
+        except Exception:  # noqa: BLE001 - advisory; never breaks a run
+            pass
         return init_agent_state
 
 

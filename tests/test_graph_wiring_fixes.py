@@ -363,7 +363,7 @@ def test_run_graph_threads_and_clears_only_its_own_run():
         g.config = {"checkpoint_enabled": True, "data_cache_dir": tmp}
         g.propagator = Propagator()
         g.memory_log = SimpleNamespace(
-            get_past_context=lambda _ticker: "",
+            get_past_context=lambda _ticker, **_kwargs: "",
             get_track_record_stats=lambda _ticker: "",
             store_decision=lambda **_kwargs: None,
         )

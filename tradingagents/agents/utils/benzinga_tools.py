@@ -27,6 +27,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.agents.utils.analysis_tools import _feature_gate
+from tradingagents.dataflows.date_window import as_of_window, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -47,6 +48,7 @@ def get_guidance_revisions(
     gate = _feature_gate("enable_benzinga_surface", "TRADINGAGENTS_ENABLE_BENZINGA_SURFACE")
     if gate:
         return gate
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return str(route_to_vendor("get_guidance_revisions", ticker, start_date, end_date))
 
 
@@ -66,6 +68,7 @@ def get_fda_calendar(
     gate = _feature_gate("enable_benzinga_surface", "TRADINGAGENTS_ENABLE_BENZINGA_SURFACE")
     if gate:
         return gate
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return str(route_to_vendor("get_fda_calendar", ticker, start_date, end_date))
 
 
@@ -85,6 +88,7 @@ def get_offerings_calendar(
     gate = _feature_gate("enable_benzinga_surface", "TRADINGAGENTS_ENABLE_BENZINGA_SURFACE")
     if gate:
         return gate
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return str(route_to_vendor("get_offerings_calendar", ticker, start_date, end_date))
 
 
@@ -105,6 +109,7 @@ def get_analyst_actions(
     gate = _feature_gate("enable_benzinga_surface", "TRADINGAGENTS_ENABLE_BENZINGA_SURFACE")
     if gate:
         return gate
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return str(route_to_vendor("get_analyst_actions", ticker, start_date, end_date))
 
 

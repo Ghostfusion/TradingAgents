@@ -49,6 +49,12 @@ def _isolate_config():
     """
     import tradingagents.dataflows.config as config_module
 
+    # The run-scoped as-of date is process/thread state (a contextvar) too: a
+    # test that builds a graph initial state publishes it, and a later test's
+    # direct tool call must not inherit that run date. Clear it per test.
+    from tradingagents.dataflows.date_window import set_run_trade_date
+
+    set_run_trade_date("")
     config_module.reset_config()
     # The vendor cache is a module-level singleton; clear its in-memory layer so
     # a prior test's mocked vendor result can't be served to this test.
@@ -62,6 +68,7 @@ def _isolate_config():
     _atools._clear_ohlcv_cache()
     yield
     config_module.reset_config()
+    set_run_trade_date("")
     vendor_cache.clear()
     _atools._clear_ohlcv_cache()
     # Close any real moomoo OpenQuoteContext a test created. The SDK's

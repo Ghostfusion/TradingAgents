@@ -6,16 +6,21 @@ Per-ticker SQLite databases so concurrent tickers don't contend.
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import sqlite3
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from tradingagents.dataflows.utils import safe_ticker_component
+
+logger = logging.getLogger(__name__)
 
 
 def _db_path(data_dir: str | Path, ticker: str) -> Path:
@@ -65,8 +70,106 @@ def _write_run_marker(marker: Path, run_id: str) -> None:
             marker.write_text(run_id, encoding="utf-8")
 
 
+def _book_marker_path(marker: Path) -> Path:
+    """Sidecar beside the run marker holding the run's book fingerprint."""
+    return marker.with_name(marker.name + ".book")
+
+
+def book_fingerprint(portfolio_context: Any) -> str:
+    """Stable digest of a caller book, so a changed one cannot resume a stale run.
+
+    ``""`` when no book was supplied - no context is NOT a flat book, and the
+    empty string is distinct from the digest of a supplied-but-empty book
+    (``{"positions": []}``). The digest is order-insensitive: positions are
+    sorted, so two books differing only in position order hash the same, while
+    any change to cash, currency, or a position's quantity/weight/price
+    changes it. Twelve hex chars, matching the run-id convention.
+    """
+    if not portfolio_context:
+        return ""
+    ctx = portfolio_context if isinstance(portfolio_context, dict) else {}
+    positions = []
+    for p in ctx.get("positions") or []:
+        if not isinstance(p, dict):
+            continue
+        positions.append(
+            {
+                "ticker": str(p.get("ticker", "")).strip().upper(),
+                "quantity": p.get("quantity"),
+                "weight": p.get("weight"),
+                "average_price": p.get("average_price"),
+            }
+        )
+    positions.sort(key=lambda p: p["ticker"])
+    canonical = json.dumps(
+        {"cash": ctx.get("cash"), "currency": ctx.get("currency"), "positions": positions},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()[:12]
+
+
+def _read_book_fingerprint(marker: Path) -> str | None:
+    """Recorded book fingerprint for a run, or None when none was recorded.
+
+    None (legacy marker with no sidecar) is deliberately distinct from ``""``
+    (a run that recorded "no book"), so a pre-fingerprint checkpoint is never
+    mistaken for a changed book.
+    """
+    sidecar = _book_marker_path(marker)
+    try:
+        if sidecar.exists():
+            return sidecar.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return None
+
+
+def _write_book_fingerprint(marker: Path, fingerprint: str) -> None:
+    """Best-effort write of the run's book fingerprint (never breaks a run)."""
+    sidecar = _book_marker_path(marker)
+    with suppress(OSError):
+        sidecar.write_text(fingerprint, encoding="utf-8")
+
+
+def resume_book_conflict(
+    data_dir: str | Path,
+    ticker: str,
+    date: str,
+    signature: str = "",
+    portfolio_context: Any = None,
+) -> str | None:
+    """Why a resume against the current book must not proceed, or None.
+
+    A checkpoint whose run started against a DIFFERENT book must not silently
+    continue: this returns a human-readable message when the book digest
+    recorded with the run marker differs from the currently supplied book's
+    digest. An identical book, or a legacy run with no digest recorded,
+    returns None.
+    """
+    marker = _run_marker_path(data_dir, ticker, date, signature)
+    recorded = _read_book_fingerprint(marker)
+    if recorded is None:
+        return None
+    current = book_fingerprint(portfolio_context)
+    if recorded == current:
+        return None
+    return (
+        "checkpoint book fingerprint mismatch: the run was started with book "
+        f"{recorded or 'none'}, but the current book is {current or 'none'}. "
+        "Refusing to resume a stale run against a different book - starting a "
+        "fresh run instead."
+    )
+
+
 def resolve_run_id(
-    data_dir: str | Path, ticker: str, date: str, signature: str = "", run_id: str = ""
+    data_dir: str | Path,
+    ticker: str,
+    date: str,
+    signature: str = "",
+    run_id: str = "",
+    portfolio_context: Any = None,
 ) -> str:
     """Run id to checkpoint under for this run.
 
@@ -75,6 +178,12 @@ def resolve_run_id(
     resumed by reusing its recorded id; with nothing to resume, a fresh id is
     minted and recorded. Ids never come from the wall clock, so tests can pin
     them.
+
+    ``portfolio_context`` is the caller's book. Its digest is recorded with the
+    run marker, and a resume whose book digest differs from the recorded one
+    does NOT silently continue: a fresh run id is minted (so the stale
+    checkpoint is not resumed) and the mismatch is surfaced via the logger and
+    :func:`resume_book_conflict`.
     """
     if run_id:
         return run_id
@@ -86,9 +195,13 @@ def resolve_run_id(
     except OSError:
         existing = None
     if existing and checkpoint_step(data_dir, ticker, date, signature, existing) is not None:
-        return existing
+        conflict = resume_book_conflict(data_dir, ticker, date, signature, portfolio_context)
+        if conflict is None:
+            return existing
+        logger.warning(conflict)
     new_id = uuid.uuid4().hex[:12]
     _write_run_marker(marker, new_id)
+    _write_book_fingerprint(marker, book_fingerprint(portfolio_context))
     return new_id
 
 
@@ -97,12 +210,18 @@ def forget_run(
 ) -> None:
     """Drop the run marker after a completed run (its checkpoint is cleared)."""
     marker = _run_marker_path(data_dir, ticker, date, signature)
+    sidecar = _book_marker_path(marker)
     try:
         if not marker.exists():
+            # A completed run may leave its fingerprint sidecar behind.
+            if sidecar.exists():
+                sidecar.unlink()
             return
         recorded = marker.read_text(encoding="utf-8").strip()
         if not run_id or recorded == run_id:
             marker.unlink()
+            with suppress(OSError):
+                sidecar.unlink()
     except OSError:
         pass
 

@@ -2,6 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of_window, get_run_trade_date
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -21,4 +22,7 @@ def get_stock_data(
     Returns:
         str: A formatted dataframe containing the stock price data for the specified ticker symbol in the specified date range.
     """
+    # Never serve OHLCV past the run's trade_date, whatever window the model
+    # asked for (a no-op when no run date is set).
+    start_date, end_date = as_of_window(start_date, end_date, get_run_trade_date())
     return route_to_vendor("get_stock_data", symbol, start_date, end_date)

@@ -2,6 +2,7 @@
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -143,7 +144,11 @@ def make_parallel_analyst_node(plan, subgraphs, concurrency: int):
 
         results = {}
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(run_one, spec) for spec in plan.specs]
+            # A new thread starts with an empty context, which would drop the
+            # run-scoped trade_date the graph published for the dated tool
+            # leaves (contextvars). Copy the caller's context per task so each
+            # analyst thread still sees the run's as-of clamp.
+            futures = [pool.submit(copy_context().run, run_one, spec) for spec in plan.specs]
             for fut in futures:
                 spec, final = fut.result()
                 results[spec.key] = final

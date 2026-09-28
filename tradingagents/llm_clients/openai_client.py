@@ -167,7 +167,7 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 _PASSTHROUGH_KWARGS = (
     "timeout", "request_timeout", "max_retries", "reasoning_effort", "temperature",
     "api_key", "callbacks", "http_client", "http_async_client",
-    "max_tokens", "top_p", "frequency_penalty", "presence_penalty",
+    "top_p", "frequency_penalty", "presence_penalty",
 )
 
 # OpenAI's ``reasoning_effort`` is only accepted by reasoning models — the GPT-5
@@ -405,6 +405,10 @@ class OpenAIClient(BaseLLMClient):
             if effort:
                 llm_kwargs.setdefault("extra_body", {})
                 llm_kwargs["extra_body"].setdefault("reasoning", {})["effort"] = effort
+
+        # Shared output-token cap -> ``max_tokens`` for the OpenAI-compatible
+        # family (base translation; unset is a no-op).
+        llm_kwargs.update(self.output_token_kwargs())
 
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)

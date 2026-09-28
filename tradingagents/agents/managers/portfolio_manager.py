@@ -216,6 +216,31 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
         except Exception:  # noqa: BLE001 - degrade to no line
             limits_line = ""
 
+        # The caller's book, three-state honest (upstream portfolio.py): a
+        # position, a genuinely flat book, and NO context at all. The PM must
+        # never read "no book supplied" as "the book is flat". Prefer the run's
+        # portfolio_context; fall back to the configured book so a configured
+        # basket still renders. No context renders an explicit refusal, never a
+        # flat-book claim.
+        portfolio_line = ""
+        try:
+            from tradingagents.agents.utils.portfolio_context import (
+                build_portfolio_context,
+                render_portfolio_context,
+            )
+
+            pctx = state.get("portfolio_context")
+            if pctx is None:
+                from tradingagents.dataflows.config import get_config
+
+                pctx = build_portfolio_context(get_config())
+            portfolio_line = (
+                render_portfolio_context(pctx, state.get("company_of_interest") or "")
+                + "\n\n"
+            )
+        except Exception:  # noqa: BLE001 - degrade to no line
+            portfolio_line = ""
+
         # Structured risk-debate judge evidence (direction.md item 5): the L2
         # judge verdict over the three risk candidates + L1 triage feed the PM
         # exactly as the research judge feeds the RM. Advisory — absent when
@@ -287,7 +312,7 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
 {risk_judge_block}
 
 {judge_reliability_line}
-{cvar_line}{liq_line}{limits_line}{consensus_line}
+{portfolio_line}{cvar_line}{liq_line}{limits_line}{consensus_line}
 **Computed decision context (deterministic, advisory - ground your final
 decision in these numbers, never invent your own):**
 {computed_context}

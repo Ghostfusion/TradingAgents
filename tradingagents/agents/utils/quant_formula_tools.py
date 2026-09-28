@@ -17,6 +17,8 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.date_window import as_of, get_run_trade_date
+
 __all__ = [
     "get_spread_estimate",
     "get_return_decomposition",
@@ -116,6 +118,7 @@ def get_spread_estimate(
     vendor provides them. Cite before any 'trading cost / spread / round-trip
     slippage' claim on a name whose quoted spread is unavailable. Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_spread_estimator"):
         return _disabled("get_spread_estimate", "enable_spread_estimator")
     try:
@@ -163,6 +166,7 @@ def get_return_decomposition(
     overnight news / gap risk' claim - it says WHICH LEG carried the move, never
     why (it is a decomposition, not an attribution). Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_return_decomposition"):
         return _disabled("get_return_decomposition", "enable_return_decomposition")
     try:
@@ -213,6 +217,7 @@ def get_quality_factors(
     A filer that does not file that XBRL concept prints the refusal reason, never
     an adjustment by zero.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     try:
         from tradingagents.dataflows.quantitative_scores import (
             gross_profitability,
@@ -340,6 +345,7 @@ def get_valuation_band(
     at an X% discount to fair value' claim; a value inside the band is not a
     signal. Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_conformal_bands"):
         return _disabled("get_valuation_band", "enable_conformal_bands")
     try:
@@ -435,6 +441,7 @@ def get_disclosure_tone(
     model's narrative read and checked against it. Counts and the dictionary
     version are always reported. Advisory.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_text_factors"):
         return _disabled("get_disclosure_tone", "enable_text_factors")
     try:
@@ -518,6 +525,7 @@ def get_book_risk_budget(
     single fixed -10% shock. Advisory sizing only - never an order. Use before
     any 'size the book down / the book is over its budget' claim.
     """
+    current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_book_risk_sizing"):
         return _disabled("get_book_risk_budget", "enable_book_risk_sizing")
     try:
