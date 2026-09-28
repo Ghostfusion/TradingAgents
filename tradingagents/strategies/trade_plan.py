@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
+from tradingagents.strategies.entry_exit_price import entry_exit_price
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
 from tradingagents.strategies.risk_entry import risk_adjusted_entry
@@ -132,6 +133,36 @@ def build_trade_plan(
         lines.append(
             f"- Ceiling headroom: distance {_pct(ceiling['ceiling_distance'])} "
             f"| margin {_pct(ceiling['ceiling_margin'])}"
+        )
+    # §103 assembly + §100's final = min(target, max) over the terms actually
+    # present. Execution is deliberately NOT a member of that min: §102 lists
+    # it, but a cost adjustment is not an independent economic ceiling, and
+    # §100 itself applies the buffer before the min - inside the min would
+    # double-count it.
+    assembled = entry_exit_price(
+        price=price,
+        valuation_ceiling=valuation_ceiling,
+        expected_return_ceiling=expected_return_ceiling,
+        rr_ceiling=rr_ceiling,
+        valuation_price=valuation_price,
+        technical_price=technical_price,
+        tranche_price=tranche_price,
+        stop=stop,
+        max_stop_fraction=max_stop_fraction,
+        name_cvar=name_cvar,
+        cvar_budget=cvar_budget,
+        execution_spread=execution_spread,
+        execution_impact=execution_impact,
+        execution_slippage=execution_slippage,
+        liquidity_status=liquidity_status,
+    )
+    final_entry = assembled["entry"]
+    if final_entry["final_entry_price"] is not None:
+        lines.append(
+            f"- **Final entry price (advisory, §100): "
+            f"{_num(final_entry['final_entry_price'])}** - min of "
+            f"{final_entry['final_entry_binding']} over "
+            f"{', '.join(sorted(final_entry['final_entry_basis']))}"
         )
     # Target entry (advisory): §100's P_entry,target over the PRICE anchors
     # that exist. The score-weighted blend is deliberately NOT implemented -
