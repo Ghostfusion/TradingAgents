@@ -22,6 +22,7 @@ import contextlib
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
+from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
 
 
 def _pct(v) -> str:
@@ -57,6 +58,10 @@ def build_trade_plan(
     valuation_price: float | None = None,
     technical_price: float | None = None,
     tranche_price: float | None = None,
+    execution_spread: float | None = None,
+    execution_impact: float | None = None,
+    execution_slippage: float | None = None,
+    liquidity_status: str | None = None,
     config: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
@@ -145,6 +150,32 @@ def build_trade_plan(
             f"coverage {target_coverage}; adjustments missing: "
             f"{', '.join(target['adjustments_missing'])})"
         )
+    # Execution cost (advisory, §74-§78): rendered only when a caller measured
+    # at least one cost term - a price-only card has nothing to say here, and
+    # a zero buffer would read as a free trade. Liquidity is the caller's
+    # verdict (`liquidity_risk.liquidity_verdict`), never re-derived here.
+    if any(v is not None for v in (execution_spread, execution_impact, execution_slippage)):
+        execution = execution_price(
+            price=price,
+            spread=execution_spread,
+            impact=execution_impact,
+            slippage=execution_slippage,
+            liquidity_status=liquidity_status,
+        )
+        if execution["buffer"] is None:
+            lines.append(f"- Execution cost (advisory): unavailable - {execution['reason']}")
+        else:
+            liquidity_note = (
+                f"; liquidity: {execution['liquidity_status']}"
+                if execution["liquidity_status"] else ""
+            )
+            lines.append(
+                f"- Execution cost (advisory): buffer {_pct(execution['buffer_fraction'])} "
+                f"({_num(execution['buffer'])}) -> execution price "
+                f"{_num(execution['execution_price'])} (terms: "
+                f"{', '.join(execution['available_sources'])}; coverage "
+                f"{execution['coverage']}/{len(COST_SOURCES)}{liquidity_note})"
+            )
     # Setup rows (advisory, measured).
     if setup:
         rows = setup.get("rows") or {}
