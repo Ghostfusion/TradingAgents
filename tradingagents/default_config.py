@@ -242,6 +242,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_TRANCHE_RISK_PCT": "tranche_risk_pct",
     "TRADINGAGENTS_TRANCHE_ACCOUNT": "tranche_account",
     "TRADINGAGENTS_MIN_RR": "min_rr",
+    "TRADINGAGENTS_MAX_STOP_FRACTION": "max_stop_fraction",
     # Liquidity / ownership gate (Strategies/risk2.md): when on, the risk
     # governor REJECTs ILLIQUID names and WARNs on CAUTION ones (Amihud ILLIQ,
     # float turnover, days-to-absorb, IWF, HHI). Off by default - preserves
@@ -1087,6 +1088,10 @@ SHIPPED_DEFAULTS = {
         # (target - entry) / (entry - stop) still equals this ratio; it is an
         # advisory ceiling row, never a gate.
         "min_rr": 2.0,
+        # §68 of Strategies/entry_exit.md: the largest per-share risk the entry
+        # rule will size, as a fraction of the entry price. The risk-adjusted
+        # max entry is stop / (1 - this); it is an advisory card row, not a gate.
+        "max_stop_fraction": 0.10,
         # Correlation-aware allocation (Strategies/industry_practice_suggestions.md
         # item 1). When on, allocation_block / get_allocation down-weight names
         # whose average pairwise correlation with the rest of the book exceeds
@@ -1412,6 +1417,7 @@ def validate_config(config: dict) -> list[str]:
     # Fractions / scales / rates that must live in [0, 1].
     for key in (
         "kelly_fraction",
+        "max_stop_fraction",
         "target_vol",
         "position_odds",
         "catalyst_scale_floor",

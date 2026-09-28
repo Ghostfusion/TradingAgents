@@ -23,6 +23,7 @@ import contextlib
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
+from tradingagents.strategies.risk_entry import risk_adjusted_entry
 
 
 def _pct(v) -> str:
@@ -62,6 +63,9 @@ def build_trade_plan(
     execution_impact: float | None = None,
     execution_slippage: float | None = None,
     liquidity_status: str | None = None,
+    max_stop_fraction: float | None = None,
+    name_cvar: float | None = None,
+    cvar_budget: float | None = None,
     config: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
@@ -176,6 +180,23 @@ def build_trade_plan(
                 f"{', '.join(execution['available_sources'])}; coverage "
                 f"{execution['coverage']}/{len(COST_SOURCES)}{liquidity_note})"
             )
+    # Risk-adjusted max entry (advisory, §68): the highest entry at which the
+    # unified stop is still inside `max_stop_fraction` of it. The CVaR half is
+    # a STATUS, never a price - a name over the book's budget cannot be
+    # entered at any price, and folding that into a number would misstate it.
+    if stop is not None and max_stop_fraction is not None:
+        risk_entry = risk_adjusted_entry(
+            stop=stop,
+            max_stop_fraction=max_stop_fraction,
+            name_cvar=name_cvar,
+            cvar_budget=cvar_budget,
+        )
+        if risk_entry["value"] is not None:
+            lines.append(
+                f"- Risk-adjusted max entry (advisory): {_num(risk_entry['value'])} "
+                f"(stop within {_pct(risk_entry['stop_fraction'])}; CVaR: "
+                f"{risk_entry['cvar_status']})"
+            )
     # Setup rows (advisory, measured).
     if setup:
         rows = setup.get("rows") or {}
@@ -278,6 +299,10 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
         "targets": read.get("targets"),
         # §100 price anchor: the tranche's own measured entry.
         "tranche_price": read.get("avg_entry"),
+        # §68 risk rule: the largest per-share risk the sizing will accept, as
+        # a fraction of the entry. A config value only - the CVaR half comes
+        # from the risk path, not from the closes.
+        "max_stop_fraction": cfg.get("max_stop_fraction"),
     }
     # Entry-ceiling R:R term: the highest entry at which the tranche's own
     # target still pays the configured minimum R:R given its stop. Solving

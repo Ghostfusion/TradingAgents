@@ -227,6 +227,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_TRANCHE_RISK_PCT` | `tranche_risk_pct` | default `0.015` |
 | `TRADINGAGENTS_TRANCHE_ACCOUNT` | `tranche_account` | default `100000.0` |
 | `TRADINGAGENTS_MIN_RR` | `min_rr` | default `2.0` |
+| `TRADINGAGENTS_MAX_STOP_FRACTION` | `max_stop_fraction` | default `0.10` |
 | `TRADINGAGENTS_ENABLE_LIQUIDITY_GATE` | `enable_liquidity_gate` | on, the risk governor sizes against the ILLIQ/float-turnover/IWF liquidity verdict (Strategies/risk2.md) |
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` | default `true` |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` | default `false` |
