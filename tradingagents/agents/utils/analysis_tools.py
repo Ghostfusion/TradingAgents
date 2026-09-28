@@ -8666,20 +8666,35 @@ def get_gap_type(
     pre-market or post-close read. The basis is always printed, so a heuristic
     is never quoted as a measurement.
     """
-    data = _ohlcv(ticker)
+    # The sample is the repo's STORED OHLCV (a ~5-year disk cache), not the
+    # 320-bar default: a per-class fill rate needs same-class gaps, and a
+    # 320-bar window leaves breakaway/exhaustion below GAP_FILL_MIN_SAMPLE
+    # (RISK-3/RISK-8). The live classification still reads the latest bars.
+    data = _ohlcv(ticker, days=1250)
     closes = data["closes"]
     if len(closes) < 25:
         return f"gap type unavailable for {ticker}: fewer than 25 bars."
     try:
-        from tradingagents.strategies.market_session import gap_type
+        from tradingagents.strategies.market_session import gap_fill_sample, gap_type
 
-        r = gap_type(closes, data.get("opens"), data["highs"], data["lows"], data["volumes"])
+        opens, highs, lows = data.get("opens"), data["highs"], data["lows"]
+        volumes = data["volumes"]
+        r = gap_type(closes, opens, highs, lows, volumes)
         if r.get("type") is None:
             return f"gap type unavailable for {ticker}: insufficient data."
+        sample = gap_fill_sample(closes, opens, highs, lows, volumes)
+        table = " ".join(
+            f"{cls}={s['fill_probability']:.0%}/{s['median_days']}d(n={s['sample']})"
+            if s["fill_probability"] is not None
+            else f"{cls}=n/a"
+            for cls, s in sample.items()
+            if isinstance(s, dict)
+        )
         return (
             f"gap type {ticker}: {r['type']} gap_pct={r['gap_pct']:.2%} "
             f"fill_probability={r['fill_probability']:.0%} days_to_fill={r['days_to_fill']} "
-            f"[{r.get('fill_basis') or 'basis unavailable'}]"
+            f"[{r.get('fill_basis') or 'basis unavailable'}] "
+            f"sample_bars={sample['bars']} classes[{table}]"
         )
     except Exception as exc:  # noqa: BLE001
         return f"gap type unavailable for {ticker}: {exc}"
@@ -10567,6 +10582,42 @@ def get_liquidation_days(
         return f"liquidation days unavailable for {ticker}: {exc}"
 
 
+def _gap_fill_for_read(hist: dict, prior_close, open_price) -> dict | None:
+    """Measured same-class fill sample for the live gap (RISK-9), or ``None``.
+
+    ``None`` unless the class has at least ``GAP_FILL_MIN_SAMPLE`` stored
+    occurrences: a thin sample is not a calibration, and a constant must never
+    be emitted in place of a measurement. The class comes from the same
+    ``classify_gap`` rule the stored sample was built with, on the gap the
+    caller supplied (no volume context, which is exactly what an externally
+    supplied open gives).
+    """
+    if not prior_close or not open_price or prior_close <= 0:
+        return None
+    try:
+        from tradingagents.strategies.market_session import (
+            GAP_FILL_MIN_SAMPLE,
+            classify_gap,
+            gap_fill_sample,
+        )
+
+        cls = classify_gap(abs((float(open_price) - float(prior_close)) / float(prior_close)), None)
+        sample = gap_fill_sample(
+            hist.get("closes") or [], hist.get("opens"), hist.get("highs"),
+            hist.get("lows"), hist.get("volumes"),
+        )
+        entry = sample.get(cls) or {}
+        if entry.get("sample", 0) < GAP_FILL_MIN_SAMPLE:
+            return None
+        return {
+            "fill_probability": entry["fill_probability"],
+            "days_to_fill": entry["median_days"],
+            "fill_basis": f"measured ({entry['sample']} historical {cls} gaps)",
+        }
+    except Exception:  # noqa: BLE001 - the fill leg is advisory
+        return None
+
+
 @tool
 
 def get_premarket_review(
@@ -10589,12 +10640,16 @@ def get_premarket_review(
     except Exception as exc:  # noqa: BLE001
         return f"premarket review unavailable for {ticker}: {exc}"
     try:
-        closes = _ohlcv(ticker).get("closes") or []
+        hist = _ohlcv(ticker, days=1250)
+        closes = hist.get("closes") or []
         atr_v = None
         if len(closes) >= 15:
             from tradingagents.strategies.size import atr as _atr
 
-            atr_v = _atr(_ohlcv(ticker).get("highs") or [], _ohlcv(ticker).get("lows") or [], closes)
+            atr_v = _atr(hist.get("highs") or [], hist.get("lows") or [], closes)
+        # RISK-9: the measured same-class fill sample, or None when the class
+        # is below the sample floor (never a constant in its place).
+        fill = _gap_fill_for_read(hist, prior_close, open_price)
         # review_decision reads `catalyst_snapshot` to raise the earnings-window
         # REJECT/REVISE. It was never passed, so that fail-closed branch was
         # unreachable from this leaf (the arbiter could only act on the gap).
@@ -10606,6 +10661,7 @@ def get_premarket_review(
             entry_price=entry_price,
             atr_value=atr_v,
             catalyst_snapshot=catalyst,
+            fill=fill,
         )
         cat_txt = (
             f"catalyst={catalyst.get('verdict')} scale={catalyst.get('scale')} "
@@ -10613,10 +10669,16 @@ def get_premarket_review(
             if catalyst
             else "catalyst=unavailable"
         )
+        fill_txt = (
+            f"fill_probability={fill['fill_probability']:.0%} "
+            f"days_to_fill={fill['days_to_fill']} [{fill['fill_basis']}]"
+            if fill
+            else "fill_probability=absent (no calibrated same-class sample)"
+        )
         return (
             f"premarket review {ticker}: verdict={r.get('verdict')} "
             f"entry={r.get('entry')} stop={r.get('stop')} size_pct={r.get('size_pct')} "
-            f"{cat_txt} reasons={r.get('reasons') or []}"
+            f"{cat_txt} {fill_txt} reasons={r.get('reasons') or []}"
         )
     except Exception as exc:  # noqa: BLE001
         return f"premarket review unavailable for {ticker}: {exc}"

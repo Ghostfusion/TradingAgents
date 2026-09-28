@@ -310,3 +310,51 @@ def test_post_close_holding():
 def test_post_close_none():
     r = ms.post_close_confirmation(None, 100, 120)
     assert r["verdict"] is None
+
+
+# ---------------------------------------------------------------------------
+# RISK-3 / RISK-8 - the per-class gap-fill outcome sample
+# ---------------------------------------------------------------------------
+
+
+def test_gap_fill_sample_is_per_class_and_reports_provenance():
+    """The sample producer behind gap_type: one entry per gap class, its
+    empirical fill rate and median days-to-fill, and the bars it looked at.
+    A class with no occurrence reports None - never 0, never the heuristic."""
+    closes, opens, highs, lows, vols = _gap_history(fill_at=(22, 24, 26, 28, 30, 32))
+    s = ms.gap_fill_sample(closes, opens, highs, lows, vols)
+    assert s["bars"] == len(closes)
+    assert s["lookback"] == 20
+    assert s["horizon"] == ms.GAP_FILL_HORIZON
+    common = s["common"]
+    assert common["sample"] == 19          # range(20, len-1) over 40 bars
+    assert common["filled"] == 6
+    assert common["fill_probability"] == pytest.approx(6 / 19)
+    assert common["median_days"] == 0      # every fill was on the gap day
+    for cls in ("breakaway", "exhaustion", "runaway"):
+        assert s[cls]["sample"] == 0
+        assert s[cls]["fill_probability"] is None
+        assert s[cls]["median_days"] is None
+    # nothing filled at all is a measured 0.0 with no day count - the constant
+    # table could never produce either
+    never = ms.gap_fill_sample(*_gap_history(fill_at=()))
+    assert never["common"]["fill_probability"] == 0.0
+    assert never["common"]["median_days"] is None
+
+
+def test_gap_fill_sample_spans_the_whole_history_it_is_given():
+    """The sample is whatever history the caller passes. The leaf feeds the
+    stored OHLCV cache rather than the 320-bar default precisely here: a class
+    count has to clear GAP_FILL_MIN_SAMPLE, and it rises with the window."""
+    short = ms.gap_fill_sample(*_gap_history(n_bars=60))
+    long = ms.gap_fill_sample(*_gap_history(n_bars=400))
+    assert short["common"]["sample"] == 39
+    assert long["common"]["sample"] == 379
+    assert long["bars"] == 400
+
+
+def test_gap_fill_sample_empty_history_reports_no_measurement():
+    s = ms.gap_fill_sample([], [], [], [], [])
+    assert s["bars"] == 0
+    assert s["common"]["sample"] == 0
+    assert s["common"]["fill_probability"] is None

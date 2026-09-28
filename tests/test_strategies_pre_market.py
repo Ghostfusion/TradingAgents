@@ -332,3 +332,38 @@ def test_ledger_track_record_direction_filter(tmp_path):
     other = ledger_track_record(path, direction="REVISE")
     assert other["resolved"] == 0
     assert other["win_rate"] is None
+
+
+# ---------------------------------------------------------------------------
+# RISK-9 - the measured fill leg on the gap read
+# ---------------------------------------------------------------------------
+
+
+def test_premarket_gap_fill_leg_is_absent_without_a_calibrated_sample():
+    """A fill statistic is emitted only from a measurement the caller holds.
+    With none supplied the leg is None - never a constant in its place."""
+    g = premarket_gap(100.0, 103.0, atr=4.0)
+    assert g["fill_probability"] is None
+    assert g["days_to_fill"] is None
+    assert g["fill_basis"] is None
+    missing = premarket_gap(None, None)
+    assert missing["fill_probability"] is None
+    assert missing["fill_basis"] is None
+
+
+def test_premarket_gap_fill_leg_rides_the_supplied_sample():
+    fill = {"fill_probability": 0.75, "days_to_fill": 2,
+            "fill_basis": "measured (12 historical common gaps)"}
+    g = premarket_gap(100.0, 100.5, atr=4.0, fill=fill)
+    assert g["fill_probability"] == 0.75
+    assert g["days_to_fill"] == 2
+    assert g["fill_basis"].startswith("measured")
+
+
+def test_review_decision_forwards_the_fill_sample_to_the_gap_read():
+    fill = {"fill_probability": 0.5, "days_to_fill": 1,
+            "fill_basis": "measured (9 historical common gaps)"}
+    r = review_decision(prior_close=100.0, open_price=100.2, fill=fill)
+    assert r["gap"]["fill_probability"] == 0.5
+    assert r["gap"]["days_to_fill"] == 1
+    assert r["gap"]["fill_basis"].startswith("measured")

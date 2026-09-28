@@ -43,11 +43,21 @@ def premarket_gap(
     prior_stop: float | None = None,
     entry_price: float | None = None,
     atr: float | None = None,
+    fill: dict | None = None,
 ) -> dict:
     """Read the overnight gap between the prior close and an open/pre-market
     price, plus whether the gap invalidates the prior plan.
 
-    Returns ``{gap_pct, gap_atr, through_stop, vacuum_to_stop, direction}``:
+    ``fill`` is the measured same-class fill sample for this gap (RISK-9), as
+    returned for one class by :func:`market_session.gap_fill_sample`; when it
+    is supplied and calibrated, its ``fill_probability`` / ``days_to_fill`` /
+    ``fill_basis`` ride along. All three are ``None`` when no sample is passed:
+    a constant is never emitted in place of a measurement, and
+    :func:`market_session.gap_type` is the only path allowed to quote the
+    labelled lookup heuristic.
+
+    Returns ``{gap_pct, gap_atr, through_stop, vacuum_to_stop, direction,
+    fill_probability, days_to_fill, fill_basis}``:
 
     * ``through_stop`` — the open is beyond the prior stop on the stop's side
       (for a long entry: open < stop). The prior plan would have stopped out;
@@ -60,6 +70,7 @@ def premarket_gap(
 
     A missing quote/close renders every sub-field None (never invented).
     """
+    _fill = fill or {}
     if prior_close is None or open_price is None or prior_close <= 0:
         return {
             "gap_pct": None,
@@ -68,6 +79,9 @@ def premarket_gap(
             "vacuum_to_stop": None,
             "direction": None,
             "open_price": open_price,
+            "fill_probability": _fill.get("fill_probability"),
+            "days_to_fill": _fill.get("days_to_fill"),
+            "fill_basis": _fill.get("fill_basis"),
         }
     gap_pct = (float(open_price) - float(prior_close)) / float(prior_close)
     gap_atr = None
@@ -92,6 +106,9 @@ def premarket_gap(
         "vacuum_to_stop": vacuum_to_stop,
         "direction": direction,
         "open_price": float(open_price),
+        "fill_probability": _fill.get("fill_probability"),
+        "days_to_fill": _fill.get("days_to_fill"),
+        "fill_basis": _fill.get("fill_basis"),
     }
 
 
@@ -205,6 +222,7 @@ def review_decision(
     catalyst_snapshot: dict | None = None,
     reanchor: dict | None = None,
     cfg: dict | None = None,
+    fill: dict | None = None,
 ) -> dict:
     """Deterministic CONFIRM / REVISE / REJECT arbiter from measured deltas.
 
@@ -254,7 +272,8 @@ def review_decision(
     has_quote = prior_close is not None and open_price is not None
     if has_quote:
         gap = premarket_gap(
-            prior_close, open_price, prior_stop=prior_stop, entry_price=entry_price, atr=atr_value
+            prior_close, open_price, prior_stop=prior_stop, entry_price=entry_price,
+            atr=atr_value, fill=fill,
         )
         if gap.get("through_stop") is True and verdict != "REJECT":
             verdict = "REJECT"
@@ -315,7 +334,8 @@ def review_decision(
         "catalyst": cat,
         "gap": (
             premarket_gap(
-                prior_close, open_price, prior_stop=prior_stop, entry_price=entry_price, atr=atr_value
+                prior_close, open_price, prior_stop=prior_stop, entry_price=entry_price,
+                atr=atr_value, fill=fill,
             )
             if has_quote
             else None

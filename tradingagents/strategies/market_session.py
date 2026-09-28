@@ -59,6 +59,8 @@ def book_depth_read(
 
 __all__ = [
     "opening_range",
+    "gap_fill_sample",
+    "classify_gap",
     "gap_type",
     "order_imbalance",
     "premarket_liquidity",
@@ -152,7 +154,7 @@ _GAP_HEURISTIC: dict[str, tuple[float, int]] = {
 }
 
 
-def _classify_gap(abs_gap: float, vol_ratio: float | None) -> str:
+def classify_gap(abs_gap: float, vol_ratio: float | None) -> str:
     """Gap class from size + volume, the one rule both the live bar and the
     historical sample are classified with."""
     if vol_ratio is not None and vol_ratio >= 2.0 and abs_gap >= 0.02:
@@ -164,22 +166,64 @@ def _classify_gap(abs_gap: float, vol_ratio: float | None) -> str:
     return "common"
 
 
-def _gap_fill_stats(
-    closes, opens, highs, lows, volumes, gtype: str, n: int
-) -> tuple[float | None, int | None, int]:
-    """Empirical fill rate + median days-to-fill for one gap class.
+def gap_fill_sample(
+    closes, opens, highs, lows, volumes, *, n: int = 20, horizon: int = GAP_FILL_HORIZON
+) -> dict:
+    """Per-class gap-fill outcome sample over the whole supplied history.
 
-    Walks the bars the caller already passed, classifies each historical gap
-    with :func:`_classify_gap`, and asks whether price traded back through the
-    prior close within :data:`GAP_FILL_HORIZON` bars. The most recent bar (the
-    gap being classified) is excluded, so the sample is out-of-sample.
+    The stored-sample producer behind :func:`gap_type` (RISK-3 / RISK-8): walks
+    every bar of the history the caller passes - normally the repo's stored
+    OHLCV - classifies each overnight gap with :func:`classify_gap`, and asks
+    whether price traded back through the prior close within ``horizon`` bars.
+    The most recent bar is excluded, so the live gap is never in its own
+    sample.
 
-    Returns ``(fill_probability, median_days, sample_size)``; the first two are
-    ``None`` when the class has no occurrences at all.
+    Returns ``{<class>: {"sample", "filled", "fill_probability", "median_days",
+    "mean_days"}}`` for every class in :data:`_GAP_HEURISTIC`, plus the
+    ``"lookback"`` / ``"horizon"`` / ``"bars"`` provenance keys. A class with
+    no occurrence reports ``None`` for its three statistics - never ``0``, and
+    never the heuristic (the caller decides what a thin sample means).
+    """
+    out: dict = {
+        cls: {"sample": 0, "filled": 0, "fill_probability": None,
+              "median_days": None, "mean_days": None}
+        for cls in _GAP_HEURISTIC
+    }
+    out["lookback"] = n
+    out["horizon"] = horizon
+    out["bars"] = len(closes or [])
+    if not closes or n <= 0:
+        return out
+    try:
+        hist = _classify_history(closes, opens, highs, lows, volumes, n, horizon)
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return out
+    for cls, days in hist.items():
+        if not days:
+            continue
+        filled = sorted(d for d in days if d <= horizon)
+        out[cls] = {
+            "sample": len(days),
+            "filled": len(filled),
+            "fill_probability": len(filled) / len(days),
+            "median_days": filled[len(filled) // 2] if filled else None,
+            "mean_days": round(statistics.fmean(filled), 2) if filled else None,
+        }
+    return out
+
+
+def _classify_history(
+    closes, opens, highs, lows, volumes, n: int, horizon: int
+) -> dict[str, list[int]]:
+    """One walk over the bars, returning ``{class: [days_to_fill, ...]}``.
+
+    A day count of ``horizon + 1`` means the gap never filled inside the
+    window. Shared by :func:`gap_fill_sample` and :func:`_gap_fill_stats` so
+    the live read and the stored sample cannot classify differently.
     """
     present = [bool(opens) and x is not None for x in (opens or [])]
     use_open = bool(opens) and all(present)
-    fills: list[int] = []
+    hist: dict[str, list[int]] = {cls: [] for cls in _GAP_HEURISTIC}
     for i in range(n, len(closes) - 1):
         try:
             prev_close = float(closes[i - 1])
@@ -189,9 +233,8 @@ def _gap_fill_stats(
             gap = (today_open - prev_close) / prev_close
             avg_vol = sum(float(v) for v in volumes[i - n:i]) / n
             vr = float(volumes[i]) / avg_vol if avg_vol > 0 else None
-            if _classify_gap(abs(gap), vr) != gtype:
-                continue
-            end = min(i + GAP_FILL_HORIZON, len(closes) - 1)
+            gtype = classify_gap(abs(gap), vr)
+            end = min(i + horizon, len(closes) - 1)
             for j in range(i, end + 1):
                 hit = (
                     float(lows[j]) <= prev_close
@@ -199,22 +242,29 @@ def _gap_fill_stats(
                     else float(highs[j]) >= prev_close
                 )
                 if hit:
-                    fills.append(j - i)
+                    hist[gtype].append(j - i)
                     break
             else:
-                fills.append(GAP_FILL_HORIZON + 1)  # never filled in the window
+                hist[gtype].append(horizon + 1)  # never filled in the window
         except (TypeError, ValueError, IndexError, ZeroDivisionError):
             continue
-    if not fills:
+    return hist
+
+
+def _gap_fill_stats(
+    closes, opens, highs, lows, volumes, gtype: str, n: int
+) -> tuple[float | None, int | None, int]:
+    """Empirical fill rate + median days-to-fill for one gap class.
+
+    A thin wrapper over :func:`gap_fill_sample`, so one walk backs both the
+    single-class read :func:`gap_type` needs and the full per-class sample.
+    Returns ``(fill_probability, median_days, sample_size)``; the first two are
+    ``None`` when the class has no occurrences at all.
+    """
+    entry = gap_fill_sample(closes, opens, highs, lows, volumes, n=n).get(gtype) or {}
+    if not entry.get("sample"):
         return None, None, 0
-    filled = [d for d in fills if d <= GAP_FILL_HORIZON]
-    prob = len(filled) / len(fills)
-    if filled:
-        ordered = sorted(filled)
-        median = ordered[len(ordered) // 2]
-    else:
-        median = None
-    return prob, median, len(fills)
+    return entry["fill_probability"], entry["median_days"], entry["sample"]
 
 
 def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
@@ -258,7 +308,7 @@ def gap_type(closes, opens, highs, lows, volumes, n: int = 20) -> dict:
         abs_gap = abs(gap_pct)
         if rng <= 0:
             return {**empty, "gap_pct": round(gap_pct, 6)}
-        gtype = _classify_gap(abs_gap, vol_ratio)
+        gtype = classify_gap(abs_gap, vol_ratio)
         prob, days, sample = _gap_fill_stats(
             closes, opens, highs, lows, volumes, gtype, n)
         if prob is not None and sample >= GAP_FILL_MIN_SAMPLE:
