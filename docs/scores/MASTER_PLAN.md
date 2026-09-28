@@ -236,7 +236,7 @@ exists and no reader uses it. No new vendor, no new measurement.
 | RISK-1 | De-duplicate the cash-sleeve/equal-weight/normalise rules re-implemented in `book_risk.portfolio_cvar` and `book_risk.book_correlated_stress` | `RiskScore.md` §3.7 | 3 | 2 | one shared helper |
 | RISK-4 / PLAN-7 | Wire `book_risk.net_beta` into the executor's book builder so `BookState.net_beta` is populated (the field is declared and never written) | `RiskScore.md` §1/§3.3; `IMPLEMENTATION_PLAN.md` §5.4 | 2 | 2 | an assignment at a `BookState(...)` site |
 | TECH-6/TECH-9/TECH-11/TECH-16 | Make `_macd_hist` public and add line/signal/hist + slopes; wire a per-signal mean-reversion z; volume spike/trend/breakout ratio; MACD crossover and histogram acceleration | `TechnicalScore.md` §1, §8.1 | 2 | 2 | the named leaf outputs exist |
-| EVT-5 | Raise `catalyst.next_earnings`' `lookahead_days` above the 60-day read horizon (the fetch already spans +95d) | `EventScore.md` §4 | 1 | 1 | the read returns >60d |
+| EVT-5 | Raise `catalyst.next_earnings`' `lookahead_days` above the 60-day read horizon (the fetch already spans +95d) | `EventScore.md` §4 | 1 | 1 | the read returns >60d — **MET, and it had been for a while: see the §12.1 row** |
 
 ---
 
@@ -766,6 +766,8 @@ was recorded as open anywhere. **44 rows, counted by id.**
 
 | FUND-17 | 5 | a stacked R&D series | **MET 2026-09-28** — `sec_edgar._TAG_MAP` declares `ResearchAndDevelopmentExpense` (live MSFT companyfacts: present, units `USD`), `_SEC_SERIES_KEYS` maps the label to `research_development` and `SERIES_KEYS` emits `research_development_series`: SEC n=19 (2008-06-30..2026-06-30, latest $35.562bn). The vendor path gains `_ROW_ALIASES['research_development']`, the key `growth_metrics` already reads for `rd_intensity` (G-Score G6). Still absent: R&D/operating expense, R&D efficiency |
 | FUND-10 | 5 | a canonical deferred/unearned key; a maturity-wall feed | **key MET 2026-09-28; the wall stays PARTIAL** — `_TAG_MAP` declares the contract-liability / deferred-revenue candidate list (current first, the `Long-term debt` ordering), `_ROW_ALIASES['deferred_revenue']` reads the vendor spelling behind a `('tax',)` exclude, `SERIES_KEYS` emits `deferred_revenue_series` (MSFT n=20, latest $72.965bn) and `growth_metrics` gains `deferred_revenue_growth`. The by-instrument maturity wall is unchanged |
+
+| EVT-5 | 1 | the read returns >60d | **MET (pre-existing; recorded 2026-09-28)** — `catalyst._EARNINGS_LOOKAHEAD_DAYS = 95`, so the default is the fetch's own forward span: `next_earnings:98` takes it as the default argument, its docstring names the window it replaced ("the old 60d default hid the 60-95d window the fetch already carried"), `:512` uses the same constant for the rendered forward edge, and `tests/test_strategies_catalyst.py:86::test_next_earnings_reads_beyond_60d_and_names_the_horizon` pins it. This row was open only because the reconciliation had no §12.1 row for it, not because the code was missing the fix |
 
 **Phase 0's two residual nits** (outside the rows §3 names): `CompositeTradeScore.md:240` still reads
 "the N-deflation question is open (decision 12)" with no marker — the same dangling reference §3.1
