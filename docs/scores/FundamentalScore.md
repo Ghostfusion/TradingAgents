@@ -1107,6 +1107,19 @@ sector at the z stage (`cross_section.py::industry_neutral_z:111`) but takes the
 renaming of the 50 band from "sector median" to "peer median" for exactly this
 reason. So the library's requirement is met one stage early and dropped one stage
 late, and `fundamental_score.py::_subscore:116` inherits it unchanged.
+**[CORRECTED 2026-09-29 — in production the sector stage is not on at all, which
+widens this divergence rather than narrowing it.** `category_scores` takes the
+step as `industry_neutral=False, sector_map=None` (`factors.py:264-265`) and **no
+production caller enables it**: it has exactly three — `scripts/value_screener.py:2532`,
+`analysis_tools.py::_quality_composite_row:5276` and `fundamental_score._subscore:128`
+— and none passes either argument. The literal `industry_neutral=True` occurs once
+in the tree, in `tests/test_category_scores.py:154-160`. So the built scores are
+`winsorize(1/99) → raw cross-sectional z → direction → weighted mean → peer-wide
+percentile`, and the case above describes a capability, not the path. The
+`basis` string already tells the truth: it prints `z basis: raw cross-sectional`.
+This is the state the owner's `SC-D2` (`docs/scores/SecondaryScores.md` §9) makes
+the default: *winsorize → sector-neutralize → percentile rank*, with
+sector-neutralisation **metric-specific** and never universal.]
 
 **C7 — the 0-100 map.** §21: `Score = min(100, max(0, 50 + 10Z))` — linear in z,
 clipped. Engine: tie-aware percentile × 100 (`factors.category_scores:258`),

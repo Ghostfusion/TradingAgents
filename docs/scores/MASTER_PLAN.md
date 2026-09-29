@@ -628,7 +628,7 @@ are otherwise cheaper and narrower:
 | id | Item | D | I | Source |
 | --- | --- | --- | --: | --: | --- |
 | UNIV-NAMES | Do the tree's names follow the survey (`EarningsScore`, `FlowScore`, …), or do the tree's component names stand with the survey names treated as families? | 1 | 1 | `ScoreUniverse.md` §8 Q7 |
-| UNIV-DILOWN | Which survey section owns dilution (§18/§24/§25) and buyback yield (§18/§26); is Piotroski's `f_eq` re-pointed or kept as a cross-check? | 1 | 2 | `ScoreUniverse.md` §8 Q2 |
+| UNIV-DILOWN | Which survey section owns dilution (§18/§24/§25) and buyback yield (§18/§26); is Piotroski's `f_eq` re-pointed or kept as a cross-check? | 1 | 2 | `ScoreUniverse.md` §8 Q2 — **ANSWERED 2026-09-29 (owner): `CapitalAllocationScore` owns dilution and buyback yield, not `QualityScore` (`SecondaryScores.md` `SC-D5`). No data moves: no `FundamentalScore`/FQS factor is a share-count quantity today, so the tree already complies and the answer assigns an owner for the eventual engine. `f_eq` is untouched — it stays Piotroski's, as a cross-check** |
 | CTS-2 | Is a second, research-side `OpportunityScore` object wanted — under a name distinct from the executor's `opportunity_score` slot? | 1 | 2 | `CompositeTradeScore.md` §6 Q2 |
 | MKT-3 | The acceptance criterion for MarketScore: "every §1 section built or declared out of scope" vs "the nine subscores exist" | 1 | 4 | `MarketScore.md` §7 Q3 |
 | VAL-3 | The coverage floor for ValuationScore's composite | 1 | 2 | `ValuationScore.md` §7 Q3 |
@@ -707,6 +707,19 @@ it, never restates it. Its rows are `MOM-1`..`MOM-6` in the table below.
 | MOM-4 | The **ownership migration** D7's matrix implies, which is the one row that edits a declared owner table: `technical_score.CATEGORY_WEIGHTS` currently carries `momentum` 18.0 and `relative_strength` 12.0 (plus `trend` 20.0, `breakout` 10.0, `volume` 10.0, `volatility` 5.0 - six of the eight §54 legs live inside TechnicalScore today), and `momentum_multihorizon` is a `get_momentum_detail` line. **ANSWERED 2026-09-27 (owner): the legs STAY — record why.** The migration was considered and declined: MF-6 has just trimmed that table to the 25 legs that survive on the panel, so moving 75 of the 100 points would re-derive `TechnicalScore` a second time and re-open the table the owner had only just settled; `MomentumScore` is therefore **additive** and reads the same underlying producers. The reason is recorded in `MomentumScore.md`. | D7 | 3 | 4 |
 | MOM-5 | The §54 **redundancy audit**, which is the same defect class MF-6 measures: the library names `ROC_21 ≈ R_21`, `RSI ↔ recent returns`, `MACD ↔ MA trend`, `SMA distance ↔ trend`, `OBV/PVT/CMF ↔ price-volume` as mathematically redundant. `technical_score`'s oscillators are three deep (`stoch_k`, `stoch_rsi`, `williams_r`, plus `rsi`, `rsi2`) with `williams_r` already measured ≡ `stoch_k` | §54; MF-6 | 3 | 4 |
 | MOM-6 | The §53 sub-items with **no producer at all**, each to be built or declined in writing: efficiency ratio, positive-day ratio, price-volume correlation, a 5-day return, the 50/100/252-day breakouts (`donchian_channel` takes an `n` but only 20 is ever wired), horizon agreement, and industry-relative RS (`cross_section.industry_neutral_z` demeans by a caller group and is not wired to any RS read) | MOM-1 | 3 | 3 |
+
+**[RECORDED 2026-09-29] All six rows above landed on 2026-09-27** —
+`tradingagents/strategies/momentum_score.py`, its own document
+(`MomentumScore.md`) and the `CHANGELOG.md` entry of that date; the clause in
+`MOM-2`'s row reading *"today **neither exists** as written"* is the state the row
+was written from, not the state now (`Z_CENTER = 50`, `Z_SCALE = 16.667`,
+`Z_WINSOR_LIMIT = 3.0` are declared in one place). **`MOM-2`'s *default* is
+nonetheless back in question**: the owner's `SC-D2` answer
+(`SecondaryScores.md` §9, 2026-09-29) makes the **winsorized, sector-neutralized
+percentile rank** the default for a stock-level score and keeps z as a diagnostic —
+and `MomentumScore` is a stock-level score whose ratified production default is `z`
+(`NORMALIZATION_METHOD = "z"`, `momentum_score.py:462`). That is `SC-D7`, open, and
+it is one named constant because `PERCENTILE_METHOD` is already implemented.
 
 ---
 
@@ -944,7 +957,7 @@ item or a note on the item it affects.
 | `ValuationScore.md` | VAL-1..VAL-20 |
 | `CompositeTradeScore.md` | CTS-1..CTS-9, DOC-19 |
 | `ScoreUniverse.md` | UNIV-* (24 systems), DOC-1 |
-| `SecondaryScores.md` | SEC-1..SEC-13 (with SC-D1..SC-D6 as decisions) |
+| `SecondaryScores.md` | SEC-1..SEC-18 (SC-D1..SC-D6 answered 2026-09-29; SC-D7 open) |
 | `MomentumScore.md` | MOM-1..MOM-6 |
 
 ## Appendix B — the nine gates, and what each unblocks

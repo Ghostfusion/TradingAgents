@@ -50,6 +50,15 @@ genuinely-new contributions - a cross-sectional **normalization** contract, a
 its eight names are already legs of built engines and the eighth already has a
 document, so **no proposed engine may be built as a second producer**.
 
+**[ANSWERED 2026-09-29]** All six of its decisions were answered the same day
+(`SecondaryScores.md` §9): no engine is promoted speculatively — promotion now needs
+the redundancy *and* the incremental-value test — the normalization default is
+**winsorized, sector-neutralized percentile rank** with z retained as a diagnostic,
+`CrowdingScore` is a consumer object rather than an engine, `MoatScore` is a hybrid
+over a deterministic backbone, dilution and buyback yield belong to
+`CapitalAllocationScore`, and the four omitted secondary names stay in the candidate
+universe and out of the build.
+
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
 [`../ScoreWeight/market.md`](../ScoreWeight/market.md) and

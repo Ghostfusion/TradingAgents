@@ -12,10 +12,13 @@ cross-engine **normalization**, **directionality** and **double-counting** layer
 of them: what already exists, under what name, what is missing, and what must not
 be built twice.
 
-**Status: a survey and a plan (2026-09-29).** Nothing here is implemented by
-writing it. This document adds no gate, no leaf, no `default_config.py` key and no
-engine module, and it proposes none for addition by itself. Every build item is in
-§8 and every one of them is gated behind an owner answer in §9.
+**Status: a survey and a plan (2026-09-29). Its six decisions were answered by the
+owner the same day — the resolutions are §9, and they change the disposition of all
+eight proposed engines.** Nothing here is implemented by writing it. This document
+adds no gate, no leaf, no `default_config.py` key and no engine module, and it
+proposes none for addition by itself. Every build item is in §8; the items the
+answers unblocked are `SEC-14`-`SEC-18`, and the one question the answers *raised*
+rather than settled is `SC-D7`.
 
 ---
 
@@ -523,6 +526,41 @@ deserves its own failing-first test.
    for exactly that table; the repo's answer today is to re-declare the sign at
    each site.
 
+### 5.7 The answered default, and what it costs
+
+`SC-D2` (§9) settles §5.1's fork: **winsorize → sector-neutralize → percentile
+rank** is the default for a stock-level score; z is kept as a diagnostic; and
+sector-neutralisation is **metric-specific**, never on market breadth itself.
+
+Three of the four steps are cheaper than the prescription sounds, and one is more
+expensive:
+
+1. **The winsorize step is already the repo's** — 0.01/0.99 in the shared core. The
+   owner deferred the exact quantile to existing methodology, so nothing moves.
+2. **The percentile step is already the repo's** for every built engine:
+   `factors.category_scores:269` maps the composite to 0-100 as a *tie-aware
+   percentile × 100*. "Percentile is the default" is therefore already true where it
+   counts; z is already only the intermediate standardisation.
+3. **The per-factor declaration already exists**: `factor_schema`'s
+   `normalization_method` and `sector_scope` sit on every factor record and are
+   validated non-empty (`:111-112`, `validate_schema:576`) — but
+   `normalization_method` is read by **nothing**, and `_spec:128-145` gives every
+   factor the same value (`"winsorised-z"`). So "metric-specific" is a *values*
+   change **plus** a *reader*. → `SEC-14`.
+4. **The sector-neutralize step costs the most, because it is not switched on at
+   all.** No production caller passes `industry_neutral`/`sector_map`, and the
+   percentile that produces 0-100 is **peer-wide, not within-sector**. The owner's
+   step 2 is implemented-but-unreached (`SEC-15`), and step 3's reference set is the
+   open half of the same item. `FundamentalScore.md` §4.4 C6 records the divergence
+   and was corrected in this pass to state the production behaviour.
+
+**One engine is now in question rather than settled.** `MomentumScore`'s `MOM-2`
+ratified `z` as its production default on 2026-09-27 — precisely what SC-D2 declines
+to make universal — while SC-D2 makes percentile the default for a stock-level
+score. That is `SC-D7` / `SEC-19`: one named constant (`momentum_score.py:462`, with
+the percentile path already implemented), but an **owner-ratified** one, so it is
+asked rather than taken.
+
 ---
 
 ## 6. The double-counting matrix
@@ -620,29 +658,110 @@ row proposes a new engine.**
 | **SEC-7** | `WORK` | Consume the **redundancy / dispersion diagnostics** an engine-side reader can print (the panel already computes 2,006 pairs) — a diagnostic beside the engine scores, never a weight change. | 3 | 3 | the printed block carries the pair count and the flags; no composite moves |
 | **SEC-8** | `WORK` | **Publish the per-engine coverage floor and the fractional-floor policy** as one declared rule across engines (`score_engine.coverage_floor` is already the one implementation). | 2 | 2 | two engines report the same floor for the same declared shape |
 | **SEC-9** | `WORK` | `ValuationScore`'s build and the `VS` cutover: **already owned by `VAL-8`/`VAL-9`/`VAL-11`/`VAL-20`** under D2. This document adds nothing and must not duplicate it. | — | — | (cross-reference only) |
-| **SEC-10** | `DECISION` | The eight engines' engine-vs-leg question — §9 / D4. | 1 | 5 | an owner sentence |
-| **SEC-11** | `DECISION` | The four omitted secondary names (Flow, Options, AI Adoption, AI Threat) — in or out of this document's scope. | 1 | 2 | an owner sentence |
-| **SEC-12** | `DECISION` | `MoatScore`'s shape: the proposal's hybrid (LLM evidence over a deterministic backbone) is the only reachable one; build it that way or decline it. | 2 | 3 | an owner sentence |
-| **SEC-13** | `DECISION` | The normalization fork: **relative rank (percentile)** vs **standardized deviation (z)** as the shared default — the proposal's own closing fork, and `MOM-2`'s for one engine. | 2 | 5 | an owner sentence + the SEC-3 table |
+| **SEC-10** | `DECISION` → **ANSWERED 2026-09-29** | The eight engines' engine-vs-leg question — **no speculative promotion**; the panel decides, and *one* of the eight survives as an engine candidate (`SC-D1`, §9.1). | 1 | 5 | `SC-D1` |
+| **SEC-11** | `DECISION` → **ANSWERED 2026-09-29** | Flow, Options, AI Adoption, AI Threat — **candidates, out of the current build** (`SC-D6`). | 1 | 2 | `SC-D6` |
+| **SEC-12** | `DECISION` → **ANSWERED 2026-09-29** | `MoatScore` — **build the hybrid**; the LLM evidence layer never manufactures a quantitative input (`SC-D4`). | 2 | 3 | `SC-D4` |
+| **SEC-13** | `DECISION` → **ANSWERED 2026-09-29** | The normalization default — **winsorized, sector-neutralized percentile rank**, with z as a diagnostic (`SC-D2`). | 2 | 5 | `SC-D2` |
+| **SEC-14** | `WORK` | Give `factor_schema.normalization_method` a **reader**, and vary its values. The field is declared and validated on **every** factor record and read by **nothing** on the scoring path; `sector_scope` is the precedent — it *is* consumed, for the `NA`/weight rule. SC-D2's "metric-specific policy" is exactly this field. | 3 | 4 | a factor whose declared method differs from `winsorised-z` scores differently, and `validate_schema` still passes |
+| **SEC-15** | `WORK` | Make the **sector-neutral step reachable in production**, and settle the ranking stage: the percentile becomes **within-sector** (the library's §22, and SC-D2's step 3) or the peer-wide percentile stands as the declared policy with the band label kept. Today no caller passes `industry_neutral`/`sector_map` at all. | 3 | 4 | a production caller enables the step and the `basis` string names it |
+| **SEC-16** | `WORK` | Build the **promotion test**'s missing half — `IncrementalValue = Performance(Existing) − Performance(Existing + S_i)` over the cached panels, beside the redundancy matrix that already exists. This is SC-D1's prerequisite for promoting anything. | 3 | 4 | a panel run prints both halves for a candidate |
+| **SEC-17** | `WORK` | `MoatScore`'s **deterministic backbone**: build the six reachable rows (ROIC persistence, ROIC − WACC spread, gross- and operating-margin premium, incremental margins, FCF durability) and record the four with no source (market-share durability, pricing power, retention/NRR, competitive concentration) as declined — so the hybrid has a defined backbone to attach its evidence layer to. | 4 | 3 | each built row has a producer + an `NA` test; the four are named in the module |
+| **SEC-18** | `WORK` | `EarningsScore`'s **residualized** family: `f(EPSSurprise, RevenueSurprise, EstimateRevisions, GuidanceRevision, RevisionBreadth, SurprisePersistence)`, explicitly excluding the growth/margin/ROIC/FCF variables `FundamentalScore` already carries. SC-D1's classification depends on it being residual, and two legs have no producer today (`§3.8`). | 3 | 3 | the family is declared, and its overlap with FGS is **measured on the panel**, not asserted |
+| **SEC-19** | `DECISION` | **`SC-D7`** — does `MomentumScore` move off its owner-ratified `z` default to the percentile default, or is it the declared exception? One named constant; it rewrites a ratified choice. | 1 | 4 | an owner sentence |
 
-**Ordering.** `SEC-3`/`SEC-4`/`SEC-5` are the whole of the proposal's genuinely-new
-contribution and are independent of every §9 answer — they make existing engines
-declarative rather than changing any number. `SEC-1`/`SEC-2` are this pass.
-`SEC-6`-`SEC-8` are ordinary Phase-2-class work. `SEC-10`-`SEC-13` gate everything
-that would create an object.
+**Ordering.** `SEC-1`/`SEC-2` are this pass. `SEC-5`, `SEC-14` and `SEC-15` are the
+proposal's genuinely-new contribution made real — they make the existing engines
+declarative rather than changing any number. `SEC-16` is the gate SC-D1 named, and
+nothing may be promoted before it exists. `SEC-3`/`SEC-4` are the declarations
+themselves. `SEC-6`-`SEC-8` are ordinary Phase-2-class work. `SEC-17`/`SEC-18` build
+the two surviving candidates. `SEC-19` is the one open question. **No row above
+creates an engine.**
 
 ---
 
-## 9. Owner decisions
+## 9. Owner decisions — **all six answered 2026-09-29**
 
-| # | Decision | Blocks | Source |
-| --- | --- | --- | --- |
-| **SC-D1** | Does any of the eight become an **engine**? D4's answer stands (`not built speculatively`); the test is `1 − \|Corr(SurveyScore, ExistingScores)\|`, one system at a time. Evaluate on the panel's redundancy matrix, not on names. | `SEC-10`; every proposed engine module | D4 (`MASTER_PLAN.md` §2.1); `ScoreUniverse.md` §8 Q5 |
-| **SC-D2** | The **normalization fork**: percentile (relative rank) or z (standardized deviation) as the shared default; winsorize quantile; and whether a sector-neutral step is required. | `SEC-3`, `SEC-13` | the proposal's §"Cross-engine normalization"; `MOM-2`; `MomentumScore.md` §3; §5.4 above |
-| **SC-D3** | Is `CrowdingScore` wanted as a **consumer** object over SentimentScore + RiskScore's legs (not a producer)? | `SEC-10` | the proposal §7.17; `ScoreUniverse.md` §6.2; `RiskScore.md` §0.3 |
-| **SC-D4** | `MoatScore`: build the hybrid (deterministic backbone + LLM evidence) or decline it in writing, given **UNIV-MOAT is NOT-FEEDABLE as a datum**. | `SEC-12` | `MASTER_PLAN.md` §5.1; `ScoreUniverse.md` §19 |
-| **SC-D5** | Which survey section owns **dilution and buyback yield** — the live `UNIV-DILOWN` question the proposal's §2.1 lands on. | `SEC-6` | `ScoreUniverse.md` §8 Q2 |
-| **SC-D6** | Are the proposal's four omitted secondary names (Flow, Options, AI Adoption, AI Threat) in scoping? | `SEC-11` | the proposal's 20-engine closing diagram |
+The owner's framing, which the six resolutions follow from: the eight-engine
+inventory is **a discovery universe, not a commitment to build eight engines** — the
+gates already in this set (D4 above all) decide which candidates survive. `SC-D7`
+was raised by the answers rather than settled by them.
+
+| # | Decision | **Resolution (owner, 2026-09-29)** |
+| --- | --- | --- |
+| **SC-D1** | Which of the eight becomes an engine | **Run the redundancy test first; promote nothing speculatively** — conditional promotion. The test is upgraded from this document's single `1 − \|Corr\|` screen to two, because *"is this score different?" is not the same question as "does this score add information?"*: `Novelty_i = 1 − max_j \|ρ(S_i, S_j)\|` over **all existing engines**, **and** `IncrementalValue_i = Performance(Existing) − Performance(Existing + S_i)` on the out-of-sample panel. Promotion is a function of `(Novelty, Coverage, DataQuality, Stability, IncrementalPredictiveValue)` — never of novelty alone |
+| **SC-D2** | The normalization fork | **Winsorized, sector-neutralized percentile rank is the default for a stock-level score** — `winsorize → sector-neutralize → percentile rank` — with **z kept as a diagnostic / research** normalization (time-series deviations, factor exposures, anomaly detection, cross-sectional research), explicitly **not** the universal production default. **Sector-neutralization is metric-specific, not universal**: needed for the multiple / margin / leverage / growth families, and explicitly **never** for market breadth itself. The shape is four switches — `winsorization: default`, `percentile: default`, `sector-neutral: metric-specific`, `z-score: optional` — *"rather than one normalization operation forced onto every engine."* The winsor quantile is deferred to the repo's existing methodology (0.01/0.99), which stands |
+| **SC-D3** | `CrowdingScore` | **A consumer/composite object, not an independent producer engine** — it is *"almost definitionally a cross-engine synthesis"*. Removed from the engine-candidate list. `FlowScore` / `OptionsScore` are **not** to be manufactured merely to support it: that is the D4 principle |
+| **SC-D4** | `MoatScore` | **Build the hybrid**, boundary stated: a deterministic backbone plus an LLM evidence layer, where *"`LLM Evidence ≠ MoatScore` until you explicitly define how the evidence maps to deterministic inputs."* The LLM explains and challenges the moat; it never manufactures a `UNIV-MOAT` quantitative input. The library's own suggestion was the same shape |
+| **SC-D5** | Dilution and buyback yield | **`CapitalAllocationScore`, not `QualityScore`** — with the conceptual split stated: QualityScore answers *how good is the economic business*, CapitalAllocationScore answers *how effectively does management deploy the capital that business produces*. `UNIV-DILOWN` is thereby **answered** |
+| **SC-D6** | Flow, Options, AI Adoption, AI Threat | **Keep all four in the candidate universe and out of the current build** unless the SC-D1 test promotes them. The two AI systems are further framed as **conditional specialized overlays** rather than universal engines — high relevance to software / IT services / content / BPO / some financial services, low to utilities and parts of industrials and commodities |
+| **SC-D7** | *(raised by SC-D2, still **open**)* | `MomentumScore`'s `MOM-2` choice — `z` as the primary, `NORMALIZATION_METHOD = "z"`, **owner-ratified 2026-09-27** — is a stock-level score using z as its *production* default, which is what SC-D2 declines to make universal. Does that engine move to the percentile default, or is it the declared exception? It is **one named constant** (`momentum_score.py:462`; `PERCENTILE_METHOD` already exists, `normalize_component(method=...)` already accepts it, so the library's own §49 is the "one-line change" its docstring claims) — but it rewrites an owner-ratified choice, so it is asked rather than taken |
+
+### 9.1 The eight, reclassified
+
+The owner's pre-matrix disposition, now the operative classification:
+
+| Proposed score | Disposition | Why |
+| --- | --- | --- |
+| QualityScore | **Factor/component of `FundamentalScore`** unless SC-D1 proves incremental | it *is* FQS (§3.1) |
+| CapitalAllocationScore | **Candidate independent engine** | moderate overlap with `FundamentalScore`; owns dilution/buyback by SC-D5 |
+| MoatScore | **Hybrid candidate** (SC-D4) | a qualitative datum with a deterministic backbone |
+| ValuationScore | **Factor/component of `FundamentalScore`** unless residualized | D2 already made `FundamentalScore` *consume* it |
+| RelativeStrengthScore | **Factor/component of Technical/Momentum** unless SC-D1 proves incremental | `MomentumScore`'s `R` + `TechnicalScore`'s 12% (§3.5) |
+| BreadthScore | **`RegimeScore` component** | one shared `market_breadth` producer (§3.6) |
+| CrowdingScore | **Consumer/composite — not an engine** (SC-D3) | crosses sentiment / risk / options / flow |
+| EarningsScore | **Candidate engine**, revision/surprise-focused and **residualized against `FundamentalScore`** | it must not repeat `RevenueGrowth`, `EPSGrowth`, margins, ROIC or FCF; make it `f(EPSSurprise, RevenueSurprise, EstimateRevisions, GuidanceRevision, RevisionBreadth, SurprisePersistence)` — which is *more* orthogonal than the proposal's own §8.24 composite |
+
+So **exactly one of the eight is a candidate independent engine**
+(`CapitalAllocationScore`), one improves by residualization (`EarningsScore`), one
+is a hybrid (`MoatScore`), one is a consumer object (`CrowdingScore`), one is a
+component of a built engine (`BreadthScore`), and three are factors of engines that
+already exist unless the panel says otherwise.
+
+### 9.2 What each resolution changes in the tree today
+
+Verified against the working tree on 2026-09-29, not inferred.
+
+* **SC-D1** — the *novelty* half of the promotion test is **runnable now**:
+  `alpha_zoo.redundancy_screen:581` and `scripts/score_panel.py::redundancy_matrix`
+  already produce the pairwise correlation matrix (measured: **2,006 pairs over 64
+  metrics**). The *incremental-value* half is **not**: `scripts/score_panel_eval.py`
+  carries no ablation / add-one-score / baseline-comparison machinery (zero matches
+  for `incremental|ablation|baseline|drop_one`), so
+  `Performance(Existing) − Performance(Existing + S_i)` has no producer. → `SEC-16`.
+* **SC-D2** — the *declaration already exists and is a placeholder*.
+  `strategies/factor_schema.py` carries `sector_scope` and `normalization_method` on
+  **every** factor record (`:111-112`), `validate_schema:576` asserts both are
+  non-empty, and `_spec:128-145` fills them with `"ALL"` / `"winsorised-z"` for every
+  factor — i.e. **declared uniformly and read by nothing on the scoring path**.
+  `sector_scope` *is* consumed (the `NA`/weight rule); `normalization_method` has no
+  reader outside the schema and its tests. "Metric-specific policy" is therefore a
+  field whose values must vary **and** whose reader must exist. → `SEC-14`.
+  Separately, the **sector-neutral step is unreachable in production** — no caller
+  passes `industry_neutral` or `sector_map`, and the literal `industry_neutral=True`
+  occurs once in the whole tree, in `tests/test_category_scores.py:154-160` — and the
+  0-100 percentile is **peer-wide, not within-sector**. That is the divergence
+  `FundamentalScore.md` §4.4 C6 records, corrected there this pass. → `SEC-15`.
+* **SC-D5** — **no data moves.** No `FundamentalScore`/FQS factor is a
+  buyback / dilution / share-count quantity (greps for `buyback|dividend` and `share*`
+  over `factor_schema.py` return only an insider-activity row), so the tree already
+  complies; the rendered producer is `ratios.shareholder_yield:370` with the leaf
+  `get_ratios`. SC-D5 **assigns an owner** for the eventual `CapitalAllocationScore`
+  and closes `UNIV-DILOWN`; it requires no migration. `MASTER_PLAN.md` §9's
+  `UNIV-DILOWN` row is marked answered in this pass.
+* **SC-D3 / SC-D6** — deferrals: no code, no row beyond `SEC-10`/`SEC-11`'s
+  reclassification. One datum worth naming for `FlowScore`: its core input is
+  `NOT-FEEDABLE` — ETF net flow (`UNIV-ETFFLOW`) — so that deferral rests on data,
+  not appetite. `OptionsScore`'s inputs largely exist (`options_surface.*`) but
+  overlap `RiskScore` and `CrowdingScore`, so it faces the strongest redundancy test
+  of the four.
+* **SC-D4** — the one resolution that **cannot be executed as written**. Of the ten
+  rows in the owner's deterministic backbone, **four have no reachable source** —
+  market-share durability, pricing-power proxies, retention / NRR and competitive
+  concentration (§3.3, Appendix A) — while the other six are ABSENT-or-partial but
+  buildable from data already fetched (ROIC persistence, ROIC − WACC spread, gross-
+  and operating-margin premium, incremental margins, FCF durability). So the backbone
+  must either build those six **and** drop or replace the four, which is a decision
+  the hybrid cannot be built around. → `SEC-17`.
 
 ---
 
@@ -731,3 +850,22 @@ from the document register — that sentence is corrected in this pass
 `Readiness` cell for an eighth engine is a claim about the engine's status and
 belongs to whoever owns that table, not to this document. Recorded so the next
 reader of the set finds it rather than re-deriving it.
+
+**Two further findings came out of the answered decisions; one is corrected in
+place.**
+
+1. **`FundamentalScore.md` §4.4 C6 asserted a production behaviour the tree does not
+   have.** It read *"the engine demeans by sector at the z stage"* — true of the
+   capability, false of the path: `category_scores` takes the step as
+   `industry_neutral=False, sector_map=None` (`factors.py:264-265`), and none of its
+   three callers (`scripts/value_screener.py:2532`,
+   `analysis_tools._quality_composite_row:5276`, `fundamental_score._subscore:128`)
+   passes either. The literal `industry_neutral=True` occurs **once** in the tree, in
+   `tests/test_category_scores.py:154-160`. Corrected in place with a dated marker —
+   and the corrected reading *widens* the divergence C6 exists to record, because the
+   sector stage is not dropped late, it is never entered. → `SEC-15`.
+2. **`MASTER_PLAN.md` §10's `MOM-1`..`MOM-6` rows read as an open queue** while all
+   six landed on 2026-09-27 (`strategies/momentum_score.py`, `MomentumScore.md`, and
+   the dated `CHANGELOG.md` entry). Annotated there rather than re-planned. `MOM-2`'s
+   **default** is separately re-opened by `SC-D7`, which is a different question from
+   whether the row is done.
