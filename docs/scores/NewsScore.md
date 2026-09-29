@@ -418,7 +418,7 @@ named in the status cell. Every symbol below was read, not grepped for.
 | 88 | ICIR weighting | 2 | PARTIAL — `alpha_health.per_period_ic:200` (returns `icir` = mean/std) + `signal_analysis.icir:77` |
 | 89 | Rank-based normalization | 2 | elsewhere — `cross_section.centered_rank:162` + `alpha_health._rank_avg:143` |
 | 90 | Cross-sectional z-score | 2 | elsewhere — `cross_section.cross_sectional_z:70` + `sentiment_research.sector_neutral_z:346` |
-| 91 | Robust z-score | 2 | PARTIAL — `analyst_revisions.winsor_z:253` (winsorised z; the MAD form is absent, grep `median_absolute` = 0) |
+| 91 | Robust z-score | 2 | PARTIAL — `strategies/ratios.py::robust_z:268` (`MAD_SCALE = 1.4826:123`, exported; reached via `cross_section.cross_sectional_z(robust=True)`, which no engine calls) + `analyst_revisions.winsor_z:253` (the winsorised mean/std z) [CORRECTED 2026-09-29: the row named only `winsor_z` and read *"the MAD form is absent, grep `median_absolute` = 0"*. The **grep test was the defect** — the helper is `robust_z`, so a search for `median_absolute` could never find it. Old reading, kept: *"`analyst_revisions.winsor_z:253` (winsorised z; the MAD form is absent, grep `median_absolute` = 0)"*] |
 | 92 | Winsorization | 1 | elsewhere — `cross_section.winsorize:31` |
 | 93 | Logistic normalization | 2 | elsewhere — `normalized.ohlson_o_score:157` (the logistic link `p = 1/(1+e^-o)` for distress probability, not a score normaliser) |
 | 94 | Hyperbolic tangent normalization | 1 | ABSENT — grep `tanh` = 0; nearest `score_engine.align:69` (linear ramp + clamp) |

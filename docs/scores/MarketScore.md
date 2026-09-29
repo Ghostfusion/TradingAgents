@@ -297,7 +297,7 @@ tree (several sibling docs' anchors have drifted by 4-120 lines — see §2 note
 | 129 | Multi-horizon trend agreement | 1 | PARTIAL | `swing.trend_architecture:76` (2 of the 4 MAs) |
 | 130 | Multi-factor market score | 0 | ABSENT | the 9-family architecture — design only |
 | 131 | Factor normalization | 1 | elsewhere | `factors.z_score:68`; `cross_section.cross_sectional_z:70` |
-| 132 | Robust normalization | 2 | PARTIAL | `cross_section.winsorize:31`; `analyst_revisions.winsor_z:253` — no MAD-based robust z |
+| 132 | Robust normalization | 2 | PARTIAL | `cross_section.winsorize:31`; `analyst_revisions.winsor_z:253`. **The MAD form exists** — `strategies/ratios.py::robust_z:268` + `MAD_SCALE = 1.4826:123`, reached by `cross_section.cross_sectional_z(robust=True)` — and no engine passes `robust=True`. [CORRECTED 2026-09-29: the row ended "— no MAD-based robust z". Old reading kept: the clause above, which was true when written] |
 | 133 | Percentile transformation | 2 | elsewhere | `factors.percentile_rank:59`; `factor_expressions.cross_sectional_rank:268` |
 | 134 | Direction normalization | 2 | PARTIAL | `score_engine.align:69` (direction-aware mapping exists as the kernel) — no per-factor inversion table |
 | 135 | Market factor subscores | 10 | ABSENT | no subscores; the built engines' subscores belong to those engines |

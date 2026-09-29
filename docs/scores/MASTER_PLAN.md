@@ -11,7 +11,9 @@ order (`IMPLEMENTATION_PLAN.md`), the wiring and contract documents
 (`FundamentalScore.md`, `TechnicalScore.md`, `RegimeScore.md`, `RiskScore.md`,
 `NewsScore.md`, `SentimentScore.md`, `EventScore.md`), the designed-not-built
 engines (`MarketScore.md`, `ValuationScore.md`), the composite
-(`CompositeTradeScore.md`) and the survey (`ScoreUniverse.md`).
+(`CompositeTradeScore.md`) and the survey (`ScoreUniverse.md`), the second survey's
+account (`SecondaryScores.md`) and the newest engine and its library
+(`MomentumScore.md`, `momentum_score.md`).
 
 Status: **a plan, nothing started.** No item here has been implemented unless §3.1
 says so, and the items marked `DECISION` cannot start at all until the owner
@@ -942,6 +944,8 @@ item or a note on the item it affects.
 | `ValuationScore.md` | VAL-1..VAL-20 |
 | `CompositeTradeScore.md` | CTS-1..CTS-9, DOC-19 |
 | `ScoreUniverse.md` | UNIV-* (24 systems), DOC-1 |
+| `SecondaryScores.md` | SEC-1..SEC-13 (with SC-D1..SC-D6 as decisions) |
+| `MomentumScore.md` | MOM-1..MOM-6 |
 
 ## Appendix B — the nine gates, and what each unblocks
 

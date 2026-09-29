@@ -347,7 +347,7 @@ changing?" and "what regime are we in?" are different dimensions.
 | 73 | Cross-Asset Composite | 1 | ABSENT | No producer. |
 | 74 | Full Regime Score | 3 | PARTIAL | `regime_score.regime_score` is the built composite, but with a different architecture: equal weights, linear ramps, no logistic — not the library's `100·σ(Σ wᵢRᵢ)`. |
 | 75 | Percentile-Based Regime Score | 2 | PARTIAL | `regime.vol_percentile:59`, `factors.percentile_rank:59`, `normalized.percentile_hist_or_none:37`. |
-| 76 | Robust Z-Score | 2 | ABSENT | No median/MAD robust-z producer. |
+| 76 | Robust Z-Score | 2 | **BUILT, no engine consumer** | `strategies/ratios.py::robust_z:268` + `MAD_SCALE = 1.4826:123` (library §23 form), reached by `cross_section.cross_sectional_z(robust=True)`; no engine passes `robust=True`, so the regime composite is unaffected. [CORRECTED 2026-09-29: the row read **ABSENT** / "No median/MAD robust-z producer". Old reading, kept] |
 | 77 | Winsorized Score | 1 | elsewhere | `analyst_revisions.winsor_z:253`. |
 | 78 | Logistic Normalization | 1 | ABSENT | No logistic normalization; `score_engine.align` is a linear ramp. |
 | 79 | Min-Max Normalization | 1 | PARTIAL | `score_engine.align` (the `(lo,hi)` ramp) is a min-max form. |

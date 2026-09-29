@@ -38,6 +38,18 @@ build one. **The work order across all of them is
 directory, ordered from the easiest and least consequential to the hardest and most
 consequential, with the nine owner decisions that gate the rest named first.
 
+**[ADDED 2026-09-29] The second survey has its own account too.**
+[`SecondaryScores.md`](SecondaryScores.md) is to `Strategies/secondary_score.md`
+what `ScoreUniverse.md` is to `Strategies/other_score.md`: the owner's third-party
+proposal of **eight engines with an exhaustive formula inventory** (Quality,
+CapitalAllocation, Moat, Valuation, RelativeStrength, Breadth, Crowding, Earnings),
+ledgered formula family by formula family against the tree, plus its three
+genuinely-new contributions - a cross-sectional **normalization** contract, a
+**double-counting** exclusion matrix and a **correlation/overlap** layer - and the
+`SEC-*` plan they imply. It records the proposal's one non-obvious result: seven of
+its eight names are already legs of built engines and the eighth already has a
+document, so **no proposed engine may be built as a second producer**.
+
 The owner's own specification of record is preserved verbatim, unedited, in
 [`../ScoreWeight/fundamental.md`](../ScoreWeight/fundamental.md),
 [`../ScoreWeight/market.md`](../ScoreWeight/market.md) and
