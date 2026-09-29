@@ -30,6 +30,7 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
+- [2026-09-29] **The annual-series reader now reads the shape the statements actually carry — the SBC-adjusted FCF stops being refused.** `ratios._series_entry` demanded the `{"values", "years"}` mapping that `annual_series`/`sec_annual_series` *return*, while `fetch_ticker` stores a series as a **bare list of floats**, so every SEC/vendor series attached to a canonical `fin` was silently rejected. Found on INCY: the run's own EDGAR table carried 17 annual `Share-based compensation` values ($249,346,000 in FY2025) while `get_quality_factors` printed *"no us-gaap:ShareBasedCompensation value for this filer"*. After the fix (measured live): `sbc=249,346,000`, `sbc_adjusted_fcf=1,105,282,000` (18.41% below reported FCF), `sbc_to_revenue=4.85%`. The same reader feeds `compute_ratios`' growth/deterioration series legs, which now light up as built. No tool, flag, gate or JSON shape changed.
 - [2026-09-28] **The interactive CLI's report tree now carries the same post-run artefacts as a batch
   tree** — `cli/main.py::save_report_to_disk` writes its tree with `write_report_tree` directly, so it
   never went through `batch.analyze` and ran neither post-save hook. It was the one producer whose trees

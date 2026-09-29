@@ -143,16 +143,33 @@ def _prior(v):
 def _series_entry(fin: dict, key: str):
     """A canonical series for ``key`` as ``{"values", "years"}``, or ``None``.
 
-    Two shapes are accepted, both emitted by ``statement_parsing``: the
-    multi-year ``<key>_series`` stack (``fetch_ticker``'s ``annual_series`` /
-    ``sec_annual_series``) and a ``{current, prior}`` pair (the moomoo merged
-    payload). One point is not a series - a stability needs at least two.
+    Three shapes are accepted, all emitted by ``statement_parsing``:
+
+    * the multi-year ``<key>_series`` stack **as a bare list of floats** - what
+      ``fetch_ticker`` actually stores, because ``annual_series`` /
+      ``sec_annual_series`` return ``{"values", "years", "periods"}`` and the
+      merge keeps only ``values``. This is the canonical ``fin`` shape:
+      ``peer_universe._series_values`` documents it and ``analysis_tools``'
+      Dechow-Dichev block asserts it (``isinstance(s, list)``);
+    * the same stack as the **wrapped entry**, kept when a caller hands
+      ``annual_series``' own return value through ``financials=`` - the only
+      shape that carries ``years``;
+    * a ``{current, prior}`` pair (the moomoo merged payload).
+
+    One point is not a series - a stability needs at least two. Reading only the
+    wrapped entry silently rejected every series the SEC / vendor path attached:
+    ``sbc_adjusted_fcf`` refused a filer's own SBC series with "no
+    ``us-gaap:ShareBasedCompensation`` value for this filer" (INCY 2026-09-29).
     """
     entry = fin.get(f"{key}_series")
-    if isinstance(entry, dict) and len(entry.get("values") or ()) >= 2:
+    years: list = []
+    if isinstance(entry, dict):
+        years = list(entry.get("years") or [])
+        entry = entry.get("values")
+    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
         return {
-            "values": [float(v) for v in entry["values"] if v is not None],
-            "years": list(entry.get("years") or []),
+            "values": [float(v) for v in entry if v is not None],
+            "years": years,
         }
     cur, prior = _latest(fin.get(key)), _prior(fin.get(key))
     if cur is not None and prior is not None:

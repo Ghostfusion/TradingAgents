@@ -544,6 +544,66 @@ def test_vs55_reads_the_sec_series_when_no_flat_key_is_present():
     assert sbc_adjusted_fcf(flat)["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
 
 
+def test_the_series_reader_accepts_fetch_tickers_bare_list_shape():
+    """``fetch_ticker`` stores ``<key>_series`` as a BARE list of floats.
+
+    That is the documented convention - ``peer_universe._series_values`` states
+    it ("``statement_parsing.fetch_ticker`` stores a series as a bare list of
+    floats ... Both shapes are accepted here") and ``analysis_tools``'
+    Dechow-Dichev block asserts it (``isinstance(s, list)``). This reader
+    required the wrapped ``{"values": ...}`` entry instead, so **every** series
+    the SEC / vendor path attached was rejected - the INCY 2026-09-29 finding.
+    """
+    from tradingagents.strategies.ratios import _series_entry
+
+    assert _series_entry({"revenue_series": [1.0, 2.0, 3.0]}, "revenue") == {
+        "values": [1.0, 2.0, 3.0],
+        "years": [],
+    }
+    # The wrapped entry (``annual_series``' own return value, handed through a
+    # caller's ``financials=``) still reads, and keeps the years it carries.
+    assert _series_entry({"revenue_series": _series([1.0, 2.0, 3.0])}, "revenue") == {
+        "values": [1.0, 2.0, 3.0],
+        "years": [2023, 2024, 2025],
+    }
+    # One point is not a series; absence stays None rather than a fabricated pair.
+    assert _series_entry({"revenue_series": [1.0]}, "revenue") is None
+    assert _series_entry({}, "revenue") is None
+
+
+def test_vs55_reads_the_bare_list_sbc_series_fetch_ticker_emits():
+    """A filer that FILES the tag must not read as one that does not.
+
+    INCY 2026-09-29: ``get_quality_factors`` printed "no
+    us-gaap:ShareBasedCompensation value for this filer" while the run's own
+    EDGAR table carried 17 annual values ($249,346,000 in FY2025) - the series
+    was a bare list and the reader rejected it, so the refusal blamed the filer
+    for a shape the reader would not read.
+    """
+    fin = _fin(
+        sbc_series=[8e6, 10e6, 12e6],
+        operating_cashflow_series=[70e6, 80e6, 90e6],
+        net_income_series=[60e6, 70e6, 80e6],
+        capex_series=[20e6, 25e6, 30e6],
+        revenue_series=[700e6, 800e6, 900e6],
+    )
+    read = sbc_adjusted_fcf(fin)
+    assert read["sbc"] == pytest.approx(12e6)
+    assert read["reported_fcf"] == pytest.approx(60e6)
+    assert read["economic_fcf"] == pytest.approx(48e6)
+    assert read["reason"] is None, "the filer's own series must not be refused"
+    assert read["sbc_to_revenue"] == pytest.approx(12e6 / 900e6)
+    # The same stack also lights up the series-derived ratio leg, which the
+    # shape mismatch had left permanently None.
+    r = compute_ratios(fin)
+    assert r["sbc"] == pytest.approx(12e6)
+    assert r["sbc_adjusted_fcf"] == pytest.approx(48e6)
+    # OCF growth (90/80 - 1) - NI growth (80/70 - 1)
+    assert r["ocf_ni_growth_divergence"] == pytest.approx(
+        (90.0 / 80.0 - 1) - (80.0 / 70.0 - 1)
+    )
+
+
 def test_vs55_ratio_to_fcf_is_refused_when_reported_fcf_is_negative():
     """SBC / negative FCF flips sign and would read as a credit."""
     read = sbc_adjusted_fcf(
