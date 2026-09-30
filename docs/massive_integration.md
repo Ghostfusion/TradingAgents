@@ -75,7 +75,9 @@ Raises the typed errors the router understands: missing key →
   is exposed to the **news** and **social** ToolNodes in
   `graph/trading_graph.py`, plus the `news_analyst` tool list + prompt.
 
-The default `news_data` chain is unchanged (`moomoo,yfinance`). To route plain
+The default `news_data` chain does **not** list `massive` — in
+`default_config.py` it is
+`eodhd,benzinga,moomoo,yfinance,alpha_vantage,stockdata,newsapi`. To route plain
 `get_news` through Massive first, set `data_vendors.news_data = "massive,..."`.
 
 ### Verify live
@@ -120,9 +122,13 @@ A ``massive`` vendor is registered for `get_macro_indicators` and returns a
 markdown time-series report (title, units, window, latest, change, table) in
 the same `(indicator, curr_date, look_back_days)` contract as FRED, supporting
 the same friendly aliases (`cpi`, `core_pce`, `unemployment`, `10y_treasury`,
-`yield_curve`, `inflation_expectations`, ...). The news/macro analyst now has a
-second HTTP vendor chain (`fred,massive,moomoo`) so macro commentary is not
-depended on a FRED key or the OpenD gateway. Alias table:
+`yield_curve`, `inflation_expectations`, ...). The macro chain in
+`default_config.py` is `fred,moomoo`: the `massive` vendor is **registered** for
+`get_macro_indicators` but is **not** in that chain, so it is unreachable
+through `route_to_vendor` until you opt in with
+`data_vendors.macro_data = "fred,massive,moomoo"`. The OpenD decoupling below
+does not depend on that opt-in — `fetch_macro_backdrop` calls Massive directly.
+Alias table:
 
 | Alias | Massive series |
 | --- | --- |
