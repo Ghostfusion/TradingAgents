@@ -33,6 +33,12 @@ import requests
 
 from .config import get_config
 from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
+from .vendor_breaker import (
+    note_vendor_ok,
+    note_vendor_refused,
+    note_vendor_transient,
+    vendor_skip_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +76,20 @@ def massive_api_key() -> str | None:
     return os.environ.get("MASSIVE_API_KEY")
 
 
+def _capability(path: str) -> str:
+    """Endpoint identity for the vendor health gate: the path minus a trailing symbol.
+
+    A 403/429 belongs to the endpoint and the plan, never to the symbol, so
+    ``.../tickers/ZM`` and ``.../tickers/NVDA`` must share one entry - keyed per
+    symbol the negative cache would need a new entry for every name and would
+    never actually suppress the re-ask.
+    """
+    parts = [p for p in str(path).split("/") if p]
+    if parts and (parts[-1].isupper() or parts[-1].replace("-", "").isdigit()):
+        parts.pop()
+    return "/".join(parts)
+
+
 def _get(path: str, params: dict | None = None) -> list | dict | None:
     """Authenticated GET; parsed JSON or None on any non-data failure.
 
@@ -82,6 +102,23 @@ def _get(path: str, params: dict | None = None) -> list | dict | None:
         raise MassiveNotConfiguredError(
             "Massive API key is not configured. Set MASSIVE_API_KEY in .env "
             "(or massive_api_key in config)."
+        )
+    capability = _capability(path)
+    skip = vendor_skip_reason("massive", capability)
+    if skip == "absent":
+        # A plan/key verdict already recorded: skip without spending a request.
+        # Not-configured is the honest type - this endpoint will not serve this
+        # account, so the caller's plan-gated advisory is the right message.
+        raise MassiveNotConfiguredError(
+            f"Massive {capability} is known unavailable on this account plan; "
+            "skipped (negative cache)."
+        )
+    if skip == "breaker":
+        # Repeated transient failures are a rate-limit story, so they must
+        # PROPAGATE - counting one as a served advisory would turn a throttle
+        # into a fact.
+        raise VendorRateLimitError(
+            f"Massive {capability} skipped: breaker open after repeated transient failures"
         )
     url = f"{BASE}{path}"
     headers = {
@@ -100,6 +137,7 @@ def _get(path: str, params: dict | None = None) -> list | dict | None:
                     resp.status_code,
                     path,
                 )
+                note_vendor_refused("massive", capability)
                 raise MassiveNotConfiguredError(
                     f"Massive returned HTTP {resp.status_code} (bad key or "
                     "plan lacks this dataset)"
@@ -108,12 +146,14 @@ def _get(path: str, params: dict | None = None) -> list | dict | None:
                 if attempt < _MAX_RETRIES:
                     time.sleep(2 * (attempt + 1))
                     continue
+                note_vendor_transient("massive")
                 raise VendorRateLimitError(
                     f"Massive {path} returned HTTP {resp.status_code}"
                 )
             if resp.status_code != 200:
                 logger.warning("Massive %s: status %s", path, resp.status_code)
                 return None
+            note_vendor_ok("massive")
             return resp.json()
         except MassiveNotConfiguredError:
             raise

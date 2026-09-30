@@ -42,6 +42,77 @@ route_to_vendor(method, ...)
   sentinels are unchanged; vendor failure logs remain the audit trail.
 - Successful results are cached in `vendor_cache` (skip category `news_data`).
 
+### 3.1b Vendor failure policy — the retained design and the endorsed rules
+
+**Status: the current design is retained.** Nothing here re-architects the
+router — the configured chain is still the only chain, a failure still degrades
+through the typed taxonomy to the next vendor, and no chain order or gate
+default changes. What follows is the *policy* that behaviour is meant to
+implement, recorded so a future change can be judged against it instead of
+guessed at.
+
+#### Retained design (do not "fix" these)
+
+| element | where | why it stays |
+| --- | --- | --- |
+| Typed errors; no retry on 401/403 | `errors.py`; the router catches by *type* | a key/plan verdict is permanent for the process — retrying it only burns quota |
+| Bounded retry on 429/5xx, then fall through | each vendor loop (`_MAX_RETRIES`, `2*(attempt+1)`) | a transient condition deserves one bounded attempt, never an unbounded storm |
+| Sentinels + typed `absence` reason | `interface.route_to_vendor_typed` | degradation must be *observable*, not silent |
+| Sentinel results are **not** cached | `vendor_cache` `_SENTINEL_PREFIXES` | a degraded result must never be replayed as a success |
+| Vendor failure logs are the audit trail | `interface.py` `Vendor %r failed for %s` | the one forensic record of what a run could not get |
+
+#### Endorsed response rules
+
+| signal | response |
+| --- | --- |
+| **401/403** (key/plan) | don't retry · **remember it** for the process (negative cache, per vendor + endpoint) · don't keep that vendor ahead in that method's chain |
+| **429 / 5xx** | bounded backoff honouring `Retry-After` where the vendor sends it, then skip **and** count toward the breaker |
+| **any fall-through** | carry `source` + caliber — availability may degrade, identity may not |
+| **panel / relative legs** | one source per panel, or drop the member and shrink `coverage` **with a reason** |
+
+#### The one thing the design was missing, and how it is now wired
+
+The failure mode was not "skip to the next vendor" — that is correct. It was
+**re-asking a refusal already known**. Measured 2026-09-30 across one set of
+batch logs: **575** FMP `profile` 429s, **60** Massive snapshot 403s (30
+`gainers` + 30 per-ticker) and **26** Finnhub `get_analyst_ratings` 403s.
+
+`vendor_breaker.py` already held both mechanisms
+(`mark_capability_absent`/`capability_available` with
+`DEFAULT_NEGATIVE_TTL_SECONDS = 900`, and `record_failure`/`allow_call`), but it
+was consulted only on the `enable_market_routing` path. Four thin helpers now
+expose it to the vendor modules themselves, market-free
+(`ANY_MARKET = "*"` — a scope deliberately separate from the market-routing key):
+
+- `vendor_skip_reason(vendor, capability)` → `"absent"` (a 401/403 verdict) |
+  `"breaker"` (open after repeated transient failures) | `None`. The two are
+  distinguishable **on purpose**: the vendor must raise
+  `VendorNotConfiguredError`/`NoMarketDataError` for `"absent"` but let
+  `VendorRateLimitError` **propagate** for `"breaker"` — otherwise a transient
+  throttle would be reported as a served advisory "unavailable".
+- `note_vendor_refused` / `note_vendor_transient` / `note_vendor_ok` record the
+  outcome.
+
+Wired at the three chokepoints that produced the measured refused calls:
+
+| module | capability key | marked on |
+| --- | --- | --- |
+| `fmp_common.fmp_get` | the endpoint `path` | 401/403 → refused; terminal 429/5xx → transient; 200 → ok |
+| `massive._get` | `_capability(path)` — the path minus a trailing symbol, so `.../tickers/ZM` and `.../tickers/NVDA` share one entry | same |
+| `finnhub.get_analyst_ratings_finnhub` | `"analyst-ratings"` | `FinnhubAPIException` 401/403 → refused |
+
+The capability is the **endpoint, never the symbol**: a plan gates per endpoint,
+so keying per symbol would need a new entry for every name in the universe and
+would never suppress the re-ask.
+
+`tests/conftest.py::_isolate_config` resets the gate before and after every test
+— it is process-global, so one test's 403 would otherwise silence that vendor
+for the rest of the session.
+
+**Left open, by decision** (both change routing behaviour and are the owner's
+call): dropping a plan-blocked vendor from a chain's order (the last clause of
+rule 1), and moving the market-routing breaker off its default-off switch.
+
 ## 3.2 `TOOLS_CATEGORIES`, `VENDOR_LIST`, `VENDOR_METHODS`
 
 - `TOOLS_CATEGORIES`: group -> {tools}. e.g. `fundamental_data` has

@@ -26,6 +26,7 @@ import finnhub
 from .config import get_config
 from .date_window import in_window
 from .errors import NoMarketDataError, VendorNotConfiguredError
+from .vendor_breaker import note_vendor_refused, vendor_skip_reason
 
 logger = logging.getLogger(__name__)
 
@@ -140,14 +141,31 @@ def get_analyst_ratings_finnhub(ticker: str) -> str:
     routing layer can surface an honest "no data" signal instead of an empty
     body (and fall through to another configured vendor for the same tool).
     """
+    capability = "analyst-ratings"
+    if vendor_skip_reason("finnhub", capability) is not None:
+        # This endpoint already answered 403 for the account: a plan fact, not a
+        # per-symbol one. Raise "no data" so the router falls through to the next
+        # vendor rather than spending another request on the same refusal.
+        raise NoMarketDataError(
+            ticker,
+            detail="finnhub analyst ratings unavailable on this account plan (skipped)",
+        )
+
     finnhub_client = _client()
 
     # recommendation_trends returns [{'buy': N, 'sell': N, 'hold': N,
     # 'strongBuy': N, 'strongSell': N, 'period': 'yyyy-mm-dd'}, ...]
-    trends = finnhub_client.recommendation_trends(ticker) or []
     # price_target returns {'symbol', 'lastUpdated', 'targetMean', 'targetHigh',
     # 'targetLow', 'targetMedian', 'numberOfAnalysts', ...}
-    target = finnhub_client.price_target(ticker) or {}
+    try:
+        trends = finnhub_client.recommendation_trends(ticker) or []
+        target = finnhub_client.price_target(ticker) or {}
+    except finnhub.FinnhubAPIException as exc:
+        # Only the plan/auth verdict is remembered; a 5xx or a timeout is
+        # transient and keeps its own retry/fall-through behaviour.
+        if getattr(exc, "status_code", None) in (401, 403):
+            note_vendor_refused("finnhub", capability)
+        raise
 
     if not trends and not target.get("targetMean"):
         raise NoMarketDataError(

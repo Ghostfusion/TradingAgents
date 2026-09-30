@@ -72,11 +72,18 @@ def _isolate_config():
     from tradingagents.agents.utils import analysis_tools as _atools
 
     _atools._clear_ohlcv_cache()
+    # The vendor health gate (negative cache + cooldown breaker) is
+    # process-global: a test in which a vendor answers 403/429 would otherwise
+    # suppress that vendor's calls for every later test in the same session.
+    from tradingagents.dataflows.vendor_breaker import reset as _reset_breaker
+
+    _reset_breaker()
     yield
     config_module.reset_config()
     set_run_trade_date("")
     vendor_cache.clear()
     _atools._clear_ohlcv_cache()
+    _reset_breaker()
     # Close any real moomoo OpenQuoteContext a test created. The SDK's
     # background threads only tear down while the process is healthy; contexts
     # left open until interpreter exit hang the run for minutes.

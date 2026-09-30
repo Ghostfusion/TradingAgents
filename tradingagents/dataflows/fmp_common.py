@@ -9,6 +9,13 @@ from __future__ import annotations
 import logging
 import time
 
+from tradingagents.dataflows.vendor_breaker import (
+    note_vendor_ok,
+    note_vendor_refused,
+    note_vendor_transient,
+    vendor_skip_reason,
+)
+
 logger = logging.getLogger(__name__)
 
 BASE = "https://financialmodelingprep.com/stable"
@@ -38,6 +45,12 @@ def fmp_get(path: str, params: dict | None = None) -> dict | list | None:
     key = f_key()
     if not key:
         return None
+    # A refusal already known must not be re-asked. The endpoint IS the
+    # capability: FMP's plan gates per endpoint, never per symbol.
+    skip = vendor_skip_reason("fmp", path)
+    if skip is not None:
+        logger.debug("fmp %s: skipped (%s)", path, skip)
+        return None
     url = f"{BASE}/{path}"
     query = dict(params or {})
     query["apikey"] = key
@@ -46,16 +59,19 @@ def fmp_get(path: str, params: dict | None = None) -> dict | list | None:
             resp = requests.get(url, params=query, timeout=TIMEOUT)
             if resp.status_code in (401, 403):
                 logger.warning("FMP auth/forbidden (check FMP_API_KEY): %s", resp.status_code)
+                note_vendor_refused("fmp", path)
                 return None
             if resp.status_code in (429,) or resp.status_code >= 500:
                 if attempt < _MAX_RETRIES:
                     time.sleep(2 * (attempt + 1))
                     continue
                 logger.warning("fmp %s: status %s", path, resp.status_code)
+                note_vendor_transient("fmp")
                 return None
             if resp.status_code != 200:
                 logger.warning("fmp %s: status %s", path, resp.status_code)
                 return None
+            note_vendor_ok("fmp")
             return resp.json()
         except Exception as exc:  # noqa: BLE001
             logger.warning("fmp %s failed: %s", path, exc)

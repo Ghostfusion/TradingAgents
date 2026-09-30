@@ -130,7 +130,63 @@ def capability_available(market: str, vendor: str, capability: str,
         return t >= until
 
 
+#: Wildcard market for the vendor-layer gate. A vendor module does not know
+#: which market a call serves, so its entries are keyed market-free. The
+#: market-routing gate uses a real market ("US"/"CA"/...) and is therefore a
+#: narrower, separate scope - the two never shadow each other.
+ANY_MARKET = "*"
+
+
+def vendor_skip_reason(vendor: str, capability: str = "",
+                       now: float | None = None) -> str | None:
+    """Why ``vendor`` must be skipped right now, or ``None`` when it may be called.
+
+    Both halves of the endorsed vendor-failure policy - and they are deliberately
+    distinguishable, because they leave the vendor module as DIFFERENT error
+    types:
+
+    * ``"absent"`` - a 401/403 verdict held in the negative cache. A key/plan
+      fact, stable for the process, which must not be re-asked per call.
+      Measured 2026-09-30: one set of batch logs carried **575** FMP ``profile``
+      429s, **60** Massive snapshot 403s and **26** Finnhub analyst-ratings
+      403s - every one of them a re-ask of a refusal already known.
+    * ``"breaker"`` - the cooldown breaker is open after repeated transient
+      failures.
+
+    Collapsing the two would report a transient throttle as a served advisory
+    "unavailable", which is what the typed taxonomy exists to prevent.
+    """
+    if not capability_available(ANY_MARKET, vendor, capability, now=now):
+        return "absent"
+    if not allow_call(ANY_MARKET, vendor, now=now):
+        return "breaker"
+    return None
+
+
+def note_vendor_refused(vendor: str, capability: str = "",
+                        ttl: int = DEFAULT_NEGATIVE_TTL_SECONDS,
+                        now: float | None = None) -> None:
+    """Remember that ``vendor`` cannot serve ``capability`` (HTTP 401/403).
+
+    A key/plan verdict does not change within a run, so it is remembered rather
+    than rediscovered. ``capability`` is the ENDPOINT identity, never the
+    symbol: a 403 on ``.../tickers/ZM`` is not about ZM.
+    """
+    mark_capability_absent(ANY_MARKET, vendor, capability, ttl=ttl, now=now)
+
+
+def note_vendor_transient(vendor: str, now: float | None = None) -> bool:
+    """Count a transient failure (429/5xx); True when this tripped the breaker."""
+    return record_failure(ANY_MARKET, vendor, now=now)
+
+
+def note_vendor_ok(vendor: str) -> None:
+    """A successful call re-closes the breaker (fails cleared)."""
+    record_success(ANY_MARKET, vendor)
+
+
 __all__ = [
+    "ANY_MARKET",
     "reset",
     "allow_call",
     "record_success",
@@ -139,4 +195,8 @@ __all__ = [
     "state_snapshot",
     "mark_capability_absent",
     "capability_available",
+    "vendor_skip_reason",
+    "note_vendor_refused",
+    "note_vendor_transient",
+    "note_vendor_ok",
 ]
