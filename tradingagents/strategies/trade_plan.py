@@ -11,6 +11,14 @@ Portfolio Manager and the 3 risk debators read pre-decision (injected into
 their prompts) and that is appended to the report. It is pure and
 deterministic - the LLMs argue over it, never create it.
 
+It carries **§103's ENTRY and EXIT blocks whole**: the entry side assembles
+``entry_exit_price``'s members (§100's ``final_entry_price`` = the ``min`` over
+the ceiling terms actually present, naming the binding one) and the exit side
+renders the §101 predicate - every decidable exit evaluated, the first to fire
+in ``EXIT_PRECEDENCE``, and the ones that could not be measured named as
+absent. So the agents read the entry price AND the exit price from one card
+instead of inventing either.
+
 Everything is advisory: the card reports measured numbers or explicit
 'unavailable', and never blocks a decision by itself (hard gating stays in
 the risk governor / strict value-dip flags).
@@ -83,7 +91,11 @@ def build_trade_plan(
                    capital_at_risk, targets).
         be_rule  - ``exits.breakeven_after_confirmation`` result.
         targets  - ``swing.targets_rr`` result OR ``tranche_plan['targets']``.
-        trail    - ``swing.trail_ema`` / ``chandelier_exit`` result.
+                   Its final tier (T2, else T1) is the §103 EXIT block's price
+                   target.
+        trail    - ``swing.trail_ema`` / ``chandelier_exit`` result. Its own
+                   level (``ema`` / ``chandelier``) is the §103 EXIT block's
+                   ``trailing_stop``.
         valuation_ceiling / expected_return_ceiling / rr_ceiling - the entry
                    ceiling sources (advisory): the price above which that
                    construct's economics fail. Whichever is absent simply
@@ -139,6 +151,26 @@ def build_trade_plan(
     # it, but a cost adjustment is not an independent economic ceiling, and
     # §100 itself applies the buffer before the min - inside the min would
     # double-count it.
+    # §101's exit inputs that this card can actually MEASURE: the trailing
+    # level (the trail read's own price - EMA20 close-through, or the
+    # chandelier) and the plan's final tier as the price target. The other four
+    # of the six (risk_gate / thesis_break / time_exit / expected_value) are not
+    # decidable at plan time and stay ABSENT, which shrinks `coverage` rather
+    # than reading as "no exit".
+    trail_level = trail_source = None
+    if isinstance(trail, dict):
+        for _key, _label in (("ema", "EMA20"), ("chandelier", "chandelier")):
+            if trail.get(_key) is not None:
+                trail_level, trail_source = trail[_key], _label
+                break
+    _tiers = targets or (tranche or {}).get("targets") or {}
+    if _tiers.get("t2") is not None:
+        exit_target, exit_target_basis = _tiers["t2"], "T2"
+    elif _tiers.get("t1") is not None:
+        exit_target, exit_target_basis = _tiers["t1"], "T1"
+    else:
+        exit_target = exit_target_basis = None
+
     assembled = entry_exit_price(
         price=price,
         valuation_ceiling=valuation_ceiling,
@@ -155,14 +187,21 @@ def build_trade_plan(
         execution_impact=execution_impact,
         execution_slippage=execution_slippage,
         liquidity_status=liquidity_status,
+        trailing_stop=trail_level,
+        target=exit_target,
     )
     final_entry = assembled["entry"]
+    exit_block = assembled["exit"]
     if final_entry["final_entry_price"] is not None:
+        _basis = "; ".join(
+            f"{_t}={_num(_v)}"
+            for _t, _v in sorted(final_entry["final_entry_basis"].items())
+        )
         lines.append(
             f"- **Final entry price (advisory, §100): "
             f"{_num(final_entry['final_entry_price'])}** - min of "
-            f"{final_entry['final_entry_binding']} over "
-            f"{', '.join(sorted(final_entry['final_entry_basis']))}"
+            f"{final_entry['final_entry_binding']} over the §103 terms present "
+            f"({_basis})"
         )
     # Target entry (advisory): §100's P_entry,target over the PRICE anchors
     # that exist. The score-weighted blend is deliberately NOT implemented -
@@ -207,9 +246,10 @@ def build_trade_plan(
                 if execution["liquidity_status"] else ""
             )
             lines.append(
-                f"- Execution cost (advisory): buffer {_pct(execution['buffer_fraction'])} "
+f"- Execution cost (advisory, §74-§78): buffer {_pct(execution['buffer_fraction'])} "
                 f"({_num(execution['buffer'])}) -> execution price "
-                f"{_num(execution['execution_price'])} (terms: "
+                f"{_num(execution['execution_price'])} (= §103 "
+                f"liquidity_adjusted_entry_price; terms: "
                 f"{', '.join(execution['available_sources'])}; coverage "
                 f"{execution['coverage']}/{len(COST_SOURCES)}{liquidity_note})"
             )
@@ -296,6 +336,44 @@ def build_trade_plan(
         "- Trail remainder: EMA(20) close-through exit / chandelier "
         f"{'available' if (trail and trail.get('exit') is not None) else 'unavailable'}"
     )
+    # §103's EXIT block (§101): the six independent exits, every decidable one
+    # evaluated at the reference price, the first to fire in EXIT_PRECEDENCE
+    # naming the exit. A condition that could not be evaluated is rendered as
+    # ABSENT - never as "no exit" (exits.exit_decision's own contract), so a
+    # reader can tell a measured no-exit from an unmeasured one. The Trader and
+    # the PM argue the exit from this row.
+    _cond = exit_block["conditions"]
+    _levels = []
+    if stop is not None:
+        _levels.append(f"stop_loss {_num(stop)}")
+    if trail_level is not None:
+        _levels.append(f"trailing_stop {_num(trail_level)} ({trail_source})")
+    if exit_target is not None:
+        _levels.append(f"target {_num(exit_target)} ({exit_target_basis})")
+    if exit_block["exit"] is True:
+        _pred = f"FIRES - {exit_block['reason']} at exit price {_num(exit_block['exit_price'])}"
+    elif exit_block["exit"] is False:
+        _pred = f"no exit condition fired at {_num(price)}"
+    else:
+        _pred = "no exit condition could be evaluated"
+    lines.append(
+        f"- §103 exit predicate (advisory, §101): {_pred} - evaluated: "
+        + ("; ".join(f"{_k}={_v}" for _k, _v in _cond.items()) if _cond else "none")
+        + f" (coverage {exit_block['coverage']}/{len(exit_block['precedence'])})"
+    )
+    lines.append(
+        "- §103 exit levels: "
+        + (" / ".join(_levels) if _levels else "unavailable")
+        + " (precedence: "
+        + " > ".join(exit_block["precedence"])
+        + ")"
+    )
+    _absent = [n for n in exit_block["precedence"] if n not in _cond]
+    if _absent:
+        lines.append(
+            "- §103 exits not measurable at plan time (absent, NOT 'no exit'): "
+            + ", ".join(_absent)
+        )
     # Adherence checklist (the journal score inputs).
     lines.append(
         "- Adherence checklist: (1) entry only at tranche levels; "

@@ -100,7 +100,13 @@ def create_trader(llm, backup_llm=None):
                     f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
                     f"Leverage these insights to make an informed and strategic decision.\n\n"
                     f"Computed decision context (deterministic, advisory - cite these numbers, "
-                    f"do not invent your own):\n{computed_context}"
+                    f"do not invent your own):\n{computed_context}\n\n"
+                    f"The 'Trade plan card' inside that context IS the §103 entry/exit price "
+                    f"block: take your entry level from its entry ceiling and §100 final entry "
+                    f"price, your stop from its unified stop, and argue any exit from its §103 "
+                    f"exit predicate (which exit fires first, and which exits were NOT "
+                    f"measurable). Quote those levels - never state a price the card does not "
+                    f"carry."
                 ),
             },
         ]

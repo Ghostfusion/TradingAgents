@@ -322,7 +322,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 
 **Risk-adjusted sizing and conviction (required):**
 - Set `position_size` explicitly from the risk debate — scale it down (or to `0% — no new position`) when the analysts flag high volatility, thin liquidity, or elevated downside risk; scale up only when the debate converged on a well-evidenced view. This is the final size that supersedes the trader's proposal.
-- Set `stop_loss` from the risk debate's volatility/liquidity assessment (e.g. below a key support level or one ATR from entry) when the decision is to enter or hold a position.
+- Set `stop_loss` from the risk debate's volatility/liquidity assessment (e.g. below a key support level or one ATR from entry) when the decision is to enter or hold a position. Ground it in the trade-plan card's §103 entry/exit price block: the entry ceiling and §100 final entry price set the entry side, the unified stop / trailing_stop / target levels set the exit side, and the card's §103 exit predicate names which exit fires first plus the exits it could NOT measure. Quote those levels — never state a price the card does not carry.
 - Set `confidence` (0–1) from how strongly the evidence converged and how robust the data was. Set `consensus` to `low` when the aggressive/conservative/neutral analysts materially disagreed (a dissent flag), and `high` when they broadly aligned.
 - Prefer a clear `Hold`/`Underweight`/`Sell` (with `position_size` `0%` or a reduction) over an ambiguous call when the debate is split — a decision to do nothing is a decision.
 
