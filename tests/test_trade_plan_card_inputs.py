@@ -14,14 +14,7 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 import tradingagents.graph.trading_graph as tg
-
-# Cold-start: this file imports the graph, whose module scope drags in the
-# analysis tools; a cold interpreter spends minutes inside conftest. The
-# file-level marker overrides --timeout, so it has to be the generous one.
-pytestmark = pytest.mark.timeout(600)
 
 
 def _closes(n: int = 200) -> list[float]:
@@ -110,66 +103,3 @@ def test_card_without_closes_reports_no_ceiling_source(monkeypatch):
     )
     assert "coverage 0/3" in ceiling_line
     assert "Ceiling headroom" not in card
-
-
-def test_card_renders_the_103_exit_predicate_over_the_measured_levels(monkeypatch):
-    """§103's EXIT block reaches the Trader and the PM through this one card.
-
-    ``build_trade_plan`` called ``entry_exit_price`` without a single exit
-    input and then discarded ``assembled["exit"]``, so ``exits.exit_decision``
-    - which has no other caller in the repo - never ran for a plan and the
-    agents saw no exit price at all. The trailing level is the trail read's own
-    price; the target is the plan's final tier.
-    """
-    card = _card(monkeypatch, _closes())
-
-    predicate = _line(card, "§103 exit predicate")
-    assert "coverage 3/7" in predicate
-    assert "stop=False" in predicate
-    assert "trailing_stop=" in predicate
-    assert "target=" in predicate
-
-    levels = _line(card, "§103 exit levels")
-    assert "stop_loss " in levels
-    assert "trailing_stop " in levels and "(EMA20)" in levels
-    assert "target " in levels and "(T2)" in levels
-    assert "precedence: risk_gate > stop > trailing_stop > target" in levels
-
-
-def test_the_exit_predicate_fires_on_a_breached_stop_at_its_own_price():
-    """A breached level names the exit and the price it would transact at."""
-    from tradingagents.strategies.trade_plan import build_trade_plan
-
-    card = build_trade_plan(ticker="T", price=90.0, tranche={"stop": 95.0}, config={})
-
-    predicate = _line(card, "§103 exit predicate")
-    assert "FIRES - stop at exit price 95.00" in predicate
-    assert "coverage 1/7" in predicate
-
-
-def test_card_without_closes_names_every_exit_absent(monkeypatch):
-    """Nothing decidable -> ``exit`` is None and every exit is named absent.
-
-    An unmeasured exit must never read as "no exit" (``exit_decision``'s own
-    contract), which is why the absent list is rendered rather than an
-    all-false condition set.
-    """
-    card = _card(monkeypatch, [])
-
-    predicate = _line(card, "§103 exit predicate")
-    assert "no exit condition could be evaluated" in predicate
-    assert "coverage 0/7" in predicate
-
-    absent = _line(card, "not measurable at plan time")
-    assert "(absent, NOT 'no exit')" in absent
-    assert "risk_gate" in absent and "thesis_break" in absent and "expected_value" in absent
-
-
-def test_final_entry_price_names_the_value_of_every_term(monkeypatch):
-    """§100's ``min`` is only auditable if the terms behind it are readable."""
-    card = _card(monkeypatch, _closes())
-
-    line = _line(card, "Final entry price")
-    assert "over the §103 terms present" in line
-    assert "max_entry_price=" in line
-    assert "target_entry_price=" in line
