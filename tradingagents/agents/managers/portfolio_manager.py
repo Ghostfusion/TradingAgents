@@ -323,6 +323,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 **Risk-adjusted sizing and conviction (required):**
 - Set `position_size` explicitly from the risk debate — scale it down (or to `0% — no new position`) when the analysts flag high volatility, thin liquidity, or elevated downside risk; scale up only when the debate converged on a well-evidenced view. This is the final size that supersedes the trader's proposal.
 - Set `stop_loss` from the risk debate's volatility/liquidity assessment (e.g. below a key support level or one ATR from entry) when the decision is to enter or hold a position. Ground it in the trade-plan card's §103 entry/exit price block: the entry ceiling and §100 final entry price set the entry side, the unified stop / trailing_stop / target levels set the exit side, and the card's §103 exit predicate names which exit fires first plus the exits it could NOT measure. Quote those levels — never state a price the card does not carry.
+- Set `entry_price` and `price_target` from that SAME §103 block whenever the decision is to enter or hold: `entry_price` is the card's **§100 final entry price** (fall back to its entry ceiling when no final was measurable), and `price_target` is the card's exit target (T2, else T1). They are different levels from `stop_loss`, and a decision that carries a stop but no stated entry or target has not described the trade. Leave both None — never the current spot price — for a Hold/Underweight/Sell with no entry to plan.
 - Set `confidence` (0–1) from how strongly the evidence converged and how robust the data was. Set `consensus` to `low` when the aggressive/conservative/neutral analysts materially disagreed (a dissent flag), and `high` when they broadly aligned.
 - Prefer a clear `Hold`/`Underweight`/`Sell` (with `position_size` `0%` or a reduction) over an ambiguous call when the debate is split — a decision to do nothing is a decision.
 
@@ -481,6 +482,18 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             fallback_llm=fallback_llm,
             backup_llm=backup_llm,
         )
+
+        # §103 ENTRY/EXIT price block (computed, advisory): the same measured
+        # block the Trader's plan carries, appended to the PM's own output, so
+        # 5_portfolio/decision.md states the entry price and the exit price
+        # beside the decision - not only inside the report's computed-context
+        # dump (IVa). Rendered from the run's ONE captured block, never
+        # re-assembled here.
+        from tradingagents.strategies.trade_plan import render_entry_exit_block
+
+        price_block = render_entry_exit_block(state.get("entry_exit_block"))
+        if price_block:
+            final_trade_decision = final_trade_decision + "\n\n" + price_block
 
         new_risk_debate_state = {
             "judge_decision": final_trade_decision,

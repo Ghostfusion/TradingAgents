@@ -48,11 +48,22 @@ class PositionContract:
         the report's spot was 336.25 - a reader saw two unexplained stops).
         The ATR basis is printed too: same level of explanation, for the other
         input that decides the stop.
+
+        The ``target`` is printed for the same reason, and one more: this string
+        is the ONLY channel ``reporting`` reads the contract's target through
+        (it regex-parses ``target <n>`` here to fill ``take_profit`` in
+        ``research_decision.json``, the invalidation conditions and the audit
+        note). Leaving it out of the render made the field unrecoverable - every
+        run wrote ``take_profit: null`` next to a card that had measured a
+        target, because the parser was reading a string the renderer had never
+        put one into (fixed 2026-09-30; the same measurement now also travels
+        structurally, in the §103 entry/exit block).
         """
         anchor = f" (from entry {self.entry_price:.2f})" if self.entry_price else ""
         basis = f", atr {self.atr:.2f} ({self.atr_source})" if self.atr else ""
+        target = f", target {self.target}" if self.target is not None else ""
         return (
-            f"size {self.size_pct:.1%}, stop {self.stop_loss}{anchor}{basis}, "
+            f"size {self.size_pct:.1%}, stop {self.stop_loss}{anchor}{basis}{target}, "
             f"reason: {self.reason()}"
         )
 

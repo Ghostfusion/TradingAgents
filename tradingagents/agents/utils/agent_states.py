@@ -107,6 +107,22 @@ class AgentState(MessagesState):
         "the structured debate (the last bounded to 3000 chars) - parsed into "
         "the L1 ground-truth registry, and rendered as report section IVa",
     ]
+    entry_exit_block: Annotated[
+        dict,
+        "The ONE structured §103 ENTRY/EXIT object for this run - the entry "
+        "ceilings and §100 final entry price, the §101 exit levels and "
+        "predicate, and the statuses/coverage for each - captured from the "
+        "trade-plan card's own assembly (`strategies/trade_plan.build_trade_plan"
+        "(capture=...)`) rather than computed a second time. Read by the Trader "
+        "and the PM (each appends `trade_plan.render_entry_exit_block` to its "
+        "own output, so the entry/exit prices print in 3_trading/trader.md and "
+        "5_portfolio/decision.md) and by `reporting.write_research_decision` "
+        "(the artifact's `position.entry_price` and `entry_exit` block). Empty "
+        "when no card was built (a gate-off run, or a state rebuilt from "
+        "markdown - the rebuilder has no captured block, and must not invent "
+        "one). Declared here because native LangGraph SILENTLY DROPS undeclared "
+        "keys (see docs/AGENT_ONBOARDING.md, 2026-08-28)",
+    ]
     quant_scorecard: Annotated[
         dict,
         "WP-12: the ONE score snapshot for this run - every engine's own result, "

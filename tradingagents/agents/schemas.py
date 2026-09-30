@@ -160,12 +160,23 @@ class TraderProposal(BaseModel):
         default=None,
         description="Optional stop-loss price in the instrument's quote currency.",
     )
+    target_price: float | None = Field(
+        default=None,
+        description=(
+            "Optional exit price target in the instrument's quote currency - "
+            "the level at which this position is taken off (§101's profit "
+            "target). Quote the trade-plan card's §103 exit target (its T2, else "
+            "T1, else the §93 measured level); leave None - never a placeholder "
+            "- when the card measured no exit level, and for a Sell/Hold with no "
+            "position to exit."
+        ),
+    )
     position_sizing: str | None = Field(
         default=None,
         description="Optional sizing guidance, e.g. '5% of portfolio'.",
     )
 
-    @field_validator("entry_price", "stop_loss", mode="before")
+    @field_validator("entry_price", "stop_loss", "target_price", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
@@ -187,6 +198,8 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
     if proposal.stop_loss is not None:
         parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
+    if proposal.target_price is not None:
+        parts.extend(["", f"**Target Price**: {proposal.target_price}"])
     if proposal.position_sizing:
         parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
     parts.extend([
@@ -227,6 +240,17 @@ class PortfolioDecision(BaseModel):
             "Detailed reasoning anchored in specific evidence from the analysts' "
             "debate. If prior lessons are referenced in the prompt context, "
             "incorporate them; otherwise rely solely on the current analysis."
+        ),
+    )
+    entry_price: float | None = Field(
+        default=None,
+        description=(
+            "Optional entry price in the instrument's quote currency - the "
+            "highest price at which this trade is still worth taking. Quote the "
+            "trade-plan card's §103 **final entry price** (or its entry ceiling "
+            "when no final was measurable); never invent one. Leave it None for "
+            "a Hold/Underweight/Sell with no entry to plan, and never restate "
+            "the current spot price as an entry."
         ),
     )
     price_target: float | None = Field(
@@ -316,7 +340,7 @@ class PortfolioDecision(BaseModel):
         ),
     )
 
-    @field_validator("price_target", "stop_loss", "confidence", mode="before")
+    @field_validator("entry_price", "price_target", "stop_loss", "confidence", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
@@ -342,6 +366,8 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         "",
         f"**Investment Thesis**: {decision.investment_thesis}",
     ]
+    if decision.entry_price is not None:
+        parts.extend(["", f"**Entry Price**: {decision.entry_price}"])
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:

@@ -2,8 +2,12 @@
 
 import json
 
+import pytest
+
 from tradingagents import reporting
 from tradingagents.reporting import _slugify, write_report_tree
+
+pytestmark = pytest.mark.timeout(180)
 
 
 def _state(verdict="PASS", reasons=None, risk_ctx=None):
@@ -926,3 +930,76 @@ def test_run_card_records_the_day_count_conflict(tmp_path):
     assert card is not None
     assert "83 days out" in card["news"][0]["claim"]
     assert "66 days" in card["news"][0]["claim"]
+
+
+# ---------------------------------------------------------------------------
+# §103 entry/exit price: the artifact carries both sides (2026-09-30)
+# ---------------------------------------------------------------------------
+
+
+def test_decision_carries_the_entry_price_and_the_103_block(tmp_path):
+    """The artifact dropped the entry side entirely, and `take_profit` could not
+    be recovered because the contract render carried no target. Both now travel
+    structurally, from the ONE §103 block the trade-plan card computed."""
+    state = _state()
+    state["position_contract"] = (
+        "size 10.0%, stop 95.0 (from entry 100.0), atr 2.00 (h/l), target 110.0, reason: x"
+    )
+    state["entry_exit_block"] = {
+        "entry": {"final_entry_price": 98.5},
+        "exit": {"coverage": 3, "precedence": ["risk_gate", "stop"]},
+        "levels": {"unified_stop": 95.0, "target": 110.0},
+    }
+    state["pm_decision"] = {"rating": "Buy"}
+    write_report_tree(state, "TST", tmp_path)
+    doc = _decision(tmp_path)
+
+    assert doc["position"]["entry_price"] == 98.5
+    assert doc["position"]["stop_loss"] == 95.0
+    assert doc["position"]["take_profit"] == 110.0
+    assert doc["entry_exit"]["entry"]["final_entry_price"] == 98.5
+    assert doc["entry_exit"]["exit"]["precedence"] == ["risk_gate", "stop"]
+
+
+def test_decision_entry_price_falls_back_to_the_contract_anchor(tmp_path):
+    """A run whose card measured no §103 final entry still has the anchor the G1
+    stop was measured from. The fallback is that measured number, never the
+    spot price."""
+    state = _state()
+    state["position_contract"] = "size 10.0%, stop 95.0 (from entry 100.0), reason: x"
+    state["pm_decision"] = {"rating": "Buy"}
+    write_report_tree(state, "TST", tmp_path)
+
+    assert _decision(tmp_path)["position"]["entry_price"] == 100.0
+
+
+def test_decision_entry_price_is_null_when_nothing_measured_it(tmp_path):
+    """No §103 block, no anchor in the contract: the field is null (unmeasured),
+    and the block attaches as null rather than as an empty object."""
+    state = _state()
+    state["position_contract"] = "size 10.0% @ stop 95.0 (kelly=0.100)"
+    state["pm_decision"] = {"rating": "Buy"}
+    write_report_tree(state, "TST", tmp_path)
+    doc = _decision(tmp_path)
+
+    assert doc["position"]["entry_price"] is None
+    assert doc["entry_exit"] is None
+
+
+def test_the_price_block_reaches_the_decision_sections(tmp_path):
+    """The block the Trader's and the PM's nodes append to their own output must
+    land in BOTH decision files and the consolidated report - that is the point
+    of carrying it on their outputs rather than only in section IVa's dump."""
+    marker = "**Entry / Exit price (§103, computed - advisory):**\n- Final entry price: 98.50"
+    state = _state()
+    state["trader_investment_plan"] = "Trader plan\n\n" + marker
+    state["risk_debate_state"]["judge_decision"] = "**Rating**: Buy\n\n" + marker
+    report = write_report_tree(state, "TST", tmp_path)
+
+    assert "Final entry price: 98.50" in (
+        tmp_path / "3_trading" / "trader.md"
+    ).read_text(encoding="utf-8")
+    assert "Final entry price: 98.50" in (
+        tmp_path / "5_portfolio" / "decision.md"
+    ).read_text(encoding="utf-8")
+    assert "Final entry price: 98.50" in report.read_text(encoding="utf-8")

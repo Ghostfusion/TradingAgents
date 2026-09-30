@@ -806,9 +806,17 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001 - advisory; the rows degrade to gaps
             closes = []
         if self.config.get("enable_computed_context"):
+            # The card is rendered here ONCE, and `capture` hands back the
+            # structured §103 ENTRY/EXIT object it was rendered from. That dict
+            # goes on the state channel so the Trader's plan, the PM's decision
+            # and the report artifact carry the entry price and the exit price
+            # the card printed (`strategies/trade_plan.render_entry_exit_block`)
+            # instead of a second assembly or a regex over the markdown.
+            _capture: dict = {}
             init_agent_state["computed_decision_context"] = self._compiled_decision_context(
-                company_name, init_agent_state, closes=closes
+                company_name, init_agent_state, closes=closes, capture=_capture
             )
+            init_agent_state["entry_exit_block"] = _capture.get("entry_exit") or {}
         # Phase 3 (§9): the Decision Packet is now rendered by the `Decision
         # Packet` graph NODE, just after the analysts - because §9's conflict
         # ledger is a property of the analyst reports, which do not exist before
@@ -1550,7 +1558,12 @@ class TradingAgentsGraph:
             return None
 
     def _compiled_decision_context(
-        self, ticker: str, state: dict | None = None, *, closes: list | None = None
+        self,
+        ticker: str,
+        state: dict | None = None,
+        *,
+        closes: list | None = None,
+        capture: dict | None = None,
     ) -> str:
         """Compile the deterministic decision context fed to the Trader, PM
         and the 3 risk debators (Phase A-E). All advisory; never blocks.
@@ -1632,6 +1645,7 @@ class TradingAgentsGraph:
                 ticker=ticker,
                 price=(closes[-1] if closes else None),
                 config=self.config,
+                capture=capture,
                 **measured_inputs(closes, self.config),
             )
             out.append(plan)

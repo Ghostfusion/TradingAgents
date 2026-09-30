@@ -105,8 +105,11 @@ def create_trader(llm, backup_llm=None):
                     f"block: take your entry level from its entry ceiling and §100 final entry "
                     f"price, your stop from its unified stop, and argue any exit from its §103 "
                     f"exit predicate (which exit fires first, and which exits were NOT "
-                    f"measurable). Quote those levels - never state a price the card does not "
-                    f"carry."
+                    f"measurable). Set TraderProposal.target_price to the card's own exit "
+                    f"target (its T2, else T1) - that is §101's profit target, and it is a "
+                    f"different level from the stop. Quote those levels - never state a price "
+                    f"the card does not carry, and leave a field None rather than filling it "
+                    f"with the current spot price."
                 ),
             },
         ]
@@ -210,6 +213,17 @@ def create_trader(llm, backup_llm=None):
                 + "\n\n**Computed verification (deterministic tools):**\n"
                 + verification
             )
+
+        # §103 ENTRY/EXIT price block (computed, advisory): the measured entry
+        # price and exit price the card printed, carried onto the Trader's own
+        # output so a reader of 3_trading/trader.md finds them where the proposal
+        # is - and so the PM's prompt receives them alongside the plan. Rendered
+        # from the run's ONE captured block, never re-assembled here.
+        from tradingagents.strategies.trade_plan import render_entry_exit_block
+
+        price_block = render_entry_exit_block(state.get("entry_exit_block"))
+        if price_block:
+            trader_plan = trader_plan + "\n\n" + price_block
 
         return {
             "messages": [AIMessage(content=trader_plan)],

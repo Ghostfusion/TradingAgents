@@ -78,6 +78,7 @@ def build_trade_plan(
     cvar_budget: float | None = None,
     mae_samples=None,
     config: dict | None = None,
+    capture: dict | None = None,
 ) -> str:
     """Build the markdown plan card from the measured pieces.
 
@@ -103,6 +104,13 @@ def build_trade_plan(
                    defaulted to the current price.
         config   - settings (``min_holding_days``, ``max_trades_per_period``,
                    ``stop_never_widen``).
+        capture  - when a dict is passed it is filled with
+                   ``capture["entry_exit"]``: the ONE structured §103 ENTRY/EXIT
+                   object this card was rendered from (the entry and exit blocks
+                   plus the measured levels). The graph stashes it on state, so
+                   the Trader's plan, the PM's decision and the report artifact
+                   all print the numbers this card printed - never a second
+                   assembly of them.
     """
     cfg = config or {}
     stop_never_widen = bool(cfg.get("stop_never_widen", True))
@@ -192,6 +200,28 @@ def build_trade_plan(
     )
     final_entry = assembled["entry"]
     exit_block = assembled["exit"]
+    # The ONE structured §103 object for this run. The card renders it below,
+    # and the graph reads this same dict back off the run and stashes it on
+    # state, so the Trader's plan, the PM's decision and the report artifact all
+    # print the numbers the card printed - never a second assembly, and never a
+    # regex over the rendered text. (That regex IS the defect it replaces: the
+    # contract's one-line summary carried no target, so `reporting`'s
+    # `target ([0-9.]+)` could never match and every artifact wrote
+    # `take_profit: null` beside a card that had measured a target.)
+    if capture is not None:
+        capture["entry_exit"] = {
+            "ticker": ticker,
+            "reference_price": price,
+            "entry": final_entry,
+            "exit": exit_block,
+            "levels": {
+                "unified_stop": stop,
+                "trailing_stop": trail_level,
+                "trailing_stop_source": trail_source,
+                "target": exit_target,
+                "target_basis": exit_target_basis,
+            },
+        }
     if final_entry["final_entry_price"] is not None:
         _basis = "; ".join(
             f"{_t}={_num(_v)}"
@@ -386,6 +416,133 @@ f"- Execution cost (advisory, §74-§78): buffer {_pct(execution['buffer_fractio
     return "\n".join(lines)
 
 
+def render_entry_exit_block(block: dict | None) -> str:
+    """Render §103's ENTRY/EXIT object as a compact markdown block.
+
+    The Trader's plan and the PM's decision carry this, so a reader of
+    ``3_trading/trader.md`` or ``5_portfolio/decision.md`` finds the measured
+    entry price and exit price *where the decision is* - not only inside the
+    report's computed-context dump (section IVa). It renders the same dict the
+    card was built from (``capture["entry_exit"]``), so the two surfaces cannot
+    disagree, and every line is a measured price or an explicit "unavailable" -
+    a term the run could not measure is named, never defaulted.
+
+    Returns ``""`` when no block was captured (an older run, or a caller that
+    computed no card): an empty string appends nothing rather than an empty
+    heading.
+    """
+    if not isinstance(block, dict) or not block:
+        return ""
+    entry = block.get("entry") or {}
+    exit_block = block.get("exit") or {}
+    levels = block.get("levels") or {}
+    out = ["**Entry / Exit price (§103, computed - advisory):**"]
+
+    final = entry.get("final_entry_price")
+    if final is not None:
+        basis = "; ".join(
+            f"{term}={_num(value)}"
+            for term, value in sorted((entry.get("final_entry_basis") or {}).items())
+        )
+        out.append(
+            f"- Final entry price: {_num(final)}"
+            + (f" - min of {basis} (binding {entry.get('final_entry_binding')})" if basis else "")
+        )
+    else:
+        out.append(
+            "- Final entry price: unavailable - no §103 ceiling term was "
+            f"measurable (status {entry.get('ceiling_status')})"
+        )
+
+    if entry.get("max_entry_price") is not None:
+        out.append(
+            f"- Entry ceiling (max): {_num(entry['max_entry_price'])} "
+            f"[{entry.get('ceiling_status')}; binding "
+            f"{entry.get('ceiling_binding_source')}; coverage "
+            f"{entry.get('ceiling_coverage')}/{len(CEILING_SOURCES)}]"
+        )
+    else:
+        out.append(f"- Entry ceiling (max): unavailable [{entry.get('ceiling_status')}]")
+
+    if entry.get("target_entry_price") is not None:
+        out.append(
+            f"- Target entry: {_num(entry['target_entry_price'])} "
+            f"[{entry.get('target_status')}; coverage "
+            f"{entry.get('target_coverage')}/{len(ANCHOR_SOURCES)}]"
+        )
+    else:
+        out.append(f"- Target entry: unavailable [{entry.get('target_status')}]")
+
+    if entry.get("risk_adjusted_entry_price") is not None:
+        out.append(
+            f"- Risk-adjusted max entry: {_num(entry['risk_adjusted_entry_price'])} "
+            f"(CVaR: {entry.get('cvar_status')})"
+        )
+    else:
+        out.append(f"- Risk-adjusted max entry: unavailable (CVaR: {entry.get('cvar_status')})")
+
+    liquidity = entry.get("liquidity_status") or "unavailable"
+    if entry.get("execution_price") is not None:
+        out.append(
+            f"- Execution price: {_num(entry['execution_price'])} - buffer "
+            f"{_num(entry.get('execution_buffer'))}; cost terms "
+            f"{entry.get('execution_coverage')}/{len(COST_SOURCES)}; "
+            f"liquidity {liquidity}"
+        )
+    else:
+        out.append(
+            f"- Execution price: unavailable - no cost term measured "
+            f"(liquidity {liquidity})"
+        )
+
+    out.append(f"- Exit stop (unified): {_num(levels.get('unified_stop'))}")
+    trail = levels.get("trailing_stop")
+    trail_src = levels.get("trailing_stop_source")
+    out.append(
+        f"- Exit trailing stop: {_num(trail)}"
+        + (f" ({trail_src})" if trail is not None and trail_src else "")
+    )
+    target = levels.get("target")
+    target_basis = levels.get("target_basis")
+    out.append(
+        f"- Exit target: {_num(target)}"
+        + (f" ({target_basis})" if target is not None and target_basis else "")
+    )
+
+    conditions = exit_block.get("conditions") or {}
+    precedence = exit_block.get("precedence") or []
+    if exit_block.get("exit") is True:
+        predicate = (
+            f"FIRES - {exit_block.get('reason')} at exit price "
+            f"{_num(exit_block.get('exit_price'))}"
+        )
+    elif exit_block.get("exit") is False:
+        predicate = f"no exit condition fired at {_num(block.get('reference_price'))}"
+    else:
+        predicate = "no exit condition could be evaluated"
+    out.append(
+        f"- Exit predicate: {predicate} - evaluated "
+        + ("; ".join(f"{k}={v}" for k, v in conditions.items()) if conditions else "none")
+        + f" (coverage {exit_block.get('coverage')}/{len(precedence)})"
+    )
+    absent = [name for name in precedence if name not in conditions]
+    if absent:
+        out.append(
+            "- Exits not measurable at plan time (absent, NOT 'no exit'): "
+            + ", ".join(absent)
+        )
+    # Closing note, and deliberately the block's LAST line: a computed
+    # appendage is never scanned by `reporting._looks_truncated`, but it does
+    # travel inside text that is (the trader's plan and the PM's decision are
+    # finalized as LLM prose). A block ending on a bare name would read as a
+    # mid-word max_tokens cut, so it ends on the parenthetical.
+    out.append(
+        "- Each level above is a price this run measured, or an explicit "
+        "'unavailable' (the full plan rows are in the trade-plan card)."
+    )
+    return "\n".join(out)
+
+
 def measured_inputs(closes, config: dict | None = None) -> dict:
     """The plan pieces measurable from the close series alone.
 
@@ -455,4 +612,4 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
     return out
 
 
-__all__ = ["build_trade_plan", "measured_inputs"]
+__all__ = ["build_trade_plan", "measured_inputs", "render_entry_exit_block"]

@@ -41,7 +41,10 @@ from tradingagents.agents.schemas import (
     PortfolioRating,
     RiskDebaterTurnPayload,
     RiskSeverity,
+    TraderAction,
+    TraderProposal,
     render_pm_decision,
+    render_trader_proposal,
 )
 from tradingagents.dataflows.config import reset_config, set_config
 from tradingagents.graph.trading_graph import _data_quality_blocks_position
@@ -263,3 +266,58 @@ class TestL1CanonicalVocabulary:
         )
         assert ctx.severity_tier.value == l1["severity_tier"]
         assert ctx.l1_action.value == l1["l1_action"]
+
+
+# ---------------------------------------------------------------------------
+# The decision's price fields render (2026-09-30)
+# ---------------------------------------------------------------------------
+
+
+def test_the_pm_decision_renders_the_entry_and_exit_prices():
+    """The PM's rendered decision carried a target and a stop but no entry at
+    all. The entry is now a field, and it renders with the exit levels."""
+    decision = PortfolioDecision(
+        rating=PortfolioRating.BUY,
+        executive_summary="s",
+        investment_thesis="t",
+        entry_price=98.5,
+        price_target=110.0,
+        stop_loss=95.0,
+    )
+    rendered = render_pm_decision(decision)
+
+    assert "**Entry Price**: 98.5" in rendered
+    assert "**Price Target**: 110.0" in rendered
+    assert "**Stop Loss**: 95.0" in rendered
+
+
+def test_the_pm_decision_omits_an_unmeasured_entry_price():
+    """An unmeasured level renders nothing rather than a placeholder: a blank
+    row is how a reader tells "not measured" from "measured at 0"."""
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="s",
+        investment_thesis="t",
+    )
+    rendered = render_pm_decision(decision)
+
+    assert "**Entry Price**" not in rendered
+    assert "**Price Target**" not in rendered
+
+
+def test_the_trader_proposal_renders_the_exit_price():
+    """The Trader had an entry and a stop but nowhere to record the exit side."""
+    proposal = TraderProposal(
+        action=TraderAction.BUY,
+        reasoning="r",
+        entry_price=98.5,
+        stop_loss=95.0,
+        target_price=110.0,
+    )
+    rendered = render_trader_proposal(proposal)
+
+    assert "**Entry Price**: 98.5" in rendered
+    assert "**Stop Loss**: 95.0" in rendered
+    assert "**Target Price**: 110.0" in rendered
+    # The trailing stop-signal line external code greps for survives.
+    assert "FINAL TRANSACTION PROPOSAL: **BUY**" in rendered

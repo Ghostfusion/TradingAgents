@@ -543,8 +543,8 @@ START -> analysts* (tool loop each) -> Bull/Bear debate (rounds) -> Research Man
 | Agent | Schema | Fields |
 | --- | --- | --- |
 | Research Manager | `ResearchPlan` | `recommendation` (5-tier), `rationale`, `strategic_actions` |
-| Trader | `TraderProposal` | `action` (Buy/Hold/Sell), `reasoning`, `entry_price?`, `stop_loss?`, `position_sizing?` |
-| Portfolio Manager | `PortfolioDecision` | `rating`, `executive_summary`, `investment_thesis`, `price_target?`, `time_horizon?`, `confidence` (0-1), `position_size`, `stop_loss?`, `consensus` (high/low) |
+| Trader | `TraderProposal` | `action` (Buy/Hold/Sell), `reasoning`, `entry_price?`, `stop_loss?`, `target_price?` (the §101 exit level — the card's own exit target, quoted, never invented), `position_sizing?` |
+| Portfolio Manager | `PortfolioDecision` | `rating`, `executive_summary`, `investment_thesis`, `entry_price?` (§100's final entry price from the card), `price_target?`, `time_horizon?`, `confidence` (0-1), `position_size`, `stop_loss?`, `consensus` (high/low) |
 | Sentiment Analyst | `SentimentReport` | `overall_band` (6-tier), `overall_score` (0-10), `confidence` (low/med/high), `narrative` (+ computed fields) |
 
 Each agent falls back to free-text when the provider lacks structured output;
@@ -934,7 +934,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_exit_overrides(targets, state_by_name, max_drawdown_pct?, trail_pct?)` | `strategies.risk_manager.manage_risk` + `trailing_stop_targets` | risk debators | two-pass liquidate/shrink overrides (Lean L1) from persisted entry/peak/current state |
 | `get_pre_trade_read(symbol, notional, max_notional?, max_rate?, window_secs?)` | `strategies.risk_checks.pre_trade_check` + `RateLimiter` + `notional` | risk debators | notional-cap + rolling-rate submission gate (advisory) |
 | `get_ledger_risk_state(ticker)` | memory log + `strategies.pre_market.ledger_track_record` | risk debators | realized win-rate drift + paper-reviewer track record (daily-loss/HWM inputs) |
-| `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable. Carries **§103's ENTRY block** (entry ceiling, §100 final entry price = the `min` over the terms present with each term's value, target entry, execution price = §103's `liquidity_adjusted_entry_price`, risk-adjusted max entry, tranche levels) and its **EXIT block** (the §101 predicate: every evaluated condition, `coverage N/7`, the level that fires and its price, and the exits NOT measurable at plan time named absent - never "no exit"). The card is also the string injected into `computed_decision_context`, so the Trader and the PM read the same rows |
+| `get_trade_plan(ticker, price?)` | `strategies.trade_plan.build_trade_plan` | risk debators / trader | the written plan card as a callable. Carries **§103's ENTRY block** (entry ceiling, §100 final entry price = the `min` over the terms present with each term's value, target entry, execution price = §103's `liquidity_adjusted_entry_price`, risk-adjusted max entry, tranche levels) and its **EXIT block** (the §101 predicate: every evaluated condition, `coverage N/7`, the level that fires and its price, and the exits NOT measurable at plan time named absent - never "no exit"). The card is also the string injected into `computed_decision_context`, so the Trader and the PM read the same rows. The card's own assembly additionally **captures the structured §103 object** (`build_trade_plan(capture=...)`): the graph stores it on the `entry_exit_block` state channel, and `trade_plan.render_entry_exit_block` renders it into the Trader's plan and the PM's decision — so the entry price and the exit price print in `3_trading/trader.md`, `5_portfolio/decision.md` and the consolidated report, and travel in `research_decision.json` (see §"the only input contract" below). One assembly per run: those surfaces read the captured dict, never a second computation and never a regex over this card's markdown |
 | `get_fixed_income_risk(ticker, years?)` | `strategies.fixed_income` | fundamentals | preferred yield + duration/DV01/convexity risk rows (perpetual YTM n/a) |
 | `get_pair_risk(ticker_x, ticker_y, window?, maxlag?)` | `strategies.statistical.cointegration_pair` + `granger_causality` (fetches both close series) | market | Engle-Granger cointegration + lag-wise Granger causality |
 | `get_pair_trade_signal(x, y, entry?, exit_thresh?, stop?)` | `strategies.statistical.pair_signal` (`spread_zscore` + cointegration + half-life) | market | cookbook recipe-3 pairs signal: entry \|z\|≥2 / exit ≤0.5 / stop ≥3, dollar-neutral `pair_quantities` + VECM `ecm_loading` advisory |
@@ -1040,7 +1040,14 @@ is `binding_constraint`, never `binding_gate`/`trade_permission` (the executor's
 gate owns those), and `risk_context` is an allow-listed advisory passthrough the
 executor records but never reads as data. `opportunity_score` stays `null`:
 this repo has no deterministic producer for it, and the schema prefers an absent
-score to a fabricated one. The rules live in one module,
+score to a fabricated one. `position.entry_price` is §100's **final entry
+price** — the §103 block's `final_entry_price`, falling back to the G1
+contract's stop anchor when no final was measurable, and `null` when neither was.
+`position.take_profit` is the contract's measured target (the contract's
+one-line render carries it precisely so this field is recoverable rather than
+always `null`). The whole §103 ENTRY/EXIT object travels verbatim under
+`entry_exit`; it is advisory, and the executor's parser reads the four
+`position` members it knows and ignores the rest. The rules live in one module,
 `tradingagents/execution_contract.py`, shared by the emitter and the report
 verifier (`verify_flags.json` gains an `envelope` block; legacy 1.0.0 trees are
 exempt). Contract note and acceptance tests: `docs/execution_v1_emitter_plan.md`.

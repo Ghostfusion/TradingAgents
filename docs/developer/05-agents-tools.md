@@ -47,9 +47,12 @@ wrap `strategies/market_session.py` and are bound to the market analyst.
 
 `agents/schemas.py` defines pydantic models:
 - `ResearchPlan` (recommendation, rationale, strategic_actions)
-- `TraderProposal` (action, reasoning, entry_price?, stop_loss?, position_sizing?)
-- `PortfolioDecision` (rating, executive_summary, investment_thesis, price_target,
-  time_horizon, confidence, position_size, stop_loss, consensus)
+- `TraderProposal` (action, reasoning, entry_price?, stop_loss?, target_price?,
+  position_sizing?) — `entry_price` / `stop_loss` / `target_price` are quoted from
+  the trade-plan card's §103 ENTRY/EXIT block, never invented; a level the card
+  did not measure stays `None`
+- `PortfolioDecision` (rating, executive_summary, investment_thesis, entry_price?,
+  price_target?, time_horizon, confidence, position_size, stop_loss, consensus)
 - `SentimentReport` (overall_band, overall_score, confidence, narrative, plus
   computed_* injected by the deterministic sentiment layer)
 - `PreMarketVerdict` (CONFIRM/REVISE/REJECT + re-anchored levels) — the

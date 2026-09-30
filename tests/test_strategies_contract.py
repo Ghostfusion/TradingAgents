@@ -10,6 +10,8 @@ from tradingagents.strategies.sentiment import (
     surprise_velocity,
 )
 
+pytestmark = pytest.mark.timeout(180)
+
 
 def _cfg(**kw):
     base = {
@@ -172,3 +174,33 @@ def test_contract_records_the_atr_basis():
     assert with_ranges.stop_loss < proxy_only.stop_loss
     assert "(h/l)" in with_ranges.summary() and "(proxy)" in proxy_only.summary()
     assert "atr=" in with_ranges.reason()
+
+
+def test_contract_summary_carries_the_target_the_report_parses():
+    """Every artifact wrote ``take_profit: null`` beside a card that had measured
+    a target. ``reporting`` recovers the contract's target by regexing
+    ``target <n>`` out of this one-line render — and the render never put one in,
+    so the field was unreachable, not unmeasured."""
+    import re
+
+    cfg = _cfg(enable_exits=True, target_atr=4.0, breakeven_atr=1.0)
+    contract = build_position_contract(cfg=cfg, closes=_closes())
+
+    assert contract is not None
+    assert contract.target is not None
+    summary = contract.summary()
+    assert f"target {contract.target}" in summary
+    found = re.search(r"\btarget\s+([0-9.]+)", summary, re.IGNORECASE)
+    assert found is not None
+    assert float(found.group(1)) == pytest.approx(contract.target)
+
+
+def test_contract_summary_omits_the_target_when_none_was_measured():
+    """With the exit engine off there is no target: the render says nothing and
+    the report's parser keeps returning None. A rendered default would be a
+    constant standing in for a measurement."""
+    contract = build_position_contract(cfg=_cfg(), closes=_closes())
+
+    assert contract is not None
+    assert contract.target is None
+    assert "target " not in contract.summary()

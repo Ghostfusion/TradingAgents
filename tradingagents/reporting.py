@@ -617,11 +617,12 @@ def write_research_decision(
         return
     rg = final_state.get("risk_gate") or {}
     contract = final_state.get("position_contract")
-    stop = target = size_pct = None
+    stop = target = size_pct = anchor_entry = None
     if isinstance(contract, dict):
         stop = contract.get("stop_loss") or contract.get("stop")
         target = contract.get("target")
         size_pct = contract.get("size_pct")
+        anchor_entry = contract.get("entry_price")
     elif isinstance(contract, str):
         m = re.search(r"\bstop\s+([0-9.]+)", contract, re.IGNORECASE)
         if m:
@@ -632,6 +633,30 @@ def write_research_decision(
         m3 = re.search(r"\bsize[^0-9]*([0-9.]+)%?", contract, re.IGNORECASE)
         if m3:
             size_pct = float(m3.group(1)) / 100.0
+        m4 = re.search(r"\bfrom entry ([0-9.]+)", contract, re.IGNORECASE)
+        if m4:
+            anchor_entry = float(m4.group(1))
+
+    # §103's ENTRY/EXIT price object - the run's captured trade-plan block,
+    # already rendered into the report and the two decision outputs. It travels
+    # here structurally so a consumer reads the measured level, not a regex over
+    # rendered prose.
+    entry_exit = final_state.get("entry_exit_block")
+    if not isinstance(entry_exit, dict):
+        entry_exit = None
+    # `position.entry_price` is §100's FINAL entry price - the highest price at
+    # which the trade's economics still hold, which is what "the entry price"
+    # means for this contract. It is deliberately NOT the G1 stop anchor (a
+    # different number: the tranche/close the stop was measured FROM). The
+    # anchor is the fallback only when no §103 final was measurable, and a null
+    # means no entry level was measured - never the spot price.
+    entry_price = None
+    if entry_exit:
+        _entry_side = entry_exit.get("entry")
+        if isinstance(_entry_side, dict):
+            entry_price = _entry_side.get("final_entry_price")
+    if entry_price is None:
+        entry_price = anchor_entry
 
     pm_rating = pm.get("rating") if isinstance(pm, dict) else None
     pm_dq = pm.get("data_quality") if isinstance(pm, dict) else None
@@ -684,10 +709,22 @@ def write_research_decision(
         "recommended_allocation_pct": None,  # PM position_size is prose; never parsed
         "position": {
             "target_notional": None,
+            # §100's final entry price (advisory). The executor derives its own
+            # fills and refuses LLM-supplied entry prices; this is the research
+            # contract's measured ceiling, not an order. Null = unmeasured.
+            "entry_price": entry_price,
             "stop_loss": stop,
             "take_profit": target,
             "size_pct_book": size_pct,
         },
+        # §103's ENTRY/EXIT object, verbatim from the trade-plan card this run
+        # rendered: every entry ceiling with its status/coverage, the §100 final
+        # entry and the term that bound it, the §101 exit levels and predicate,
+        # and the exits the run could NOT measure (named, so an absent exit is
+        # never read as "no exit"). Advisory - the executor ignores unknown
+        # keys; it is attached so a reviewer can reconcile the decision with the
+        # levels it was made from without re-deriving them.
+        "entry_exit": entry_exit,
         "data_quality": facts_dq,
         # No producer reaches report-tree state (the caliber is set where the
         # vendor result is read, dataflows/interface.py): null = unknown,

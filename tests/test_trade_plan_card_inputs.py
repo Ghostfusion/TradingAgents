@@ -173,3 +173,53 @@ def test_final_entry_price_names_the_value_of_every_term(monkeypatch):
     assert "over the §103 terms present" in line
     assert "max_entry_price=" in line
     assert "target_entry_price=" in line
+
+
+def _card_and_block(monkeypatch, closes):
+    """The card and the §103 block captured from its own assembly."""
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = _config()
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    capture: dict = {}
+    graph._compiled_decision_context("NVDA", {}, capture=capture)
+    return capture.get("entry_exit") or {}
+
+
+def test_the_card_captures_the_103_block_it_rendered(monkeypatch):
+    """The Trader, the PM and the artifact all read this ONE dict, so it must
+    carry the card's own numbers: the captured final entry price is the value
+    the card's "Final entry price" row printed."""
+    block = _card_and_block(monkeypatch, _closes())
+
+    assert block["entry"]["final_entry_price"] is not None
+    final_line = _line(_card(monkeypatch, _closes()), "Final entry price")
+    assert f"{block['entry']['final_entry_price']:.2f}" in final_line
+    # The exit side travels with it: the levels the §101 predicate was evaluated
+    # on, and the precedence it names the first exit in.
+    assert block["levels"]["unified_stop"] is not None
+    assert block["levels"]["target"] is not None
+    assert block["exit"]["precedence"][0] == "risk_gate"
+
+
+def test_the_rendered_price_block_names_every_absent_exit(monkeypatch):
+    """This block is what the Trader's and the PM's sections print. A level the
+    run could not measure is named absent, never read as "no exit"."""
+    from tradingagents.strategies.trade_plan import render_entry_exit_block
+
+    text = render_entry_exit_block(_card_and_block(monkeypatch, _closes()))
+
+    assert "Final entry price:" in text
+    assert "Entry ceiling (max):" in text
+    assert "Exit predicate:" in text
+    assert "risk_gate" in text and "thesis_break" in text
+    assert "unavailable" in text  # the CVaR / execution rows were unmeasurable
+    # It travels inside text `reporting._looks_truncated` scans for a max_tokens
+    # cut, so the block ends on a sentence, never on a bare measured name.
+    assert text.rstrip().endswith(".")
+
+
+def test_the_price_block_renders_nothing_for_a_run_that_computed_no_card():
+    from tradingagents.strategies.trade_plan import render_entry_exit_block
+
+    assert render_entry_exit_block(None) == ""
+    assert render_entry_exit_block({}) == ""
