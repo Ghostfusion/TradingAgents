@@ -97,7 +97,11 @@ Thread-local to keep concurrent batch workers isolated:
 - `initialize_config()` / `get_config()` (deep copy) / `set_config(partial)`
   / `reset_config()`.
 
-All tools read through `get_config()`.
+All tools read through `get_config()`. `initialize_config()` populates from
+`DEFAULT_CONFIG` — shipped defaults **plus** the ambient `TRADINGAGENTS_*`
+environment, i.e. what this machine runs; `reset_config()`, the test-isolation
+path, restores `SHIPPED_DEFAULTS` instead, so a developer's `.env` cannot leak
+into a test.
 
 ## 3.6 Cache — `dataflows/vendor_cache.py`
 

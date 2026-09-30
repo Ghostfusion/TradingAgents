@@ -44,8 +44,14 @@ def _isolate_config():
     ``set_config`` merges (it never clears keys absent from the override), so a
     test that sets e.g. ``tool_vendors`` would otherwise leak into later tests
     and make routing behavior order-dependent. ``reset_config()`` clears both
-    the process fallback and the current thread's override, so every test
-    starts from a clean DEFAULT_CONFIG.
+    the process fallback and the current thread's override and restores
+    ``SHIPPED_DEFAULTS`` - the defaults as released, *not* the ambient
+    ``DEFAULT_CONFIG``, into which this machine's ``.env`` has folded its own
+    ``TRADINGAGENTS_*`` values at import. A test therefore never inherits the
+    operator's gates: left enabled, they ran the run-card engines for real, and
+    every ``write_report_tree`` in ``test_reporting.py`` resolved a nine-name
+    peer universe through the vendor chain (``resolve_peer_universe`` ->
+    ``fetch_ticker`` -> Tiingo retry backoff) instead of returning early.
     """
     import tradingagents.dataflows.config as config_module
 

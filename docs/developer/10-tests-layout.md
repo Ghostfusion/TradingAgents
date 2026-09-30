@@ -39,7 +39,12 @@ The **Massive** integration has two dedicated files:
   tests never hit real APIs (unless the test explicitly sets a real key).
 - `_isolate_config` — calls `reset_config()` + clears the vendor cache before
   and after each test, so a prior test's `set_config`/mocked vendor result can't
-  leak into the next (order-independent tests). Also closes moomoo contexts
+  leak into the next (order-independent tests). `reset_config()` restores
+  `SHIPPED_DEFAULTS`, **not** the ambient `DEFAULT_CONFIG`, so this machine's
+  `.env` gates never reach a test — a developer with the run-card engines
+  enabled used to make every `write_report_tree` in `test_reporting.py` fetch a
+  nine-name peer universe (two 30-minute bounds, fixed 2026-09-30; see
+  `tests/test_config_isolation.py`). Also closes moomoo contexts
   (`_close_all_ctxs`) to avoid process hang.
 - `_disable_reddit_killswitch` — removes `TRADINGAGENTS_DISABLE_REDDIT` so the
   fetcher's real path runs even if a local `.env` opts out.

@@ -93,7 +93,12 @@ def test_documented_env_enables_market_routing_branch(monkeypatch):
     try:
         dc = importlib.reload(default_config_module)
         assert dc.DEFAULT_CONFIG["enable_market_routing"] is True
-        config_module.reset_config()
+        # Install what the real loader produced. `reset_config()` restores
+        # SHIPPED_DEFAULTS and deliberately never the ambient/reloaded
+        # DEFAULT_CONFIG, so the enabled branch has to be handed to the process
+        # config explicitly - which is what an entry point does with
+        # DEFAULT_CONFIG anyway.
+        config_module.set_config(dc.DEFAULT_CONFIG)
         # The default core_stock_apis chain tries eodhd first; only the
         # env-enabled market-routing branch reorders it to yfinance for US.
         assert _route_get_stock_data() == "yfinance"

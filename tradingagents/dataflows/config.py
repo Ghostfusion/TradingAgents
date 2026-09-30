@@ -30,7 +30,14 @@ _lock = threading.Lock()
 
 
 def initialize_config():
-    """Ensure the process fallback is populated."""
+    """Ensure the process fallback is populated.
+
+    Populated from ``DEFAULT_CONFIG`` - what *this machine* runs, i.e. the
+    shipped defaults with the ambient ``TRADINGAGENTS_*`` environment folded
+    in.  :func:`reset_config` deliberately restores ``SHIPPED_DEFAULTS``
+    instead: it is the test-isolation path, where the machine's ambient values
+    must not leak in.
+    """
     global _config
     with _lock:
         if _config is None:
@@ -70,14 +77,25 @@ def get_config() -> dict:
 
 
 def reset_config():
-    """Reset both the thread override and the process fallback to defaults.
+    """Reset the thread override and the process fallback to the **shipped** defaults.
 
     Intended for tests that need clean isolation; also clears this thread's
     override so a prior ``set_config`` can't leak into the next test.
+
+    Restores :data:`default_config.SHIPPED_DEFAULTS`, *not* ``DEFAULT_CONFIG``:
+    the latter is the shipped dict **with** the ambient ``TRADINGAGENTS_*``
+    environment folded in at import (``tradingagents/__init__.py`` loads a
+    developer's ``.env`` into ``os.environ``), so resetting to it handed every
+    test this machine's own configuration. That is not isolation - with the
+    run-card engines enabled in ``.env``, a plain report-write test ran
+    ``resolve_peer_universe`` and fetched nine issuers' statements live, which
+    is what made ``tests/test_reporting.py`` consume two 30-minute pytest
+    bounds instead of finishing in ~20 s (measured 2026-09-30). A test that
+    wants an ambient value must set it itself.
     """
     global _config
     with _lock:
-        _config = deepcopy(default_config.DEFAULT_CONFIG)
+        _config = deepcopy(default_config.SHIPPED_DEFAULTS)
         _tls.config = None
 
 
