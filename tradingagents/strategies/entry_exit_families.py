@@ -119,6 +119,28 @@ def _price_str(value) -> str:
         return str(value)
 
 
+def _refuse_wrong_side(record: dict, base, required: str, side: str) -> dict:
+    """Refuse a level that is not on the side of the entry it must be on.
+
+    ``required`` is ``"ge"`` (the level must be at or above ``base``) or ``"le"``.
+    A price on the wrong side is not a usable level, and printing it as one would
+    mislead: FNF 2026-09-30 closed AT its 20-bar low, so ``support*(1+eps)`` came
+    out above the reference price and "support - ATR" above the entry it was
+    supposed to protect. The member becomes an absent-with-reason instead - never
+    a silently inverted number.
+    """
+    if record.get("value") is None or base is None:
+        return record
+    value = record["value"]
+    ok = value >= base if required == "ge" else value <= base
+    if ok:
+        return record
+    return _absent(
+        f"{record.get('reason')} - refused: {_price_str(value)} is not {side} "
+        f"the entry {_price_str(base)}"
+    )
+
+
 def member(value, reason: str) -> dict:
     """One §103 member: the measured price, or ``None`` with the reason it is absent.
 
@@ -387,6 +409,21 @@ def section_103_members(
         exit_members["risk_reward_target"] = _absent(
             "needs an entry above a measured stop and a positive reward/risk multiple"
         )
+
+    # A level on the wrong side of the entry is not a level. Every stop must sit
+    # below the entry it protects and every target above it; one that does not
+    # is refused with the reason rather than printed as usable. The break-even
+    # stop is deliberately NOT checked: §56 moves the stop UP once the trade is
+    # in profit, so it is above the entry by construction.
+    for name in ("volatility_stop", "ATR_stop", "support_stop"):
+        exit_members[name] = _refuse_wrong_side(exit_members[name], base, "le", "below")
+    for name in ("volatility_target", "risk_reward_target", "technical_target"):
+        exit_members[name] = _refuse_wrong_side(exit_members[name], base, "ge", "above")
+    # §10's entry sits just ABOVE support, so support must be at or below the
+    # reference price for the level to mean anything.
+    entry_members["support_entry_price"] = _refuse_wrong_side(
+        entry_members["support_entry_price"], ref, "le", "at or below"
+    )
 
     return {"entry": entry_members, "exit": exit_members}
 

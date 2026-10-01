@@ -119,6 +119,36 @@ def test_the_stops_sit_below_the_entry_and_the_targets_above_it():
     assert members["break_even_stop"]["value"] > entry
 
 
+def test_a_level_on_the_wrong_side_of_the_entry_is_refused_not_printed():
+    """FNF 2026-09-30 closed AT its 20-bar low and its §100 final entry sat
+    below the price, so "support + eps" came out ABOVE the reference price and
+    "support - ATR" above the entry it was supposed to protect. A "stop" above
+    the entry is not a stop: the member is refused WITH the reason, never
+    printed as though it were usable."""
+    closes = [200.0 - i for i in range(40)]  # falling: the last close IS the low
+    ref = closes[-1]
+    ceiling = ref * 0.95  # a §100 final entry can sit below the current price
+    out = fam.section_103_members(
+        closes=closes,
+        price=ref,
+        entry=ceiling,
+        stop=ceiling * 0.95,
+        config={"min_rr": 2.0},
+    )
+
+    support_entry = out["entry"]["support_entry_price"]
+    assert support_entry["value"] is None
+    assert "refused" in support_entry["reason"]
+
+    support_stop = out["exit"]["support_stop"]
+    assert support_stop["value"] is None
+    assert "refused" in support_stop["reason"]
+
+    # The levels that ARE on the right side are untouched by the guard.
+    assert out["exit"]["ATR_stop"]["value"] < ceiling
+    assert out["exit"]["risk_reward_target"]["value"] > ceiling
+
+
 def test_the_unproducible_members_are_absent_with_a_reason():
     """Momentum has no score -> price map and a fair value needs statements:
     both are named absent, never filled with a plausible-looking number."""
