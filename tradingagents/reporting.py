@@ -1759,15 +1759,27 @@ def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
         # imported here (not at module load) to keep this writer import-light.
         from tradingagents.agents.researchers.structured_debate import (
             REASON,
+            SCORE_SERIES,
             TERMINATED,
         )
 
         research = (Path(save_path) / "2_research" / "structured_debate.md").exists()
         risk = (Path(save_path) / "4_risk" / "structured_risk_debate.md").exists()
         ds = final_state.get("debate_state") or {}
+        rs = final_state.get("structured_risk_state") or {}
         block.update(
             {
                 "evidence": {"research": research, "risk": risk},
+                # L1's deterministic rubric, verbatim: the per-round
+                # {score, evidence, novelty, constraint_ok, weights} vectors
+                # `_complete_round` computed and persisted on each section's
+                # channel. Recorded rather than re-derived, so the card cannot
+                # disagree with the evidence file. Empty when the structured
+                # path did not run - not a zero score.
+                "l1_scores": {
+                    "research": list(ds.get(SCORE_SERIES) or []),
+                    "risk": list(rs.get(SCORE_SERIES) or []),
+                },
                 # The degradation that used to be invisible: the structured
                 # debate was asked for and produced no evidence. Keyed to the
                 # RESEARCH artifact - a research debate that fell back is a
@@ -1919,6 +1931,96 @@ def _run_card_security_context(
         }
     except Exception as exc:  # noqa: BLE001 - advisory; never break the report
         return {"status": "unavailable", "unavailable": str(exc)}
+
+
+def _fmt_score(v) -> str:
+    """Format a 0..1 deterministic score for the evidence block.
+
+    ``None`` renders ``-`` (an unmeasured dimension is never a 0). Trailing
+    zeros are stripped so ``1.0`` reads ``1`` and ``0.875`` stays ``0.875``.
+    """
+    try:
+        return f"{float(v):g}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _l1_score_lines(ds: dict) -> list[str]:
+    """Render the persisted deterministic L1 dimension vectors, per round.
+
+    ``_complete_round`` writes ``score_series`` = ``[{"round", "score",
+    "evidence", "novelty", "constraint_ok", "weights"}, ...]`` into the
+    section channel. Those three weighted dimensions ARE L1's rubric
+    (``strategies/debate_score.DEFAULT_WEIGHTS``); before this renderer they
+    were computed, persisted and then dropped — the evidence file printed only
+    the severity tier and the penalty. Recorded here verbatim, not re-derived.
+
+    A section with no scored round renders an explicit ``unavailable`` line:
+    absence means the round never closed, never "a score of zero".
+    """
+    from tradingagents.agents.researchers.structured_debate import SCORE_SERIES
+
+    series = ds.get(SCORE_SERIES) or []
+    if not series:
+        return ["- L1 round scores: unavailable (no round was scored)"]
+    weights = {}
+    for row in series:
+        if isinstance(row, dict) and row.get("weights"):
+            weights = row["weights"]
+    head = "- L1 round scores (deterministic)"
+    if weights:
+        head += " - " + ", ".join(f"{k} x{_fmt_score(v)}" for k, v in weights.items())
+    lines = [head]
+    for row in series:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            f"  - round {row.get('round', '?')}: score {_fmt_score(row.get('score'))} "
+            f"| evidence {_fmt_score(row.get('evidence'))} "
+            f"| novelty {_fmt_score(row.get('novelty'))} "
+            f"| constraint {_fmt_score(row.get('constraint_ok'))}"
+        )
+    return lines
+
+
+def _structured_debate_evidence(
+    ds: dict, *, title: str, role: str
+) -> str | None:
+    """Render the opt-in structured-debate evidence block, or ``None``.
+
+    One renderer for both sections (research and risk share the identical
+    machinery — ``create_debate_judge(section=...)``): the L1 severity verdict
+    and its deterministic round scores, the judge's per-candidate mean, and the
+    grounded claim ledger. Shared because the two call sites used to carry
+    byte-identical copies, which is how a renderer change reaches one section
+    and not the other.
+    """
+    if not (ds.get("judge_scores") or ds.get("claim_ledger_md") or ds.get("l1")):
+        return None
+    lines = [f"## {title}"]
+    l1 = ds.get("l1")
+    if l1:
+        lines.append(
+            f"- L1 verdict: {l1.get('severity_tier', '?')} / "
+            f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')}, "
+            f"penalty={l1.get('penalty_score', 0)})"
+        )
+    lines.extend(_l1_score_lines(ds))
+    judge = ds.get("judge_scores") or {}
+    for alias, agg in judge.items():
+        if agg.get("unavailable"):
+            lines.append(
+                f"- {alias}: mean UNAVAILABLE (judge did not run) "
+                f"{agg.get('reason', '')}".rstrip()
+            )
+        else:
+            lines.append(
+                f"- {alias}: mean {agg.get('mean', '-')} "
+                f"(scores: {agg.get('scores', {})})"
+            )
+    if ds.get("claim_ledger_md"):
+        lines.append(ds["claim_ledger_md"])
+    return _finalize_section(_readable_section("\n".join(lines), role=role))
 
 
 def write_report_tree(
@@ -2093,42 +2195,23 @@ def write_report_tree(
             )
             (research_dir / "manager.md").write_text(_unavailable_mgr, encoding="utf-8")
             research_parts.append(("Research Manager", _unavailable_mgr))
-        # Structured-debate evidence block (opt-in enable_debate): judge
-        # scores per anonymized candidate + the grounded claim ledger + the
-        # L1 severity verdict. Absent when the structured path did not run.
-        # scores per anonymized candidate + the grounded claim ledger + the
-        sd = final_state.get("debate_state") or {}
-        if sd.get("judge_scores") or sd.get("claim_ledger_md") or sd.get("l1"):
+        # Structured-debate evidence block (opt-in enable_debate): the L1
+        # severity verdict + its deterministic round scores, the judge's
+        # per-candidate mean, and the grounded claim ledger. Absent when the
+        # structured path did not run.
+        _evidence = _structured_debate_evidence(
+            final_state.get("debate_state") or {},
+            title="Structured debate evidence (deterministic)",
+            role="Research Manager",
+        )
+        if _evidence is not None:
             research_dir.mkdir(exist_ok=True)
-            sd_lines = ["## Structured debate evidence (deterministic)"]
-            l1 = sd.get("l1")
-            if l1:
-                sd_lines.append(
-                    f"- L1 verdict: {l1.get('severity_tier', '?')} / "
-                    f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')}, "
-                    f"penalty={l1.get('penalty_score', 0)})"
-                )
-            judge = sd.get("judge_scores") or {}
-            for alias, agg in judge.items():
-                if agg.get("unavailable"):
-                    sd_lines.append(
-                        f"- {alias}: mean UNAVAILABLE (judge did not run) "
-                        f"{agg.get('reason', '')}".rstrip()
-                    )
-                else:
-                    sd_lines.append(
-                        f"- {alias}: mean {agg.get('mean', '-')} "
-                        f"(scores: {agg.get('scores', {})})"
-                    )
-            if sd.get("claim_ledger_md"):
-                sd_lines.append(sd["claim_ledger_md"])
-            evidence = _finalize_section(
-                _readable_section("\n".join(sd_lines), role="Research Manager")
-            )
             # Evidence file stays on disk (structured_debate.md) but is NOT
             # appended to complete_report.md — it is a debug artifact, kept
             # out of the user-facing report (2026-09-01).
-            (research_dir / "structured_debate.md").write_text(evidence, encoding="utf-8")
+            (research_dir / "structured_debate.md").write_text(
+                _evidence, encoding="utf-8"
+            )
         if research_parts:
             content = "\n\n---\n\n".join(
                 f"### {name}\n\n{_shift_down(text)}" for name, text in research_parts
@@ -2185,39 +2268,18 @@ def write_report_tree(
         # Structured risk-debate evidence (direction.md parity): judge scores
         # per anonymized candidate + grounded claim ledger + L1 verdict from
         # the structured_risk_state channel. Mirrors the research block.
-        sr = final_state.get("structured_risk_state") or {}
-        if sr.get("judge_scores") or sr.get("claim_ledger_md") or sr.get("l1"):
+        _evidence = _structured_debate_evidence(
+            final_state.get("structured_risk_state") or {},
+            title="Structured risk-debate evidence (deterministic)",
+            role="Portfolio Manager",
+        )
+        if _evidence is not None:
             risk_dir.mkdir(exist_ok=True)
-            sd_lines = ["## Structured risk-debate evidence (deterministic)"]
-            l1 = sr.get("l1")
-            if l1:
-                sd_lines.append(
-                    f"- L1 verdict: {l1.get('severity_tier', '?')} / "
-                    f"{l1.get('l1_action', '?')} (side={l1.get('side', '?')}, "
-                    f"penalty={l1.get('penalty_score', 0)})"
-                )
-            judge = sr.get("judge_scores") or {}
-            for alias, agg in judge.items():
-                if agg.get("unavailable"):
-                    sd_lines.append(
-                        f"- {alias}: mean UNAVAILABLE (judge did not run) "
-                        f"{agg.get('reason', '')}".rstrip()
-                    )
-                else:
-                    sd_lines.append(
-                        f"- {alias}: mean {agg.get('mean', '-')} "
-                        f"(scores: {agg.get('scores', {})})"
-                    )
-            if sr.get("claim_ledger_md"):
-                sd_lines.append(sr["claim_ledger_md"])
-            evidence = _finalize_section(
-                _readable_section("\n".join(sd_lines), role="Portfolio Manager")
-            )
             # Evidence file stays on disk (structured_risk_debate.md) but is
             # NOT appended to complete_report.md (debug artifact; kept out of
             # the user-facing report).
             (risk_dir / "structured_risk_debate.md").write_text(
-                evidence, encoding="utf-8"
+                _evidence, encoding="utf-8"
             )
         if risk_parts:
             content = "\n\n---\n\n".join(

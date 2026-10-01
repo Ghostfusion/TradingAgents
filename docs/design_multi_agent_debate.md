@@ -292,6 +292,20 @@ Per round, each debater produces a structured `ArgumentRecord`
   - `debate_score(q) = 0.6*evidence + 0.25*novelty + 0.15*constraint_ok`
   (weights config). Consensus is NOT a score — agreement only feeds
   termination (4.4).
+- **The three weighted dimensions ARE L1's rubric, and since 2026-10-01 they
+  are visible.** `_complete_round` writes the whole vector per round to
+  `SCORE_SERIES` (`{round, score, evidence, novelty, constraint_ok, weights}`);
+  `reporting._l1_score_lines` renders one row per round beneath the L1 verdict
+  in the evidence block (`2_research/structured_debate.md`,
+  `4_risk/structured_risk_debate.md`), and
+  `run_card.json["debate"]["l1_scores"]["research"|"risk"]` records both
+  sections verbatim. Before this the vector was computed, persisted and then
+  dropped at the renderer — the file carried only the severity tier and the
+  penalty, so the deterministic rubric was invisible. A section with no closed
+  round renders `unavailable (no round was scored)`, never a zero: absence is
+  not a score. Both sections render through ONE shared renderer
+  (`reporting._structured_debate_evidence`), so a change reaches both or
+  neither.
 - Rising `invalid` share across rounds for one side triggers an early-flag
   (the "adversarial entrenchment" guard): a debater that repeats the same
   unsupported claim twice is `entrenched` and its subsequent claims weigh
@@ -530,7 +544,7 @@ debate_require_capability_matrix: false  # R3: startup health-check gate
 | Severity triage + regen budget | `strategies/debate_score.py::classify_severity` (pure) + `agents/utils/structured.py` (scoped repair pass) |
 | Divergence / entrenchment / artificial-consensus | `strategies/debate_score.py::divergence_check` + `entrenchment_index` + `reweight_to_baseline` (pure) |
 | A/B harness (R4) | `scripts/debate_ab_harness.py` (Brier + max-unforecasted-dd) |
-| Report | `reporting.py` (2_research section gains `judge_scores` + `evidence_ledger` block, back-compat) |
+| Report | `reporting.py` (2_research section gains `judge_scores` + `evidence_ledger` block, back-compat); `_l1_score_lines` renders the per-round deterministic L1 vector, `_structured_debate_evidence` is the single renderer both sections call |
 
 ---
 

@@ -54,11 +54,13 @@ engages. Keyed on ticker+date+graph-shape; cleared on success.
 
 ```
 <path>/1_analysts/{market,news,fundamentals,sentiment}.md
-<path>/2_research/{bull,bear,manager}.md      (+ structured_debate.md, evidence only)
+<path>/2_research/{bull,bear,manager}.md
+              (+ structured_debate.md: L1 verdict + its per-round deterministic
+                 dimension vector, judge scores, claim ledger)
 <path>/3_trading/trader.md
 <path>/4_risk/{aggressive,conservative,neutral}.md
               (or a single verdict.md when risk_compact_report is set)
-              (+ structured_risk_debate.md, evidence only)
+              (+ structured_risk_debate.md, same block for the risk section)
 <path>/5_portfolio/decision.md
 <path>/complete_report.md      (H1 report -> H2 team -> H3 role -> H4+ agent content)
 <path>/run_card.json           (config hash, commit, models, verdict, scorecard)

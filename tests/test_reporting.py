@@ -732,6 +732,127 @@ def test_run_card_still_written_when_the_debate_block_fails(tmp_path):
     assert "RuntimeError: boom" in card["debate"]["error"]
 
 
+_ROUND_1 = {
+    "round": 1,
+    "score": 0.825,
+    "evidence": 0.875,
+    "novelty": 0.6,
+    "constraint_ok": 1.0,
+    "weights": {"evidence": 0.6, "novelty": 0.25, "constraint": 0.15},
+}
+_ROUND_2 = {
+    "round": 2,
+    "score": 0.8,
+    "evidence": 0.875,
+    "novelty": 0.5,
+    "constraint_ok": 1.0,
+    "weights": {"evidence": 0.6, "novelty": 0.25, "constraint": 0.15},
+}
+
+
+def test_evidence_block_renders_the_l1_dimension_vectors(tmp_path):
+    """The deterministic rubric L1 already computes was invisible.
+
+    `_complete_round` persists {score, evidence, novelty, constraint_ok,
+    weights} per round on the section channel, but the evidence block printed
+    only the severity tier and the penalty - so the three weighted dimensions
+    were computed, stored and then dropped at the renderer. They render now,
+    read from the state rather than re-derived.
+    """
+    state = _state()
+    # The SD evidence block is written inside the research section, so a real
+    # run's transcript is present alongside the debate state.
+    state["investment_debate_state"] = {
+        "bull_history": "bull prose\n",
+        "bear_history": "bear prose\n",
+    }
+    state["debate_state"] = {
+        "l1": {
+            "side": "bear",
+            "severity_tier": "GREEN",
+            "l1_action": "PROCEED",
+            "penalty_score": 0.0,
+        },
+        "score_series": [_ROUND_1, _ROUND_2],
+    }
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    body = (tmp_path / "2_research" / "structured_debate.md").read_text(encoding="utf-8")
+    assert "- L1 round scores (deterministic)" in body
+    assert "evidence x0.6, novelty x0.25, constraint x0.15" in body
+    assert "round 1: score 0.825" in body
+    assert "evidence 0.875" in body
+    assert "novelty 0.6" in body
+    assert "constraint 1" in body
+    assert "round 2: score 0.8" in body
+    assert "novelty 0.5" in body
+
+
+def test_unscored_section_says_unavailable_not_zero(tmp_path):
+    """Absence is not a zero: an L1 verdict with no closed round must read
+    'unavailable', because a rendered `score 0` is a measurement claim."""
+    state = _state()
+    state["investment_debate_state"] = {
+        "bull_history": "bull prose\n",
+        "bear_history": "bear prose\n",
+    }
+    state["debate_state"] = {
+        "l1": {
+            "side": "bull",
+            "severity_tier": "GREEN",
+            "l1_action": "PROCEED",
+            "penalty_score": 0.0,
+        },
+    }
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    body = (tmp_path / "2_research" / "structured_debate.md").read_text(encoding="utf-8")
+    assert "- L1 round scores: unavailable (no round was scored)" in body
+    assert "round 1: score" not in body
+
+
+def test_run_card_records_the_l1_vectors_for_both_sections(tmp_path):
+    """The run card carries the same vectors verbatim, so the record cannot
+    disagree with the evidence file."""
+    state = _state()
+    state["debate_state"] = {"score_series": [_ROUND_1]}
+    state["structured_risk_state"] = {"score_series": [{**_ROUND_2, "score": 0.5}]}
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    assert card["debate"]["l1_scores"]["research"][0]["evidence"] == 0.875
+    assert card["debate"]["l1_scores"]["research"][0]["round"] == 1
+    assert card["debate"]["l1_scores"]["risk"][0]["score"] == 0.5
+    assert card["debate"]["l1_scores"]["risk"][0]["novelty"] == 0.5
+
+
+def test_both_sections_render_through_one_shared_renderer(tmp_path):
+    """Research and risk used byte-identical copies of this block; the two
+    call sites now share one renderer, so a row reaches both or neither."""
+    state = _state()
+    state["investment_debate_state"] = {
+        "bull_history": "bull prose\n",
+        "bear_history": "bear prose\n",
+    }
+    state["debate_state"] = {"l1": {"severity_tier": "GREEN"}, "score_series": [_ROUND_1]}
+    state["structured_risk_state"] = {
+        "l1": {"severity_tier": "GREEN"},
+        "score_series": [{**_ROUND_1, "score": 0.5}],
+    }
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    research = (tmp_path / "2_research" / "structured_debate.md").read_text(encoding="utf-8")
+    risk = (tmp_path / "4_risk" / "structured_risk_debate.md").read_text(encoding="utf-8")
+    assert "round 1: score 0.825" in research
+    assert "round 1: score 0.5" in risk
+    assert "evidence x0.6, novelty x0.25, constraint x0.15" in risk
+
+
+def test_fmt_score_renders_an_unmeasured_dimension_as_a_dash():
+    from tradingagents.reporting import _fmt_score
+
+    assert _fmt_score(None) == "-"
+    assert _fmt_score("not-a-number") == "-"
+    assert _fmt_score(1.0) == "1"
+    assert _fmt_score(0.0) == "0"
+
+
 # ---------------------------------------------------------------------------
 # Number/label integrity: the execution contract's evidence-derived fields and
 # the binding-gate label (NVDA 2026-09-12 review).
