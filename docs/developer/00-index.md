@@ -26,8 +26,10 @@ drill into whatever area you are touching.
 | 12 | `12-data-providers.md` | the 13 data providers/sources and how each is wired |
 
 Companion docs (repo root `docs/`):
+- [`docs/MASTER_DESIGN.md`](../MASTER_DESIGN.md) — **the whole system in one document**: invariants, layer map, graph, data layer, strategies, score engines, reporting, config/gates, entry surfaces, the executor boundary, the web app, the test architecture, and the current gap list. Read this before the numbered guides if you want the shape of the system rather than one area.
 - [`docs/AGENT_ONBOARDING.md`](../AGENT_ONBOARDING.md) — environment runbook / gotchas (read first).
 - [`docs/api_reference.md`](../api_reference.md) — canonical config-key, tool, vendor tables.
+- [`docs/gate_registry.md`](../gate_registry.md) — every gate: switch, fire site, proof.
 - [`docs/howto_end_to_end.md`](../howto_end_to_end.md) — daily workflow (screener → pipeline → reports).
 
 ## A one-paragraph mental model

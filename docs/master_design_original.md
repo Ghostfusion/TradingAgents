@@ -1,5 +1,13 @@
 # Master Design — TradingAgents (current capabilities)
 
+> **Historical snapshot — superseded by [`docs/MASTER_DESIGN.md`](MASTER_DESIGN.md).**
+> This file is kept for provenance. Its counts are ~3 weeks old and no longer
+> match the tree (it says 2,501 tests / 177 files / 146 tools; the tree now has
+> 6,286 tests / 404 test modules / 235 tools, and it predates the §103
+> entry/exit object, the score-engine set and the decision-packet work).
+> **Read `MASTER_DESIGN.md` for the current system**; treat this file as the
+> earlier recap it is.
+
 *A from-scratch recap of what this project does TODAY. No future features, no
 roadmap — every section describes behavior that exists and is tested. Written
 as the design a rebuild would target, with the system's own modules, entry

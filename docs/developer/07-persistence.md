@@ -29,10 +29,24 @@ engages. Keyed on ticker+date+graph-shape; cleared on success.
 
 ## 7.4 Strategy / calibration ledgers
 
-- `strategy_ledger.jsonl` (under `data_cache_dir`) — analyst hit-rates (the
-  reflection engine).
+- `strategy_ledger.jsonl` (under `data_cache_dir`) — the reflection engine's
+  per-analyst hit-rates. Written through
+  `strategies/reflection.py::ReflectionLedger` (the class takes an explicit
+  `path`; the caller at `graph/trading_graph.py:2066` supplies the filename).
+  Read back by `scripts/strategy_quality_report.py:137` and
+  `scripts/orderflow_evaluate.py:91`, both of which default to the same path.
+  Each row is `{analyst, ticker, trade_date, delta_r, ts}`;
+  the score is a recency-decayed hit-rate with a 30-day half-life.
 - `calibration_ledger.jsonl` — bucket win-rates for the calibration overlay.
-- `risk_audit.jsonl` — risk-governor audit rows (PASS/WARN/REJECT).
+  Rows are stamped `{confidence, won: delta_r > 0}` (`trading_graph.py:2108`).
+- `risk_audit.jsonl` (under `data_cache_dir`) — risk-governor audit rows
+  `{ticker, verdict, reasons}` with `verdict ∈ PASS|WARN|REJECT`. Gated by
+  `risk_audit_enabled` (**default ON**). **SHA-256-chained**: each row's
+  `prev_hash` is the hash of the previous raw line
+  (`strategies/hash_chain_audit.py::append`), so truncation or editing breaks
+  the chain. Verify with `py -3.12 scripts/risk_report.py --verify-chain`;
+  summarise verdict counts and limit hits with
+  `py -3.12 scripts/risk_report.py --audit`.
 
 ## 7.5 Report tree
 
@@ -40,12 +54,29 @@ engages. Keyed on ticker+date+graph-shape; cleared on success.
 
 ```
 <path>/1_analysts/{market,news,fundamentals,sentiment}.md
-<path>/2_research/{bull,bear,manager}.md
+<path>/2_research/{bull,bear,manager}.md      (+ structured_debate.md, evidence only)
 <path>/3_trading/trader.md
 <path>/4_risk/{aggressive,conservative,neutral}.md
+              (or a single verdict.md when risk_compact_report is set)
+              (+ structured_risk_debate.md, evidence only)
 <path>/5_portfolio/decision.md
 <path>/complete_report.md      (H1 report -> H2 team -> H3 role -> H4+ agent content)
+<path>/run_card.json           (config hash, commit, models, verdict, scorecard)
+<path>/research_decision.json   (the executor contract; emitted by default)
+<path>/tool_evidence.json       (only when the run captured evidence leaves)
 ```
+
+`write_report_tree(..., emit_run_artifacts=False)` (used by
+`rebuild_complete_report.py`) re-renders the markdown only and deliberately
+leaves `run_card.json` / `research_decision.json` / `tool_evidence.json`
+untouched — a rebuild reconstructs state from markdown and must not invent an
+artifact the original run never wrote.
+
+Further per-tree files are written by opt-in hooks, each behind its own gate:
+`verify_flags.json` (batch `--verify` / `scripts/report_verify.py`),
+`jev_verdict.json` (`enable_jev_verdict`), `alpha_ledger.jsonl`
+(`alpha_ledger_enable`), and `pre_market_review_<date>.md`
+(`enable_pre_market_review`).
 
 The TOC auto-links every team/role heading. `5_portfolio/decision.md` carries
 the `Risk Gate (computed)` verdict when the governor is on (plus, with the
