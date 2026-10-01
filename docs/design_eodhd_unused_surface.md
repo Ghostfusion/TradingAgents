@@ -15,8 +15,9 @@ plan and the constraints that decide it).
 
 **The supplied catalog is materially wrong about what this key can reach.** It lists 68
 endpoints as though the set were uniform; probed live, the set splits three ways and the
-largest part is closed. EODHD is also **not** a removed vendor — the repo calls **8 of its
-paths** today.
+largest part is closed. EODHD is also **not** a removed vendor — the repo calls **11 of its
+paths** today (8 at the 2026-09-19 scan, plus the `/ust/real-yield-rates`, `/ust/bill-rates` and
+`/id-mapping` builds below).
 
 Of the **9 endpoints that are reachable and unused**, only **three clear master rule 15**
 (no derived quantity may have two independent authoritative producers). The rest are either a
@@ -37,9 +38,9 @@ Everything else reachable is recorded in Appendix B with the reason it is **not*
 | Measure | Count |
 |---|---|
 | Endpoints in the supplied catalog | 68 |
-| Called by this repo today | **8** |
+| Called by this repo today | **11** (8 at the 2026-09-19 scan + P0/P1/P2; see Appendix C) |
 | Probed live against the key | **~100 URLs** (catalog paths + path variants) |
-| **Reachable and unused** | **9** |
+| **Reachable and unused** | **9** at the scan; **11** after Appendix C (`+ /news-word-weights`, `/commodities/historical/ALL_COMMODITIES`) |
 | Plan-gated (403) | **20** |
 | Not found at any probed path (404) | **~9** |
 
@@ -145,7 +146,9 @@ Appendix A lists all of them with their exact messages.
 
 The catalog asserts `word-weights` and the Treasury/rates set; the rates part is **half right** —
 the four `/ust/*` endpoints above are real and reachable, but SOFR and the policy rate are not
-at any path probed. `word-weights` was not found on either spelling.
+at any path probed. `word-weights` was not found on either spelling — but the two spellings
+probed were `word-weights` and `news/word-weights`; the catalog's own `news-word-weights`
+**is** served (200). See Appendix C, which also reconciles the `commodities/*` pair.
 
 ---
 
@@ -516,3 +519,58 @@ the gate. Without the 422 probe this would have been indistinguishable from a wr
 
 Measured payload sizes for the `/ust/*` family: 116 KB, 187 KB, 46 KB, 42 KB respectively — a
 year of rows per call in every case.
+
+---
+
+## Appendix C — catalog reconciliation (2026-10-01)
+
+The owner supplied a flat 18-path catalog and asked which of them the tree calls. Mapped
+against the single vendor seam, **9 of the 18 are wired** and the used set is now **11 paths**
+(the 8 below plus P0 `/ust/real-yield-rates`, P1 `/ust/bill-rates`, P2 `/id-mapping`). Note
+`/id-mapping` is used but is **not** in the catalog.
+
+| Catalog path | Wired? | Where / why not |
+|---|---|---|
+| `/eod/{SYMBOL}` | **yes** | `get_stock_data_eodhd:104` |
+| `/real-time/{SYMBOL}` | **yes** | `get_market_snapshot_eodhd:358` |
+| `/div/{SYMBOL}` | **yes** | `get_corporate_actions_eodhd:275` |
+| `/splits/{SYMBOL}` | **yes** | `get_corporate_actions_eodhd:275` |
+| `/exchange-symbol-list/{EXCHANGE}` | **yes** | `get_exchange_symbols_eodhd:328` |
+| `/news` | **yes** | `get_news_eodhd:240` |
+| `/sentiments` | **yes** | `_sentiment_points_eodhd:153` |
+| `/ust/real-yield-rates` | **yes** | P0, built 2026-09-19 |
+| `/ust/bill-rates` | **yes** | P1, built 2026-09-27 |
+| `/eod-bulk-last-day/{EXCHANGE}` | no | reachable, same producer as `/eod` batched — P3 declined |
+| `/us-quote-delayed` | no | reachable, second producer of the `/real-time` quote |
+| `/exchanges-list` | no | reachable, pure reference data |
+| `/search/{QUERY}` | no | reachable, discovery only — `/exchange-symbol-list` covers the need |
+| `/ust/yield-rates` | no | reachable, second producer of the nominal curve |
+| `/ust/long-term-rates` | no | reachable, second producer of the nominal curve |
+| `/news-word-weights` | no | **reachable — see below** (this document had tested the wrong spelling) |
+| `/commodities/historical/{CODE}` | no | **404 on this key** (see below) |
+| `/commodities/historical/ALL_COMMODITIES` | no | **reachable — see below**, no consumer |
+
+### Two gaps this reconciliation closed
+
+**1. `news-word-weights` is reachable; the Tier-4 note tested the wrong spelling.** Tier 4
+records `word-weights` as 404 "on either spelling" — but the two spellings probed were
+`word-weights` and `news/word-weights`. The catalog's `news-word-weights` is the one EODHD
+actually serves: **200**, returning a term→weight dict
+(`{"stock": 0.01948, "apple": 0.01193, "price": 0.0118, …}`) for a symbol. The Tier-4 line stands
+for the paths it probed; it does **not** establish that this endpoint is absent, and it is now
+recorded as reachable-and-unused. It is **not** adopted: it is a second producer of nothing the
+tree scores, and `sentiments` already owns the news-derived number.
+
+**2. The commodities surface is half real.** `commodities/historical/ALL_COMMODITIES` → **200**,
+a monthly Global Price Index of All Commodities (415 rows, `unit: Index 2016 = 100`). But
+`commodities/historical/{CODE}` (probed as `/GOLD` and as `?s=GOLD`) → **404**; only the
+aggregate index path resolves on this key. Not adopted — the tree has no consumer, and the
+aggregate index is not the per-commodity series the catalog implies. `ALL_COMMODITIES` **is** the
+`{CODE}` slot with a fixed code, so the catalog's two rows are one route, not two.
+
+### Re-measured live 2026-10-01
+
+`eod-bulk-last-day/US` **27,063 rows** (the 45,009 in Appendix B is date-dependent, a previous
+session's trading day), `exchanges-list` 70, `search/AAPL` 15, `us-quote-delayed` 200,
+`ust/yield-rates` 200, `ust/long-term-rates` 200 — every other Appendix-B figure reproduces.
+No code changed by this appendix.
