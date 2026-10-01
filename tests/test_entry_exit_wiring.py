@@ -25,6 +25,11 @@ from tradingagents.agents.schemas import (
     TraderProposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.strategies.entry_exit_families import (
+    ENTRY_MEMBERS,
+    EXIT_MEMBERS,
+    member as _member,
+)
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -69,6 +74,28 @@ _BLOCK = {
 }
 
 _BLOCK_HEADING = "**Entry / Exit price (§103, computed - advisory):**"
+
+# Every §103 name, so the renderer is exercised on the complete object. Two
+# members that no run can produce stay absent-with-a-reason, so the test sees
+# both shapes: a measured price, and a named absence (never a blank row).
+_BLOCK["entry"]["members"] = {
+    name: _member(98.5, "fixture: a measured entry family") for name in ENTRY_MEMBERS
+}
+_BLOCK["entry"]["members"]["final_entry_price"] = _member(
+    98.5, "§100: min(target, max) over the terms present; binding max_entry_price"
+)
+_BLOCK["entry"]["members"]["momentum_entry_price"] = _member(
+    None, "no calibrated momentum-score -> price map exists"
+)
+_BLOCK["exit"]["members"] = {
+    name: _member(110.0, "fixture: a measured exit family") for name in EXIT_MEMBERS
+}
+_BLOCK["exit"]["members"]["stop_loss_price"] = _member(
+    95.0, "the plan's unified stop (invalidation)"
+)
+_BLOCK["exit"]["members"]["event_exit"] = _member(
+    None, "needs the forward calendar, which the card is built without"
+)
 
 
 class _StructuredLLM:
@@ -129,10 +156,11 @@ def test_the_trader_output_carries_the_103_price_block(monkeypatch):
     plan = out["trader_investment_plan"]
 
     assert _BLOCK_HEADING in plan
-    assert "- Final entry price: 98.50" in plan
-    assert "- Entry ceiling (max): 99.00" in plan
-    assert "- Exit target: 110.00 (T2)" in plan
-    assert "- Exit predicate:" in plan
+    assert "- final_entry_price: 98.50 - §100: min(target, max) over the terms present" in plan
+    assert "- stop_loss_price: 95.00 - the plan's unified stop (invalidation)" in plan
+    assert "- momentum_entry_price: unavailable - no calibrated momentum-score" in plan
+    assert "- event_exit: unavailable - needs the forward calendar" in plan
+    assert "- §101 exit predicate:" in plan
     assert "no exit condition fired" in plan
 
 
@@ -158,7 +186,7 @@ def test_the_pm_decision_carries_the_same_block():
     assert "**Price Target**: 110.0" in decision
     # ...then the computed block, from the same dict the Trader read.
     assert _BLOCK_HEADING in decision
-    assert "- Final entry price: 98.50" in decision
+    assert "- final_entry_price: 98.50" in decision
     # Rating stays the first line: parsers, the CLI and the memory log read it.
     assert decision.startswith("**Rating**: Buy")
 

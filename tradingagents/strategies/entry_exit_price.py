@@ -12,6 +12,14 @@ economic ceiling, and §100 itself applies the buffer before the min - putting
 it inside the min double-counts it (the defect recorded in the plan). It is
 reported, and the final is taken over the ceilings alone.
 
+Each block also carries ``members``: **every** name §103's recommended object
+lists, each either the price this run measured or ``None`` with the reason it is
+absent. The §8-§42 constructions (the volatility and support entries, the
+volatility / ATR / support / break-even stops, the volatility / risk-multiple /
+fair-value targets) come from ``entry_exit_families``; the rest are this
+module's own primitives - one value per name, so a reader can check the spec off
+the report line by line.
+
 Pure and deterministic. Advisory throughout.
 """
 
@@ -55,6 +63,13 @@ def entry_exit_price(
     risk_gate=None,
     time_exit_fired=None,
     expected_value=None,
+    # §8-§42 price families (the close series and the reference entry)
+    closes=None,
+    high=None,
+    low=None,
+    fair_value=None,
+    rr_multiple=None,
+    config=None,
 ) -> dict:
     """Assemble §103's ENTRY and EXIT blocks from the phase primitives."""
     ceiling = entry_ceiling(
@@ -125,6 +140,77 @@ def entry_exit_price(
         expected_value=expected_value,
     )
     exit_block["precedence"] = list(EXIT_PRECEDENCE)
+
+    # §103's member map: every name the spec lists, each a measured price (or a
+    # measured condition) or None with the reason it is absent. The §8-§42
+    # families and this module's own primitives each own part of the list; the
+    # merge keeps ONE value per name, so the report can print the whole object
+    # without a reader having to know which producer filled which row.
+    from tradingagents.strategies.entry_exit_families import (
+        member,
+        section_103_members,
+    )
+
+    families = section_103_members(
+        closes=closes,
+        high=high,
+        low=low,
+        price=price,
+        valuation_price=valuation_price,
+        technical_price=technical_price,
+        expected_return_price=rr_ceiling,
+        fair_value=fair_value,
+        entry=final if final is not None else price,
+        stop=stop,
+        trailing_stop=trailing_stop,
+        technical_target=target,
+        rr_multiple=rr_multiple,
+        config=config,
+    )
+    entry_block["members"] = {
+        **families["entry"],
+        "risk_adjusted_entry_price": member(
+            risk["value"], "§68: stop / (1 - max_stop_fraction)"
+        ),
+        "liquidity_adjusted_entry_price": member(
+            execution["liquidity_adjusted_entry_price"],
+            "§102: price net of the measured execution buffer",
+        ),
+        "execution_price": member(
+            execution["execution_price"],
+            "§74-§78: the price this run could realistically pay",
+        ),
+        "max_entry_price": member(
+            ceiling["value"],
+            f"§102: min over the ceiling sources (status {ceiling['status']})",
+        ),
+        "final_entry_price": member(
+            final,
+            f"§100: min(target, max) over the terms present; binding {binding}",
+        ),
+    }
+    conditions = exit_block["conditions"]
+    exit_block["members"] = {
+        **families["exit"],
+        "stop_loss_price": member(stop, "the plan's unified stop (invalidation)"),
+        "time_exit": member(
+            conditions.get("time_exit"), "§58: held past its holding horizon"
+        ),
+        "thesis_break_exit": member(
+            conditions.get("thesis_break"), "§101: the thesis broke"
+        ),
+        "expected_value_exit": member(
+            conditions.get("expected_value"), "§101: expected value turned negative"
+        ),
+        "final_exit_price": member(
+            exit_block["exit_price"] if exit_block["exit"] is True else None,
+            (
+                f"§103: the level that fires ({exit_block['reason']})"
+                if exit_block["exit"] is True
+                else f"§103: no exit fires at the reference price ({exit_block['reason']})"
+            ),
+        ),
+    }
 
     return {"entry": entry_block, "exit": exit_block}
 

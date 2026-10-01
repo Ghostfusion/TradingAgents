@@ -1173,7 +1173,7 @@ class TradingAgentsGraph:
                         closes=closes,
                         # Pass the real H/L so the contract's ATR (and therefore
                         # its stop) is the true range. Without them
-                        # _atr_or_proxy fell back to a close-to-close proxy -
+                        # atr_or_proxy fell back to a close-to-close proxy -
                         # NVDA 2026-09-12: contract stop 207.8845 from a proxy
                         # ATR 5.20 while the swing tools, using the real ATR
                         # 7.6672 that was sitting in this same state, said
@@ -1749,10 +1749,10 @@ class TradingAgentsGraph:
             pass
         try:
             if self.config.get("enable_risk_governor") and closes and closes[-1] > 0:
-                from tradingagents.strategies.contract import _atr_or_proxy
+                from tradingagents.strategies.contract import atr_or_proxy
                 from tradingagents.strategies.risk_sizing import risk_money
 
-                atr_v = _atr_or_proxy(closes, None, None, window=14)
+                atr_v = atr_or_proxy(closes, None, None, window=14)
                 if atr_v and atr_v > 0:
                     entry = float(closes[-1])
                     stop = entry - 2.0 * atr_v

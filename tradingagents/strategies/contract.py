@@ -80,7 +80,7 @@ def _log_returns(closes) -> list:
     return rets
 
 
-def _atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
+def atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
     """ATR plus the basis it came from: ``"h/l"`` (true range) or ``"proxy"``.
 
     The proxy is a close-to-close range estimate, so it understates the real
@@ -109,9 +109,9 @@ def _atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
     return avg * closes[-1], "proxy"
 
 
-def _atr_or_proxy(closes, high, low, window: int = 14) -> float:
+def atr_or_proxy(closes, high, low, window: int = 14) -> float:
     """ATR from H/L when present; else a close-to-close range proxy."""
-    return _atr_with_source(closes, high, low, window=window)[0]
+    return atr_with_source(closes, high, low, window=window)[0]
 
 
 def build_position_contract(
@@ -169,7 +169,7 @@ def build_position_contract(
 
     from tradingagents.strategies.size import position_size_kelly, volatility_target_scale
 
-    a, atr_source = _atr_with_source(closes_f, high, low)
+    a, atr_source = atr_with_source(closes_f, high, low)
     stop_pct = _clamp(atr_mult * a / last if a > 0 else 0.02, 0.005, 0.50)
 
     # Reference entry for the dollar stop: the weighted tranche entry when a
@@ -305,4 +305,4 @@ def build_position_contract(
     )
 
 
-__all__ = ["PositionContract", "build_position_contract"]
+__all__ = ["PositionContract", "atr_or_proxy", "atr_with_source", "build_position_contract"]

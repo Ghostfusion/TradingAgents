@@ -335,9 +335,9 @@ def tranche_risk_read(
     if p1 <= 0:
         return {"valid": False, "reason": "non-positive price"}
     if atr_value is None:
-        from .contract import _atr_or_proxy
+        from .contract import atr_or_proxy
 
-        atr_value = _atr_or_proxy(closes, None, None, window=14)
+        atr_value = atr_or_proxy(closes, None, None, window=14)
     plan = tranche_plan(
         p1,
         atr_value,

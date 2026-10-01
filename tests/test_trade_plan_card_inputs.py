@@ -201,18 +201,24 @@ def test_the_card_captures_the_103_block_it_rendered(monkeypatch):
     assert block["exit"]["precedence"][0] == "risk_gate"
 
 
-def test_the_rendered_price_block_names_every_absent_exit(monkeypatch):
-    """This block is what the Trader's and the PM's sections print. A level the
-    run could not measure is named absent, never read as "no exit"."""
+def test_the_rendered_price_block_prints_every_103_member(monkeypatch):
+    """This block is what the Trader's and the PM's sections print, so it has to
+    carry the WHOLE §103 object: every member, as the measured price or as the
+    reason it is absent - never a blank row."""
+    from tradingagents.strategies.entry_exit_families import ENTRY_MEMBERS, EXIT_MEMBERS
     from tradingagents.strategies.trade_plan import render_entry_exit_block
 
-    text = render_entry_exit_block(_card_and_block(monkeypatch, _closes()))
+    block = _card_and_block(monkeypatch, _closes())
+    assert set(block["entry"]["members"]) == set(ENTRY_MEMBERS)
+    assert set(block["exit"]["members"]) == set(EXIT_MEMBERS)
 
-    assert "Final entry price:" in text
-    assert "Entry ceiling (max):" in text
-    assert "Exit predicate:" in text
+    text = render_entry_exit_block(block)
+    for name in (*ENTRY_MEMBERS, *EXIT_MEMBERS):
+        assert f"- {name}:" in text
+    assert "- final_entry_price: " in text
+    assert "- momentum_entry_price: unavailable - " in text  # no score -> price map
+    assert "- §101 exit predicate:" in text
     assert "risk_gate" in text and "thesis_break" in text
-    assert "unavailable" in text  # the CVaR / execution rows were unmeasurable
     # It travels inside text `reporting._looks_truncated` scans for a max_tokens
     # cut, so the block ends on a sentence, never on a bare measured name.
     assert text.rstrip().endswith(".")

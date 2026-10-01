@@ -106,6 +106,11 @@ involved. This is the "compute, don't narrate" core.
   risk/stop)*vol*flow*agree*catalyst).
 - `calibration.py` — `fit_buckets` (ledger win-rate -> calibrated P).
 - `consensus.py` — `agreement_score` (debate stances -> agreement).
+- `entry_exit_families.py` — §103's §8-§42 price families: the volatility and
+  support entries, the volatility / ATR / support / break-even stops and the
+  volatility / risk-multiple / fair-value targets, each returned as a measured
+  price or as a named absence (`section_103_members`, `ENTRY_MEMBERS`,
+  `EXIT_MEMBERS`).
 - `exits.py` — stop/BE/targets.
 - `reflection.py` — ledger, analyst hit-rates.
 - `orderflow.py` — `fetch_flow`, `summarize`, divergence/alignment/exhaustion.

@@ -19,6 +19,13 @@ in ``EXIT_PRECEDENCE``, and the ones that could not be measured named as
 absent. So the agents read the entry price AND the exit price from one card
 instead of inventing either.
 
+The object that assembly captures carries §103's **complete** member set: the
+card's own primitives plus the §8-§42 price families
+(``strategies/entry_exit_families.py``). ``render_entry_exit_block`` renders
+every member - the measured price, or ``unavailable`` with the reason - so the
+report shows the whole spec'd object rather than the subset the card's prose
+rows happen to print.
+
 Everything is advisory: the card reports measured numbers or explicit
 'unavailable', and never blocks a decision by itself (hard gating stays in
 the risk governor / strict value-dip flags).
@@ -29,6 +36,7 @@ from __future__ import annotations
 import contextlib
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
+from tradingagents.strategies.entry_exit_families import ENTRY_MEMBERS, EXIT_MEMBERS
 from tradingagents.strategies.entry_exit_price import entry_exit_price
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
@@ -77,6 +85,10 @@ def build_trade_plan(
     name_cvar: float | None = None,
     cvar_budget: float | None = None,
     mae_samples=None,
+    closes=None,
+    high=None,
+    low=None,
+    fair_value=None,
     config: dict | None = None,
     capture: dict | None = None,
 ) -> str:
@@ -197,6 +209,15 @@ def build_trade_plan(
         liquidity_status=liquidity_status,
         trailing_stop=trail_level,
         target=exit_target,
+        # §103's remaining price families: the close series prices the ATR /
+        # volatility / support stops and the volatility / risk-multiple targets,
+        # and `fair_value` fills the fair-value pair when a caller has one.
+        closes=closes,
+        high=high,
+        low=low,
+        fair_value=fair_value,
+        rr_multiple=cfg.get("min_rr"),
+        config=cfg,
     )
     final_entry = assembled["entry"]
     exit_block = assembled["exit"]
@@ -417,97 +438,47 @@ f"- Execution cost (advisory, §74-§78): buffer {_pct(execution['buffer_fractio
 
 
 def render_entry_exit_block(block: dict | None) -> str:
-    """Render §103's ENTRY/EXIT object as a compact markdown block.
+    """Render §103's complete ENTRY/EXIT object as markdown.
 
     The Trader's plan and the PM's decision carry this, so a reader of
-    ``3_trading/trader.md`` or ``5_portfolio/decision.md`` finds the measured
-    entry price and exit price *where the decision is* - not only inside the
-    report's computed-context dump (section IVa). It renders the same dict the
-    card was built from (``capture["entry_exit"]``), so the two surfaces cannot
-    disagree, and every line is a measured price or an explicit "unavailable" -
-    a term the run could not measure is named, never defaulted.
+    ``3_trading/trader.md`` or ``5_portfolio/decision.md`` finds the entry price
+    and the exit price *where the decision is* - not only inside the report's
+    computed-context dump (section IVa). It renders the same dict the card was
+    built from (``capture["entry_exit"]``), so the two surfaces cannot disagree.
 
-    Returns ``""`` when no block was captured (an older run, or a caller that
-    computed no card): an empty string appends nothing rather than an empty
+    Every name §103 lists is printed from the object's ``members`` map: the
+    measured price, or ``unavailable`` WITH the reason it is absent. A member a
+    run could not measure is named, never defaulted - the rule the whole §103
+    path keeps. Returns ``""`` when no block was captured (an older run, or a
+    caller that computed no card), so nothing is appended rather than an empty
     heading.
     """
     if not isinstance(block, dict) or not block:
         return ""
     entry = block.get("entry") or {}
     exit_block = block.get("exit") or {}
-    levels = block.get("levels") or {}
+    entry_members = entry.get("members") or {}
+    exit_members = exit_block.get("members") or {}
     out = ["**Entry / Exit price (§103, computed - advisory):**"]
 
-    final = entry.get("final_entry_price")
-    if final is not None:
-        basis = "; ".join(
-            f"{term}={_num(value)}"
-            for term, value in sorted((entry.get("final_entry_basis") or {}).items())
-        )
-        out.append(
-            f"- Final entry price: {_num(final)}"
-            + (f" - min of {basis} (binding {entry.get('final_entry_binding')})" if basis else "")
-        )
-    else:
-        out.append(
-            "- Final entry price: unavailable - no §103 ceiling term was "
-            f"measurable (status {entry.get('ceiling_status')})"
-        )
-
-    if entry.get("max_entry_price") is not None:
-        out.append(
-            f"- Entry ceiling (max): {_num(entry['max_entry_price'])} "
-            f"[{entry.get('ceiling_status')}; binding "
-            f"{entry.get('ceiling_binding_source')}; coverage "
-            f"{entry.get('ceiling_coverage')}/{len(CEILING_SOURCES)}]"
-        )
-    else:
-        out.append(f"- Entry ceiling (max): unavailable [{entry.get('ceiling_status')}]")
-
-    if entry.get("target_entry_price") is not None:
-        out.append(
-            f"- Target entry: {_num(entry['target_entry_price'])} "
-            f"[{entry.get('target_status')}; coverage "
-            f"{entry.get('target_coverage')}/{len(ANCHOR_SOURCES)}]"
-        )
-    else:
-        out.append(f"- Target entry: unavailable [{entry.get('target_status')}]")
-
-    if entry.get("risk_adjusted_entry_price") is not None:
-        out.append(
-            f"- Risk-adjusted max entry: {_num(entry['risk_adjusted_entry_price'])} "
-            f"(CVaR: {entry.get('cvar_status')})"
-        )
-    else:
-        out.append(f"- Risk-adjusted max entry: unavailable (CVaR: {entry.get('cvar_status')})")
-
-    liquidity = entry.get("liquidity_status") or "unavailable"
-    if entry.get("execution_price") is not None:
-        out.append(
-            f"- Execution price: {_num(entry['execution_price'])} - buffer "
-            f"{_num(entry.get('execution_buffer'))}; cost terms "
-            f"{entry.get('execution_coverage')}/{len(COST_SOURCES)}; "
-            f"liquidity {liquidity}"
-        )
-    else:
-        out.append(
-            f"- Execution price: unavailable - no cost term measured "
-            f"(liquidity {liquidity})"
-        )
-
-    out.append(f"- Exit stop (unified): {_num(levels.get('unified_stop'))}")
-    trail = levels.get("trailing_stop")
-    trail_src = levels.get("trailing_stop_source")
-    out.append(
-        f"- Exit trailing stop: {_num(trail)}"
-        + (f" ({trail_src})" if trail is not None and trail_src else "")
-    )
-    target = levels.get("target")
-    target_basis = levels.get("target_basis")
-    out.append(
-        f"- Exit target: {_num(target)}"
-        + (f" ({target_basis})" if target is not None and target_basis else "")
-    )
+    for title, members, names in (
+        ("ENTRY", entry_members, ENTRY_MEMBERS),
+        ("EXIT", exit_members, EXIT_MEMBERS),
+    ):
+        out.extend(["", f"**{title}**"])
+        for name in names:
+            record = members.get(name)
+            if not isinstance(record, dict):
+                out.append(f"- {name}: unavailable - this run produced no such member")
+                continue
+            value = record.get("value")
+            reason = record.get("reason") or "no reason recorded"
+            if value is None:
+                out.append(f"- {name}: unavailable - {reason}")
+            elif isinstance(value, bool):
+                out.append(f"- {name}: {value} - {reason}")
+            else:
+                out.append(f"- {name}: {_num(value)} - {reason}")
 
     conditions = exit_block.get("conditions") or {}
     precedence = exit_block.get("precedence") or []
@@ -521,7 +492,7 @@ def render_entry_exit_block(block: dict | None) -> str:
     else:
         predicate = "no exit condition could be evaluated"
     out.append(
-        f"- Exit predicate: {predicate} - evaluated "
+        "- §101 exit predicate: " + predicate + " - evaluated "
         + ("; ".join(f"{k}={v}" for k, v in conditions.items()) if conditions else "none")
         + f" (coverage {exit_block.get('coverage')}/{len(precedence)})"
     )
@@ -531,17 +502,16 @@ def render_entry_exit_block(block: dict | None) -> str:
             "- Exits not measurable at plan time (absent, NOT 'no exit'): "
             + ", ".join(absent)
         )
-    # Closing note, and deliberately the block's LAST line: a computed
-    # appendage is never scanned by `reporting._looks_truncated`, but it does
-    # travel inside text that is (the trader's plan and the PM's decision are
-    # finalized as LLM prose). A block ending on a bare name would read as a
-    # mid-word max_tokens cut, so it ends on the parenthetical.
+    # Closing note, and deliberately the block's LAST line: a computed appendage
+    # is never scanned by `reporting._looks_truncated`, but it does travel inside
+    # text that is (the trader's plan and the PM's decision are finalized as LLM
+    # prose). A block ending on a bare measured name would read as a mid-word
+    # max_tokens cut, so it ends on the parenthetical.
     out.append(
         "- Each level above is a price this run measured, or an explicit "
         "'unavailable' (the full plan rows are in the trade-plan card)."
     )
     return "\n".join(out)
-
 
 def measured_inputs(closes, config: dict | None = None) -> dict:
     """The plan pieces measurable from the close series alone.
@@ -577,6 +547,11 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
     out: dict = {
         "tranche": read,
         "targets": read.get("targets"),
+        # The series itself. The §8-§42 price families (the ATR / volatility /
+        # support stops and the volatility / risk-multiple targets) need the
+        # bars, and this is the ONE read the run already made - passing it costs
+        # no second fetch, and `build_trade_plan` reads it only through them.
+        "closes": list(closes),
         # §100 price anchor: the tranche's own measured entry.
         "tranche_price": read.get("avg_entry"),
         # §68 risk rule: the largest per-share risk the sizing will accept, as
