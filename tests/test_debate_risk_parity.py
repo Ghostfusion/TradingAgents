@@ -239,6 +239,71 @@ class TestBoundedContextPhases:
         disputes = active_disputes(ds)
         assert disputes and disputes[0]["status"] == "violated"
 
+    def test_l1_node_writes_the_dimensioned_rubric(self):
+        """L1's rubric is computed by the node from the turn's own claims and
+        the accumulated ledger, and written under its OWN key.
+
+        The six names are the L2 judge's so the tiers can be compared, but a
+        deterministic measurement must never land in `judge_scores` beside a
+        stochastic judge opinion - the defect class that keeps
+        `opportunity_score` null in the artifact.
+        """
+        from tradingagents.agents.researchers.structured_debate import (
+            CLAIM_LEDGER,
+            L1_RUBRIC,
+            ROUND_RECORDS,
+            claim_records_from_turn,
+            create_debate_l1,
+        )
+        from tradingagents.agents.schemas import DebaterTurnPayload
+
+        def _turn(stance, claims, alloc):
+            return DebaterTurnPayload.model_validate({
+                "round_index": 1,
+                "stance": stance,
+                "core_thesis": "t",
+                "quantitative_claims": claims,
+                # One HIGH, two LOW -> the tail-risk share is 1/3.
+                "risk_factors": [
+                    {"risk_id": "a", "severity": "high"},
+                    {"risk_id": "b", "severity": "low"},
+                    {"risk_id": "c", "severity": "low"},
+                ],
+                "recommended_allocation_pct": alloc,
+            })
+
+        bull = _turn("BULL", [{"metric_name": "fcf", "asserted_value": 7.41,
+                               "ground_truth_key": "fcf_yield", "source": "x"}], 10.0)
+        bear = _turn("BEAR", [{"metric_name": "fcf", "asserted_value": 3.0,
+                               "ground_truth_key": "fcf_yield", "source": "x"},
+                              {"metric_name": "rsi", "asserted_value": 55.0,
+                               "ground_truth_key": "rsi", "source": "x"}], 2.0)
+        prior_rows = [c.to_dict() for c in claim_records_from_turn(bull, "bull", 1)]
+
+        node = create_debate_l1(lambda s: {"fcf_yield": 7.41, "rsi": 55.0})
+        out = node({"debate_state": {
+            ROUND_RECORDS: [{"bull": bull.model_dump()}, {"bear": bear.model_dump()}],
+            "last_side": "bear",
+            CLAIM_LEDGER: prior_rows,
+        }})
+        ds = out["debate_state"]
+        dims = ds[L1_RUBRIC]["dimensions"]
+
+        # bear's fcf 3.0 is 59.5% off the 7.41 ground truth -> violated; rsi
+        # matches -> valid, so half the verifiable claims hold up.
+        assert dims["empirical_grounding"]["value"] == pytest.approx(5.0)
+        assert dims["downside_tail_risk_weight"]["value"] == pytest.approx(10.0 / 3, abs=1e-3)
+        # One of the bear's two claims meets the opponent's number on the same
+        # metric (fcf 3.0 vs 7.41); rsi is not a metric the bull used.
+        assert dims["rebuttal_effectiveness"]["value"] == pytest.approx(5.0)
+        # The bear's first turn has nothing to entrench against.
+        assert dims["entrenchment_detected"]["value"] is None
+        # The two dimensions with no deterministic producer say so.
+        assert dims["catalyst_clarity"]["value"] is None
+        assert dims["assumption_sensitivity"]["value"] is None
+        # And the deterministic values never land in the judge's dict.
+        assert not (ds.get("judge_scores") or {})
+
     def test_d10_consensus_exit_reads_the_section_agreement(self):
         """The consensus contour could never fire: nothing wrote the key.
 

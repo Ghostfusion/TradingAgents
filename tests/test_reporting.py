@@ -853,6 +853,83 @@ def test_fmt_score_renders_an_unmeasured_dimension_as_a_dash():
     assert _fmt_score(0.0) == "0"
 
 
+_RUBRIC = {
+    "dimensions": {
+        "empirical_grounding": {
+            "value": 8.75, "status": "OK", "reason": "10 x the valid share",
+        },
+        "downside_tail_risk_weight": {
+            "value": 3.3333, "status": "OK", "reason": "1/3 at HIGH or CRITICAL",
+        },
+        "catalyst_clarity": {
+            "value": None, "status": "NO_SOURCE", "reason": "needs the forward calendar",
+        },
+        "assumption_sensitivity": {
+            "value": None, "status": "NO_SOURCE", "reason": "needs a valuation perturbation",
+        },
+        "rebuttal_effectiveness": {
+            "value": 5.0, "status": "OK", "reason": "met half the opponent's premises",
+        },
+        "entrenchment_detected": {
+            "value": True, "status": "OK", "reason": "index 0.9 vs threshold 0.8",
+        },
+    },
+    "present": [
+        "empirical_grounding", "downside_tail_risk_weight",
+        "rebuttal_effectiveness", "entrenchment_detected",
+    ],
+    "absent": ["catalyst_clarity", "assumption_sensitivity"],
+}
+
+
+def test_evidence_block_renders_the_l1_rubric(tmp_path):
+    """The six dimension rows, with an unmeasured dimension reading ``-`` plus
+    its reason - never a 0 - and a boolean reading true/false, not 1.0/0.0."""
+    state = _state()
+    state["investment_debate_state"] = {"bull_history": "b\n", "bear_history": "B\n"}
+    state["debate_state"] = {
+        "l1": {"side": "bear", "severity_tier": "GREEN", "l1_action": "PROCEED",
+               "penalty_score": 0.0},
+        "l1_rubric": _RUBRIC,
+    }
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    body = (tmp_path / "2_research" / "structured_debate.md").read_text(encoding="utf-8")
+    assert "- L1 rubric (deterministic, 0-10):" in body
+    assert "- empirical_grounding: 8.75 - 10 x the valid share" in body
+    assert "- catalyst_clarity: - - needs the forward calendar" in body
+    assert "- assumption_sensitivity: - - needs a valuation perturbation" in body
+    assert "- entrenchment_detected: true - index 0.9 vs threshold 0.8" in body
+    assert "- rebuttal_effectiveness: 5 - met half the opponent's premises" in body
+
+
+def test_evidence_block_says_unavailable_when_no_turn_was_scored(tmp_path):
+    state = _state()
+    state["investment_debate_state"] = {"bull_history": "b\n", "bear_history": "B\n"}
+    state["debate_state"] = {"l1": {"severity_tier": "GREEN"}}
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    body = (tmp_path / "2_research" / "structured_debate.md").read_text(encoding="utf-8")
+    assert "- L1 rubric: unavailable (no turn was scored)" in body
+
+
+def test_run_card_records_the_l1_rubric_for_both_sections(tmp_path):
+    """The card carries L1's deterministic dimensions per section, kept apart
+    from the judge's `judge_scores`."""
+    state = _state()
+    state["debate_state"] = {"l1_rubric": _RUBRIC}
+    state["structured_risk_state"] = {"l1_rubric": _RUBRIC}
+    write_report_tree(state, "TST", tmp_path, config={"enable_debate": True})
+    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+    research = card["debate"]["l1_rubric"]["research"]["dimensions"]
+    risk = card["debate"]["l1_rubric"]["risk"]["dimensions"]
+    assert research["empirical_grounding"]["value"] == 8.75
+    assert risk["entrenchment_detected"]["value"] is True
+    assert card["debate"]["l1_rubric"]["research"]["absent"] == [
+        "catalyst_clarity", "assumption_sensitivity",
+    ]
+    # The deterministic rubric is its own key - the judge's dict stays empty.
+    assert card["debate"]["l1_scores"]["research"] == []
+
+
 # ---------------------------------------------------------------------------
 # Number/label integrity: the execution contract's evidence-derived fields and
 # the binding-gate label (NVDA 2026-09-12 review).

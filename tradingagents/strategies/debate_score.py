@@ -271,7 +271,220 @@ def reweight_to_baseline(
     return round((1 - alpha) * w_debate + alpha * w_baseline, 6)
 
 
+# ---------------------------------------------------------------------------
+# L1's dimensioned rubric (design §4.3 / §4.5)
+# ---------------------------------------------------------------------------
+
+# The six names the L2 judge scores - its four ``JudgeDimension`` members plus
+# ``rebuttal_effectiveness`` and ``entrenchment_detected`` - so the two tiers
+# can be read dimension-for-dimension. L1 fills the four it can MEASURE.
+#
+# They are reported under their OWN key (``l1_rubric``) and are never merged
+# into ``judge_scores``. A deterministic measurement and a stochastic judge
+# opinion must not share a dict, or some consumer will average them: this is
+# the same reason ``research_decision.json``'s ``opportunity_score`` is null
+# rather than the judge's rubric mean.
+L1_RUBRIC_DIMENSIONS = (
+    "empirical_grounding",
+    "downside_tail_risk_weight",
+    "catalyst_clarity",
+    "assumption_sensitivity",
+    "rebuttal_effectiveness",
+    "entrenchment_detected",
+)
+# Cosine-overlap at or above which a role is judged to be repeating itself
+# (design §4.5 R2'). A parameter default, not a config key - ``divergence_check``
+# pins its own floor the same way.
+DEFAULT_ENTRENCHMENT_THRESHOLD = 0.8
+# Severities that count toward ``downside_tail_risk_weight``.
+HIGH_SEVERITIES = frozenset({"HIGH", "CRITICAL"})
+# Relative disagreement above which two values on the same metric are a
+# contradiction rather than rounding.
+REBUTTAL_TOLERANCE_PCT = 1.0
+
+
+def _l1_dim(value, reason: str) -> dict:
+    """One rubric member: ``{value, status, reason}``.
+
+    ``status`` is ``OK`` / ``NO_SOURCE`` with ``NO_SOURCE`` **iff** ``value``
+    is ``None`` - the same contract the §103 price members use.
+    """
+    return {
+        "value": value,
+        "status": "OK" if value is not None else "NO_SOURCE",
+        "reason": reason,
+    }
+
+
+def direct_challenge_share(
+    claims: Sequence[dict],
+    opponent_claims: Sequence[dict],
+    tolerance_pct: float = REBUTTAL_TOLERANCE_PCT,
+) -> float | None:
+    """Share of this turn's quantitative claims that contradict an opponent.
+
+    ``rebuttal_effectiveness`` at L2 is the judge's read of how directly an
+    argument invalidated the opponent's specific premises, which a rule cannot
+    see. What a rule CAN see is whether the turn actually met the opponent's
+    numbers: a claim on the same metric as an opponent's earlier claim, at a
+    different value, is a direct challenge to a stated premise. That is the
+    deterministic floor for this dimension - deliberately about the opponent's
+    premises, not about speaking at length.
+
+    ``None`` when there is nothing to rebut (no opposing quantitative claim, or
+    this turn made no quantitative claim of its own), never ``0.0``: an empty
+    turn is not an ineffective one.
+    """
+    mine = [
+        c
+        for c in claims
+        if str(c.get("kind", "quantitative")) == "quantitative"
+        and c.get("value") is not None
+    ]
+    if not mine:
+        return None
+    theirs = {}
+    for c in opponent_claims:
+        if str(c.get("kind", "quantitative")) != "quantitative":
+            continue
+        key = str(c.get("metric_name") or "").strip().lower()
+        if key and c.get("value") is not None:
+            theirs[key] = float(c["value"])
+    if not theirs:
+        return None
+    hits = 0
+    for c in mine:
+        key = str(c.get("metric_name") or "").strip().lower()
+        if key not in theirs:
+            continue
+        truth = theirs[key]
+        denom = abs(truth) if truth else 1.0
+        if abs(float(c["value"]) - truth) / denom * 100.0 > tolerance_pct:
+            hits += 1
+    return hits / len(mine)
+
+
+def aligned_value_vectors(
+    current: dict, previous: dict
+) -> tuple[list[float], list[float]]:
+    """Two equal-length value lists ordered by the union of metric names.
+
+    ``entrenchment_index`` (design §4.5) takes two vectors; a role's vector is
+    the numbers it asserted, aligned by metric name. A metric present in only
+    one of the two turns contributes ``0.0`` to the other side, so dropping a
+    metric reads as drift instead of being silently ignored.
+    """
+    keys = sorted(set(current) | set(previous))
+    return (
+        [float(current.get(k) or 0.0) for k in keys],
+        [float(previous.get(k) or 0.0) for k in keys],
+    )
+
+
+def l1_rubric(
+    verifications: Sequence[dict],
+    claims: Sequence[dict],
+    *,
+    opponent_claims: Sequence[dict] = (),
+    current_values: dict | None = None,
+    prior_values: dict | None = None,
+    allocation: float | None = None,
+    prior_allocation: float | None = None,
+    entrenchment_threshold: float = DEFAULT_ENTRENCHMENT_THRESHOLD,
+) -> dict:
+    """L1's dimensioned rubric, deterministic and pure.
+
+    Every value comes from the turn's own claims and the run's verified ground
+    truth. Scaled 0..10 to match
+    ``L2JudgeDimensionedRubric.dimension_scores`` so the tiers can be compared
+    directly; stored separately, never merged.
+
+    Four of the six have a producer here. Two do not, and say so rather than
+    guessing: ``catalyst_clarity`` needs the forward calendar (not held by the
+    debate node) and ``assumption_sensitivity`` needs a valuation perturbation
+    (not computed on this path). An absent member is ``None`` with its reason,
+    never ``0``.
+
+    Returns ``{dimensions: {name: {value, status, reason}}, present, absent}``.
+    """
+    dims: dict[str, dict] = {}
+
+    ev = evidence_quality(verifications)
+    dims["empirical_grounding"] = _l1_dim(
+        None if ev is None else round(10.0 * ev, 4),
+        "10 x the valid share of this turn's verifiable claims"
+        if ev is not None
+        else "the turn made no verifiable claim",
+    )
+
+    sevs = [str(c.get("severity") or "").strip().upper() for c in claims]
+    sevs = [s for s in sevs if s]
+    if sevs:
+        high = sum(1 for s in sevs if s in HIGH_SEVERITIES)
+        dims["downside_tail_risk_weight"] = _l1_dim(
+            round(10.0 * high / len(sevs), 4),
+            f"{high}/{len(sevs)} declared risk factors at HIGH or CRITICAL",
+        )
+    else:
+        dims["downside_tail_risk_weight"] = _l1_dim(
+            None, "the turn declared no risk factor"
+        )
+
+    dims["catalyst_clarity"] = _l1_dim(
+        None, "needs the forward calendar, which the debate node does not hold"
+    )
+    dims["assumption_sensitivity"] = _l1_dim(
+        None, "needs a valuation perturbation, which the L1 tier does not compute"
+    )
+
+    share = direct_challenge_share(claims, opponent_claims)
+    dims["rebuttal_effectiveness"] = _l1_dim(
+        None if share is None else round(10.0 * share, 4),
+        "10 x the share of this turn's quantitative claims that contradict an "
+        "opponent claim on the same metric (deterministic floor; a judge reads "
+        "rhetoric, a rule only sees whether the numbers were met)"
+        if share is not None
+        else "no preceding opposing claim to rebut",
+    )
+
+    cur = dict(current_values or {})
+    prev = dict(prior_values or {})
+    if cur and prev:
+        a, b = aligned_value_vectors(cur, prev)
+        idx = entrenchment_index(a, b, allocation, prior_allocation)
+        detected = bool(idx >= entrenchment_threshold)
+        alloc_known = allocation is not None and prior_allocation is not None
+        dims["entrenchment_detected"] = _l1_dim(
+            detected,
+            f"index {idx:g} vs threshold {entrenchment_threshold:g} "
+            f"({'repeated its numbers' if detected else 'new evidence'})"
+            + (
+                ""
+                if alloc_known
+                else "; allocation unavailable, so the index is pure value overlap"
+            ),
+        )
+    else:
+        dims["entrenchment_detected"] = _l1_dim(
+            None, "this role has no earlier turn to compare against"
+        )
+
+    present = [k for k in L1_RUBRIC_DIMENSIONS if dims[k]["value"] is not None]
+    return {
+        "dimensions": dims,
+        "present": present,
+        "absent": [k for k in L1_RUBRIC_DIMENSIONS if k not in present],
+    }
+
+
 __all__ = [
+    "L1_RUBRIC_DIMENSIONS",
+    "DEFAULT_ENTRENCHMENT_THRESHOLD",
+    "HIGH_SEVERITIES",
+    "REBUTTAL_TOLERANCE_PCT",
+    "direct_challenge_share",
+    "aligned_value_vectors",
+    "l1_rubric",
     "GREEN",
     "SOFT_WARNING",
     "RETRYABLE_ERROR",

@@ -12,15 +12,19 @@ from tradingagents.strategies.debate_score import (
     APPLY_PENALTY_AND_PROCEED,
     GREEN,
     HARD_BREACH,
+    L1_RUBRIC_DIMENSIONS,
     PROCEED,
     RETRYABLE_ERROR,
     SOFT_WARNING,
     TRIGGER_REGEN,
+    aligned_value_vectors,
     classify_severity,
     debate_score,
+    direct_challenge_share,
     divergence_check,
     entrenchment_index,
     information_gain,
+    l1_rubric,
     novelty_gain,
     reweight_to_baseline,
     termination_check,
@@ -167,3 +171,113 @@ class TestEntrenchmentReweight:
         assert reweight_to_baseline(0.8, 0.5, alpha=0.5) == pytest.approx(0.65)
         assert reweight_to_baseline(0.8, 0.5, alpha=1.0) == pytest.approx(0.5)
         assert reweight_to_baseline(0.8, 0.5, alpha=0.0) == pytest.approx(0.8)
+
+
+def _q(metric, value, kind="quantitative"):
+    return {"metric_name": metric, "value": value, "kind": kind}
+
+
+class TestL1Rubric:
+    """L1's dimensioned rubric: the six names the L2 judge scores, filled only
+    where a deterministic producer exists."""
+
+    def test_every_member_obeys_the_ok_iff_present_contract(self):
+        r = l1_rubric([], [], current_values={"a": 1.0}, prior_values={"a": 1.0})
+        assert set(r["dimensions"]) == set(L1_RUBRIC_DIMENSIONS)
+        for name, member in r["dimensions"].items():
+            assert member["reason"], name
+            assert (member["status"] == "NO_SOURCE") is (member["value"] is None)
+            assert (name in r["present"]) is (member["value"] is not None)
+
+    def test_empirical_grounding_is_ten_times_the_valid_share(self):
+        verifs = [_verif(value=10.0, truth={"k": 10.0}), _verif(value=99.0, truth={"k": 10.0})]
+        r = l1_rubric(verifs, [])
+        assert r["dimensions"]["empirical_grounding"]["value"] == pytest.approx(5.0)
+
+    def test_empirical_grounding_absent_when_nothing_verifiable(self):
+        member = l1_rubric([], [])["dimensions"]["empirical_grounding"]
+        assert member["value"] is None
+        assert member["status"] == "NO_SOURCE"
+
+    def test_downside_tail_risk_weight_is_the_high_severity_share(self):
+        claims = [
+            _q("risk:a", None, kind="qualitative"),
+            {"metric_name": "risk:b", "value": None, "kind": "qualitative", "severity": "CRITICAL"},
+            {"metric_name": "risk:c", "value": None, "kind": "qualitative", "severity": "high"},
+            {"metric_name": "risk:d", "value": None, "kind": "qualitative", "severity": "LOW"},
+        ]
+        member = l1_rubric([], claims)["dimensions"]["downside_tail_risk_weight"]
+        # The member is rounded to 4 dp for rendering.
+        assert member["value"] == pytest.approx(10.0 * 2 / 3, abs=1e-3)
+
+    def test_downside_tail_risk_weight_absent_without_risk_factors(self):
+        member = l1_rubric([], [_q("pe", 18.0)])["dimensions"]["downside_tail_risk_weight"]
+        assert member["value"] is None
+
+    def test_rebuttal_effectiveness_counts_met_premises(self):
+        mine = [_q("pe_ttm", 12.0), _q("rsi", 55.0)]
+        theirs = [_q("pe_ttm", 38.0), _q("rsi", 55.0)]
+        # One of two claims contradicts the opponent's number -> 5.0 of 10.
+        assert direct_challenge_share(mine, theirs) == pytest.approx(0.5)
+        member = l1_rubric([], mine, opponent_claims=theirs)["dimensions"][
+            "rebuttal_effectiveness"
+        ]
+        assert member["value"] == pytest.approx(5.0)
+
+    def test_rebuttal_effectiveness_absent_without_an_opponent(self):
+        member = l1_rubric([], [_q("pe_ttm", 12.0)])["dimensions"]["rebuttal_effectiveness"]
+        assert member["value"] is None
+        assert "no preceding opposing claim" in member["reason"]
+
+    def test_rebuttal_never_reads_an_empty_turn_as_ineffective(self):
+        # A turn with no quantitative claim of its own is not a 0.
+        assert direct_challenge_share([], [_q("pe_ttm", 38.0)]) is None
+
+    def test_entrenchment_detected_on_a_repeated_position(self):
+        r = l1_rubric(
+            [],
+            [],
+            current_values={"pe_ttm": 38.0, "rsi": 55.0},
+            prior_values={"pe_ttm": 38.0, "rsi": 55.0},
+            allocation=2.0,
+            prior_allocation=2.0,
+        )
+        assert r["dimensions"]["entrenchment_detected"]["value"] is True
+
+    def test_entrenchment_not_detected_on_new_numbers(self):
+        r = l1_rubric(
+            [],
+            [],
+            current_values={"pe_ttm": 12.0},
+            prior_values={"pe_ttm": 38.0},
+            allocation=2.0,
+            prior_allocation=8.0,
+        )
+        assert r["dimensions"]["entrenchment_detected"]["value"] is False
+
+    def test_entrenchment_absent_on_a_first_turn(self):
+        member = l1_rubric([], [], current_values={"pe_ttm": 38.0})["dimensions"][
+            "entrenchment_detected"
+        ]
+        assert member["value"] is None
+
+    def test_entrenchment_says_so_when_allocation_is_missing(self):
+        r = l1_rubric(
+            [],
+            [],
+            current_values={"pe_ttm": 38.0},
+            prior_values={"pe_ttm": 38.0},
+        )
+        assert "allocation unavailable" in r["dimensions"]["entrenchment_detected"]["reason"]
+
+    def test_the_two_unproducible_dimensions_say_why(self):
+        dims = l1_rubric([], [])["dimensions"]
+        assert "forward calendar" in dims["catalyst_clarity"]["reason"]
+        assert "valuation perturbation" in dims["assumption_sensitivity"]["reason"]
+        assert dims["catalyst_clarity"]["value"] is None
+        assert dims["assumption_sensitivity"]["value"] is None
+
+    def test_aligned_vectors_pad_a_metric_present_in_only_one_turn(self):
+        a, b = aligned_value_vectors({"x": 2.0, "y": 3.0}, {"x": 2.0})
+        assert a == [2.0, 3.0]
+        assert b == [2.0, 0.0]

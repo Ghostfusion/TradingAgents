@@ -1758,6 +1758,7 @@ def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
         # Debate-state key names live in agents/researchers/structured_debate.py;
         # imported here (not at module load) to keep this writer import-light.
         from tradingagents.agents.researchers.structured_debate import (
+            L1_RUBRIC,
             REASON,
             SCORE_SERIES,
             TERMINATED,
@@ -1779,6 +1780,13 @@ def _run_card_debate(final_state: dict, save_path, cfg: dict) -> dict:
                 "l1_scores": {
                     "research": list(ds.get(SCORE_SERIES) or []),
                     "risk": list(rs.get(SCORE_SERIES) or []),
+                },
+                # L1's dimensioned rubric for the LAST turn of each section -
+                # the deterministic values for the six names the L2 judge
+                # scores, kept apart from `judge_scores` on purpose.
+                "l1_rubric": {
+                    "research": ds.get(L1_RUBRIC) or {},
+                    "risk": rs.get(L1_RUBRIC) or {},
                 },
                 # The degradation that used to be invisible: the structured
                 # debate was asked for and produced no evidence. Keyed to the
@@ -1983,6 +1991,32 @@ def _l1_score_lines(ds: dict) -> list[str]:
     return lines
 
 
+def _l1_rubric_lines(ds: dict) -> list[str]:
+    """Render L1's dimensioned rubric - the six names the L2 judge scores.
+
+    Scaled 0..10 so the two tiers can be read side by side, but the rows come
+    from ``l1_rubric`` (deterministic), never from ``judge_scores``. A
+    dimension with no producer renders ``-`` plus its reason: an unmeasured
+    dimension is not a zero.
+    """
+    from tradingagents.agents.researchers.structured_debate import L1_RUBRIC
+
+    dims = (ds.get(L1_RUBRIC) or {}).get("dimensions") or {}
+    if not dims:
+        return ["- L1 rubric: unavailable (no turn was scored)"]
+    lines = ["- L1 rubric (deterministic, 0-10):"]
+    for name, member in dims.items():
+        val = member.get("value")
+        if isinstance(val, bool):
+            rendered = str(val).lower()
+        elif val is None:
+            rendered = "-"
+        else:
+            rendered = f"{val:g}"
+        lines.append(f"  - {name}: {rendered} - {member.get('reason', '')}")
+    return lines
+
+
 def _structured_debate_evidence(
     ds: dict, *, title: str, role: str
 ) -> str | None:
@@ -2006,6 +2040,7 @@ def _structured_debate_evidence(
             f"penalty={l1.get('penalty_score', 0)})"
         )
     lines.extend(_l1_score_lines(ds))
+    lines.extend(_l1_rubric_lines(ds))
     judge = ds.get("judge_scores") or {}
     for alias, agg in judge.items():
         if agg.get("unavailable"):

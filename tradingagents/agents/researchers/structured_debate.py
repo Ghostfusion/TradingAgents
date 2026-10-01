@@ -26,6 +26,7 @@ from tradingagents.strategies.debate_score import (
     TRIGGER_REGEN,
     classify_severity,
     debate_score,
+    l1_rubric,
     termination_check,
 )
 from tradingagents.strategies.quant_scorecard import (
@@ -68,6 +69,10 @@ STANCES_KEY = {
 CLAIM_LEDGER = "claim_ledger"
 CLAIM_LEDGER_MD = "claim_ledger_md"
 L1_KEY = "l1"
+# L1's dimensioned rubric (strategies/debate_score.l1_rubric). Its own key on
+# purpose: the six names are the L2 judge's, but a deterministic measurement
+# must never share a dict with a stochastic judge opinion (`judge_scores`).
+L1_RUBRIC = "l1_rubric"
 JUDGE_SCORES = "judge_scores"
 JUDGE_RUBRICS = "judge_rubrics"
 TERMINATED = "terminated"
@@ -610,8 +615,55 @@ def create_debate_l1(
             regen_count=int(ds.get(REGEN_COUNT, 0)),
             regen_max=int(cfg.get("debate_regen_max", 1)),
         )
+        # §4.3/§4.5: L1's dimensioned rubric over the six names the L2 judge
+        # scores. Deterministic and pure (`strategies/debate_score.l1_rubric`);
+        # computed on EVERY turn, including one that regens or aborts, so a
+        # failed turn still records what was measurable about it.
+        round_no = len(round_records)
+        _claim_dicts = [
+            {
+                "metric_name": c.metric_name,
+                "value": c.value,
+                "kind": c.kind,
+                "severity": c.severity,
+            }
+            for c in claims
+        ]
+
+        def _value_map(rows) -> dict:
+            """``{metric: value}`` for a set of quantitative ledger rows."""
+            return {
+                r.metric_name.strip().lower(): float(r.value)
+                for r in rows
+                if r.kind == "quantitative" and r.value is not None and r.metric_name
+            }
+
+        # The role's own allocation, one turn back - the momentum term in
+        # `entrenchment_index`. Absent (first turn) leaves the index at pure
+        # value overlap, which the member's reason says out loud.
+        _prior_alloc = None
+        for _rec in reversed(round_records[:-1]):
+            _prev_payload = _rec.get(role)
+            if isinstance(_prev_payload, dict):
+                _prior_alloc = _prev_payload.get("recommended_allocation_pct")
+                break
+
+        rubric = l1_rubric(
+            verifs,
+            _claim_dicts,
+            opponent_claims=[
+                {"metric_name": r.metric_name, "value": r.value, "kind": r.kind}
+                for r in ledger.rows
+                if r.role != role and r.round < round_no
+            ],
+            current_values=_value_map(claims),
+            prior_values=_value_map(ledger.previous_claims(role, round_no)),
+            allocation=latest.get("recommended_allocation_pct"),
+            prior_allocation=_prior_alloc,
+        )
         new_ds = dict(ds)
         new_ds[CLAIM_LEDGER] = ledger.to_dict()
+        new_ds[L1_RUBRIC] = rubric
         # Render with the L1 used-set: claims L1 verified VALID (or the
         # qualitative risk-factor rows, weight ~0 by design) count as used;
         # unverified / violated / abstain rows keep the honest "(unused)"
@@ -998,6 +1050,7 @@ __all__ = [
     "CLAIM_LEDGER",
     "CLAIM_LEDGER_MD",
     "L1_KEY",
+    "L1_RUBRIC",
     "JUDGE_SCORES",
     "JUDGE_RUBRICS",
     "TERMINATED",
