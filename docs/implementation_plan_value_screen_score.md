@@ -102,6 +102,8 @@ screen already holds decides it** (live, 2026-10-01):
 | Yahoo `quoteType` | `"EQUITY"` | it is **not** `"ADR"` (CIB/KSPI/BABA/TSM/SHOP all `EQUITY`) and `info` carries no `isAdr` key |
 | Yahoo `longName` / moomoo `name` | — | **vendor-dependent**: CIB is `"Grupo Cibest S.A."` on Yahoo and `"BanColombia"` on moomoo — *no* ADR token, so a name regex misses the very case that prompted this gate |
 | moomoo concept plates | — | **no ADR plate exists**: the US universe has 117 concept plates and none matches `ADR|Depositary`; CIB sits only in industry/broker plates |
+| moomoo screener `HAS_ADR` (`SimpleField=5`) | `0` = not an ADR | **incomplete, cannot gate**: live `MARKET=US AND HAS_ADR=1` returns **198** names, overwhelmingly China/HK depositary receipts (`BABA`, `JD`, `BIDU`, `NTES`, `TCEHY`, `HSBC`, and OTC `BBCHY`-style) — and it does **not** flag **CIB, TSM, KSPI, KOF, NVO, SHOP**, so `HAS_ADR=0` (11,940 names) still leaks every one of them. The flag tracks one slice of the receipt universe, not foreignness |
+| moomoo `get_company_profile` | `Securities Type` = `DR`; `Country` | **correct**: `DR` for CIB/KSPI/KOF/NVO/TSM/BABA/EC, `Country` = the issuer's (`Colombia`/`Kazakhstan`/`Mexico`/`Denmark`/`China`/`Canada`), and the foreign *ordinary* `SHOP` reports `Securities Type None` + `Canada`. But it is per-symbol and returns the same country values as the Yahoo read below — a redundant second source, not a cheaper or wider one |
 | SEC EDGAR form (`20-F`/`40-F`, `F-6`) | foreign-private-issuer marker | valid, but per-symbol and only a fallback for the `unknown` bucket (unused) |
 
 So the gate reads the **issuer's** country — `tradingagents/dataflows/y_finance.py::get_company_country_yfinance`
@@ -122,6 +124,14 @@ today a **redundant** second source rather than a correctness fix; the country r
 anyway (it is the only one that sees a foreign direct listing). If a future ADR is ever found
 misreported as US-domiciled — the one case the country read cannot catch — adding the Finnhub
 `Type in {ADR, GDR, NVDR}` pre-filter (one call, already keyed) is the first move.
+
+Corroborated on a second vendor: moomoo's `get_company_profile` independently reports the same
+exclusions (`Securities Type DR` for CIB/KSPI/KOF/NVO/TSM/BABA/EC; `Country Canada` with no `DR` for
+the foreign ordinary `SHOP`; `United States of America` for AAPL/MSFT). One divergence is worth
+noting because the gate is deliberately insensitive to it: moomoo reports TSMC's country as
+`China` where Yahoo reports `Taiwan`. Both are non-US, so the single `country != US` predicate
+drops TSM either way — a country read that must be *exactly* right would be fragile; one that only
+tests US-ness is not.
 
 ### 4.3 Stage 1 — the server-side screen
 
