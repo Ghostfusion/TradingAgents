@@ -28,6 +28,7 @@ from tradingagents.strategies.backtest_engine import (
     MatchingEngine,
     Order,
     OrderSide,
+    OrderStatus,
     OrdType,
 )
 
@@ -208,6 +209,27 @@ class TestSuspendedBarDoesNotLeakNaN:
         assert res["position_filled"]["qty"] == 0.0
         assert res["entry_price"] == 101.0
         assert res["net_pnl"] == pytest.approx(0.0)
+
+
+class TestMatchingEngineNonFiniteBar:
+    """A bar with no price fills nothing - including MARKET, whose fill price
+    is the bar's close with no level to compare against.
+    """
+
+    def test_market_order_rides_through_a_suspended_bar(self):
+        eng = MatchingEngine()
+        eng.submit(Order(0, "X", OrderSide.BUY, OrdType.MARKET, 100))
+        res = eng.run([_suspended(0), Bar(1, 100, 101, 99, 100)])
+        assert len(res.fills) == 1
+        assert res.fills[0].ts_bar_index == 1
+        assert res.fills[0].price == 100.0
+
+    def test_no_finite_bar_means_no_fill(self):
+        eng = MatchingEngine()
+        eng.submit(Order(0, "X", OrderSide.BUY, OrdType.MARKET, 100))
+        res = eng.run([_suspended(0), _suspended(1)])
+        assert res.fills == []
+        assert res.orders[0].status == OrderStatus.ACCEPTED
 
 
 class TestMatchingEngineStopFill:

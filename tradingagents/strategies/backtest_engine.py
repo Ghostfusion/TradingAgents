@@ -16,6 +16,7 @@ high/low crosses the trigger. Fill costs (commission + slippage) apply via a
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -208,6 +209,13 @@ class MatchingEngine:
                                 order.ord_type = OrdType.LIMIT
                 if fill_px is not None:
                     px = self._fill_price(order, fill_px)
+                    if not math.isfinite(px):
+                        # A bar with no price cannot deal. The LIMIT and STOP
+                        # branches are self-protecting (a NaN compares False
+                        # against every level), but MARKET reads the bar's
+                        # close unbounded, so the guard belongs at the one
+                        # place every path commits a fill.
+                        continue
                     remaining = order.quantity - order.filled_qty
                     fill = Fill(order.order_id, order.symbol, order.side, remaining, px, bar_i)
                     order.filled_qty = order.quantity

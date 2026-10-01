@@ -90,7 +90,9 @@ reconciliation}`, `crates/model/src/{enums.rs, position.rs}`,
   suspended bar has no price, so the fallback marks to the most recent real
   close and, when nothing in the window traded at all, the plan is reported
   UNEXECUTED (`position_filled.executed: false`, qty 0) rather than with a NaN.
-  Pinned by `tests/test_backtest_fill_semantics.py`.
+  `MatchingEngine.run()` never commits a fill at a non-finite price either, so
+  a bar with no price leaves the order resting. Pinned by
+  `tests/test_backtest_fill_semantics.py`.
 - **Tests:** `tests/test_nautilus_phase1.py` + `tests/test_next_bar_fill.py` -
   crucial: stop triggers on high/low, gap-aware stop fill, partial fills,
   cancel/reject transitions.
