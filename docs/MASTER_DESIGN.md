@@ -87,7 +87,8 @@ enforced by something, not merely stated.
    masks anything dated after the as-of; backtests fill at the next bar, never
    at the signal bar's close, and a fill is always at a price the bar actually
    offered - a stop gapped through fills at `min/max(trigger, open)`, never at
-   the trigger itself. Enforced by `dataflows/effective_date.py`,
+   the trigger itself, a limit-locked bar executes nothing at all, and both
+   legs pay slippage. Enforced by `dataflows/effective_date.py`,
    `dataflows/date_window.py`, `dataflows/pit_registry.py` and the
    `tests/test_window_integrity.py` / `test_news_lookahead` /
    `test_backtest_fill_semantics` suites.

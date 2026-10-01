@@ -82,8 +82,15 @@ reconciliation}`, `crates/model/src/{enums.rs, position.rs}`,
   stops fire precisely on the gap days; a `STOP_LIMIT` whose limit is
   unreachable on the trigger bar **rests as the limit it declares** instead of
   filling; and the exit scan starts on the bar AFTER a next-bar close fill, so
-  the entry bar's already-past range cannot stop the trade out. Pinned by
-  `tests/test_backtest_fill_semantics.py`.
+  the entry bar's already-past range cannot stop the trade out. A
+  limit-locked/suspended bar cannot deal at ANY price, so it is skipped for the
+  stop and target checks as well as for the mark-to-market. And **both legs pay
+  slippage, adversarially by side** - charging the entry only understates the
+  round trip by one leg. A fallback price must come from a bar that traded: a
+  suspended bar has no price, so the fallback marks to the most recent real
+  close and, when nothing in the window traded at all, the plan is reported
+  UNEXECUTED (`position_filled.executed: false`, qty 0) rather than with a NaN.
+  Pinned by `tests/test_backtest_fill_semantics.py`.
 - **Tests:** `tests/test_nautilus_phase1.py` + `tests/test_next_bar_fill.py` -
   crucial: stop triggers on high/low, gap-aware stop fill, partial fills,
   cancel/reject transitions.

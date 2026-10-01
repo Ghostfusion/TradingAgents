@@ -115,6 +115,101 @@ def test_exit_scan_does_not_read_the_entry_bars_past_range():
 # ---------------------------------------------------------------------------
 
 
+class TestExitTradability:
+    """A limit-locked bar cannot execute an exit AT ANY PRICE, so the stop and
+    target checks must skip it exactly as the loop's mark-to-market already
+    does - otherwise a stop is booked on a bar on which a sell was impossible.
+    """
+
+    def test_stop_does_not_execute_on_a_locked_limit_down_bar(self):
+        bars = _bars([
+            (100, 101, 99, 100),
+            (100, 102, 99.5, 101),   # entry @ 101
+            (95, 96, 89, 90.0),      # -10.9%: locked, a SELL cannot execute
+            (88, 90, 86, 89),        # next tradable bar
+        ])
+        res = _backtest(bars, entry=101.0, stop=95.0, targets=[120.0],
+                        side="long", limit_threshold=0.10)
+        assert res["exit_label"] == "stop"
+        assert res["fills"][1]["bar"] == 3, "stop executed on a locked bar"
+        assert res["fills"][1]["price"] == 88.0
+
+    def test_stop_does_not_execute_on_a_locked_limit_up_bar(self):
+        bars = _bars([
+            (100, 101, 99, 100),
+            (100, 102, 99.5, 101),      # short entry @ 101
+            (110, 112, 109, 112.0),     # +10.9%: locked, a BUY cannot execute
+            (118, 119, 117, 118),
+        ])
+        res = _backtest(bars, entry=101.0, stop=110.0, targets=[80.0],
+                        side="short", limit_threshold=0.10)
+        assert res["exit_label"] == "stop"
+        assert res["fills"][1]["bar"] == 3, "stop executed on a locked bar"
+        assert res["fills"][1]["price"] == 118.0
+
+
+class TestExitSlippage:
+    """The exit leg pays slippage too. Charging the entry only understates the
+    round trip by one leg, and always in the strategy's favour.
+    """
+
+    def test_long_exit_leg_pays_slippage(self):
+        bars = _bars([
+            (100, 101, 99, 100),
+            (100, 102, 99.5, 101),   # entry @ 101 -> 101 * 1.01 = 102.01
+            (102, 125, 101, 124),    # target 120 touched
+        ])
+        res = _backtest(bars, entry=101.0, stop=95.0, targets=[120.0],
+                        side="long", slippage_ticks=0.01)
+        assert res["exit_label"] == "target120.00"
+        assert res["fills"][1]["price"] == pytest.approx(118.8)  # 120 * 0.99
+        assert res["gross_pnl"] == pytest.approx(1679.0)
+
+    def test_short_exit_leg_pays_slippage(self):
+        bars = _bars([
+            (100, 101, 99, 100),
+            (100, 102, 99.5, 101),   # short entry @ 101 -> 101 * 0.99 = 99.99
+            (100, 101, 75, 76),      # target 80 touched
+        ])
+        res = _backtest(bars, entry=101.0, stop=105.0, targets=[80.0],
+                        side="short", slippage_ticks=0.01)
+        assert res["exit_label"] == "target80.00"
+        assert res["fills"][1]["price"] == pytest.approx(80.8)  # 80 * 1.01
+        assert res["gross_pnl"] == pytest.approx(1919.0)
+
+
+NAN = float("nan")
+
+
+def _suspended(i):
+    return Bar(i, NAN, NAN, NAN, NAN)
+
+
+class TestSuspendedBarDoesNotLeakNaN:
+    """A suspended bar has no price at all. Falling back to one reported NaN as
+    the exit price and poisoned net_pnl, the CSV row and both printed stats.
+    """
+
+    def test_final_suspended_bar_marks_to_the_last_real_price(self):
+        bars = _bars([
+            (100, 101, 99, 100),
+            (100, 102, 99.5, 101),   # entry @ 101
+            (101, 103, 100, 102),
+        ]) + [_suspended(3)]
+        res = _backtest(bars, entry=101.0, stop=95.0, targets=[150.0], side="long")
+        assert res["fills"][1]["bar"] == 2
+        assert res["fills"][1]["price"] == 102.0
+        assert res["net_pnl"] == pytest.approx(100.0)
+
+    def test_no_tradable_bar_reports_an_unexecuted_plan(self):
+        bars = _bars([(100, 101, 99, 100)]) + [_suspended(1)]
+        res = _backtest(bars, entry=101.0, stop=95.0, targets=[150.0], side="long")
+        assert res["position_filled"]["executed"] is False
+        assert res["position_filled"]["qty"] == 0.0
+        assert res["entry_price"] == 101.0
+        assert res["net_pnl"] == pytest.approx(0.0)
+
+
 class TestMatchingEngineStopFill:
     def test_sell_stop_gapped_through_fills_at_the_open(self):
         eng = MatchingEngine()

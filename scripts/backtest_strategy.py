@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import sys
@@ -136,6 +137,12 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
         return {"open": bar.open, "high": bar.high, "low": bar.low,
                 "close": bar.close, "volume": getattr(bar, "volume", None)}
 
+    def _finite(x) -> bool:
+        try:
+            return math.isfinite(float(x))
+        except (TypeError, ValueError):
+            return False
+
     def _blocked(side, bar, prev_close) -> bool:
         if suspended(bar.close):
             return True
@@ -154,6 +161,9 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
     # entries, not close-based signals.
     prev_close = None
     entry_bar_i: int | None = None
+    # Set when NO bar in the window traded. The plan then did not execute and
+    # is reported as such, rather than with a fabricated - or NaN - price.
+    nothing_traded = False
     if next_bar_close:
         # Signal from bar T's close fills at bar T+1's close - but only on a
         # TRADABLE bar: a suspended day (NaN close) or a limit-up day for a
@@ -171,7 +181,11 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
             break
         if entry_bar_i is None:
             entry_bar_i = len(bars) - 1
-            entry = bars[entry_bar_i].close if bars else entry
+            last_px = bars[entry_bar_i].close if bars else None
+            if _finite(last_px):
+                entry = float(last_px)
+            else:
+                nothing_traded = True  # no bar traded; keep the plan's price
     else:
         for i, bar in enumerate(bars):
             if _blocked(entry_side, bar, prev_close):
@@ -187,7 +201,10 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
             prev_close = bar.close
         if entry_bar_i is None:
             entry_bar_i = 0
-            entry = bars[0].close
+            if _finite(bars[0].close):
+                entry = bars[0].close
+            else:
+                nothing_traded = True
     entry_px = entry
     if participation > 0 and entry_bar_i < len(bars):
         qty = float(volume_gate(qty, getattr(bars[entry_bar_i], "volume", 0.0), participation))
@@ -210,6 +227,12 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
     prev_close = bars[exit_start - 1].close if exit_start > 0 else None
     for i in range(exit_start, len(bars)):
         bar = bars[i]
+        # A limit-locked or suspended bar cannot deal at ANY price, so it is
+        # skipped for the stop/target checks too, not only for the
+        # mark-to-market below: the trade rides through it.
+        if _blocked(exit_side, bar, prev_close):
+            prev_close = bar.close
+            continue
         stop_hit = (
             (exit_side == OrderSide.SELL and bar.low <= stop_px)
             or (exit_side == OrderSide.BUY and bar.high >= stop_px)
@@ -233,17 +256,35 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
                 break
         if exit_label != "none":
             break
-        if not _blocked(exit_side, bar, prev_close):
-            exit_px = _deal_price(_bar_dict(bar), deal_price) or bar.close
+        exit_px = _deal_price(_bar_dict(bar), deal_price) or bar.close
         prev_close = bar.close
     if exit_label == "none":
+        # Mark to the most recent bar with a REAL price: a suspended bar has
+        # none, and a NaN here would report an unmeasured number as a fill and
+        # poison net_pnl, the CSV and the stat printout.
         exit_bar_i = len(bars) - 1
-        exit_px = _deal_price(_bar_dict(bars[-1]), deal_price) or bars[-1].close
+        exit_px = None
+        for j in range(len(bars) - 1, max(entry_bar_i - 1, 0) - 1, -1):
+            px = _deal_price(_bar_dict(bars[j]), deal_price)
+            if px is None:
+                px = getattr(bars[j], "close", None)
+            if _finite(px):
+                exit_bar_i, exit_px = j, float(px)
+                break
+        if exit_px is None:
+            nothing_traded = True
+            exit_px = entry_px
+    # The exit leg pays slippage too, adversarially by side: the entry leg is
+    # charged above and charging it only on the entry understates the round
+    # trip by one leg, always in the strategy's favour.
+    if slippage_ticks:
+        exit_px = (exit_px * (1.0 - slippage_ticks) if exit_side == OrderSide.SELL
+                   else exit_px * (1.0 + slippage_ticks))
 
     # The quantity that actually filled: participation caps it, and the
     # legacy fallback entry (no range reached) means nothing traded.
-    filled_qty = float(qty)
-    if entry_bar_i < len(bars):
+    filled_qty = 0.0 if nothing_traded else float(qty)
+    if not nothing_traded and entry_bar_i < len(bars):
         filled_qty = float(volume_gate(
             qty, getattr(bars[entry_bar_i], "volume", 0.0), participation,
         )) if participation > 0 else float(qty)
