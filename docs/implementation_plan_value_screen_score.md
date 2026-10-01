@@ -98,6 +98,11 @@ screen already holds decides it** (live, 2026-10-01):
 | moomoo screen row | — | carries `symbol/name/price/pe/pb/roe/rsi/change`, no country |
 | FMP `/profile` | `isAdr` / `country` | correct field, answers `429` on this key for every symbol incl. AAPL |
 | EODHD `fundamentals` | `General::CountryISO` | correct field, `403` on this plan |
+| Finnhub `/stock/symbol` `type` | `"ADR"` | **available** (one call, 31,123 US rows: `ADR` 2,233 / `GDR` 44 / `NVDR` 52; CIB/KSPI/BABA/TSM/NVO all `ADR`, AAPL `Common Stock`) — but it cannot replace the country read: a foreign **direct** listing is `Common Stock` (SHOP), so it sees depositary receipts only |
+| Yahoo `quoteType` | `"EQUITY"` | it is **not** `"ADR"` (CIB/KSPI/BABA/TSM/SHOP all `EQUITY`) and `info` carries no `isAdr` key |
+| Yahoo `longName` / moomoo `name` | — | **vendor-dependent**: CIB is `"Grupo Cibest S.A."` on Yahoo and `"BanColombia"` on moomoo — *no* ADR token, so a name regex misses the very case that prompted this gate |
+| moomoo concept plates | — | **no ADR plate exists**: the US universe has 117 concept plates and none matches `ADR|Depositary`; CIB sits only in industry/broker plates |
+| SEC EDGAR form (`20-F`/`40-F`, `F-6`) | foreign-private-issuer marker | valid, but per-symbol and only a fallback for the `unknown` bucket (unused) |
 
 So the gate reads the **issuer's** country — `tradingagents/dataflows/y_finance.py::get_company_country_yfinance`
 (Yahoo `info['country']`; verified live: KSPI → Kazakhstan, KOF → Mexico, EC → Colombia, BABA → China,
@@ -109,6 +114,14 @@ would spend on it: one cheap `.info` per candidate against N expensive financial
 like the ratio gates: a name whose country cannot be read is dropped and counted apart (`unknown`),
 never assumed American. The caller prints `[domicile] … dropped N foreign, M with no readable
 country`, so a vendor outage reads as a drop count rather than a clean empty screen.
+
+**Measured coverage (2026-10-01).** 30 of 30 sampled Finnhub-typed `ADR` rows return a non-US
+country, and `CIB` (Bancolombia — the case that prompted the ask) is excluded with `foreign=1,
+unknown=0`. No ADR reached the kept set and none fell into `unknown`, so the Finnhub `ADR` flag is
+today a **redundant** second source rather than a correctness fix; the country read is necessary
+anyway (it is the only one that sees a foreign direct listing). If a future ADR is ever found
+misreported as US-domiciled — the one case the country read cannot catch — adding the Finnhub
+`Type in {ADR, GDR, NVDR}` pre-filter (one call, already keyed) is the first move.
 
 ### 4.3 Stage 1 — the server-side screen
 
