@@ -1434,7 +1434,8 @@ normalized to a fraction regardless of the market session. `0` disables any gate
 A second, narrower screen applies one broker app's filter panel verbatim — market
 cap ≥ $10B, 0 < P/E (TTM) ≤ 33, P/B ≤ 9, P/S (TTM) ≤ 8, Price-to-Cash-Flow (TTM) ≤ 25 —
 keeps only the names **down ≥ 2% on the day**, adds optional anchors (`--roe-min`,
-`--chg5d-max`, `--rsi-max`, and the NYSE/Nasdaq common-stock gate), then ranks the
+`--chg5d-max`, `--rsi-max`, the NYSE/Nasdaq common-stock gate, and the
+US-domicile gate `--exclude-foreign`), then ranks the
 survivors by the engine's own `fundamental_score` composite and prints only the names
 clearing `--fundamental-score-min` (default 50 — the flag was `--score-min` before
 2026-09-28), then filters that list again on the engine's own `technical_score`
@@ -1456,7 +1457,14 @@ no band table — and reaches no executor gate. The `tech` column is the engine'
 `technical_score` over the name's own bars (the same components the run card and the
 `get_technical_score` tool read), band-labelled by its own table; a name whose composite
 cannot be measured is **withheld, never passed**, so it does not appear in the qualifying
-table and its reason is printed instead. OpenD supplies the server-side Screening
+table and its reason is printed instead. `--exclude-foreign` keeps only **US-domiciled
+issuers**, which removes foreign companies *and* their US-listed ADRs in one pass: it reads
+the ISSUER's country (Yahoo), not the listing venue, and an ADR's country is the issuer's
+(KSPI → Kazakhstan, BABA → China), so the `--exchanges` gate alone never removes one — the
+EODHD symbol list reports the *exchange's* country (`USA` for all 50,973 US rows), calls an
+ADR `Common Stock`, and gives it a US-prefixed ISIN. A name whose country cannot be fetched
+is dropped too (**fail-closed**, like the ratio gates) and counted separately, so a vendor
+outage reads as a drop count rather than a clean empty list. OpenD supplies the server-side Screening
 V2 stage; `--no-moomoo` falls back to the deepest decliners and labels the run a
 partial scan. Runnable from the `trading_web` app as its **Value score** screen
 (`/value-score`) - every flag above is a field, blank keeps this script's own

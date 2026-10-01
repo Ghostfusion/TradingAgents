@@ -394,3 +394,87 @@ def test_zero_skips_the_technical_pass_entirely(tmp_path, monkeypatch):
 
     assert vss.main(["--no-moomoo", "--tech-score-min", "0",
                      "--out-dir", str(out), "-d", "2026-09-24"]) == 0
+
+
+# --- the domicile gate: US-domiciled issuers only ---------------------------
+#
+# One predicate has to remove a foreign company AND its US-listed ADR, because
+# every field this screen already holds fails to: the EODHD symbol list reports
+# the EXCHANGE's country (USA for all 50,973 US rows), calls an ADR
+# `Type == "Common Stock"`, and gives it a US-prefixed ISIN. The issuer's own
+# country is the only column that separates them, so the gate reads it and
+# fails CLOSED - a name whose country cannot be read is dropped, not assumed
+# American, because the assumption IS the leak.
+
+
+def _patch_country(monkeypatch, mapping):
+    """Patch the issuer-country reader the gate imports lazily."""
+    import tradingagents.dataflows.y_finance as yf_mod
+
+    monkeypatch.setattr(yf_mod, "get_company_country_yfinance",
+                        lambda sym: mapping.get(sym))
+
+
+def test_the_domicile_gate_keeps_a_us_issuer_and_drops_an_adr(monkeypatch):
+    """Domestic kept; a foreign issuer and its ADR both dropped by one rule."""
+    _patch_country(monkeypatch, {
+        "AAPL": "United States",     # domestic - kept
+        "KSPI": "Kazakhstan",        # ADR, NYSE/Nasdaq listed - dropped
+        "KOF": "Mexico",             # ADR - dropped
+        "SHOP": "Canada",            # foreign ordinary - dropped
+    })
+    kept, dom = vss.stage_domicile(_tech_args(), [{"symbol": s} for s in
+                                                  ("AAPL", "KSPI", "KOF", "SHOP")])
+
+    assert [r["symbol"] for r in kept] == ["AAPL"]
+    assert dom == {"foreign": 3, "unknown": 0}
+
+
+def test_the_domicile_gate_fails_closed_when_the_country_cannot_be_read(monkeypatch):
+    """No country is not evidence of a US country: dropped, and counted apart."""
+    _patch_country(monkeypatch, {"AAPL": "United States", "MYSTERY": None})
+    kept, dom = vss.stage_domicile(_tech_args(), [{"symbol": "MYSTERY"},
+                                                  {"symbol": "AAPL"}])
+
+    assert [r["symbol"] for r in kept] == ["AAPL"]
+    assert dom == {"foreign": 0, "unknown": 1}, "unknown takes the fail-closed path"
+
+
+def test_a_country_lookup_that_raises_is_unknown_not_american(monkeypatch):
+    """One name's vendor failure never aborts the run, and never reads as US."""
+    import tradingagents.dataflows.y_finance as yf_mod
+
+    def _boom(sym):
+        raise RuntimeError("yahoo 401")
+
+    monkeypatch.setattr(yf_mod, "get_company_country_yfinance", _boom)
+
+    kept, dom = vss.stage_domicile(_tech_args(), [{"symbol": "AAPL"}])
+
+    assert kept == []
+    assert dom == {"foreign": 0, "unknown": 1}
+
+
+def test_a_us_country_variant_is_not_read_as_foreign():
+    """A vendor spelling of the US must not silently drop a domestic name."""
+    for name in ("United States", "united states of america", "USA", " us "):
+        assert vss._is_us_domiciled(name) is True, name
+    for name in ("", None, "Canada", "United Kingdom"):
+        assert vss._is_us_domiciled(name) is False, name
+
+
+def test_the_cli_declares_exclude_foreign():
+    """The gate is reachable from the CLI the web adapter shells out to."""
+    assert vss.main(["--offline-demo", "--exclude-foreign"]) == 0
+
+
+def test_the_report_names_the_domicile_gate_only_when_it_is_on():
+    """A reader must see the exclusion in the header, and never when it is off."""
+    on = vss.render([], {}, {}, {}, _tech_args(exclude_foreign=True),
+                    "", "", tech={}, tech_withheld={})
+    off = vss.render([], {}, {}, {}, _tech_args(), "", "", tech={}, tech_withheld={})
+
+    assert "US-domiciled issuers only" in on
+    assert "US-domiciled issuers only" not in off
+    assert "fails CLOSED" in on, "the report states the fail-closed rule"
+    assert "fails CLOSED" not in off

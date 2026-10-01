@@ -355,6 +355,32 @@ def _dividend_yield_note(info: dict, ticker_obj, rendered_pct: float | None) -> 
     )
 
 
+def get_company_country_yfinance(ticker: str) -> str | None:
+    """The ISSUER's domicile country (Yahoo ``info['country']``), or ``None``.
+
+    Country-of-company, not country-of-listing: a US-listed ADR returns its
+    foreign domicile (measured 2026-10-01: KSPI -> Kazakhstan, BABA -> China,
+    TSM -> Taiwan, SHOP -> Canada, AAPL -> United States), which is what the
+    value screen's ``--exclude-foreign`` gate reads. The EODHD symbol list
+    cannot supply it - its ``Country`` is the *exchange's* (``USA`` for all
+    50,973 US rows), ADRs arrive as ``Type == Common Stock``, and their ISINs
+    are US-prefixed (KSPI ``US48581R2058``), so none of those three columns
+    separates a foreign issuer from a domestic one.
+
+    ``None`` when the lookup fails or the vendor omits the field. Optional
+    enrichment like the rest of this module: no exception reaches the caller,
+    because the gate's caller owns the fail-closed decision, not this reader.
+    """
+    try:
+        info = yf_retry(lambda: yf.Ticker(require_symbol(ticker)).info)
+    except Exception:  # noqa: BLE001 - optional enrichment; the caller fails closed
+        return None
+    if not isinstance(info, dict):
+        return None
+    country = info.get("country")
+    return str(country).strip() or None
+
+
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
     curr_date: Annotated[str, "current date (not used for yfinance)"] = None

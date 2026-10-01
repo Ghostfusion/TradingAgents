@@ -108,6 +108,12 @@ NEAREST_PUBLISHED_EDGES = (60.0, 65.0)
 #: interchangeable, and before 2026-09-25 whichever ran last deleted the other's.
 VALUE_SCORE_PREFIX = "value_score_"
 
+#: Accepted renderings of the United States in the domicile gate, normalized to
+#: lower case. Yahoo renders the country NAME (``"United States"``) for a US
+#: issuer, but a vendor variant would otherwise be read as foreign, so the
+#: obvious spellings are accepted rather than one exact string.
+US_COUNTRY_NAMES = frozenset({"united states", "united states of america", "usa", "us"})
+
 #: Vendor calls this run made, by stage - printed in the footer.
 _CALLS: dict[str, int] = {}
 
@@ -266,6 +272,67 @@ def stage_value_screen(args, universe: set) -> list:
                 "and are down on the day", len(out), args.min_mcap / 1e9,
                 args.pe_max, args.pb_max)
     return out
+
+
+# --------------------------------------------------------------------------
+# Stage 1b - the domicile gate: US-domiciled issuers only (ADRs included out)
+# --------------------------------------------------------------------------
+
+
+def _is_us_domiciled(country) -> bool:
+    """True only for a country string that names the United States."""
+    return str(country or "").strip().lower() in US_COUNTRY_NAMES
+
+
+def stage_domicile(args, rows: list) -> tuple[list, dict]:
+    """Keep US-domiciled issuers; drop foreign companies AND their ADRs.
+
+    Reads Yahoo's ``country`` - the ISSUER's domicile, not the listing venue -
+    so a US-listed ADR carries its foreign country (measured 2026-10-01: KSPI ->
+    Kazakhstan, KOF -> Mexico, EC -> Colombia, BABA -> China, TSM -> Taiwan,
+    SHOP -> Canada) and ONE predicate excludes foreign companies and their
+    depositary receipts together. None of the fields this screen already holds
+    can do that: the EODHD symbol list's ``Country`` is the exchange's (``USA``
+    for all 50,973 US rows), ADRs are ``Type == "Common Stock"`` there, and
+    their ISINs are US-prefixed, while the moomoo screen row carries no country
+    at all.
+
+    Fail-CLOSED, like the ratio gates: a name whose country cannot be read is
+    dropped and counted apart (``unknown``), never assumed American - assuming
+    it is exactly what would let a foreign name through. Both counters are
+    printed by the caller, so a vendor outage that empties the list is visible
+    rather than silent.
+
+    :returns: ``(kept_rows, {"foreign": n, "unknown": n})``.
+    """
+    from tradingagents.dataflows.y_finance import get_company_country_yfinance
+
+    kept: list = []
+    foreign = unknown = 0
+    for row in rows:
+        sym = row["symbol"]
+        try:
+            country = get_company_country_yfinance(sym)
+        except Exception as exc:  # noqa: BLE001 - one name's lookup never aborts the run
+            logger.warning("domicile lookup failed for %s (%s)", sym, exc)
+            country = None
+        _bump("yfinance issuer country (.info)")
+        if _is_us_domiciled(country):
+            kept.append(row)
+        elif country:
+            foreign += 1
+        else:
+            unknown += 1
+    if rows and not kept:
+        # Every candidate dropped: either the vendor returned a foreign country
+        # for all of them (correct for a list of ADRs) or the country lookup
+        # failed wholesale (an outage). The distinct counters tell the two
+        # apart, and this line keeps the outage case from reading as a clean
+        # empty screen.
+        logger.warning(
+            "domicile gate kept 0 of %d candidate(s): %d foreign, %d with no "
+            "readable country", len(rows), foreign, unknown)
+    return kept, {"foreign": foreign, "unknown": unknown}
 
 
 # --------------------------------------------------------------------------
@@ -634,7 +701,9 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
         f"P/CF TTM <= {args.pcf_max:g} · same-day move <= {args.max_chg:g}%"
         + (f" · ROE >= {args.roe_min:g}%" if args.roe_min else "")
         + (f" · 5-day change <= {args.chg5d_max:g}%" if args.chg5d_max else "")
-        + (f" · RSI(14) <= {args.rsi_max:g}" if args.rsi_max else ""),
+        + (f" · RSI(14) <= {args.rsi_max:g}" if args.rsi_max else "")
+        + (" · US-domiciled issuers only (foreign companies and their ADRs "
+           "excluded)" if getattr(args, "exclude_foreign", False) else ""),
         f"- Panel: {panel_note}",
         f"- Scoring pass: {scored_n} of {len(rows)} candidates scored, {panel_n} "
         f"panel name(s) carrying a composite, {len(miss)} withheld, "
@@ -729,6 +798,13 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
            "are stronger. `tech` is the name's own tape, read from its own "
            "bars and against no peer set. The two answer different questions; "
            "a high one does not excuse a low one."] if tech_on else []),
+        *(["- **US-domiciled only.** The issuer's country (Yahoo) gates this "
+           "list, not the listing exchange: a US-listed foreign company AND its "
+           "ADR are removed by the same predicate, so no depositary receipt "
+           "survives it. The read fails CLOSED - a name whose country could not "
+           "be fetched is dropped, never assumed American - and the domicile "
+           "line above counts those separately from the foreign names."]
+          if getattr(args, "exclude_foreign", False) else []),
         "- **Liquidity/execution are not checked here.** Nothing in this list "
         "has been reviewed for spread, depth or a session window; the "
         "pre-market and risk gates are separate reads.",
@@ -843,6 +919,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="price floor for the bulk feed and the screen (default 15)")
     parser.add_argument("--exchanges", type=str, default="NYSE,NASDAQ",
                         help="listing exchanges to keep ('' disables)")
+    parser.add_argument("--exclude-foreign", action="store_true",
+                        help="keep only US-domiciled issuers, which excludes "
+                             "foreign companies AND their US-listed ADRs in one "
+                             "pass (Yahoo's issuer country: KSPI->Kazakhstan, "
+                             "BABA->China). A name whose country cannot be read "
+                             "is dropped (fail-closed) and counted; the listing "
+                             "exchange does NOT imply domicile, so this is the "
+                             "only gate that removes an ADR")
     parser.add_argument("--out-dir", default="screener",
                         help="folder for the saved markdown (default 'screener')")
     parser.add_argument("--panel", default=None, metavar="DATE",
@@ -880,6 +964,17 @@ def main(argv: list[str] | None = None) -> int:
     if not rows:
         print("no candidates: nothing met both the day filter and the screen.")
         return 0
+    if args.exclude_foreign:
+        # Before the ratio pass: the domicile read is one cheap .info per
+        # candidate, and dropping a foreign name here spares the per-name
+        # financials fetch the ratio gates would otherwise spend on it.
+        rows, dom = stage_domicile(args, rows)
+        print(f"[domicile] {len(rows)} of the candidate set are US-domiciled "
+              f"(ADRs excluded); dropped {dom['foreign']} foreign, "
+              f"{dom['unknown']} with no readable country (fail-closed)")
+        if not rows:
+            print("no candidates after the domicile gate (--exclude-foreign).")
+            return 0
     kept, fin_by_ticker, fails = stage_ratios(args, rows, change)
     print(f"[funnel] decliners {len(change)} -> candidates {len(rows)} -> "
           f"passed the ratio gates {len(kept)} (dropped: {fails['pe']} on P/E, "

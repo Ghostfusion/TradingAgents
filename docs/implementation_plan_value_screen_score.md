@@ -51,6 +51,7 @@ flowchart TD
 | --- | --- | --- |
 | 0 | `get_top_movers_symbols_eodhd(direction="losers", count≈4000, min_price=15)` | **1 call** |
 | 0b | `get_exchange_symbols_eodhd("US")` | 1 cached call |
+| 0c | `stage_domicile` (`--exclude-foreign` only) | 1 issuer-country `.info` per candidate, and it removes work from stage 2 |
 | 1 | `screen_value_dip_moomoo(...)` | 1 paginated call |
 | 2 | `_fetch_fin_cached` then `compute_ratios` | N per-name, capped by `--limit` |
 | 3 | `load_panel_series` then `fundamental_score` | **0** |
@@ -82,6 +83,32 @@ decliner list. `get_exchange_symbols_eodhd("US")` returns the ~51,198-row US sym
 This is also why the moomoo screen is called with `exchanges=None`: its own client-side exchange
 gate costs one `get_stock_basicinfo` call **per row**, while this leg already carries the exchange
 column for one cached call. Same set, N fewer calls.
+
+### 4.2b Stage 0c — the US-domicile gate (`--exclude-foreign`, off by default)
+
+The exchange gate above is a **listing** gate, so it keeps every foreign issuer that lists in the
+US — including every ADR. Asked to exclude them, the measured answer was that **no column this
+screen already holds decides it** (live, 2026-10-01):
+
+| field | value for an ADR | why it cannot gate |
+| --- | --- | --- |
+| EODHD `Country` | `"USA"` | it is the *exchange's* country: `USA` for **all 50,973** US rows |
+| EODHD `Type` | `"Common Stock"` | KSPI / KOF / EC / BABA / TSM / SAP / TM / UL / SNY / BCS / ING / HSBC all pass |
+| EODHD `Isin` | `US…` | a depositary receipt is US-issued: BABA `US01609W1027`, KSPI `US48581R2058` |
+| moomoo screen row | — | carries `symbol/name/price/pe/pb/roe/rsi/change`, no country |
+| FMP `/profile` | `isAdr` / `country` | correct field, answers `429` on this key for every symbol incl. AAPL |
+| EODHD `fundamentals` | `General::CountryISO` | correct field, `403` on this plan |
+
+So the gate reads the **issuer's** country — `tradingagents/dataflows/y_finance.py::get_company_country_yfinance`
+(Yahoo `info['country']`; verified live: KSPI → Kazakhstan, KOF → Mexico, EC → Colombia, BABA → China,
+TSM → Taiwan, SHOP → Canada, AAPL → United States). It is issuer-of-company, not venue, so **one
+predicate removes a foreign company and its ADR together** — no separate ADR rule is needed or wanted.
+
+Run **before stage 2**, so a dropped name never costs the per-name financials fetch the ratio gates
+would spend on it: one cheap `.info` per candidate against N expensive financials. **Fail-closed**,
+like the ratio gates: a name whose country cannot be read is dropped and counted apart (`unknown`),
+never assumed American. The caller prints `[domicile] … dropped N foreign, M with no readable
+country`, so a vendor outage reads as a drop count rather than a clean empty screen.
 
 ### 4.3 Stage 1 — the server-side screen
 
