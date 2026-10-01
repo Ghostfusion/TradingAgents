@@ -85,9 +85,12 @@ enforced by something, not merely stated.
 3. **Point-in-time discipline.** Decisions bind to an `effective_trading_date`;
    news and price reads are filtered to the as-of window; `pit_registry`
    masks anything dated after the as-of; backtests fill at the next bar, never
-   at the signal bar's close. Enforced by `dataflows/effective_date.py`,
+   at the signal bar's close, and a fill is always at a price the bar actually
+   offered - a stop gapped through fills at `min/max(trigger, open)`, never at
+   the trigger itself. Enforced by `dataflows/effective_date.py`,
    `dataflows/date_window.py`, `dataflows/pit_registry.py` and the
-   `tests/test_window_integrity.py` / `test_news_lookahead` suites.
+   `tests/test_window_integrity.py` / `test_news_lookahead` /
+   `test_backtest_fill_semantics` suites.
 
 4. **Deterministic where possible.** Technical, valuation, risk, sentiment and
    factor reads are pure functions over vendor data. The LLM is only ever

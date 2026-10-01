@@ -196,19 +196,32 @@ def backtest(bars: list[Bar], entry: float, stop: float, targets: list[float],
 
     # Exit: stop or the first target touched after entry (skipping suspended /
     # limit-blocked bars; the trade just rides through them).
+    #
+    # The scan starts on the bar AFTER a next-bar CLOSE fill: entry filled at
+    # bars[T].close, so that bar's high/low are entirely in the past and
+    # reading its low for the stop is the same-bar look-ahead the entry path
+    # already forbids. A legacy range-touch entry fills intraday, so its own
+    # bar stays eligible (that direction is merely conservative).
+    exit_start = entry_bar_i + 1 if next_bar_close else entry_bar_i
     exit_bar_i = entry_bar_i
     exit_px = entry_px
     exit_label = "none"
     stop_px = stop
-    prev_close = bars[0].close if bars else None
-    for i in range(entry_bar_i, len(bars)):
+    prev_close = bars[exit_start - 1].close if exit_start > 0 else None
+    for i in range(exit_start, len(bars)):
         bar = bars[i]
         stop_hit = (
             (exit_side == OrderSide.SELL and bar.low <= stop_px)
             or (exit_side == OrderSide.BUY and bar.high >= stop_px)
         )
         if stop_hit:
-            exit_bar_i, exit_px, exit_label = i, stop_px, "stop"
+            # A stop gapped through fills at the GAP, not at the stop price: a
+            # sell stop cannot fill above min(stop, open) nor a buy stop below
+            # max(stop, open). Booking the stop price itself fabricates price
+            # improvement on exactly the gap days that trigger stops.
+            exit_px = (min(stop_px, bar.open) if exit_side == OrderSide.SELL
+                       else max(stop_px, bar.open))
+            exit_bar_i, exit_label = i, "stop"
             break
         for tgt in targets[:2]:
             hit = (

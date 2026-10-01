@@ -73,8 +73,20 @@ reconciliation}`, `crates/model/src/{enums.rs, position.rs}`,
   class MatchingEngine:
       replay(candles: list[dict], orders: list[Order]) -> list[Fill]  # close/bar_execution fill
   ```
-- **Tests:** `tests/test_backtest_engine.py` - crucial: stop triggers on
-  high/low, price-time priority, partial fills, cancel/reject transitions.
+- **Fill convention (pinned 2026-10-01, applied to `MatchingEngine` AND
+  `scripts/backtest_strategy.py::backtest`):** a fill is always at a price the
+  bar actually offered. Market fills at the NEXT bar's close when the flag is
+  set; a **stop gapped through fills at the gap** - `min(trigger, open)` for a
+  sell stop, `max(trigger, open)` for a buy stop - never at the trigger,
+  because the trigger is the one price a gapped-through bar did not trade and
+  stops fire precisely on the gap days; a `STOP_LIMIT` whose limit is
+  unreachable on the trigger bar **rests as the limit it declares** instead of
+  filling; and the exit scan starts on the bar AFTER a next-bar close fill, so
+  the entry bar's already-past range cannot stop the trade out. Pinned by
+  `tests/test_backtest_fill_semantics.py`.
+- **Tests:** `tests/test_nautilus_phase1.py` + `tests/test_next_bar_fill.py` -
+  crucial: stop triggers on high/low, gap-aware stop fill, partial fills,
+  cancel/reject transitions.
 
 ### B2. Fill, slippage + fee models (cost realism) ⭐ quick win
 - **Source:** `execution/src/models/fill.rs` `DefaultFillModel`

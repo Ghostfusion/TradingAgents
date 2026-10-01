@@ -188,9 +188,24 @@ class MatchingEngine:
                                     and bar.low <= order.trigger)
                     if buy_stopped or sell_stopped:
                         if order.ord_type == OrdType.STOP:
-                            fill_px = order.trigger
+                            # A gapped-through stop fills at the gap, never at
+                            # the trigger: a buy stop cannot fill below
+                            # max(trigger, open) nor a sell stop above
+                            # min(trigger, open).
+                            fill_px = (max(order.trigger, bar.open)
+                                       if order.side == OrderSide.BUY
+                                       else min(order.trigger, bar.open))
                         elif order.price is not None:
-                            fill_px = order.price
+                            # The stop fires and the order then RESTS as the
+                            # limit it declares: fill only if that limit was
+                            # reachable on this bar, else rest for a later one.
+                            reachable = (bar.low <= order.price
+                                         if order.side == OrderSide.BUY
+                                         else bar.high >= order.price)
+                            if reachable:
+                                fill_px = order.price
+                            else:
+                                order.ord_type = OrdType.LIMIT
                 if fill_px is not None:
                     px = self._fill_price(order, fill_px)
                     remaining = order.quantity - order.filled_qty
