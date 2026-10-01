@@ -122,7 +122,7 @@ never a second contributor.
 
 | Endpoint | Measured | Why it is not a P-item |
 |---|---|---|
-| `/eod-bulk-last-day/{EX}` | **45,009 rows / 6.6 MB in ONE call** | Same producer as `get_stock_data_eodhd`, batched. A **transport optimisation**, not a new source — valuable, but it must not become a second contributor. |
+| `/eod-bulk-last-day/{EX}` | **28,256–48,502 rows / 6.6 MB in ONE call** | Same producer as `get_stock_data_eodhd`, batched. A **transport optimisation**, not a new source — valuable, but it must not become a second contributor. **P3 BUILT 2026-10-01** as a session/coverage cross-check (see the build record); the price-chain swap is still not built. |
 | `/ust/yield-rates` | 2,506 rows, `tenor → rate` | `federal_reserve.get_treasury_curve:116` already reads Treasury's own CSV for the nominal curve. **Second producer.** |
 | `/ust/long-term-rates` | 537 rows, `rate_type` (`BC_20year`), `extrapolation_factor` | Same nominal curve, different taxonomy. **Second producer**; the `rate_type` shape is the only novelty and does not justify a second authority. |
 | `/us-quote-delayed` | 10 symbols → 10 rows; `sector`, `industry`, `name`, `otcMarket`, `otcTier`, bid/ask | Same vendor quote as the already-used `/real-time`; `sector`/`industry` duplicate `yfinance_sector.fetch_sector:64`. The `otcTier` classification is the one field with no existing producer. |
@@ -243,7 +243,8 @@ A second public function returning the same rows would be a second producer, and
 | **P0** | `real_yield_points_eodhd` + `get_real_yield_rates_eodhd`; the nominal/real pairing as a single derived read — **BUILT 2026-09-19** (see below) | `enable_eodhd_rates` |
 | **P1** | `get_bill_auction_rates_eodhd` — **BUILT 2026-09-27** (see below) | same |
 | **P2** | `map_identifiers_eodhd`, FIGI/LEI/CUSIP only; CIK as a named cross-check behind `sec_edgar._cik_for` — **BUILT 2026-09-27** (see below) | same |
-| **P3** | `/eod-bulk-last-day` as a **batched transport** for the existing price producer — only if the per-symbol path ever becomes the bottleneck — **DECLINED 2026-09-27**: no measurement shows it is (see below) | same |
+| **P3** | `/eod-bulk-last-day` as a **batched transport** — **BUILT 2026-10-01** at the owner's instruction, as a session confirmation + coverage cross-check, explicitly **not** a price contributor (see below) | same |
+| **P4** | `/news-word-weights` as a descriptive news reference read (terms behind a name's news) — **BUILT 2026-10-01** (see below) | same |
 
 Each phase needs: the gate row in all four places, a failing-first test **by mutation**, and a
 `CHANGELOG.md` entry with a `**Web impact**:` line.
@@ -410,24 +411,73 @@ ambiguity branch silently resolving to row 0; the exactly-one-selector guard rem
 field defaulted to `""`; `lei` dropped from the carried fields; the CIK key renamed to `cik`;
 a vendor failure raised instead of reported; an empty payload reporting no reason.
 
-## P3 — decision (2026-09-27): DECLINED
+## P3 — decision (2026-09-27): DECLINED, then BUILT (2026-10-01)
 
-The design makes P3 **conditional by its own words** — `/eod-bulk-last-day` as a batched
-transport *"only if the per-symbol path ever becomes the bottleneck"*. **No measurement shows
-it is, so it is not built.**
+**The original decision, recorded because it was right on its own terms.** The design made P3
+conditional by its own words — `/eod-bulk-last-day` as a batched transport *"only if the
+per-symbol path ever becomes the bottleneck"* — and **no measurement showed it is**, so it was
+declined: the one measured screener regression was *rate* reads (twelve collapsed to two), not
+price fetches; the price route is the `core_stock_apis` chain (`eodhd` first) behind a 6 h disk
+cache on a 100 k calls/day plan; and building it would have traded a cached per-symbol read for a
+6.6 MB response.
 
-- The one measured screener regression this design records was **not** the price path: the P0
-  build record's 158 s → 60 s fix was twelve *rate* reads collapsed to two. Nothing measured
-  the per-symbol price fetch.
-- The price route is the `core_stock_apis` chain (`eodhd` first), wrapped in the 6 h disk cache
-  (`dataflows/vendor_cache.py`), on an EOD plan of **100 k calls/day at 1000/min** — the README
-  records the plan precisely because the moomoo K-line quota, not EODHD's, was the constraint.
-- Building it now would trade a cached per-symbol read for a **6.6 MB** response and a new
-  transport seam with no measurement to justify either.
+**What changed:** the owner instructed the adoption directly (2026-10-01), so the condition is
+overridden rather than met — the honest framing is that this is a **capability on request, not a
+measured optimisation**, and the build is scoped so the cost stays bounded.
 
-**Trigger to reopen:** a measured per-run breakdown showing the per-symbol price fetch dominates
-the screener's vendor time (count and latency). That measurement needs live EODHD access, which
-is why it was not taken here. Until it exists, P3 stays declined rather than built speculatively.
+**BUILT 2026-10-01.**
+
+- **Readers.** `dataflows/eodhd.get_bulk_last_day_eodhd(exchange, date=None)` (the raw transport:
+  the vendor's row list, typed errors) and
+  `::bulk_last_day_index_eodhd(exchange, date=None, symbols=None)` → `{SYMBOL: {date, open,
+  high, low, close, volume}}` plus `session` / `rows` / `requested` / `covered` and an
+  `unavailable` reason instead of a raise.
+- **Measured live 2026-10-01.** No `date`: **28,256 US rows**, ~3.7 s, 6.6 MB, one call.
+  With `date=2026-09-30`: **48,502 rows**. The `date` parameter **is** honoured (contrast
+  `/ust/real-yield-rates`, which ignores every parameter), and a malformed date is rejected
+  *before* the request. Rows carry `code / exchange_short_name / date / open / high / low /
+  close / adjusted_close / volume` and **no `change_p` or `previousClose`** — so a change needs a
+  second session and is deliberately not computed here.
+- **Rule 15 is the whole design.** This is the *same producer* as `get_stock_data_eodhd`
+  (`/eod/{sym}`), batched. It is therefore **not** wired as a price contributor: the consumer
+  uses one call to confirm the session and to **cross-check the ranked names against the whole
+  exchange's own feed**, and states in the output that no reported price is taken from it. A
+  name that did not print is reported (`not in feed`), never assumed.
+- **`session` comes from the row, not the argument** — so a caller that asked for a date the
+  vendor ignored is still told what it actually got.
+
+**Not built:** the batched *price-chain* transport. The readers exist and are wired as a
+cross-check, but nothing replaced the per-symbol `/eod` path — that swap still has no measurement
+behind it, so the original trigger stands for that part.
+
+## P4 — build record (2026-10-01)
+
+**`/news-word-weights` — the terms behind a name's recent news.** Reachable on this key all
+along; the Tier-4 note had only ever probed the wrong spellings (see Appendix C). Built at the
+owner's instruction.
+
+- **Reader.** `dataflows/eodhd.news_word_weights_eodhd(symbol, limit=12)` →
+  `{symbol, rows, news_processed, news_found, terms: [{term, weight}], unavailable}`,
+  heaviest-first. A term whose weight does not parse is **dropped, never 0.0** (rule 1).
+- **Measured live 2026-10-01:** 100 terms, `meta {news_processed: 300, news_found: 29195}`,
+  AAPL's head being `stock 0.01948 / apple 0.01193 / price 0.0118 / companies 0.00925`.
+- **The build forced a seam change.** The read takes **~40 s** (the vendor aggregates ~300
+  articles), far over this module's 20 s default, so `_eodhd_get` gained a per-call `timeout=`
+  and this path carries `_WORD_WEIGHTS_TIMEOUT = 120`. Without it the read would have failed on
+  transport every time — *measured*, not assumed: the first probe blew the 20 s default.
+- **It feeds no score.** `strategies/sentiment` and `/sentiments` own the news-derived number
+  (`Sent7`/`SentZ` read it); this is a descriptive reference read — *what* the news is about —
+  so it is printed and never contributed.
+
+**Consumer (both).** The existing `scripts/value_screener.py --rates` block, so the whole
+`enable_eodhd_rates` surface stays one gate and one flag. P3 prints the session, the exchange row
+count and a coverage cross-check of the top 25 ranked names; P4 prints the top-10 terms for the
+**top 3** names — bounded because of the measured ~40 s per call. Gate off: the block prints
+`unavailable` and its reason and makes no call, unchanged.
+
+**Verification.** `tests/test_eodhd_rates.py`, 16 new tests (52 in the file). Both readers were
+also exercised **live** (bulk: 28,256 rows / `date=` honoured; word weights: 100 terms), so the
+mocked payload shapes are the measured ones.
 
 ---
 
@@ -454,6 +504,9 @@ is why it was not taken here. Until it exists, P3 stays declined rather than bui
    regression was redundant *rate* reads, not price fetches; the price route is cached 6 h on a
    100 k calls/day plan. Reopen only on a measured per-run breakdown showing the per-symbol
    price fetch dominates vendor time.
+   **REOPENED AND BUILT 2026-10-01 by owner instruction** — as a session/coverage **cross-check**,
+   not as a price-chain transport (see the P3 build record). The cost-model half of this question
+   is therefore still open: nothing replaced the per-symbol `/eod` path.
 
 ---
 
@@ -469,6 +522,13 @@ and P2's CIK demotion is already specified. **BUILT 2026-09-27** (see the P1/P2 
 
 **Do not build Tier 2.** Six reachable endpoints are second producers or reference plumbing.
 Reachability is not a reason to adopt; rule 15 is the reason not to.
+
+**Owner override (2026-10-01).** Two of those declines — `/eod-bulk-last-day` and
+`/news-word-weights` — were adopted anyway, at the owner's instruction. Each was scoped so it
+breaks no rule: the first as a batched **transport** wired as a coverage cross-check that
+contributes no price, the second as a descriptive **reference** read that feeds no score. Both
+ride the existing `enable_eodhd_rates` gate and the existing `--rates` consumer, so no new gate
+and no new flag. The remaining four Tier-2 declines stand.
 
 ---
 
@@ -507,7 +567,7 @@ the gate. Without the 422 probe this would have been indistinguishable from a wr
 
 | Endpoint | Status | Rows / shape | Adopted? |
 |---|---|---|---|
-| `/eod-bulk-last-day/{EX}` | 200 | **45,009 rows, 6.6 MB**, one call | P3 (transport only) |
+| `/eod-bulk-last-day/{EX}` | 200 | **28,256–48,502 rows, 6.6 MB**, one call | **P3 BUILT 2026-10-01** (cross-check transport) |
 | `/us-quote-delayed` | 200 | 10 symbols → 10 rows | No — second producer |
 | `/search/{q}` | 200 | list, `ISIN` + `previousClose` | No — discovery only |
 | `/id-mapping` | 200 | 18 rows/ISIN; `FIGI, LEI, CUSIP, CIK` | **P2** |
@@ -525,9 +585,15 @@ year of rows per call in every case.
 ## Appendix C — catalog reconciliation (2026-10-01)
 
 The owner supplied a flat 18-path catalog and asked which of them the tree calls. Mapped
-against the single vendor seam, **9 of the 18 are wired** and the used set is now **11 paths**
-(the 8 below plus P0 `/ust/real-yield-rates`, P1 `/ust/bill-rates`, P2 `/id-mapping`). Note
-`/id-mapping` is used but is **not** in the catalog.
+against the single vendor seam at the time, **9 of the 18 were wired** and the used set was
+**11 paths** (the 8 below plus P0 `/ust/real-yield-rates`, P1 `/ust/bill-rates`, P2
+`/id-mapping`). Note `/id-mapping` is used but is **not** in the catalog.
+
+**Then the owner had two of the declines adopted (2026-10-01): `/eod-bulk-last-day` (P3) and
+`/news-word-weights` (P4)**, so the wired count is now **11 of the 18** and the used set
+**13 paths**. The reasons they were declined still stand for the *framing*: P3 is wired as a
+cross-check transport that contributes no price (rule 15), and P4 as a reference read that feeds
+no score.
 
 | Catalog path | Wired? | Where / why not |
 |---|---|---|
@@ -540,13 +606,13 @@ against the single vendor seam, **9 of the 18 are wired** and the used set is no
 | `/sentiments` | **yes** | `_sentiment_points_eodhd:153` |
 | `/ust/real-yield-rates` | **yes** | P0, built 2026-09-19 |
 | `/ust/bill-rates` | **yes** | P1, built 2026-09-27 |
-| `/eod-bulk-last-day/{EXCHANGE}` | no | reachable, same producer as `/eod` batched — P3 declined |
+| `/eod-bulk-last-day/{EXCHANGE}` | **yes** | P3, built 2026-10-01 — batched transport, wired as a coverage cross-check, never a price contributor |
 | `/us-quote-delayed` | no | reachable, second producer of the `/real-time` quote |
 | `/exchanges-list` | no | reachable, pure reference data |
 | `/search/{QUERY}` | no | reachable, discovery only — `/exchange-symbol-list` covers the need |
 | `/ust/yield-rates` | no | reachable, second producer of the nominal curve |
 | `/ust/long-term-rates` | no | reachable, second producer of the nominal curve |
-| `/news-word-weights` | no | **reachable — see below** (this document had tested the wrong spelling) |
+| `/news-word-weights` | **yes** | P4, built 2026-10-01 — news-term reference read (~40 s/call), feeds no score |
 | `/commodities/historical/{CODE}` | no | **404 on this key** (see below) |
 | `/commodities/historical/ALL_COMMODITIES` | no | **reachable — see below**, no consumer |
 
@@ -557,9 +623,10 @@ records `word-weights` as 404 "on either spelling" — but the two spellings pro
 `word-weights` and `news/word-weights`. The catalog's `news-word-weights` is the one EODHD
 actually serves: **200**, returning a term→weight dict
 (`{"stock": 0.01948, "apple": 0.01193, "price": 0.0118, …}`) for a symbol. The Tier-4 line stands
-for the paths it probed; it does **not** establish that this endpoint is absent, and it is now
-recorded as reachable-and-unused. It is **not** adopted: it is a second producer of nothing the
-tree scores, and `sentiments` already owns the news-derived number.
+for the paths it probed; it does **not** establish that this endpoint is absent. It has since
+been **adopted as P4 (2026-10-01)** at the owner's instruction — as a reference read only: it is
+still true that `sentiments` owns the news-derived number, which is why the word weights feed no
+score.
 
 **2. The commodities surface is half real.** `commodities/historical/ALL_COMMODITIES` → **200**,
 a monthly Global Price Index of All Commodities (415 rows, `unit: Index 2016 = 100`). But
@@ -573,4 +640,8 @@ aggregate index is not the per-commodity series the catalog implies. `ALL_COMMOD
 `eod-bulk-last-day/US` **27,063 rows** (the 45,009 in Appendix B is date-dependent, a previous
 session's trading day), `exchanges-list` 70, `search/AAPL` 15, `us-quote-delayed` 200,
 `ust/yield-rates` 200, `ust/long-term-rates` 200 — every other Appendix-B figure reproduces.
-No code changed by this appendix.
+
+The P3/P4 build (2026-10-01) measured both adopted paths once more: `eod-bulk-last-day/US`
+**28,256 rows** with no `date` and **48,502** with `date=2026-09-30` (so the parameter *is*
+honoured), and `news-word-weights` **100 terms** in **~40 s**. The row-count spread across the
+three measurements is the session, not the route — a session in progress reports fewer names.

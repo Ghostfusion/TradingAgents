@@ -1215,8 +1215,13 @@ so a tree carries its own consistency record instead of depending on the opt-in
   (Treasury bill **auction** detail — discount/coupon, `maturity_date`, `cusip`)
   and `eodhd.map_identifiers_eodhd` (**FIGI / LEI / CUSIP**; the vendor's CIK is
   returned only as a labelled `cik_cross_check`, since `sec_edgar._cik_for` owns
-  that join). **P3 (`/eod-bulk-last-day`) is DECLINED** — no measurement shows
-  the per-symbol price path is the bottleneck. All behind the one
+  that join). **P3 (`/eod-bulk-last-day`) and P4 (`/news-word-weights`) are BUILT
+  (2026-10-01)** at the owner's instruction: the first as a batched **transport**
+  wired as a session + coverage cross-check (`bulk_last_day_index_eodhd`), never a
+  price contributor (rule 15); the second as a **news-term reference read**
+  (`news_word_weights_eodhd`, ~40 s/call, feeds no score — `/sentiments` owns the
+  news-derived number). The per-symbol price-*chain* swap is still not built: no
+  measurement shows that path is the bottleneck. All behind the one
   `enable_eodhd_rates` gate, read by `scripts/value_screener.py --rates`. Gate off
   by default.
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of

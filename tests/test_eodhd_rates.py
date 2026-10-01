@@ -570,3 +570,158 @@ def test_cik_is_a_labelled_cross_check_with_no_second_path():
     # No public eodhd surface resolves a CIK: a second path is the rule-15
     # violation the design demotes.
     assert not [n for n in dir(eodhd) if "cik" in n.lower()]
+
+
+# ---------------------------------------------------------------------------
+# P3 `/eod-bulk-last-day` and P4 `/news-word-weights` (built 2026-10-01).
+#
+# Payload shapes are the measured ones: bulk rows carry code / date / open /
+# high / low / close / adjusted_close / volume and NO change_p or previousClose;
+# the word-weight body is a term -> float dict plus a meta pair. Offline: the
+# seam is mocked, so nothing touches the network.
+# ---------------------------------------------------------------------------
+
+# Two sessions' worth of the measured row shape.
+_BULK_BODY = [
+    {"code": "AAPL", "exchange_short_name": "US", "date": "2026-10-01",
+     "open": 330.17, "high": 332.48, "low": 325.81, "close": 330.32,
+     "adjusted_close": 330.32, "volume": 35017775},
+    {"code": "MSFT", "exchange_short_name": "US", "date": "2026-10-01",
+     "open": 510.0, "high": 512.0, "low": 508.0, "close": 511.5,
+     "adjusted_close": 511.5, "volume": 19000000},
+    # a suspended row: no close -> dropped, never 0.0
+    {"code": "HALT", "exchange_short_name": "US", "date": "2026-10-01",
+     "open": None, "high": None, "low": None, "close": None,
+     "adjusted_close": None, "volume": 0},
+]
+
+_WORD_WEIGHTS_BODY = {
+    "data": {"stock": 0.01948, "apple": 0.01193, "price": 0.0118,
+             "companies": 0.00925, "year": 0.00887},
+    "meta": {"news_processed": 300, "news_found": 29195},
+    "links": ["https://eodhd.com/"],
+}
+
+
+def test_bulk_index_carries_the_session_and_every_symbol():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY):
+        got = eodhd.bulk_last_day_index_eodhd("US")
+    assert got["session"] == "2026-10-01", "the session comes from the ROW, not the argument"
+    assert got["rows"] == 3, "the vendor row count must be visible"
+    assert set(got["symbols"]) == {"AAPL", "MSFT"}, "the halted row has no close"
+    assert got["symbols"]["AAPL"]["close"] == 330.32
+    assert got["symbols"]["AAPL"]["volume"] == 35017775
+    assert got["unavailable"] is None
+
+
+def test_bulk_row_without_a_close_is_dropped_not_zero():
+    """A suspended name must not appear at 0.0 - absent stays absent."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY):
+        got = eodhd.bulk_last_day_index_eodhd("US")
+    assert "HALT" not in got["symbols"]
+    assert all(v["close"] is not None for v in got["symbols"].values())
+
+
+def test_bulk_index_filters_to_the_requested_symbols_and_reports_coverage():
+    """The transport's whole point: one call, many names, and a visible gap."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY):
+        got = eodhd.bulk_last_day_index_eodhd("US", symbols=["AAPL", "NOPE"])
+    assert set(got["symbols"]) == {"AAPL"}, "only the requested, present name"
+    assert got["requested"] == 2 and got["covered"] == 1
+    assert "AAPL" not in (got["unavailable"] or ""), "a partial hit is not an error"
+
+
+def test_bulk_index_matches_across_the_us_suffix():
+    """`AAPL.US` from a caller and bare `AAPL` from the feed are the same name."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY):
+        got = eodhd.bulk_last_day_index_eodhd("US", symbols=["aapl.us"])
+    assert got["covered"] == 1
+    assert "AAPL" in got["symbols"]
+
+
+def test_bulk_index_no_requested_name_in_the_feed_is_named():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY):
+        got = eodhd.bulk_last_day_index_eodhd("US", symbols=["ZZZZ"])
+    assert got["covered"] == 0
+    assert "none of the 1 requested symbols" in got["unavailable"]
+
+
+def test_bulk_index_empty_payload_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=[]):
+        got = eodhd.bulk_last_day_index_eodhd("US")
+    assert got["symbols"] == {}
+    assert "bulk last-day read failed" in got["unavailable"]
+
+
+def test_bulk_index_vendor_failure_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", side_effect=RuntimeError("gateway down")):
+        got = eodhd.bulk_last_day_index_eodhd("US")
+    assert got["rows"] == 0
+    assert "gateway down" in got["unavailable"]
+
+
+def test_bulk_date_is_validated_before_the_call():
+    """A malformed date must fail locally, not spend a request on it."""
+    with mock.patch.object(eodhd, "_eodhd_get") as seam, pytest.raises(ValueError):
+        eodhd.get_bulk_last_day_eodhd("US", date="09/30/2026")
+    seam.assert_not_called()
+
+
+def test_bulk_date_is_forwarded_when_well_formed():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_BULK_BODY) as seam:
+        eodhd.get_bulk_last_day_eodhd("US", date="2026-09-30")
+    assert seam.call_args.args[0] == "eod-bulk-last-day/US"
+    assert seam.call_args.args[1]["date"] == "2026-09-30"
+
+
+def test_word_weights_are_sorted_and_capped():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_WORD_WEIGHTS_BODY):
+        got = eodhd.news_word_weights_eodhd("AAPL", limit=3)
+    assert [t["term"] for t in got["terms"]] == ["stock", "apple", "price"]
+    assert got["rows"] == 5, "the vendor term count is the full set, not the cap"
+    assert got["unavailable"] is None
+
+
+def test_word_weights_query_the_dotted_symbol_and_carry_a_long_timeout():
+    """~40 s measured: the read must not inherit the module's 20 s default."""
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_WORD_WEIGHTS_BODY) as seam:
+        eodhd.news_word_weights_eodhd("aapl")
+    assert seam.call_args.args[0] == "news-word-weights"
+    assert seam.call_args.args[1]["s"] == "AAPL.US"
+    assert seam.call_args.kwargs["timeout"] >= 60
+
+
+def test_word_weights_carry_the_vendor_coverage_counts():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=_WORD_WEIGHTS_BODY):
+        got = eodhd.news_word_weights_eodhd("AAPL")
+    assert got["news_processed"] == 300
+    assert got["news_found"] == 29195
+
+
+def test_word_weights_non_numeric_term_is_dropped_not_zero():
+    body = {"data": {"stock": 0.02, "ghost": None, "broken": "n/a"}, "meta": {}}
+    with mock.patch.object(eodhd, "_eodhd_get", return_value=body):
+        got = eodhd.news_word_weights_eodhd("AAPL")
+    assert [t["term"] for t in got["terms"]] == ["stock"]
+    assert got["rows"] == 3, "the vendor count includes the undroppable-in-place terms"
+
+
+def test_word_weights_empty_payload_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", return_value={"data": {}, "meta": {}}):
+        got = eodhd.news_word_weights_eodhd("AAPL")
+    assert got["terms"] == []
+    assert "no word weights" in got["unavailable"]
+
+
+def test_word_weights_vendor_failure_is_reported_not_raised():
+    with mock.patch.object(eodhd, "_eodhd_get", side_effect=RuntimeError("read timed out")):
+        got = eodhd.news_word_weights_eodhd("AAPL")
+    assert got["terms"] == []
+    assert "read timed out" in got["unavailable"]
+
+
+def test_word_weights_blank_symbol_is_reported_without_a_call():
+    with mock.patch.object(eodhd, "_eodhd_get") as seam:
+        got = eodhd.news_word_weights_eodhd("   ")
+    assert got["unavailable"] == "no symbol given"
+    seam.assert_not_called()

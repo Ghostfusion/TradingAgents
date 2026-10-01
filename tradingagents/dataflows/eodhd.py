@@ -43,13 +43,19 @@ def eodhd_api_key() -> str | None:
     return os.environ.get("EODHD_API_KEY") or os.environ.get("TRADINGAGENTS_EODHD_API_KEY")
 
 
-def _eodhd_get(path: str, params: dict | None = None) -> dict | list:
+def _eodhd_get(
+    path: str, params: dict | None = None, *, timeout: float | None = None
+) -> dict | list:
     """GET ``BASE/{path}`` with api_token; parsed JSON on success.
 
     EODHD returns HTTP 200 with a JSON error body (``{"code": ..., "message":
     ...}``) for most failures, and HTTP 429 for rate limits. This helper
     classifies both (raising a typed vendor error) so the router can fall
     through cleanly.
+
+    ``timeout`` overrides the module default for a path measured slower than it
+    (``/news-word-weights`` takes ~40 s: see ``_WORD_WEIGHTS_TIMEOUT``). Omitted,
+    the default applies.
     """
     import requests as _requests
 
@@ -62,9 +68,10 @@ def _eodhd_get(path: str, params: dict | None = None) -> dict | list:
     url = f"{BASE}/{path}"
     query = dict(params or {})
     query["api_token"] = key
+    req_timeout = TIMEOUT if timeout is None else timeout
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            resp = _requests.get(url, params=query, timeout=TIMEOUT)
+            resp = _requests.get(url, params=query, timeout=req_timeout)
         except Exception as exc:  # noqa: BLE001 - network failure degrades
             if attempt < _MAX_RETRIES:
                 continue
@@ -998,4 +1005,210 @@ def map_identifiers_eodhd(*, isin: str | None = None, symbol: str | None = None)
     for field in ("isin", "figi", "lei", "cusip"):
         result[field] = chosen.get(field) or None
     result["cik_cross_check"] = chosen.get("cik") or None
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Batched last session — /eod-bulk-last-day/{EXCHANGE}
+#
+# This is the SAME producer as ``get_stock_data_eodhd`` (EODHD's own daily
+# OHLCV), batched: ONE call returns every symbol on an exchange for one session
+# (measured live 2026-10-01: 28,132 US rows for 2026-10-01, ~3.7 s, 6.6 MB). It
+# is therefore a **transport**, not a new source — nothing here may become a
+# second contributor to a price the tree already reads (master rule 15). Its
+# consumer uses it to confirm the session and to cross-check the ranked names
+# against the whole exchange's own feed in one call, which is what a transport
+# is for.
+#
+# Rows carry no ``change_p`` and no ``previousClose`` (measured: ``code``,
+# ``exchange_short_name``, ``date``, ``open``, ``high``, ``low``, ``close``,
+# ``adjusted_close``, ``volume``), so a change needs a second session and is
+# deliberately NOT computed here.
+# ---------------------------------------------------------------------------
+
+_BULK_LAST_DAY_PATH = "eod-bulk-last-day"
+
+
+def _bare_symbol(value) -> str:
+    """``AAPL.US`` / ``aapl`` -> ``AAPL``; ``""`` for an empty value."""
+    return str(value or "").strip().upper().removesuffix(".US")
+
+
+def get_bulk_last_day_eodhd(exchange: str = "US", date: str | None = None) -> list[dict]:
+    """Every symbol on ONE exchange for ONE session, in a single call.
+
+    The raw transport read: the vendor's row list exactly as returned. ``date``
+    (``YYYY-MM-DD``) asks for a specific session and is validated **before** the
+    call; omitted, the vendor returns its latest completed session. Raises a
+    typed error on no data / rate limit / bad key like the other readers here,
+    so a router can fall through to the next vendor.
+    """
+    if date is not None:
+        datetime.strptime(date, "%Y-%m-%d")
+    params: dict = {"fmt": "json"}
+    if date:
+        params["date"] = date
+    data = _eodhd_get(f"{_BULK_LAST_DAY_PATH}/{exchange}", params)
+    if not isinstance(data, list) or not data:
+        raise NoMarketDataError(exchange, exchange, detail="no bulk last-day rows")
+    return data
+
+
+def bulk_last_day_index_eodhd(
+    exchange: str = "US",
+    date: str | None = None,
+    symbols: list[str] | None = None,
+) -> dict:
+    """``{SYMBOL: {date, open, high, low, close, volume}}`` from ONE call.
+
+    The machine form of the batched read. ``symbols`` (optional) restricts the
+    index to those tickers and turns the read into a **coverage cross-check**:
+    ``covered``/``requested`` say how many of them the exchange feed carried, so
+    a caller can see a name that did not print rather than assume it did.
+
+    Returns::
+
+        {"exchange", "session", "rows", "requested", "covered",
+         "symbols": {...}, "unavailable"}
+
+    ``session`` is the **row's own** ``date`` (all rows of a response share one —
+    measured), not the argument, so a caller that asked for a date the vendor
+    ignored is still told what it got. ``rows`` is the vendor's row count.
+
+    A row without a usable ``close`` is **dropped, never zero** (master rule 1),
+    and a failed or empty read is reported in ``unavailable`` rather than raised
+    — the consumer is a script that prints gaps.
+    """
+    result: dict = {
+        "exchange": exchange,
+        "session": None,
+        "rows": 0,
+        "requested": 0,
+        "covered": 0,
+        "symbols": {},
+        "unavailable": None,
+    }
+    want: set[str] | None = None
+    if symbols:
+        want = {_bare_symbol(s) for s in symbols if _bare_symbol(s)}
+        result["requested"] = len(want)
+    try:
+        rows = get_bulk_last_day_eodhd(exchange, date)
+    except Exception as exc:  # noqa: BLE001 - a failed read is a named gap
+        result["unavailable"] = f"bulk last-day read failed: {exc}"
+        return result
+
+    index: dict = {}
+    session = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sym = _bare_symbol(row.get("code"))
+        if not sym:
+            continue
+        close = _rate_or_none(row.get("close"))
+        if close is None:
+            continue
+        if session is None:
+            session = str(row.get("date") or "") or None
+        if want is not None and sym not in want:
+            continue
+        index[sym] = {
+            "date": str(row.get("date") or "") or None,
+            "open": _rate_or_none(row.get("open")),
+            "high": _rate_or_none(row.get("high")),
+            "low": _rate_or_none(row.get("low")),
+            "close": close,
+            "volume": _rate_or_none(row.get("volume")),
+        }
+    result["session"] = session
+    result["rows"] = len(rows)
+    result["symbols"] = index
+    result["covered"] = len(index)
+    if not index:
+        result["unavailable"] = (
+            "no rows in the response"
+            if want is None
+            else f"none of the {len(want)} requested symbols are in the {exchange} feed"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# News term weights — /news-word-weights
+#
+# A descriptive read of the same vendor surface as ``/sentiments`` (already
+# used): the terms driving a symbol's recent news, with their weights. It feeds
+# NO score — ``strategies/sentiment`` and ``/sentiments`` own the news-derived
+# number — so it is a reference read: printed, never contributed.
+#
+# MEASURED LATENCY 2026-10-01: ~40 s per call (the vendor aggregates ~300
+# articles), well over this module's 20 s default, so the read carries its own
+# longer timeout. A caller must budget for it, which is why the screener prints
+# it for a bounded number of names.
+# ---------------------------------------------------------------------------
+
+_NEWS_WORD_WEIGHTS_PATH = "news-word-weights"
+_WORD_WEIGHTS_TIMEOUT = 120
+
+
+def news_word_weights_eodhd(symbol: str, limit: int = 12) -> dict:
+    """Term -> weight for a symbol's recent news, heaviest first.
+
+    Returns::
+
+        {"symbol", "rows", "news_processed", "news_found",
+         "terms": [{"term", "weight"}], "unavailable"}
+
+    ``rows`` is how many terms the vendor returned (measured: 100) and
+    ``terms`` is the sorted, ``limit``-capped head of them. A term whose weight
+    does not parse is **dropped, never 0.0** (master rule 1). ``news_processed``
+    / ``news_found`` are the vendor's own coverage counts, carried so a reader
+    can see how much news the weights were built from. A failure or an empty
+    payload is reported in ``unavailable`` rather than raised, so a caller can
+    print the gap.
+    """
+    sym = _bare_symbol(symbol)
+    result: dict = {
+        "symbol": sym,
+        "rows": 0,
+        "news_processed": None,
+        "news_found": None,
+        "terms": [],
+        "unavailable": None,
+    }
+    if not sym:
+        result["unavailable"] = "no symbol given"
+        return result
+    query = f"{sym}.US"
+    try:
+        data = _eodhd_get(
+            _NEWS_WORD_WEIGHTS_PATH,
+            {"s": query, "fmt": "json"},
+            timeout=_WORD_WEIGHTS_TIMEOUT,
+        )
+    except Exception as exc:  # noqa: BLE001 - a failed read is a named gap
+        result["unavailable"] = f"word-weight read failed: {exc}"
+        return result
+
+    body = data.get("data") if isinstance(data, dict) else None
+    meta = data.get("meta") if isinstance(data, dict) else None
+    if isinstance(meta, dict):
+        result["news_processed"] = meta.get("news_processed")
+        result["news_found"] = meta.get("news_found")
+    if not isinstance(body, dict) or not body:
+        result["unavailable"] = f"no word weights for {query}"
+        return result
+
+    result["rows"] = len(body)
+    terms = []
+    for term, weight in body.items():
+        w = _rate_or_none(weight)
+        if w is None:
+            continue
+        terms.append({"term": str(term), "weight": w})
+    terms.sort(key=lambda t: t["weight"], reverse=True)
+    result["terms"] = terms[: max(0, int(limit))]
+    if not terms:
+        result["unavailable"] = f"no numeric word weights for {query}"
     return result

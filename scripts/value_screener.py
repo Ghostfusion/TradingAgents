@@ -1419,11 +1419,13 @@ def main(argv: list[str] | None = None) -> int:
         help="print the EODHD rate/reference reads at the head of the report: the "
         "US real-yield (TIPS) curve with the measured inflation expectation "
         "(nominal par yield - TIPS real yield), the Treasury bill auction table "
-        "(auction discount/coupon, maturity, CUSIP), and FIGI/LEI/CUSIP for the "
-        "ranked names. Requires enable_eodhd_rates; with the gate off the block "
-        "prints unavailable and its reason. Advisory: it never gates a row and "
-        "never changes a valuation - dcf.wacc_from_beta keeps its own assumed "
-        "premium.",
+        "(auction discount/coupon, maturity, CUSIP), FIGI/LEI/CUSIP for the "
+        "ranked names, the market-wide last session (batched /eod-bulk-last-day, "
+        "used as a session + coverage cross-check) and the news term weights "
+        "behind the top names (~40s each). Requires enable_eodhd_rates; with the "
+        "gate off the block prints unavailable and its reason. Advisory: it never "
+        "gates a row and never changes a valuation - dcf.wacc_from_beta keeps its "
+        "own assumed premium.",
     )
     parser.add_argument(
         "--growth-scores",
@@ -2609,10 +2611,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             try:
                 from tradingagents.dataflows.eodhd import (
+                    bulk_last_day_index_eodhd,
                     get_bill_auction_rates_eodhd,
                     get_real_yield_rates_eodhd,
                     inflation_expectation_eodhd,
                     map_identifiers_eodhd,
+                    news_word_weights_eodhd,
                     real_yield_points_eodhd,
                 )
                 from tradingagents.dataflows.federal_reserve import treasury_curve_points
@@ -2694,6 +2698,88 @@ def main(argv: list[str] | None = None) -> int:
                             f"{_id['figi'] or '-'} | {_id['lei'] or '-'} | "
                             f"{_id['cusip'] or '-'} |"
                         )
+                # P3 (`/eod-bulk-last-day`) as built 2026-10-01: the batched
+                # transport for EODHD's own daily OHLCV. ONE call returns the whole
+                # exchange's session, so its use here is a session confirmation and
+                # a coverage cross-check of the ranked names - never a second price
+                # contributor (rule 15: the same producer as `/eod/{sym}`, batched).
+                # No price in this report is taken from it.
+                _bulk_names = [
+                    str(_row.get("ticker") or "").upper()
+                    for _row in (ranked or [])[:25]
+                ]
+                _bulk = bulk_last_day_index_eodhd(
+                    "US", date=args.date, symbols=_bulk_names
+                )
+                rate_lines += [
+                    "",
+                    "## Market-wide last session (EODHD /eod-bulk-last-day)",
+                    "",
+                    f"- Session {_bulk['session'] or '-'}: one call returned "
+                    f"{_bulk['rows']} {_bulk['exchange']} rows.",
+                ]
+                if _bulk.get("unavailable"):
+                    rate_lines.append(f"- unavailable: {_bulk['unavailable']}")
+                else:
+                    rate_lines += [
+                        f"- Coverage cross-check of the top {_bulk['requested']} "
+                        f"ranked names: {_bulk['covered']} appear in the feed.",
+                        "",
+                        "| Ticker | Feed close | Feed volume | Session |",
+                        "| --- | --- | --- | --- |",
+                    ]
+                    for _nm in _bulk_names:
+                        _bar = (_bulk["symbols"] or {}).get(_nm)
+                        if not _bar:
+                            rate_lines.append(f"| {_nm} | - | - | not in feed |")
+                        else:
+                            rate_lines.append(
+                                f"| {_nm} | {_bar['close']} | {_bar['volume']} | "
+                                f"{_bar['date']} |"
+                            )
+                    rate_lines += [
+                        "",
+                        "Transport note: this is EODHD's own daily OHLCV, batched - "
+                        "the same producer as the per-symbol `/eod` read (rule 15), "
+                        "used only to confirm the session and cross-check the ranked "
+                        "names in one call. No reported price is taken from it.",
+                    ]
+                # P4 (`/news-word-weights`) as built 2026-10-01: the terms driving
+                # a name's recent news. A reference read of the same vendor surface
+                # as `/sentiments`; it feeds no score and is bounded to the top few
+                # names because the vendor takes ~40 s per name (measured).
+                _ww_names = [
+                    str(_row.get("ticker") or "").upper()
+                    for _row in (ranked or [])[:3]
+                ]
+                if _ww_names:
+                    rate_lines += [
+                        "",
+                        "## News term weights (EODHD /news-word-weights)",
+                        "",
+                        "| Ticker | Terms (weight) | Basis |",
+                        "| --- | --- | --- |",
+                    ]
+                    for _nm in _ww_names:
+                        _ww = news_word_weights_eodhd(_nm, limit=10)
+                        if _ww.get("unavailable"):
+                            rate_lines.append(
+                                f"| {_nm} | unavailable - {_ww['unavailable']} | - |"
+                            )
+                            continue
+                        _tops = ", ".join(
+                            f"{t['term']} {t['weight']:.4f}" for t in _ww["terms"]
+                        )
+                        rate_lines.append(
+                            f"| {_nm} | {_tops} | {_ww['rows']} terms from "
+                            f"{_ww['news_processed']} articles |"
+                        )
+                    rate_lines += [
+                        "",
+                        "Advisory reference read: what the news is *about*, not a "
+                        "sentiment number (`/sentiments` owns that, and it is what "
+                        "`Sent7`/`SentZ` read). ~40 s per name (measured).",
+                    ]
             except Exception as exc:  # noqa: BLE001 - a failed read is reported, not raised
                 rate_lines += ["", f"unavailable - rate read failed: {exc}"]
         rates_block = "\n".join(rate_lines)
