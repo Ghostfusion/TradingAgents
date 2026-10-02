@@ -70,11 +70,20 @@ def test_exit_block_carries_the_predicate_and_its_precedence():
 
 
 def test_cvar_permission_is_reported_alongside_the_price():
-    out = entry_exit_price(
+    ok = entry_exit_price(
+        price=100.0, stop=95.0, max_stop_fraction=0.10, name_cvar=0.02, cvar_budget=0.03
+    )["entry"]
+    over = entry_exit_price(
         price=100.0, stop=95.0, max_stop_fraction=0.10, name_cvar=0.09, cvar_budget=0.03
     )["entry"]
-    assert out["cvar_status"] == "OVER_BUDGET"
-    assert out["risk_adjusted_entry_price"] is not None
+    assert ok["cvar_status"] == "OK"
+    assert over["cvar_status"] == "OVER_BUDGET"
+    # Owner invariant (2026-10-02): an over-budget CVaR is a STATUS. It must not
+    # be folded into a smaller / less-attractive entry price - the risk
+    # governor's PASS/FAIL stays the authoritative gate, and a price term must
+    # never override it.
+    assert over["risk_adjusted_entry_price"] == ok["risk_adjusted_entry_price"]
+    assert over["max_entry_price"] == ok["max_entry_price"]
 
 
 def test_the_object_carries_both_blocks_and_the_coverage_counts():

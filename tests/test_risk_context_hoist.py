@@ -210,3 +210,38 @@ def test_kill_switch_state_is_produced_and_can_fire(monkeypatch):
     unknown = _run(None)
     assert unknown.get("active") is False
     assert "drawdown" not in (unknown.get("measured_legs") or [])
+
+
+def test_the_plan_consumes_the_pre_graph_risk_context(monkeypatch):
+    """The plan's risk half reads the SAME snapshot the governor gates on.
+
+    Guards the producer<->consumer seam: ``_precompute_risk_context`` writes
+    ``single_cvar`` / ``cvar_budget_pct`` / ``liquidity.verdict`` and
+    ``_compiled_decision_context`` hands exactly those to the plan. A rename on
+    either side would silently put the entry block back to
+    ``cvar_status: NO_SOURCE`` while the report's decision basis still cites a
+    measured CVaR - the internal inconsistency this wiring removes (MU
+    2026-10-02 read ``CVaR: NO_SOURCE`` in the card beside ``CVaR 10.79% >
+    budget 3.00%`` in the same report's basis line).
+    """
+    graph = _graph(monkeypatch, _closes())
+    import tradingagents.dataflows.float_shares as float_shares
+    import tradingagents.dataflows.statement_parsing as statement_parsing
+
+    monkeypatch.setattr(float_shares, "fetch_float_shares", lambda _t: 4_000_000.0)
+    monkeypatch.setattr(
+        statement_parsing, "fetch_ticker", lambda _t, _d: {"shares": {"current": 20_000_000.0}}
+    )
+
+    ctx = graph._precompute_risk_context("NVDA")
+    assert ctx["single_cvar"] is not None
+
+    capture: dict = {}
+    graph._compiled_decision_context(
+        "NVDA", {"risk_context": ctx}, closes=_closes(), capture=capture
+    )
+    entry = capture["entry_exit"]["entry"]
+    # The measured CVaR reached the plan as a STATUS (OK / OVER_BUDGET) - never
+    # NO_SOURCE, and never a price.
+    assert entry["cvar_status"] in ("OK", "OVER_BUDGET")
+    assert entry["liquidity_status"] == ctx["liquidity"]["verdict"]

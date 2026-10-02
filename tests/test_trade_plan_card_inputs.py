@@ -229,3 +229,51 @@ def test_the_price_block_renders_nothing_for_a_run_that_computed_no_card():
 
     assert render_entry_exit_block(None) == ""
     assert render_entry_exit_block({}) == ""
+
+
+def _block_from_state(monkeypatch, closes, state, **cfg_over):
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = _config(**cfg_over)
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    capture: dict = {}
+    graph._compiled_decision_context("NVDA", state, capture=capture)
+    return (capture.get("entry_exit") or {}).get("entry") or {}
+
+
+def test_the_plan_reads_the_measured_risk_snapshot_off_state(monkeypatch):
+    """The pre-graph risk snapshot is the ONE producer of the analyzed name's
+    CVaR and the book's CVaR budget (``_precompute_risk_context`` seeds it; the
+    risk governor consumes the same values). The plan's risk half must read
+    THOSE, not re-derive CVaR - and an over-budget name is reported as a STATUS,
+    never folded into a smaller entry price that would override the governor.
+    The liquidity verdict travels the same way. No execution cost term is
+    fabricated here: with no measured microstructure the price stays
+    ``NO_SOURCE`` (the owner's rule), it is not priced at an assumed zero."""
+    entry = _block_from_state(
+        monkeypatch,
+        _closes(),
+        {
+            "risk_context": {
+                "single_cvar": 0.09,
+                "cvar_budget_pct": 0.03,
+                "liquidity": {"verdict": "caution"},
+            }
+        },
+        max_stop_fraction=0.10,
+    )
+
+    assert entry["cvar_status"] == "OVER_BUDGET"
+    assert entry["liquidity_status"] == "caution"
+    assert entry["risk_adjusted_entry_price"] is not None
+    # No measured cost term -> no executable price. "Not measured" is not "free".
+    assert entry["execution_price"] is None
+    assert entry["liquidity_adjusted_entry_price"] is None
+
+
+def test_a_run_with_no_risk_snapshot_reports_cvar_no_source(monkeypatch):
+    """The read is real: with nothing on ``state["risk_context"]`` the same path
+    answers ``NO_SOURCE`` rather than defaulting a CVaR or a budget."""
+    entry = _block_from_state(monkeypatch, _closes(), {})
+
+    assert entry["cvar_status"] == "NO_SOURCE"
+    assert entry["liquidity_status"] is None

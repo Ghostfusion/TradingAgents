@@ -1641,11 +1641,23 @@ class TradingAgentsGraph:
                 measured_inputs,
             )
 
+            # The measured risk snapshot - the pre-graph SINGLE producer whose
+            # numbers the risk governor also consumes (`_precompute_risk_context`
+            # seeds it on state before this context is compiled). The plan's risk
+            # half reads THESE values rather than re-deriving CVaR, so one
+            # measured quantity keeps one producer. A name over budget is
+            # reported as a STATUS (`cvar_status: OVER_BUDGET`), never folded
+            # into a smaller entry price: the governor's PASS/FAIL stays the
+            # authoritative gate, and a price term must not override it.
+            rctx = (state or {}).get("risk_context") or {}
             plan = build_trade_plan(
                 ticker=ticker,
                 price=(closes[-1] if closes else None),
                 config=self.config,
                 capture=capture,
+                name_cvar=rctx.get("single_cvar"),
+                cvar_budget=rctx.get("cvar_budget_pct"),
+                liquidity_status=(rctx.get("liquidity") or {}).get("verdict"),
                 **measured_inputs(closes, self.config),
             )
             out.append(plan)

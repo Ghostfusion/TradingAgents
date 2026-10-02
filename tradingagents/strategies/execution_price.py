@@ -6,10 +6,19 @@ ceiling - ``P_entry,target = P_risk - ExecutionBuffer`` - and §102's
 pure and deterministic: it prices the cost terms the caller measured and
 reports the ones it did not.
 
-Each term is a **fraction of price** (the repo's own convention - see
-``liquidity_risk.volume_share_slippage`` / ``market_impact_slippage``, which
-return costs in this shape). An absent term shrinks ``coverage``; it is never
-defaulted to zero, because "not measured" and "free" are different claims.
+Each term is a **fraction of price**. The repo's cost models return *price
+units* (``liquidity_risk.volume_share_slippage`` / ``market_impact_slippage``
+multiply by the price), so a caller converts by dividing by that price -
+``book_risk``'s impact row does exactly this to land in return units. An absent
+term shrinks ``coverage``; it is never defaulted to zero, because "not
+measured" and "free" are different claims.
+
+**Contract rule** (owner decision 2026-10-02): an execution cost may adjust an
+executable price **only** when it is sourced from measured microstructure or
+an explicitly validated cost model. With no measured term the field is
+``NO_SOURCE`` - never an assumed zero, and never a config placeholder standing
+in for a measurement. That is the deliberate seam a future cost model plugs
+into: supply the term here when it is measured, leave it absent until then.
 """
 
 from __future__ import annotations
