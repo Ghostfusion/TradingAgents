@@ -26,7 +26,18 @@ separate plans. This repo uses the **stocks** and **economy** datasets (US).
 
 ### Plan realities (matters for feasibility)
 
-- **Stocks Basic: quote data only**. Snapshots/fundamentals require Starter+.
+- **Snapshots and `/stocks/financials/v1/*` are 403 on this plan** — that is the
+  half that holds (re-probed 2026-10-01; see Appendix A). The earlier "Stocks
+  Basic: quote data only" wording was **too narrow**: on this key the
+  aggregates, indicators, float, filings (10-K sections, 8-K text/disclosures,
+  risk factors, form-3/4), reference, exchanges, market status, conditions and
+  ticker-events surfaces all return **200**. Only `snapshot` and `financials`
+  are gated.
+- **The entry tier is rate-limited to ~5 requests/minute** (measured 2026-10-01:
+  the sixth call in a minute returns `429`, including on endpoints that had just
+  succeeded). A probe that walks a list will look like an entitlement wall when
+  it is a throttle — pace it, or the 429s mislead. The router's breaker handles
+  this at runtime; a *probe* must not.
 - **Starter/Developer = 15-min delayed quotes; Advanced/Business = real-time.**
 - **FMV and Greeks are Business-plan only** → represent as *unavailable* per
   the no-fabrication contract, never invented.
@@ -408,3 +419,77 @@ prototype an endpoint's response shape before writing the native
 - **Recency**: below Advanced/Business, quotes are 15-min delayed. `news`
   itself is hourly, so the implemented news tool is unaffected.
 - Keep `.env`/`.env.example` in sync when adding keys.
+
+---
+
+## Appendix A — endpoint coverage audit (2026-10-01)
+
+The owner supplied Massive's stocks/reference catalog (36 paths) and asked which are
+used and what is missing. **8 of the 36 are wired**; the rest are mapped below,
+each probed **live** against the repo's own key, paced past the ~5 req/min throttle.
+
+**Wired today:** `/v1/related-companies/{ticker}`, `/vX/reference/ipos`,
+`/stocks/v1/splits`, `/stocks/v1/dividends`, `/stocks/v1/short-interest`,
+`/stocks/v1/short-volume`, `/stocks/filings/vX/form-4`, `/v2/reference/news`.
+(Plus, outside that catalog: `/fed/v1/{treasury-yields,inflation,
+inflation-expectations,labor-market}`, `/stocks/financials/v1/ratios`,
+`/v2/snapshot/locale/us/markets/stocks/{tickers/{t},gainers|losers}`.)
+
+### The one real gap — SEC narrative text (no producer in this tree)
+
+`sec_edgar.py` owns XBRL facts (`annual_facts`, `financial_history_series`), filing
+**metadata** (`recent_filing_forms`) and EDGAR **full-text search**
+(`get_edgar_fulltext_search`). It has no *item-level section extraction*. Massive
+does, probed 200:
+
+| Endpoint | Measured shape |
+|---|---|
+| `/stocks/filings/10-K/vX/sections?ticker=` | **10 rows**, `{cik, ticker, section, filing_date, period_end, text, filing_url}` — e.g. `section: risk_factors` carrying the **full item text** ("Item 1A. Risk Factors\nThe following summarizes factors…") |
+| `/stocks/filings/vX/risk-factors?ticker=` | **50 rows**, `{cik, ticker, primary_category, secondary_category, tertiary_category, filing_date, supporting_text}` — a **categorised** risk taxonomy with supporting snippets |
+| `/stocks/taxonomies/vX/risk-factors` | **140 rows** — the category dictionary behind the above |
+| `/stocks/filings/8-K/vX/text?ticker=` | 10 rows |
+| `/stocks/filings/8-K/vX/disclosures?ticker=` | 100 rows |
+| `/stocks/taxonomies/vX/disclosures` | 119 rows, `{primary_category, secondary_category, tertiary_category, description, taxonomy}` |
+
+**Candidate, not adopted.** It would need a new reader + a category + a tool + an
+analyst-prompt binding — a design decision, not a plumbing one. No second-producer
+objection applies: nothing else produces this text.
+
+### Reachable, but a second producer (rule 15) — do NOT adopt
+
+| Endpoint | Probed | Collides with |
+|---|---|---|
+| `/v2/aggs/ticker/{t}/range/…` | 200 (21 rows) | EODHD `/eod`, yfinance, moomoo OHLCV |
+| `/v2/aggs/grouped/locale/us/market/stocks/{date}` | 200 (**12,613 rows**) | **the P3 EODHD `/eod-bulk-last-day` transport** built 2026-10-01 (the same whole-market-session quantity) |
+| `/v1/open-close/{t}/{date}` | 200 | same OHLCV chain |
+| `/v2/aggs/ticker/{t}/prev` | 200 | the snapshot's own `prevDay` |
+| `/v1/indicators/{sma,ema,macd,rsi}/{t}` | 200 | `strategies/technical_factors.py`, `factor_expressions.py`, `swing.py`, `rule_eval.py` compute these |
+| `/stocks/vX/float` | 200 | `dataflows/float_shares.py` |
+| `/v3/reference/{splits,dividends}` | 200 | the `/stocks/v1/{splits,dividends}` already wired |
+| `/v3/reference/tickers/{t}` | 200 (25 rows) | yfinance sector, `sec_edgar._cik_for` (CIK), EODHD `id-mapping` (FIGI) — only `list_date`/`delisted_utc` have no producer |
+
+### Reachable, reference/plumbing only — low signal for batch decisions
+
+`/v3/reference/tickers`, `/v3/reference/tickers/types` (200), `/v3/reference/exchanges`
+(200, 27), `/v3/reference/conditions` (200), `/v1/marketstatus/now` (200),
+`/v1/marketstatus/upcoming` (200), `/vX/reference/tickers/{id}/events` (200, 4 rows),
+`/stocks/filings/vX/index` (200, 1,000 rows), `/stocks/filings/vX/form-3` (200, 100).
+`marketstatus`/`exchanges`/`ticker-events` were already declined as low-signal in §3f;
+that call still holds. `marketstatus` would only second-guess `effective_date.py`'s
+session table; `form-3` is the initial-ownership sibling of the form-4 already wired.
+
+### Entitled but unusable
+
+`/stocks/filings/vX/13-F` → **200** but still **no `ticker` filter** (only `filer_cik` /
+`filing_date`; probed `filer_cik=0000320193` → 0 rows), so the §3c deferral stands: a
+per-ticker institutional aggregate cannot be built from it without mixing issuers.
+
+### Not found at the paths listed
+
+`/stocks/v1/float` → **404** (the route is `/stocks/vX/float`), and
+`/v3/reference/tickers/AAPL/events` → **404** (the route is
+`/vX/reference/tickers/{id}/events`). The catalog's other `vX` placeholders are served
+literally — Massive accepts `vX` as the version segment, which is why `dataflows/massive.py`
+already calls `/vX/reference/ipos` and `/stocks/filings/vX/form-4` that way.
+
+**No code changed by this appendix.**
