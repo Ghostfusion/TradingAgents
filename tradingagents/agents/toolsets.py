@@ -19,6 +19,7 @@ so it has no toolset and no ToolNode at all.
 from __future__ import annotations
 
 from tradingagents.agents.utils.agent_utils import (
+    get_8k_filings,
     get_allocation,
     get_allocation_black_litterman,
     get_alpha_scoring,
@@ -88,6 +89,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_fcf_yield,
     get_fda_calendar,
     get_fed_watch,
+    get_filing_sections,
     get_financial_history,
     get_fixed_income_risk,
     get_form4_insider,
@@ -167,6 +169,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_return_decomposition,
     get_revenue_breakdown,
     get_reverse_dcf,
+    get_risk_factors,
     get_risk_gate,
     get_risk_overlay,
     get_risk_parity_alloc,
@@ -460,6 +463,9 @@ def fundamentals_company_tools() -> list:
                 get_insider_activity,
                 get_company_peers,
                 get_form4_insider,
+                get_filing_sections,
+                get_risk_factors,
+                get_8k_filings,
                 get_ratios,
                 get_allocation,
                 get_constituent_cap_weights,

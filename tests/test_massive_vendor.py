@@ -18,8 +18,10 @@ from tradingagents.dataflows.errors import (
 from tradingagents.dataflows.massive import (
     MassiveNotConfiguredError,
     fetch_macro_backdrop,
+    get_8k_filings_massive,
     get_corporate_actions_massive,
     get_dividends_massive,
+    get_filing_sections_massive,
     get_form4_insider_massive,
     get_fundamentals_massive,
     get_ipos_massive,
@@ -28,6 +30,7 @@ from tradingagents.dataflows.massive import (
     get_news_massive,
     get_ratios_massive,
     get_related_companies_massive,
+    get_risk_factors_massive,
     get_short_interest_massive,
     get_short_volume_massive,
     get_splits_massive,
@@ -600,6 +603,27 @@ class MassiveFailoverTests(unittest.TestCase):
             )
         self.assertIn("form-4 insider activity unavailable", out)
 
+    def test_get_filing_sections_degrades(self):
+        from tradingagents.agents.utils.analysis_tools import get_filing_sections
+
+        with self._patch("get_filing_sections_massive", "tradingagents.dataflows.massive"):
+            out = get_filing_sections.invoke({"ticker": "x"})
+        self.assertIn("10-K filing sections unavailable", out)
+
+    def test_get_risk_factors_degrades(self):
+        from tradingagents.agents.utils.analysis_tools import get_risk_factors
+
+        with self._patch("get_risk_factors_massive", "tradingagents.dataflows.massive"):
+            out = get_risk_factors.invoke({"ticker": "x"})
+        self.assertIn("risk factors unavailable", out)
+
+    def test_get_8k_filings_degrades(self):
+        from tradingagents.agents.utils.analysis_tools import get_8k_filings
+
+        with self._patch("get_8k_filings_massive", "tradingagents.dataflows.massive"):
+            out = get_8k_filings.invoke({"ticker": "x"})
+        self.assertIn("8-K filings unavailable", out)
+
     def test_get_ratios_degrades(self):
         from tradingagents.agents.utils.analysis_tools import get_ratios
 
@@ -657,3 +681,162 @@ def test_short_interest_ranks_the_latest_settlement_against_its_own_history():
     assert "Percentile: 100%" in out
     assert "vs prior settlement" in out
     assert "not a bullish signal" in out
+
+
+# ---------------------------------------------------------------------------
+# SEC filing TEXT readers (10-K sections / risk factors / 8-K items).
+#
+# Shapes are the MEASURED ones (probed live 2026-10-01): the 10-K sections
+# endpoint publishes only `risk_factors` and `business`, a section's text runs
+# 53k-69k chars, and all three reads honour the `ticker` filter (10/10, 50/50,
+# 10/10 rows). `/stocks/filings/8-K/vX/disclosures` did NOT (an AAPL query
+# returned another issuer's rows), which is why it is not read here.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class MassiveFilingTextTests(unittest.TestCase):
+    _SECTIONS = {
+        "results": [
+            {"cik": "0000320193", "ticker": "AAPL", "section": "risk_factors",
+             "filing_date": "2025-10-31", "period_end": "2025-09-27",
+             "text": "Item 1A.    Risk Factors\nThe following summarizes factors",
+             "filing_url": "https://www.sec.gov/Archives/a.txt"},
+            {"cik": "0000320193", "ticker": "AAPL", "section": "business",
+             "filing_date": "2025-10-31", "period_end": "2025-09-27",
+             "text": "Item 1.    Business. The Company designs...",
+             "filing_url": "https://www.sec.gov/Archives/b.txt"},
+        ]
+    }
+
+    _RISKS = {
+        "results": [
+            {"cik": "0000320193", "ticker": "AAPL", "filing_date": "2024-11-01",
+             "primary_category": "financial_and_market",
+             "secondary_category": "capital_structure_and_performance",
+             "tertiary_category": "dividend_policy_and_capital_allocation",
+             "supporting_text": "The Company believes the price of its stock ..."},
+            {"cik": "0000320193", "ticker": "AAPL", "filing_date": "2024-11-01",
+             "primary_category": "legal_and_regulatory",
+             "secondary_category": "intellectual_property",
+             "tertiary_category": "patent_litigation",
+             "supporting_text": "The Company is subject to legal proceedings ..."},
+        ]
+    }
+
+    _EIGHT_K = {
+        "results": [
+            {"cik": "0000320193", "ticker": "AAPL",
+             "accession_number": "0000320193-26-000018", "form_type": "8-K",
+             "filing_date": "2026-07-30",
+             "items_text": "Item 2.02    Results of Operations and Financial Condition.\nOn July 30",
+             "filing_url": "https://www.sec.gov/Archives/c.txt"},
+        ]
+    }
+
+    _TAXONOMY = {
+        "results": [
+            {"primary_category": "legal_and_regulatory",
+             "description": "Risks from laws, regulation and litigation",
+             "taxonomy": "risk"},
+        ]
+    }
+
+    def _router(self, filings):
+        """A `_get` that answers the filings read and the taxonomy separately."""
+        def fake_get(path, params=None):
+            if "taxonomies" in path:
+                return self._TAXONOMY
+            return filings
+        return fake_get
+
+    def test_sections_carry_the_period_and_the_item_text(self):
+        with mock.patch.object(massive, "_get", return_value=self._SECTIONS):
+            out = get_filing_sections_massive("AAPL")
+        assert "period ending 2025-09-27" in out
+        assert "Item 1A. Risk Factors" in out
+        assert "business, risk_factors" in out, "the published set must be stated"
+
+    def test_sections_long_text_is_bounded_and_says_what_it_withheld(self):
+        body = {"results": [dict(self._SECTIONS["results"][0], text="x" * 5000)]}
+        with mock.patch.object(massive, "_get", return_value=body):
+            out = get_filing_sections_massive("AAPL")
+        assert "chars withheld" in out, "an unlabelled truncation reads as the whole item"
+        assert "x" * 5000 not in out
+
+    def test_sections_unknown_section_is_named_never_substituted(self):
+        with mock.patch.object(massive, "_get", return_value=self._SECTIONS):
+            out = get_filing_sections_massive("AAPL", section="md&a")
+        assert "No rows for section 'md&a'" in out
+        assert "business, risk_factors" in out
+        assert "Item 1A." not in out, "a missing section must not be answered with another"
+
+    def test_sections_filter_keeps_only_the_requested_section(self):
+        with mock.patch.object(massive, "_get", return_value=self._SECTIONS):
+            out = get_filing_sections_massive("AAPL", section="business")
+        assert "Item 1. Business" in out
+        assert "Item 1A." not in out
+
+    def test_sections_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_filing_sections_massive("AAPL")
+
+    def test_risk_factors_group_by_primary_category(self):
+        with mock.patch.object(massive, "_get", return_value=self._RISKS):
+            out = get_risk_factors_massive("AAPL")
+        assert "### financial_and_market (1)" in out
+        assert "### legal_and_regulatory (1)" in out
+        assert "dividend_policy_and_capital_allocation" in out
+
+    def test_risk_factors_taxonomy_is_opt_in(self):
+        with mock.patch.object(massive, "_get", side_effect=self._router(self._RISKS)):
+            out = get_risk_factors_massive("AAPL", include_taxonomy=True)
+        assert "Category dictionary" in out
+        assert "Risks from laws, regulation and litigation" in out
+
+    def test_risk_factors_makes_no_taxonomy_call_by_default(self):
+        calls: list = []
+
+        def fake_get(path, params=None):
+            calls.append(path)
+            return self._RISKS
+
+        with mock.patch.object(massive, "_get", side_effect=fake_get):
+            get_risk_factors_massive("AAPL")
+        assert not [c for c in calls if "taxonomies" in c], "the dictionary is opt-in"
+
+    def test_risk_factors_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_risk_factors_massive("AAPL")
+
+    def test_8k_renders_the_item_text_and_the_accession(self):
+        with mock.patch.object(massive, "_get", return_value=self._EIGHT_K):
+            out = get_8k_filings_massive("AAPL")
+        assert "Item 2.02" in out
+        assert "0000320193-26-000018" in out
+
+    def test_8k_empty_raises_no_market_data(self):
+        with (
+            mock.patch.object(massive, "_get", return_value=[]),
+            self.assertRaises(NoMarketDataError),
+        ):
+            get_8k_filings_massive("AAPL")
+
+    def test_all_reads_use_the_singular_ticker_filter_the_vendor_honours(self):
+        seen: dict = {}
+
+        def fake_get(path, params=None):
+            seen[path] = params
+            return self._SECTIONS
+
+        with mock.patch.object(massive, "_get", side_effect=fake_get):
+            get_filing_sections_massive("aapl")
+            get_8k_filings_massive("aapl")
+        assert seen["/stocks/filings/10-K/vX/sections"]["ticker"] == "AAPL"
+        assert seen["/stocks/filings/8-K/vX/text"]["ticker"] == "AAPL"

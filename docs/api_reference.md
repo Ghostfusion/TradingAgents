@@ -626,7 +626,8 @@ deliberate step with a vendor-suite re-run.
 - `technical_indicators` : `get_indicators`
 - `fundamental_data` : `get_fundamentals`, `get_balance_sheet`, `get_cashflow`,
   `get_income_statement`, `get_basic_financials`, `get_company_peers`,
-  `get_insider_activity`, `get_form4_insider`
+  `get_insider_activity`, `get_form4_insider`, `get_filing_sections`,
+  `get_risk_factors`, `get_8k_filings`
 - `news_data` : `get_news`, `get_global_news`, `get_insider_transactions`, `get_massive_news`
 - `news_sentiment` (optional): `get_news_sentiment` — daily series via
   `eodhd,alpha_vantage,gdelt` (EODHD `/sentiments` primary)
@@ -886,6 +887,9 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_insider_activity(ticker)` | `finnhub.get_insider_activity_finnhub` | fundamentals | 12m net insider change + mspr + trend |
 | `get_company_peers(ticker)` | `finnhub.get_company_peers_finnhub` | fundamentals | comparable peer group |
 | `get_form4_insider(ticker, start, end)` | `massive.get_form4_insider_massive` | fundamentals | net open-market Form 4 buys - sells (excl. A/M) |
+| `get_filing_sections(ticker, section?)` | `massive.get_filing_sections_massive` | fundamentals | 10-K item text (risk_factors, business) as bounded excerpts |
+| `get_risk_factors(ticker, include_taxonomy?)` | `massive.get_risk_factors_massive` | fundamentals | disclosed risks grouped by vendor category + supporting text |
+| `get_8k_filings(ticker)` | `massive.get_8k_filings_massive` | fundamentals | recent 8-K current reports with their item text |
 | `get_ratios(ticker, date?)` | `strategies.ratios.compute_ratios` (local derivation; Massive plan-gated cross-check via `get_fundamentals`) | fundamentals | computed EV/EBITDA, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, Current, Quick, cash ratio, dividend yield, FCF, market cap (free, no paid plan; missing inputs n/a). The returned dict also carries the §55 SBC keys (`sbc`, `sbc_to_revenue`, `sbc_adjusted_fcf`, `sbc_to_fcf`), which are engine-only and NOT rendered: on this vendor-only path the flat `sbc` key has no source — `fetch_ticker` runs here **without** `with_sec_series` (the SEC 10-K series is what fills the key) and the vendor cash-flow row is labelled **`Stock Based Compensation`**, which no canonical alias maps (live MSFT 2026-09-27; INCY 2026-09-29, whose EDGAR `sbc` series does resolve) — so the read renders through `get_quality_factors` instead, which fetches the series |
 | `get_exit_check(entry, close?, atr?, ..., ticker?)` | `strategies.exits.exit_check` | market | stop-to-breakeven, ATR target, holding action. Pass `ticker` and the close + 14d ATR are MEASURED from the run's series (a conflicting caller value is reported as ignored); without one the output labels its levels CALLER-SUPPLIED, so an invented ATR (NVDA 2026-09-15 passed `atr=7.0`) is never read as computed |
 | `get_allocation(scores, sector_map?, returns_by_name?)` | `strategies.portfolio.adjust_for_caps` (+ `correlation_penalty` when `enable_correlation_penalty` is on and return series are provided) | fundamentals | cap-respecting book allocation; optionally correlation-penalized (down-weights names whose avg pairwise correlation with the book exceeds the threshold) |

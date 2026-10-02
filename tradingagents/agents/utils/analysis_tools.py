@@ -2229,6 +2229,89 @@ def get_form4_insider(
         return f"form-4 insider activity unavailable for {ticker}: {exc}"
 
 
+@tool
+def get_filing_sections(
+    ticker: Annotated[str, "ticker symbol"],
+    section: Annotated[
+        str | None,
+        "optional 10-K section filter; the published set is risk_factors, business",
+    ] = None,
+) -> str:
+    """The 10-K's own item text (Item 1 Business, Item 1A Risk Factors).
+
+    SEC 10-K narrative sections via Massive.com - the filing's own prose, which
+    the filing-list tool (forms + metadata) and the XBRL statement readers do
+    not carry. Each section comes back as a bounded excerpt that states how much
+    it withheld.
+
+    Args:
+        ticker: single ticker symbol.
+        section: optional filter; only `risk_factors` and `business` are published.
+
+    Returns:
+        the sections with their period and source URL, or an explicit
+        'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.massive import get_filing_sections_massive
+
+        return get_filing_sections_massive(ticker, section)
+    except Exception as exc:  # noqa: BLE001
+        return f"10-K filing sections unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_risk_factors(
+    ticker: Annotated[str, "ticker symbol"],
+    include_taxonomy: Annotated[
+        bool, "also print the vendor's category dictionary"
+    ] = False,
+) -> str:
+    """Categorised risk factors disclosed in a ticker's SEC filings.
+
+    Each statement carries primary/secondary/tertiary category labels and the
+    supporting text it was drawn from, via Massive.com - a categorised view the
+    raw 10-K text is not.
+
+    Args:
+        ticker: single ticker symbol.
+        include_taxonomy: also print the dictionary that defines the labels.
+
+    Returns:
+        risk statements grouped by category (plus the dictionary when asked), or
+        an explicit 'unavailable' message.
+    """
+    try:
+        from tradingagents.dataflows.massive import get_risk_factors_massive
+
+        return get_risk_factors_massive(ticker, include_taxonomy=include_taxonomy)
+    except Exception as exc:  # noqa: BLE001
+        return f"risk factors unavailable for {ticker}: {exc}"
+
+
+@tool
+def get_8k_filings(ticker: Annotated[str, "ticker symbol"]) -> str:
+    """Recent 8-K current reports with their item text.
+
+    Event-level SEC disclosures (results, material agreements, leadership
+    changes) via Massive.com, carrying the item numbers that name the event
+    type - text the filing-list tool does not return.
+
+    Args:
+        ticker: single ticker symbol.
+
+    Returns:
+        recent 8-K filings with their item text, or an explicit 'unavailable'
+        message.
+    """
+    try:
+        from tradingagents.dataflows.massive import get_8k_filings_massive
+
+        return get_8k_filings_massive(ticker)
+    except Exception as exc:  # noqa: BLE001
+        return f"8-K filings unavailable for {ticker}: {exc}"
+
+
 # ---------------------------------------------------------------------------
 # Decision-grounding tools (agent-decision plan P0/P1/P2)
 #   Expose deterministic strategy functions so the trader / PM / analysts
@@ -13479,6 +13562,9 @@ __all__ = [
     "get_insider_activity",
     "get_company_peers",
     "get_form4_insider",
+    "get_filing_sections",
+    "get_risk_factors",
+    "get_8k_filings",
     "get_ratios",
     "get_exit_check",
     "get_exit_plan",

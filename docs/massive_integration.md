@@ -359,8 +359,44 @@ propagate. Otherwise the exception escapes the LangGraph tool call, aborts the
 whole analyst node, and the batch marks the symbol failed instead of falling
 back to moomoo/yfinance. Every direct Massive wrapper
 (`get_short_volume`, `get_market_snapshot`, `get_top_movers`, `get_massive_news`,
-`get_form4_insider`, `get_ratios`, `get_dividends`, `get_ipos`) follows this
+`get_form4_insider`, `get_ratios`, `get_dividends`, `get_ipos`,
+`get_filing_sections`, `get_risk_factors`, `get_8k_filings`) follows this
 contract; guarded by `tests/test_massive_vendor.py::MassiveFailoverTests`.
+
+---
+
+## 3g. SEC filing TEXT - 10-K sections, risk factors, 8-K items (adopted 2026-10-01)
+
+The narrative half of the filings. `sec_edgar.py` owns XBRL facts, the filing
+**list** (`recent_filing_forms`) and EDGAR full-text **search**
+(`get_edgar_fulltext_search`), but no item-level section extraction — so the
+filing's own prose had no producer in this tree. These three direct tools (the
+`get_form4_insider` pattern: reader + `@tool`, no `VENDOR_METHODS` entry, no
+gate) close that gap and bind to the **fundamentals analyst**.
+
+| Tool | Reader | Endpoint |
+| --- | --- | --- |
+| `get_filing_sections(ticker, section?)` | `get_filing_sections_massive` | `/stocks/filings/10-K/vX/sections` |
+| `get_risk_factors(ticker, include_taxonomy?)` | `get_risk_factors_massive` | `/stocks/filings/vX/risk-factors` (+ `/stocks/taxonomies/vX/risk-factors`) |
+| `get_8k_filings(ticker)` | `get_8k_filings_massive` | `/stocks/filings/8-K/vX/text` |
+
+**Measured live 2026-10-01.** All three honour the `ticker` filter — 10/10,
+50/50 and 10/10 rows came back for the requested symbol. The 10-K sections
+endpoint publishes only `risk_factors` and `business`, across about five fiscal
+years; a risk-factor section runs **53k–69k chars**, so every reader renders a
+**bounded excerpt** that states `[+N chars withheld]` — an unlabelled
+truncation would read as the whole item. An unknown `section` is **named with
+the published set** rather than answered with a different section.
+
+**`include_taxonomy` is opt-in** because the dictionary
+(`/stocks/taxonomies/vX/risk-factors`, 140 rows) is a second request on a
+~5 req/min plan; the risk-factor labels are readable without it.
+
+**Deliberately NOT wired — `/stocks/filings/8-K/vX/disclosures`.** Probed 200,
+but an `AAPL` query returned **another issuer's** rows: the endpoint accepts no
+reliable `ticker` filter, so a per-ticker read would mix issuers. This is the
+same defect that defers 13-F in §3c, and it is why the 8-K reader uses
+`/8-K/vX/text` (filter honoured) instead.
 
 ---
 
@@ -425,12 +461,16 @@ prototype an endpoint's response shape before writing the native
 ## Appendix A — endpoint coverage audit (2026-10-01)
 
 The owner supplied Massive's stocks/reference catalog (36 paths) and asked which are
-used and what is missing. **8 of the 36 are wired**; the rest are mapped below,
+used and what is missing. **8 of the 36 were wired at the audit; 11 after the
+SEC-text adoption below.** The rest are mapped below,
 each probed **live** against the repo's own key, paced past the ~5 req/min throttle.
 
-**Wired today:** `/v1/related-companies/{ticker}`, `/vX/reference/ipos`,
+**Wired today (11 of the 36):** `/v1/related-companies/{ticker}`, `/vX/reference/ipos`,
 `/stocks/v1/splits`, `/stocks/v1/dividends`, `/stocks/v1/short-interest`,
-`/stocks/v1/short-volume`, `/stocks/filings/vX/form-4`, `/v2/reference/news`.
+`/stocks/v1/short-volume`, `/stocks/filings/vX/form-4`, `/v2/reference/news`,
+plus the three adopted from the gap below — `/stocks/filings/10-K/vX/sections`,
+`/stocks/filings/vX/risk-factors` (+ `/stocks/taxonomies/vX/risk-factors`) and
+`/stocks/filings/8-K/vX/text`.
 (Plus, outside that catalog: `/fed/v1/{treasury-yields,inflation,
 inflation-expectations,labor-market}`, `/stocks/financials/v1/ratios`,
 `/v2/snapshot/locale/us/markets/stocks/{tickers/{t},gainers|losers}`.)
@@ -451,9 +491,16 @@ does, probed 200:
 | `/stocks/filings/8-K/vX/disclosures?ticker=` | 100 rows |
 | `/stocks/taxonomies/vX/disclosures` | 119 rows, `{primary_category, secondary_category, tertiary_category, description, taxonomy}` |
 
-**Candidate, not adopted.** It would need a new reader + a category + a tool + an
-analyst-prompt binding — a design decision, not a plumbing one. No second-producer
-objection applies: nothing else produces this text.
+**ADOPTED 2026-10-01 as §3g.** Three direct tools bound to the fundamentals analyst
+(`get_filing_sections`, `get_risk_factors`, `get_8k_filings`), with the taxonomy
+dictionary riding as an opt-in on the risk-factor read. No second-producer objection
+applies: nothing else produces this text.
+
+One row of the table above is **NOT** adopted: `/stocks/filings/8-K/vX/disclosures`.
+It answered 200 but an `AAPL` query returned **another issuer's** rows — it takes no
+reliable `ticker` filter — so the 8-K reader uses `/8-K/vX/text` (filter honoured,
+10/10) instead. Same defect as the 13-F deferral below. Filter checks for the three
+adopted reads: 10/10, 50/50, 10/10 rows for the requested symbol.
 
 ### Reachable, but a second producer (rule 15) — do NOT adopt
 

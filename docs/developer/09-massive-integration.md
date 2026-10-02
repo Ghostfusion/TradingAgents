@@ -22,6 +22,9 @@ gitignored. Plan-dependent; free Basic is quote-only.
 | Economy (treasury/inflation/labor) | `/fed/v1/*` | entitled | `get_macro_indicators_massive` + catalyst backdrop |
 | Short interest/volume | `/stocks/v1/*` | entitled | `get_short_interest_massive` + `get_short_volume` |
 | Form-4 insider | `/stocks/filings/vX/form-4` | entitled | `get_form4_insider` |
+| 10-K item TEXT | `/stocks/filings/10-K/vX/sections` | entitled | `get_filing_sections` |
+| Risk factors (+ taxonomy) | `/stocks/filings/vX/risk-factors` | entitled | `get_risk_factors` |
+| 8-K item TEXT | `/stocks/filings/8-K/vX/text` | entitled | `get_8k_filings` |
 | Corporate actions (dividends/splits) | `/stocks/v1/*` | entitled | `get_corporate_actions_massive`, `get_dividends`, `get_splits` |
 | Related companies (peers) | `/v1/related-companies/{t}` | entitled | `get_company_peers` `massive` option |
 | IPOs | `/vX/reference/ipos` | entitled | `get_ipos` tool (news) |
@@ -44,7 +47,8 @@ change).
 
 Tools exported:
 `get_news_massive, get_macro_indicators_massive, get_short_interest_massive,
-get_short_volume_massive, get_form4_insider_massive, get_ratios_massive,
+get_short_volume_massive, get_form4_insider_massive, get_filing_sections_massive,
+get_risk_factors_massive, get_8k_filings_massive, get_ratios_massive,
 get_fundamentals_massive, get_market_snapshot_massive, get_top_movers_massive,
 get_dividends_massive, get_splits_massive, get_related_companies_massive,
 get_ipos_massive, get_corporate_actions_massive, fetch_macro_backdrop`.

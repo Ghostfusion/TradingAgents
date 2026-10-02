@@ -760,6 +760,273 @@ def _fmt_signed(value) -> str:
 
 
 # ---------------------------------------------------------------------------
+# SEC filing TEXT (REST `/stocks/filings/vX/*` and `/stocks/taxonomies/vX/*`)
+#
+# `sec_edgar.py` owns XBRL facts, filing metadata and EDGAR full-text SEARCH but
+# has no item-level section extraction. These readers add the narrative — the
+# 10-K's own item text, the categorised risk-factor set, and the 8-K's items —
+# which is what the fundamentals analyst grounds a risk/strategy claim in.
+#
+# MEASURED LIVE 2026-10-01 (and unlike the 13-F deferral below): all three
+# filing reads HONOUR the `ticker` filter — 10/10, 50/50 and 10/10 rows came
+# back for the requested symbol. `/stocks/filings/8-K/vX/disclosures` did NOT
+# (an AAPL query returned another issuer's rows), so it is deliberately NOT
+# read here; that is the same defect that defers 13-F in
+# `docs/massive_integration.md` §3c, and a per-ticker aggregate built on it
+# would mix issuers.
+#
+# Text is LONG — a 10-K risk-factor section measured 53k–69k chars — so every
+# reader renders a BOUNDED excerpt and states how much it withheld. A truncated
+# quote that says so is honest; one that does not is a misquote.
+# ---------------------------------------------------------------------------
+
+_SECTIONS_PATH = "/stocks/filings/10-K/vX/sections"
+_RISK_FACTORS_PATH = "/stocks/filings/vX/risk-factors"
+_8K_TEXT_PATH = "/stocks/filings/8-K/vX/text"
+_RISK_TAXONOMY_PATH = "/stocks/taxonomies/vX/risk-factors"
+
+# The section names the vendor actually publishes (measured: a five-year AAPL
+# read returned only these two). A requested name outside the set is NAMED,
+# never silently answered with a different section.
+TEN_K_SECTIONS = ("risk_factors", "business")
+
+# Bound per excerpt, and per category for the risk-factor set: a report head
+# cannot carry 68k chars, and a silently truncated quote would misrepresent it.
+_SECTION_EXCERPT_CHARS = 1500
+_RISK_ROWS_PER_CATEGORY = 6
+_SUPPORTING_TEXT_CHARS = 300
+
+
+def _excerpt(text, limit: int = _SECTION_EXCERPT_CHARS) -> str:
+    """One bounded line of ``text``, saying what it withheld.
+
+    Collapses newlines so a section renders as a single quotable line and
+    appends ``[+N chars withheld]`` when it cut — an unlabelled truncation
+    would read as the whole item.
+    """
+    flat = " ".join(str(text or "").split())
+    if not flat:
+        return "(empty text)"
+    if len(flat) <= limit:
+        return flat
+    return f"{flat[:limit]} [+{len(flat) - limit} chars withheld]"
+
+
+def _taxonomy_block(kind: str = "risk-factors", limit: int = 21) -> str:
+    """The vendor's category dictionary for a filing taxonomy, as a table.
+
+    Private on purpose: ``/stocks/taxonomies/*`` is reference data with no
+    ticker and no signal of its own — it only explains the category labels the
+    filing readers print, so it is rendered *inside* them rather than exposed
+    as a read an analyst would call by itself.
+    """
+    rows: list = []
+    try:
+        payload = _get(_RISK_TAXONOMY_PATH if kind == "risk-factors"
+                       else "/stocks/taxonomies/vX/disclosures",
+                       {"limit": int(limit)})
+    except Exception as exc:  # noqa: BLE001 - the dictionary is context, not data
+        return f"\nCategory dictionary unavailable: {exc}"
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if isinstance(results, list):
+        rows = [r for r in results if isinstance(r, dict)]
+    if not rows:
+        return "\nCategory dictionary: no rows returned."
+    lines = ["", f"Category dictionary ({kind}, {len(rows)} shown):", ""]
+    for row in rows:
+        path = " / ".join(
+            str(row.get(k) or "")
+            for k in ("primary_category", "secondary_category", "tertiary_category")
+        ).strip(" /")
+        desc = str(row.get("description") or "").strip()
+        lines.append(f"- {path or row.get('taxonomy') or '?'}"
+                     + (f" — {desc}" if desc else ""))
+    return "\n".join(lines)
+
+
+def get_filing_sections_massive(
+    ticker: str, section: str | None = None, limit: int = 10
+) -> str:
+    """10-K item sections — the filing's own PROSE, newest first.
+
+    `sec_edgar` owns the XBRL facts and the filing list; this is the narrative,
+    e.g. the 10-K's own Item 1A Risk Factors and Item 1 Business text, which no
+    other reader in this tree carries. Measured live: the vendor publishes only
+    ``risk_factors`` and ``business``, over about five fiscal years.
+
+    ``section`` filters client-side to one published name; an unknown name is
+    **named with the published set**, never silently answered with a different
+    section. Each section renders as a bounded excerpt that states how much it
+    withheld.
+
+    Raises ``NoMarketDataError`` when the vendor returns no rows.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(
+        _SECTIONS_PATH,
+        {"ticker": _plural_ticker_param(ticker), "limit": int(limit)},
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no 10-K sections for {ticker}"
+        )
+
+    rows = [r for r in results if isinstance(r, dict)]
+    published = sorted(
+        {str(r.get("section") or "") for r in rows if r.get("section")}
+    ) or list(TEN_K_SECTIONS)
+    want = (section or "").strip().lower()
+    if want:
+        rows = [r for r in rows if str(r.get("section") or "").strip().lower() == want]
+    lines = [
+        f"## {ticker.upper()} 10-K sections (SEC filing text, Massive.com)",
+        "",
+        f"Published sections: {', '.join(published) or 'none'}; "
+        f"{len(results)} row(s) returned"
+        + (f", {len(rows)} matching '{want}'" if want else ""),
+        "",
+    ]
+    if not rows:
+        lines.append(
+            f"No rows for section '{want}'. The vendor publishes: "
+            f"{', '.join(published) or 'none'}. Nothing is substituted for a "
+            "missing section."
+        )
+        return "\n".join(lines)
+    for row in rows:
+        lines += [
+            f"### {row.get('section')} — period ending {row.get('period_end')} "
+            f"(filed {row.get('filing_date')})",
+            "",
+            _excerpt(row.get("text")),
+            f"Source: {row.get('filing_url')}",
+            "",
+        ]
+    lines.append(
+        "Interpretation: this is the filing's own text, quoted in excerpts — "
+        "the primary source for a risk or strategy claim. Cite the period; the "
+        "wording changes year to year."
+    )
+    return "\n".join(lines)
+
+
+def get_risk_factors_massive(
+    ticker: str, limit: int = 50, include_taxonomy: bool = False
+) -> str:
+    """Categorised risk factors drawn from a ticker's filings (Massive.com).
+
+    Each row is a risk statement carrying ``primary``/``secondary``/
+    ``tertiary_category`` labels plus the ``supporting_text`` it was drawn from
+    — a categorised view the raw 10-K text is not. ``include_taxonomy`` also
+    prints the vendor's category dictionary, so the labels can be read rather
+    than guessed. Measured live: the ``ticker`` filter is honoured (50/50 rows).
+
+    Raises ``NoMarketDataError`` when the vendor returns no rows.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(
+        _RISK_FACTORS_PATH,
+        {"ticker": _plural_ticker_param(ticker), "limit": int(limit)},
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no risk factors for {ticker}"
+        )
+
+    rows = [r for r in results if isinstance(r, dict)]
+    by_cat: dict[str, list] = {}
+    for row in rows:
+        by_cat.setdefault(
+            str(row.get("primary_category") or "uncategorised"), []
+        ).append(row)
+    lines = [
+        f"## {ticker.upper()} Risk factors (SEC filing text, Massive.com)",
+        "",
+        f"{len(rows)} categorised risk statement(s) across "
+        f"{len(by_cat)} primary categor{'y' if len(by_cat) == 1 else 'ies'}",
+        "",
+    ]
+    for cat in sorted(by_cat):
+        items = by_cat[cat]
+        lines.append(f"### {cat} ({len(items)})")
+        for row in items[:_RISK_ROWS_PER_CATEGORY]:
+            sub = " / ".join(
+                str(row.get(k) or "")
+                for k in ("secondary_category", "tertiary_category")
+            ).strip(" /")
+            lines.append(
+                f"- **{sub or 'uncategorised'}** "
+                f"(filed {str(row.get('filing_date') or '')[:10]}): "
+                f"{_excerpt(row.get('supporting_text'), _SUPPORTING_TEXT_CHARS)}"
+            )
+        if len(items) > _RISK_ROWS_PER_CATEGORY:
+            lines.append(
+                f"- ... {len(items) - _RISK_ROWS_PER_CATEGORY} more in this category "
+                "(raise `limit` to see them)"
+            )
+        lines.append("")
+    if include_taxonomy:
+        lines.append(_taxonomy_block("risk-factors"))
+        lines.append("")
+    lines.append(
+        "Interpretation: these are the issuer's own disclosed risks, categorised "
+        "by the vendor. A category with many statements is where the filing "
+        "spends its risk budget — not a probability."
+    )
+    return "\n".join(lines)
+
+
+def get_8k_filings_massive(ticker: str, limit: int = 10) -> str:
+    """Recent 8-K current reports with their ITEM TEXT (Massive.com).
+
+    The event-level narrative — e.g. "Item 2.02 Results of Operations and
+    Financial Condition" — which `sec_edgar.recent_filing_forms` does not carry
+    (it lists the forms, not their text). Measured live: the ``ticker`` filter
+    is honoured (10/10 rows).
+
+    Raises ``NoMarketDataError`` when the vendor returns no rows.
+    """
+    from .errors import NoMarketDataError
+
+    payload = _get(
+        _8K_TEXT_PATH,
+        {"ticker": _plural_ticker_param(ticker), "limit": int(limit)},
+    )
+    results = payload if isinstance(payload, list) else (payload or {}).get("results")
+    if not isinstance(results, list) or not results:
+        raise NoMarketDataError(
+            ticker, detail=f"Massive returned no 8-K filings for {ticker}"
+        )
+
+    rows = [r for r in results if isinstance(r, dict)]
+    lines = [
+        f"## {ticker.upper()} 8-K current reports (SEC filing text, Massive.com)",
+        "",
+        f"{len(rows)} filing(s), most recent first",
+        "",
+    ]
+    for row in rows:
+        lines += [
+            f"### {str(row.get('filing_date') or '')[:10]} — "
+            f"{row.get('form_type') or '8-K'} ({row.get('accession_number') or '?'})",
+            "",
+            _excerpt(row.get("items_text"), 600),
+            f"Source: {row.get('filing_url')}",
+            "",
+        ]
+    lines.append(
+        "Interpretation: 8-K items are event disclosures (results, material "
+        "agreements, leadership changes). The item NUMBER names the event type; "
+        "cite it before characterising the event."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Precomputed valuation & fundamentals (REST `/stocks/financials/v1/*`)
 #   Plan-aware: these endpoints are entitlements-gated (403 on free Basic). The
 #   403 path degrades through the router exactly like a missing key, so the
@@ -1091,6 +1358,9 @@ __all__ = [
     "get_short_interest_massive",
     "get_short_volume_massive",
     "get_form4_insider_massive",
+    "get_filing_sections_massive",
+    "get_risk_factors_massive",
+    "get_8k_filings_massive",
     "get_ratios_massive",
     "get_fundamentals_massive",
     "get_market_snapshot_massive",

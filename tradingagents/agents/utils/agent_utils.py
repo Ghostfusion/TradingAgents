@@ -7,6 +7,7 @@ import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 from tradingagents.agents.utils.analysis_tools import (
+    get_8k_filings,
     get_allocation,
     get_alpha_scoring,
     get_analyst_verdict,
@@ -58,6 +59,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_exit_plan,
     get_extended_indicators,
     get_factor_profile,
+    get_filing_sections,
     get_financial_history,
     get_fixed_income_risk,
     get_fixed_risk_size,
@@ -118,6 +120,7 @@ from tradingagents.agents.utils.analysis_tools import (
     get_relative_rotation,
     get_relative_strength,
     get_reverse_dcf,
+    get_risk_factors,
     get_risk_gate,
     get_risk_overlay,
     get_risk_parity_alloc,
@@ -396,6 +399,9 @@ __all__ = [
     "get_insider_activity",
     "get_company_peers",
     "get_form4_insider",
+    "get_filing_sections",
+    "get_risk_factors",
+    "get_8k_filings",
     "get_ratios",
     "get_exit_check",
     "get_exit_plan",
