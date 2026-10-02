@@ -48,6 +48,17 @@ REPORT_STEMS = ("fundamentals", "market", "news", "sentiment")
 # "same value".
 _DEC_RE = re.compile(r"\d+\.\d+")
 
+# Thousands separators. A report writes `94,758,519,316.13` while the evidence
+# leaf stores `94758519316.13`; `_DEC_RE` cannot cross a comma, so it extracted
+# the fragment `316.13` and matched nothing - flagging every thousands-grouped
+# figure as ungrounded (measured 2026-10-02: MU fundamentals flagged `316.13`
+# from `94,758,519,316.13`, WDC market flagged `197.31` from `-1,822,197.31`).
+# Normalize BEFORE matching, stripping only a comma BETWEEN digit groups of
+# exactly three - so a prose list ("42, 100") is untouched and `1,2` is left
+# alone. A bare `42,100` is still read as a thousands group, which is the
+# correct reading in numeric prose.
+_GROUPED_COMMA_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+
 # Unit-magnitude equivalence: evidence leaves store raw tool floats
 # (e.g. 122368000.0) while reports cite human units (122.4M). A figure
 # matches when the raw pair is within tolerance OR differs by a clean unit
@@ -65,6 +76,10 @@ def _float_tokens(text: str) -> set:
     """Distinct decimal numbers in ``text`` (the figures that carry signal;
     bare integers are too noisy for a cheap grounding check)."""
     out = set()
+    # Digit-group commas are punctuation, not a break: drop them so a figure
+    # written `94,758,519,316.13` is the same token as the evidence's
+    # `94758519316.13`. Without this the match started at the last group.
+    text = _GROUPED_COMMA_RE.sub("", text)
     for m in _DEC_RE.finditer(text):
         try:
             out.add(float(m.group()))
@@ -587,6 +602,12 @@ def _run_card_engine_lines(report_dir: Path) -> list[str]:
     such rows across all four stems. The card is the same run's artefact, so it
     is evidence for its own numbers; ordinary numeric claims still require leaf
     evidence.
+
+    Since 2026-10-02 it also returns the card's ``engine_detail`` (Level 2, §4.2)
+    as one more line, so the *component* math an analyst quotes - the category
+    and the raw measurement it was aligned from, not only the composite - is
+    groundable too. That detail was rendered into every analyst's prompt while
+    being persisted nowhere, which is the gap this closes.
     """
     card_path = Path(report_dir) / "run_card.json"
     if not card_path.exists():
@@ -629,6 +650,16 @@ def _run_card_engine_lines(report_dir: Path) -> list[str]:
         if trade.get("status"):
             bits.append(f"status {trade['status']}")
         out.append("TradeScore: " + ", ".join(bits))
+    # §4.2's Level-2 detail - the category -> measurement chain every analyst's
+    # prompt carries (`report_hygiene.engine_score_block` renders it). It was
+    # reaching the prompt and the prose while being persisted nowhere, so a
+    # report quoting its own component math (STX 2026-10-02:
+    # `persistence=2.621359223300971 -> 15.145631067961162`) had no artifact to
+    # ground against. The card persists the rendered text, and it is tokenized
+    # AS-IS - so the renderer stays the one producer and no line format is
+    # re-implemented here.
+    if isinstance(scorecard, dict) and scorecard.get("engine_detail"):
+        out.append(str(scorecard["engine_detail"]))
     return out
 
 

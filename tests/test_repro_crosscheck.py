@@ -129,3 +129,58 @@ def test_run_card_tokens_is_empty_without_a_usable_card(tmp_path):
     assert rc._run_card_tokens(str(tmp_path)) == set()
     (tmp_path / "run_card.json").write_text("{not json", encoding="utf-8")
     assert rc._run_card_tokens(str(tmp_path)) == set()
+
+
+def test_a_thousands_separated_figure_is_grounded(tmp_path, capsys):
+    """A report writing `94,758,519,316.13` must match the evidence's
+    `94758519316.13`. The token pattern cannot cross a comma, so it used to
+    extract the fragment `316.13` and flag a correct figure - measured
+    2026-10-02 on MU's fundamentals report (`316.13`) and WDC's market report
+    (`197.31`, from `-1,822,197.31`)."""
+    rc = _load_repro_check()
+    md_dir = tmp_path / "1_analysts"
+    md_dir.mkdir()
+    (md_dir / "fundamentals.md").write_text(
+        "market cap 94,758,519,316.13", encoding="utf-8"
+    )
+    leaves = [
+        {"tool": "get_verified_market_snapshot", "status": "ok",
+         "content": "market_cap=94758519316.13"},
+    ]
+    rc._figure_cross_check([str(tmp_path)], [{"fundamentals": leaves}])
+    out = capsys.readouterr().out
+    assert "all decimal figures grounded" in out
+    assert "316.13" not in out
+
+
+def test_the_run_cards_engine_detail_grounds_component_math(tmp_path, capsys):
+    """§4.2's Level-2 detail reaches every analyst prompt, so a report quoting
+    its own component math is quoting the run. STX 2026-10-02 printed
+    `persistence=2.621359223300971 -> 15.145631067961162` and it was persisted
+    nowhere - the card's `engines` projection keeps only seven summary keys, so
+    there was no artifact to ground against. The card now carries the rendered
+    detail and `_run_card_tokens` reads it."""
+    rc = _load_repro_check()
+    md_dir = tmp_path / "1_analysts"
+    md_dir.mkdir()
+    (md_dir / "news.md").write_text(
+        "persistence 15.145631067961162", encoding="utf-8"
+    )
+    (tmp_path / "run_card.json").write_text(
+        json.dumps(
+            {
+                "quant_scorecard": {
+                    "engines": {},
+                    "engine_detail": (
+                        "- persistence (weight 5): 15.15/100 (no-signal) "
+                        "over 1 components\n"
+                        "    persistence=2.621359223300971 -> 15.145631067961162"
+                    ),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc._figure_cross_check([str(tmp_path)], [{"news": []}])
+    out = capsys.readouterr().out
+    assert "all decimal figures grounded" in out

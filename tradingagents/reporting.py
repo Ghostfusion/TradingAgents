@@ -1389,12 +1389,23 @@ def _run_card_quant_scorecard(
     try:
         from tradingagents.strategies.quant_scorecard import (
             SCORECARD_BASIS,
+            format_engine_detail,
             format_quant_scorecard,
             scorecard_status,
         )
 
         status = scorecard_status(snapshot)
         block = format_quant_scorecard(snapshot)
+        # Level 2 (§4.2) - the same category -> measurement chain every analyst's
+        # prompt carries (`report_hygiene.engine_score_block` /
+        # `scorecard_context_block`, both of which call this renderer). It was
+        # reaching the prompt and the analyst prose while being persisted
+        # NOWHERE: the `engines` projection below keeps only seven summary keys,
+        # so a report quoting its own component math (STX 2026-10-02 printed
+        # `persistence=2.621359223300971 -> 15.145631067961162`) had no artifact
+        # to be grounded against. Persisting the rendered text keeps ONE producer
+        # - the verifier tokenizes this string rather than re-deriving the lines.
+        detail = format_engine_detail(snapshot)
     except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
         return {"unavailable": f"{type(exc).__name__}: {exc}"}
     return {
@@ -1424,6 +1435,10 @@ def _run_card_quant_scorecard(
         },
         # the rendered block itself, so "the debate's number" is checkable here
         "block": block,
+        # The Level-2 detail the analysts read, so the component figures in their
+        # prose are groundable against this same run's card. Additive: a reader
+        # that ignores the key sees exactly what it saw before.
+        "engine_detail": detail,
     }
 
 

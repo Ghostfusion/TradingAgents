@@ -530,6 +530,25 @@ def test_the_card_measures_the_event_row_from_the_runs_own_overlay(wired):
     assert _run_card_quant_scorecard(state, {"enable_quant_scorecard": False}) is None
 
 
+def test_the_card_persists_the_level_2_detail_the_prompts_carried():
+    """`engine_detail` is the §4.2 block every analyst's prompt carries
+    (`report_hygiene.engine_score_block` / `scorecard_context_block` render it
+    via the same function). The card's `engines` projection keeps only seven summary
+    keys, so without this the component math a report quotes has no artifact to
+    be grounded against (STX 2026-10-02 quoted `persistence=2.62... -> 15.14...`
+    with nothing to check it against)."""
+    from tradingagents.reporting import _run_card_quant_scorecard
+
+    snap = _snapshot()
+    card = _run_card_quant_scorecard(
+        {"quant_scorecard": snap, "trade_date": DATE}, _CARD_ON
+    )
+    # The SAME renderer the prompt uses, so the persisted text cannot drift from
+    # what the analyst actually read.
+    assert isinstance(card["engine_detail"], str)
+    assert card["engine_detail"] == qs.format_engine_detail(snap)
+
+
 def test_the_card_fetches_the_forward_calendars_once_for_both_readers(
     tmp_path, monkeypatch
 ):

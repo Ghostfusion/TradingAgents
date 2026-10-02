@@ -79,6 +79,23 @@ def test_float_tokens_distinct():
     assert rv._float_tokens("a 3.14 and 3.14 and 2.5") == {3.14, 2.5}
 
 
+def test_float_tokens_reads_through_thousands_separators():
+    """`94,758,519,316.13` is the SAME number as the evidence's `94758519316.13`.
+
+    The token pattern cannot cross a comma, so it used to extract the fragment
+    `316.13` and flag a correct figure as ungrounded - measured 2026-10-02 on
+    MU's fundamentals report (`316.13`) and WDC's market report (`197.31`, from
+    `-1,822,197.31`)."""
+    assert rv._float_tokens("94,758,519,316.13") == {94758519316.13}
+    assert rv._float_tokens("-1,822,197.31") == {1822197.31}
+    # The separator is removed, not the figure: the same number written without
+    # commas yields the same token, which is what makes the two match.
+    assert rv._float_tokens("94758519316.13") == {94758519316.13}
+    # Prose punctuation is not a separator - a comma before a space or a shorter
+    # digit run is left alone.
+    assert rv._float_tokens("scores 42, 100 and 7.5") == {7.5}
+
+
 def test_matches_tolerance():
     assert rv._matches(3.1415, {3.1418})  # 0.01% off -> within 0.5%
     assert not rv._matches(3.14, {3.2})  # 2% off -> outside
@@ -2831,6 +2848,34 @@ def test_run_card_engines_are_evidence_for_their_own_numbers(tmp_path):
     # Nothing is invented when the tree has no card, and a missing path is safe.
     assert "run_card" not in rv._evidence_digest({}, "news")
     assert rv._run_card_engine_lines(tmp_path / "absent") == []
+
+
+def test_run_card_engine_detail_grounds_component_math(tmp_path):
+    """§4.2's Level-2 detail is in every analyst's prompt, so its component
+    figures must be groundable from the same run's card. STX 2026-10-02 quoted
+    `persistence=2.621359223300971 -> 15.145631067961162` from it, and it was
+    persisted NOWHERE: not a tool leaf, and not in the card's `engines`
+    projection, which keeps only seven summary keys."""
+    card = {
+        "quant_scorecard": {
+            "engines": {},
+            "engine_detail": (
+                "### NewsScore — 41/100\n"
+                "- persistence (weight 5): 15.15/100 (no-signal) over 1 components\n"
+                "    persistence=2.621359223300971 -> 15.145631067961162"
+            ),
+        }
+    }
+    (tmp_path / "run_card.json").write_text(json.dumps(card), encoding="utf-8")
+    lines = rv._run_card_engine_lines(tmp_path)
+    assert any("persistence=2.621359223300971" in ln for ln in lines), lines
+    decimals = rv._evidence_decimals({"run_card": lines}, "news")
+    assert 2.621359223300971 in decimals
+    # An absent detail adds no line at all (older trees keep their behaviour).
+    (tmp_path / "run_card.json").write_text(
+        json.dumps({"quant_scorecard": {"engines": {}}}), encoding="utf-8"
+    )
+    assert rv._run_card_engine_lines(tmp_path) == []
 
 
 def test_scenario_slash_leg_is_not_bound_to_the_first_value():
