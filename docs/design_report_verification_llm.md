@@ -131,6 +131,20 @@ host-executed server-side tools** exist and remove the blocker:
       closed the unit-scale false-flag class: `_matches` is now magnitude-aware
       (report 122.4M vs leaf 122368000.0 match; canonical impl shared by
       repro_check). Deterministic suspects on the MSTR tree: 20 -> 0.
+- [x] **Grounding-set parity with `scripts/repro_check.py` (2026-10-02).** The
+      card is evidence for its own numbers, and this doc's `_run_card_engine_lines`
+      fix (2026-09-27) made the LLM verifier ground the engine scorecard. The
+      deterministic copy in `repro_check` did **not** — it grounded only
+      `tool_evidence.json` leaves, so every engine composite with no coincidental
+      tool float near it came back flagged. Measured on CB 2026-10-02:
+      **TradeScore 60.43** reported as ungrounded in all four analyst reports,
+      while its six sibling engines passed only because round numbers
+      (63.0 / 75.0 / 47.0 / 44.4 / 61.6) happened to sit inside the ±0.5%
+      tolerance. `repro_check` now calls `report_verifier._run_card_engine_lines`
+      itself, so the deterministic layer and the LLM anchor share one rule and
+      cannot disagree (the same reason `_float_tokens` / `_matches` are imported
+      rather than re-implemented).
+
 ## Batch findings (2026-09-08 retail: WMT/COST/TJX/ROST — 16 stems, post-39d00ba)
 
 Adjudicated per working-agreement rule 8: 140 flags =

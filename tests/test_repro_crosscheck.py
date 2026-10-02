@@ -10,6 +10,7 @@ legitimately rounded copy of a tool value passes.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -71,3 +72,60 @@ def test_figure_cross_check_flags_garble_and_passes_grounded(tmp_path, capsys):
     assert "news: 1 figure(s) with no matching tool-output value" in out
     assert "303.9" in out
     assert "151.1" not in out  # rounded stop is grounded, not listed
+
+
+def test_engine_scorecard_figures_are_grounded_from_run_card(tmp_path, capsys):
+    """A cited engine score must not be flagged - it is the run's OWN number.
+
+    The scorecard reaches the analyst prompt through a block, not a tool call,
+    so it is absent from tool_evidence.json in every form. Measured 2026-10-02:
+    CB's TradeScore 60.43 was reported as ungrounded in all four analyst reports
+    while its six sibling engines passed only because round numbers like 63.0 /
+    75.0 / 47.0 happened to fall inside the ±0.5% tolerance. Any engine value
+    without such a neighbour was a guaranteed false positive.
+    """
+    rc = _load_repro_check()
+    md_dir = tmp_path / "1_analysts"
+    md_dir.mkdir()
+    (md_dir / "fundamentals.md").write_text(
+        "TradeScore 60.43 (coverage 0.6)", encoding="utf-8"
+    )
+    (tmp_path / "run_card.json").write_text(
+        json.dumps(
+            {"trade_score": {"score": 60.43, "coverage": 0.6, "status": "RESEARCH_ONLY"}}
+        ),
+        encoding="utf-8",
+    )
+    rc._figure_cross_check([str(tmp_path)], [{"fundamentals": []}])
+    out = capsys.readouterr().out
+    assert "all decimal figures grounded" in out
+    assert "60.43" not in out
+
+
+def test_a_garbled_engine_score_is_still_flagged(tmp_path, capsys):
+    """Grounding the scorecard must not hide a garbled copy of it.
+
+    A decimal-shift garble (60.43 -> 160.43) matches neither the tool evidence
+    nor the run's scorecard, so the tripwire still fires - the fix removes false
+    positives without adding false negatives.
+    """
+    rc = _load_repro_check()
+    md_dir = tmp_path / "1_analysts"
+    md_dir.mkdir()
+    (md_dir / "market.md").write_text("TradeScore 160.43", encoding="utf-8")
+    (tmp_path / "run_card.json").write_text(
+        json.dumps({"trade_score": {"score": 60.43}}), encoding="utf-8"
+    )
+    rc._figure_cross_check([str(tmp_path)], [{"market": []}])
+    out = capsys.readouterr().out
+    assert "1 figure(s) with no matching" in out
+    assert "160.4" in out
+
+
+def test_run_card_tokens_is_empty_without_a_usable_card(tmp_path):
+    """Absent or malformed run_card.json adds no grounding (older trees keep
+    their previous behaviour)."""
+    rc = _load_repro_check()
+    assert rc._run_card_tokens(str(tmp_path)) == set()
+    (tmp_path / "run_card.json").write_text("{not json", encoding="utf-8")
+    assert rc._run_card_tokens(str(tmp_path)) == set()

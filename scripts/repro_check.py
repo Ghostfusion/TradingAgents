@@ -179,15 +179,40 @@ def _print_evidence_diff(report_dirs) -> None:
 # Figure-matching is canonical in tradingagents.agents.utils.report_verifier
 # (scale-aware: raw tool floats like 122368000.0 match a report's 122.4M) so
 # the deterministic cross-check and the LLM-verifier anchor never disagree.
-from tradingagents.agents.utils.report_verifier import _float_tokens, _matches  # noqa: E402
+from tradingagents.agents.utils.report_verifier import (  # noqa: E402
+    _float_tokens,
+    _matches,
+    _run_card_engine_lines,
+)
 
 _DEC_RE = re.compile(r"\d+\.\d+")
 
 
+def _run_card_tokens(report_dir) -> set:
+    """Decimals from the run's OWN engine scorecard.
+
+    ``report_verifier._run_card_engine_lines`` states the rule: the scorecard is
+    written into every analyst's prompt (``engine_score_block`` /
+    ``scorecard_context_block``), so a report quoting "RiskScore 75.23" quotes
+    what the run itself supplied - not fabrication. The LLM verifier has grounded
+    those lines since 2026-09-27; this copy of the check did not, so every engine
+    composite with no coincidental tool float inside the ±0.5% tolerance came
+    back flagged. Measured 2026-10-02 on CB: TradeScore 60.43 reported as
+    ungrounded in all four analyst reports while its six sibling engines passed
+    only because round numbers (63.0 / 75.0 / 47.0 / 44.4 / 61.6) happened to sit
+    nearby. Reuse the canonical producer so the two checks cannot disagree.
+    """
+    out: set = set()
+    for line in _run_card_engine_lines(Path(report_dir)):
+        out |= _float_tokens(line)
+    return out
+
+
 def _figure_cross_check(report_dirs: list, evidence: list) -> None:
     """Advisory figure-grounding check: decimal numbers in each analyst
-    report that have no matching value in the run's tool evidence are
-    candidates for the copy-garble class seen on QCOM 2026-09-07 news.md
+    report that have no matching value in that run's OWN numbers - the
+    gathered tool evidence plus the engine scorecard in ``run_card.json`` -
+    are candidates for the copy-garble class seen on QCOM 2026-09-07 news.md
     ('303.9 -> 944B' for the TGA draw, '0.51%' for 10.51%, '7.6%' for 7.4%).
     Heuristic: tolerance-matched, so same-number different-formatting passes;
     integer deltas (e.g. '-5%' vs '-4%') are not covered - the analyst
@@ -204,6 +229,9 @@ def _figure_cross_check(report_dirs: list, evidence: list) -> None:
                 continue
             for leaf in payload:
                 ev_dec |= _float_tokens(str(leaf.get("content") or ""))
+        # The run's own computed engines are injected into the prompt without a
+        # tool call, so ground them from run_card.json as well.
+        ev_dec |= _run_card_tokens(d)
         md_dir = Path(d) / "1_analysts"
         if not md_dir.exists():
             print(f"  run{run_i + 1}: no 1_analysts/ dir, skipped")
@@ -218,8 +246,12 @@ def _figure_cross_check(report_dirs: list, evidence: list) -> None:
                     f"matching tool-output value: {shown}" + (" …" if len(suspect) > 25 else "")
                 )
             else:
-                print(f"  run{run_i + 1} {md.stem}: all decimal figures grounded in tool output")
-    print("  (heuristic: ±0.5% tolerance; integers/pool-tool figures are not covered)")
+                print(f"  run{run_i + 1} {md.stem}: all decimal figures grounded")
+    print(
+        "  (grounded against gathered tool evidence + the run's own run_card.json "
+        "engine scores;\n   heuristic: ±0.5% tolerance; integers/pool-tool figures "
+        "are not covered)"
+    )
 
 
 def _print_symmetry(evidence) -> None:
