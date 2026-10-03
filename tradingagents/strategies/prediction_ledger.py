@@ -20,9 +20,17 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import asdict
 from pathlib import Path
 
+from tradingagents.strategies.forecast_contract import (
+    ForecastEvaluation,
+    ForecastRecord,
+    _ledger_writer_token,
+)
+
 _LEDGER_NAME = "predictions.jsonl"
+_FORECAST_LEDGER_NAME = "forecasts.jsonl"
 
 
 def _ledger_path(results_dir: str | None) -> Path:
@@ -195,5 +203,138 @@ def score_all(closes_by_key: dict, results_dir: str | None = None,
     return out
 
 
+# ---------------------------------------------------------------------------
+# FL-5 - the forecast ledger: the ONLY writer of ForecastEvaluation
+# ---------------------------------------------------------------------------
+# Same append-only JSONL discipline as the decision ledger above: rows are
+# immutable once written, reads never mutate them, and IO never raises. One
+# file holds both row kinds, tagged by ``kind``: ``"record"`` (the production
+# ``ForecastRecord``) and ``"evaluation"`` (the post-hoc ``ForecastEvaluation``
+# the ledger alone may append). The record is never rewritten by a later
+# evaluation - that separation is the whole point of the contract's one-way
+# gate (``forecast_contract.ForecastEvaluation._writer``).
+
+
+def _forecast_ledger_path(results_dir: str | None) -> Path:
+    base = results_dir or os.path.expanduser("~/.tradingagents/logs")
+    return Path(base) / _FORECAST_LEDGER_NAME
+
+
+def record_forecast(record: ForecastRecord, results_dir: str | None = None) -> dict:
+    """Append one immutable ``ForecastRecord`` row; returns it (never raises on IO).
+
+    Idempotent by ``record.forecast_id``: if a ``kind == "record"`` row already
+    carries that id, the existing row is returned unchanged and nothing is
+    appended. A write failure still returns the row (the in-memory record is
+    the caller's), matching ``log_decision``.
+    """
+    if not isinstance(record, ForecastRecord):
+        raise TypeError(
+            f"record_forecast expects a ForecastRecord, got {type(record).__name__}"
+        )
+    for existing in forecast_rows(results_dir):
+        if existing.get("kind") != "record":
+            continue
+        if (existing.get("record") or {}).get("forecast_id") == record.forecast_id:
+            return existing
+    row = {"kind": "record", "ts": time.time(), "record": asdict(record)}
+    path = _forecast_ledger_path(results_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return row
+
+
+def forecast_rows(results_dir: str | None = None) -> list[dict]:
+    """Read every forecast-ledger row (ts-sorted); broken lines are skipped, never raises."""
+    path = _forecast_ledger_path(results_dir)
+    if not path.is_file():
+        return []
+    out = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                out.append(row)
+    except OSError:
+        return []
+    return sorted(out, key=lambda r: r.get("ts", 0.0))
+
+
+def evaluate_forecast(
+    *,
+    forecast_id: str,
+    realized_outcome: float,
+    evaluated_as_of: float,
+    n_observations: int,
+    scoring_rule: str,
+    score: float,
+    benchmark_ref: str,
+    benchmark_score: float,
+    results_dir: str | None = None,
+    realized_coverage: float | None = None,
+) -> dict:
+    """Append the ONE ``ForecastEvaluation`` for ``forecast_id``; returns the row.
+
+    This module is the only importer of the contract's ``_ledger_writer_token``,
+    so this is the only place a ``ForecastEvaluation`` can be constructed: a
+    producer has no write path to its own score (design doc §7.1/§8.1).
+
+    Sign convention: ``benchmark_delta = benchmark_score - score``. All four
+    ``SCORING_RULES`` (CRPS, QLIKE, RMSE, MAE) are **lower-is-better**, so a
+    **POSITIVE delta means the forecast beat the benchmark**.
+
+    An evaluation that keys to no recorded ``kind == "record"`` row is a
+    defect, not a row, and raises ``ValueError`` naming the id. The ledger's
+    terminal is dropped before serialisation: the stored row carries no writer
+    object and no ``_writer`` key. IO never raises.
+    """
+    known = False
+    for row in forecast_rows(results_dir):
+        if row.get("kind") == "record" and (
+            (row.get("record") or {}).get("forecast_id") == forecast_id
+        ):
+            known = True
+            break
+    if not known:
+        raise ValueError(
+            f"evaluate_forecast: no recorded ForecastRecord carries forecast_id "
+            f"{forecast_id!r}; an evaluation that keys to nothing is a defect, not a row"
+        )
+    evaluation = ForecastEvaluation(
+        forecast_id=forecast_id,
+        realized_outcome=realized_outcome,
+        evaluated_as_of=evaluated_as_of,
+        n_observations=n_observations,
+        scoring_rule=scoring_rule,
+        score=score,
+        benchmark_ref=benchmark_ref,
+        benchmark_score=benchmark_score,
+        benchmark_delta=benchmark_score - score,
+        realized_coverage=realized_coverage,
+        _writer=_ledger_writer_token(),
+    )
+    payload = asdict(evaluation)
+    payload.pop("_writer", None)
+    row = {"kind": "evaluation", "ts": time.time(), "evaluation": payload}
+    path = _forecast_ledger_path(results_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return row
+
+
 __all__ = ["log_decision", "rows", "outcome_metrics", "score_outcome",
-           "score_all", "_LEDGER_NAME"]
+           "score_all", "record_forecast", "forecast_rows", "evaluate_forecast",
+           "_LEDGER_NAME"]

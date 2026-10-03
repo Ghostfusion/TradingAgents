@@ -254,7 +254,7 @@ has no write access.
 
 **Depends on.** FL-1, FL-2.
 
-**First caller — it lands with the first producer, and that is a sequencing finding (recorded 2026-10-03).**
+**First caller — it landed with FL-9's publisher, and the sequencing finding below is closed (recorded 2026-10-03, resolved the same day).**
 Every public symbol the ledger gains here needs a caller in `tradingagents/` or `scripts/` (ground rule 7,
 enforced by `tests/test_calc_agent_wiring.py`), and **nothing in the tree can supply one**: the chain begins
 `candidate models → pool/selector` (design doc §8.1) and that pool is V1, which is blocked on the vendor
@@ -269,6 +269,16 @@ populates — and this plan will not ship one in place of a caller. **FL-5 lands
 producer that can publish a record.** The two invariants (the ledger is the only writer of
 `ForecastEvaluation`; the record is byte-identical after a later evaluation is appended) are frozen
 regardless.
+
+**Resolved the same day — FL-9 is that producer (2026-10-03).** `tradingagents/strategies/forecast_publisher.py`
+publishes `rv_forecast`'s output as the registry's `realized_volatility` record, filling all fourteen
+`Provenance` fields from real sources and raising `PublishRefusal` when one of them has no true source — so
+the record now exists *and cannot be faked*. The caller is `scripts/forecast_ledger.py`, **offline**, because
+ground rule 8 forbids the decision path and the in-run path cannot state `adjusted_prices` at all
+(`write_research_decision` writes `"price_caliber": None` under *"never assumed 'adjusted'"*). The two
+invariants below are therefore executable rather than declared:
+`test_the_record_is_unchanged_by_a_later_evaluation` in `tests/test_forecast_ledger_adapter.py`, and the same
+check run live against the real ledger.
 
 ### FL-6 — The benchmark declaration per forecast family
 
@@ -330,6 +340,58 @@ ownership is a **design revision**, not an FL item — it must return to the des
 
 ---
 
+### FL-9 — The record publisher, so FL-5 has a producer (added 2026-10-03)
+
+**Target.** New `tradingagents/strategies/forecast_publisher.py`:
+`publish_realized_volatility_forecast(...)` turns the registry's declared `rv_forecast` output into a
+`ForecastRecord` carrying a **complete, sourced** `Provenance`, and raises `PublishRefusal` when a mandatory
+identity has no true source.
+
+**Why it exists.** FL-5 was deferred with a recorded finding: no producer emitted the mandatory `Provenance`
+(§7.2 rule 9), so a `ForecastRecord` could not be constructed at all. FL-9 is that producer. It adds **no
+second authority**: the registry already declares `strategies/long_memory.py::rv_forecast` as the one
+authoritative producer for `realized_volatility · single_asset · 1d · 1`, and the publisher **reads its
+identity from that row** — target, scope, frequency, horizon, gate, `producer_id` and symbol are never
+restated, so the record and the registry cannot drift apart.
+
+**No design revision is required.** §8.1's chain is `candidate models → pool/selector → ForecastRecord`. A
+pool is what FD-1 §3.2 exempts *when several models compete for one target*; exactly one producer is declared
+for this key, so the record comes straight from it. FD-1, the contract's semantics and authoritative
+ownership are untouched — the design doc is unchanged by this item.
+
+**Behaviour — the rule that shapes the signature: an identity is never invented.**
+
+| field | the source it is taken from, or the refusal |
+|---|---|
+| `data_snapshot_id` | the caller's `prompt_metrics.snapshot_identity` (`snapshot_id` + the content-addressed `data_snapshot_hash`); an empty one refuses |
+| `calendar_id` | `CALENDAR_BY_MARKET`, a declared table; an unlisted market refuses |
+| `adjusted_prices` | `market_router.price_caliber_for`, asked about the loader's actual source; `unknown` refuses, because this repo never assumes "adjusted" |
+| `padded` | `False` — a fact about this producer: `rv_forecast` drops non-finite pairs and refuses below `HAR_MIN_OBS`; it never pads a window |
+| `missing_obs` / `imputed_obs` | non-finite observations inside the window, and `0` — the engine drops, it never imputes |
+| `parameter_hash` | the regressor set plus the fitted coefficients; "no fit happened" is a distinct recorded value, never `""` |
+| `training_start` / `training_end` | the first and last label of the window actually used; undatable labels refuse, because a position is not a timestamp |
+| `code_revision` | `execution_contract.git_sha()`, or an artefact's own revision |
+
+**Phase / run mode.** **Offline.** Ground rule 8 is why: the caller may not live in `prepare_initial_state`,
+`finalize_run` or any agent tool, and the in-run path cannot even state `adjusted_prices` —
+`write_research_decision` writes `"price_caliber": None` under the comment *"never assumed 'adjusted'"*. The
+first caller is `scripts/forecast_ledger.py`, which an operator runs.
+
+**Gate behaviour.** With `enable_long_memory` off the record is still published, as `status="unavailable"`
+with `reason_code="GATE_OFF"`: the ledger records *why* the quantity is absent, and an absence is as
+reproducible as a value.
+
+**Failing-first tests.** `tests/test_forecast_publisher.py` — the identity is read from the registry row; each
+of five unstatable identities refuses by name; an unauthorized `producer_id` refuses; a positional (undatable)
+label refuses; the gate-off row is a named absence carrying full provenance; the fitted row's `parameter_hash`
+moves with the data; dropped observations survive into `missing_obs`; `adjusted_prices` follows the caliber
+table.
+
+**Acceptance.** A published record satisfies every §7.2 rule and carries all fourteen provenance fields from
+real sources; no field is defaulted; `ForecastRecord` still has no evaluation surface.
+
+**Depends on.** FL-1, FL-2 and FL-6 (the row's benchmark).
+
 ## 2. Item table
 
 | id | kind | item | Owner | Phase | Run mode | Gate |
@@ -338,13 +400,14 @@ ownership is a **design revision**, not an FL item — it must return to the des
 | **FL-2** | `WORK` | registry + authoritative-producer gate + candidate exemption | `tradingagents/strategies/forecast_registry.py` (new) | P1 | in-run, pure | none |
 | **FL-3** | `WORK` | `absolute_return` / `return_rank` `declined` + codes | FL-2's registry | P1 | in-run, pure | none |
 | **FL-4** | `WORK` | admission test + licence tiers | `tests/test_forecast_dependency_admission.py` (new) | P2 | test-only | none |
-| **FL-5** | `WORK` | contract → ledger → `ForecastEvaluation` | `strategies/prediction_ledger.py` (+ adapter) | P2 | in-run write | none |
+| **FL-5** | `WORK` | contract → ledger → `ForecastEvaluation` | `strategies/prediction_ledger.py` (+ adapter) | P2 | offline write | none |
 | **FL-6** | `WORK` | benchmark declaration per family + enforcement | FL-2's registry + `tests/` | P2 | in-run + test | none |
 | **FL-7** | `DOC` | bind V1's members to FD-1; record the unsupplied `-t`/FIGARCH | `paper_survey_26/implementation_plan_vol_surface_and_vrp.md` §V1 | P2 | doc | — |
 | **FL-8** | `DECISION` | licence tiers; `declined` vs `not_admitted`; V1 members; vendor unblock | owner | — | — | — |
+| **FL-9** | `WORK` | the record publisher; every provenance field sourced, an absent one refuses | `tradingagents/strategies/forecast_publisher.py` + `scripts/forecast_ledger.py` | P2 | offline write | none |
 
 **Ordering.** FL-1 + FL-2 land together (ground rule 7). FL-3 rides FL-2. FL-4 and FL-6 are independent.
-FL-5 needs FL-1/FL-2. FL-7 follows FL-4.
+FL-5 needs FL-1/FL-2, and its first caller comes from FL-9. FL-7 follows FL-4.
 
 ---
 
@@ -404,7 +467,7 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
 | `test_the_interval_carries_no_realized_coverage` | production ≠ evaluation | add `realized_coverage` to `interval` |
 | `test_a_forecast_record_has_no_evaluation_field` | **the P0 split** | re-add an `evaluation` attribute |
 | `test_a_producer_cannot_construct_a_forecast_evaluation` | §8.1 one-way | expose the evaluation writer |
-| `test_the_record_is_unchanged_by_a_later_evaluation` | immutability | let the append mutate the record |
+| `test_the_record_is_unchanged_by_a_later_evaluation` | immutability, executable end to end through FL-5's ledger | let the append mutate the record |
 | `test_a_non_ok_row_carries_a_closed_vocabulary_code` | §7.2 rule 4 | accept free prose as the code |
 | `test_no_key_has_two_authoritative_producers` | invariant 8 for forecasts | point one key at two producers |
 | `test_candidate_members_do_not_collide_with_the_registry` | FD-1 §3.2 | register a pool member as authoritative |
@@ -421,11 +484,20 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
 | `test_every_admitted_row_declares_a_licence_tier` | §11.3 | drop the tier |
 | `test_the_real_pyproject_installs_no_forecasting_dependency` | today's net change is zero | add a forecasting extra to the real file |
 | `test_the_declared_table_is_internally_complete` | the table is complete and only two rows are CONDITIONAL | strip a reason, or add a third CONDITIONAL |
+| `test_the_identity_is_read_from_the_registry_row` | the record cannot drift from the registry | restate a target/scope/horizon literal in the publisher |
+| `test_an_identity_is_never_invented` | **§7.2 rule 9, five ways** | default `data_snapshot_id`, guess a calendar, or map an `unknown` caliber to a bool |
+| `test_an_unauthorized_producer_cannot_be_published` | a record may only be published for an authorized key | publish for a `declined`/unlisted `producer_id` |
+| `test_a_non_datable_label_yields_no_record` | a position is not a timestamp | accept an integer label as `training_start` |
+| `test_the_gate_off_row_is_a_named_absence` | a gate-off forecast is a recorded code, not a gap | return `None` instead of a `GATE_OFF` row |
+| `test_the_fitted_row_carries_a_real_parameter_hash` | `parameter_hash` tracks the fitted parameters | hash a constant |
+| `test_dropped_observations_survive_into_provenance` | ground rule 4 | drop the count along with the observation |
+| `test_adjusted_prices_follows_the_caliber_table` | the flag follows the verified table | hard-code `True` |
+| `test_the_producer_cannot_populate_its_own_evaluation` | §8.1 one-way, enforced at the ledger | expose the ledger terminal to a producer |
 | `tests/test_calc_agent_wiring.py` (existing) | FL-1 has a real caller | — |
 
 **Suite impact.** Every test is offline, pure and sub-second — no vendor call, no network, no GPU. FL-1, FL-2,
 FL-3, FL-4 and FL-6 land twenty-four of them: nine in `tests/test_forecast_contract.py`, ten in
-`tests/test_forecast_registry.py`, five in `tests/test_forecast_dependency_admission.py`.
+`tests/test_forecast_registry.py`, five in `tests/test_forecast_dependency_admission.py`. FL-9 and FL-5 add sixteen more: fourteen in `tests/test_forecast_publisher.py` and two in `tests/test_forecast_ledger_adapter.py`.
 
 ---
 
@@ -448,6 +520,10 @@ FL-3, FL-4 and FL-6 land twenty-four of them: nine in `tests/test_forecast_contr
 8. No item has changed FD-1, the `ForecastContract`'s semantics, or authoritative ownership without a
    design revision (design §11.0).
 9. `py -3.12 -m ruff check .` clean; affected suites then the full suite with `--session-timeout=5400`.
+10. The publisher never invents a provenance value: every mandatory identity names a real source, and an
+    absent one refuses rather than defaulting — pinned field by field in `tests/test_forecast_publisher.py`.
+    FL-5's adapter is the ledger's only evaluation writer, and the record row is byte-identical after an
+    evaluation lands.
 
 ---
 
@@ -496,9 +572,15 @@ FL-3, FL-4 and FL-6 land twenty-four of them: nine in `tests/test_forecast_contr
    while FL-1's record types are bound by ground rule 7's intent and not by a test. Recorded, not repaired:
    activating the case would flag modules repo-wide, which belongs to that gate's owner rather than to this
    plan.
-8. **FL-5 has neither a caller nor a record to write.** It is the one item whose ground-rule-7 caller cannot
+8. **FL-5 had neither a caller nor a record to write.** It is the one item whose ground-rule-7 caller cannot
    be named from the tree as it stands: the first producer of a `ForecastRecord` is the pool design doc §8.1
    puts at the head of the chain, and that pool is V1 (blocked). Sharper still, no producer emits the
    mandatory `Provenance` (§7.2 rule 9), so a record cannot be constructed at all — and wiring the ledger at
    an existing site would be a **stub over an unpopulated state key**, which this plan refuses. FL-5 therefore
-   lands with the first producer. See FL-5's *First caller* note.
+   lands with the first producer - **FL-9, landed 2026-10-03** - so the deferral is replaced by the
+   publisher's own limit, which is item 9 below. See FL-5's *First caller* note.
+9. **The publisher covers exactly one key, and its provenance is only as good as its caller.** FL-9 publishes
+   `realized_volatility · single_asset · 1d · 1` and nothing else: the registry's second row
+   (`regime_stress_probability`) has no publisher yet, so the ledger's coverage is one producer deep. And the
+   identity field it cannot derive — `data_snapshot_id` — belongs to the caller, so a wrong snapshot id
+   yields a well-formed, entirely unreproducible record that neither the contract nor any test can detect.
