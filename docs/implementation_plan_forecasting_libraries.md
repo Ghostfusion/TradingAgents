@@ -58,7 +58,7 @@ that:
 
 ### FL-1 — The three record types
 
-**Target.** New `strategies/forecast_contract.py`: `CandidateForecast`, `ForecastRecord` and
+**Target.** New `tradingagents/strategies/forecast_contract.py`: `CandidateForecast`, `ForecastRecord` and
 `ForecastEvaluation` in the §7.1 shapes, plus validators.
 
 **Behaviour.** Enforced at construction, not by documentation:
@@ -104,7 +104,7 @@ line** (design doc §2, §7.4). FL-2 is its real caller.
 
 ### FL-2 — The forecast registry and the authoritative-producer gate
 
-**Target.** New `strategies/forecast_registry.py`: one declared mapping
+**Target.** New `tradingagents/strategies/forecast_registry.py`: one declared mapping
 `(target.name, entity_scope, frequency, horizon_steps) -> {unit, producer_id, implementation_ref, gate, status}`.
 
 **Behaviour.** A manifest. It reads no config and computes nothing. Seeded from the design doc §6.1's
@@ -114,6 +114,14 @@ verified table, with **separated** keys and an explicit scope:
 `volatility_models.py::bipower_proxy` (gate `enable_jump_robust_proxies`); `regime_stress_probability ·
 index · 1d · 5` ← `regime.py` (gate `enable_hmm_heavy_tails`); plus the conformal interval axis and the
 declined return families (FL-3).
+
+Every `implementation_ref` is a **repo path relative to the `tradingagents/` code package root** and
+resolves by the design doc §7.2 rule 8's fixed transform — strip `.py`, map `/` → `.`, prefix
+`tradingagents.`, split on `::` — so `strategies/long_memory.py::rv_forecast` →
+`tradingagents.strategies.long_memory` + `rv_forecast`. **Two `strategies/` directories exist**:
+`tradingagents/strategies/` is the code package, while the top-level `strategies/` is a docs vault (no
+`.py`, no `__init__.py`), so the prefix is mandatory at resolution time — the bare `strategies.long_memory`
+raises `ModuleNotFoundError`. A **new** module is named with its full path for the same reason.
 
 **First caller.** the report/run-card writer that lists declared forecast keys beside the score engines —
 the registry must be *reachable*, not merely present (ground rule 7) — plus its own tests.
@@ -245,8 +253,8 @@ ownership is a **design revision**, not an FL item — it must return to the des
 
 | id | kind | item | Owner | Phase | Run mode | Gate |
 |---|---|---|---|---|---|---|
-| **FL-1** | `WORK` | `CandidateForecast` / `ForecastRecord` / `ForecastEvaluation` | `strategies/forecast_contract.py` (new) | P1 | in-run, pure | none |
-| **FL-2** | `WORK` | registry + authoritative-producer gate + candidate exemption | `strategies/forecast_registry.py` (new) | P1 | in-run, pure | none |
+| **FL-1** | `WORK` | `CandidateForecast` / `ForecastRecord` / `ForecastEvaluation` | `tradingagents/strategies/forecast_contract.py` (new) | P1 | in-run, pure | none |
+| **FL-2** | `WORK` | registry + authoritative-producer gate + candidate exemption | `tradingagents/strategies/forecast_registry.py` (new) | P1 | in-run, pure | none |
 | **FL-3** | `WORK` | `absolute_return` / `return_rank` `declined` + codes | FL-2's registry | P1 | in-run, pure | none |
 | **FL-4** | `WORK` | admission test + licence tiers | `tests/test_forecast_dependency_admission.py` (new) | P2 | test-only | none |
 | **FL-5** | `WORK` | contract → ledger → `ForecastEvaluation` | `strategies/prediction_ledger.py` (+ adapter) | P2 | in-run write | none |
@@ -334,7 +342,7 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
 
 ## 7. Definition of done
 
-1. `strategies/forecast_contract.py` and `strategies/forecast_registry.py` exist; every public symbol has a
+1. `tradingagents/strategies/forecast_contract.py` and `tradingagents/strategies/forecast_registry.py` exist; every public symbol has a
    caller outside its own module.
 2. The registry declares every forecast-like number the engine emits today, each resolving to exactly one
    existing symbol, with `(target.name, entity_scope, frequency, horizon_steps)` separated per design doc

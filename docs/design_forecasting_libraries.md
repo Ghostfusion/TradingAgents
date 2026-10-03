@@ -437,7 +437,7 @@ CandidateForecast
 ForecastRecord
 ├── forecast_id        : str
 ├── producer_id        : str              # STABLE SEMANTIC OWNER: "forecast_pool.realized_volatility.v1"
-├── implementation_ref : str              # current code location: "strategies/long_memory.py::rv_forecast"
+├── implementation_ref : str              # repo path, resolves per §7.2 rule 8: "strategies/long_memory.py::rv_forecast"
 ├── gate               : str | None       # "enable_long_memory" | None
 │
 ├── target                                # MANDATORY (§7.2 rule 7)
@@ -533,7 +533,13 @@ shared a `model_version`.
    a forecast of another** — and because the same target name recurs across scopes.
 8. **`producer_id` is the stable identity; `implementation_ref` is the current location.** Code paths move
    during refactoring; the semantic owner does not. Both are recorded, with `code_revision` pinning the
-   exact implementation version.
+   exact implementation version. **`implementation_ref` is written as a repo path relative to the code
+   package root** — `strategies/long_memory.py::rv_forecast` — and **resolves by a fixed transform**: strip
+   the `.py`, map `/` → `.`, prefix `tradingagents.`, split on `::`, then
+   `importlib.import_module("tradingagents.strategies.long_memory")` → `rv_forecast`. **The prefix is
+   mandatory at resolution time**, because a *top-level* `strategies/` directory also exists and it is the
+   **docs vault** (notes only — no `.py`, no `__init__.py`); the bare form alone is ambiguous and does not
+   import. A **new** module is therefore named with its full path in this document's plan.
 9. **Provenance is mandatory**, including `padded`, `data_snapshot_id` and `calendar_id`. The corpus's
    temporal-coverage-bias result is that a padded window *suppresses measured volatility in a known
    direction* — biased, not merely uncertain — and `adjusted_prices` changes the economic meaning of a
