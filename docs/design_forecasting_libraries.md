@@ -1,7 +1,9 @@
 # Design: The Forecasting Layer — Ownership, Admission Rule, and the ForecastContract
 
-**Status:** DESIGN — the *admission invariant and the contract* are proposed; **no library is admitted and
-no producer is built by this document**. The companion plan carries eight items: six `WORK` (FL-1…FL-6),
+**Status:** DESIGN — **FROZEN 2026-10-03 at v1.2.** The contract, the ownership invariant (**FD-1**), the
+admission rule, the production/evaluation boundary and the library verdict categories are settled; an
+implementation item may not reopen them (see §11.0 for the boundary). **No library is admitted and no
+producer is built by this document.** The companion plan carries eight items: six `WORK` (FL-1…FL-6),
 one `DOC` (FL-7) and one `DECISION` (FL-8).
 **Version:** 1.2 (revises v1.1 and v1.0, 2026-10-03)
 **Date:** 2026-10-03
@@ -667,7 +669,31 @@ tool; this makes the deployment shape explicit.
 
 ---
 
-## 11. Owner decisions
+## 11. Owner decisions — the freeze boundary, then the register
+
+### 11.0 The freeze boundary (declared 2026-10-03)
+
+**Frozen at v1.2.** Changing any row below is a **design revision**, not an implementation-item edit:
+
+| frozen surface | where |
+|---|---|
+| `CandidateForecast` / `ForecastRecord` / `ForecastEvaluation`, and the two-immutable split | §7.1 |
+| FD-1's five clauses and the candidate-output exemption | §3, §3.2 |
+| capability ownership (cl. 1) vs quantity ownership (cl. 5) | §3.1 |
+| one **authoritative** producer per `(target.name, entity_scope, frequency, horizon_steps)` | §6, §7.3 |
+| forecast ≠ score ≠ signal ≠ decision | §2 |
+| the evidence/evaluation boundary — `ForecastEvaluation` is post-hoc and ledger-written | §7.1, §8.1 |
+| the library verdict categories (`CONDITIONAL` / `REJECT_*` / `ALREADY_COVERED`) | §9 |
+
+**Downstream of the freeze.** The four open items below (§11.3–§11.6: the licence-tier default, `declined`
+vs `not_admitted`, V1's unsupplied `-t`/FIGARCH members, V1's vendor unblock) belong to the **implementation
+and owner workflow**, not to this document. **FL-1…FL-7 execute without any of them being settled** — none is
+a precondition for the contract, the registry, the refusal rows, the admission test, the ledger wiring or the
+benchmark declaration.
+
+**The governance rule.** A downstream decision that would change FD-1, the `ForecastContract`'s semantics, or
+authoritative ownership **is a design change**: it must return here as a numbered revision, name what it
+invalidates, and update §12. It may never ride in silently on an FL item's diff.
 
 ### Answered (owner, 2026-10-03)
 

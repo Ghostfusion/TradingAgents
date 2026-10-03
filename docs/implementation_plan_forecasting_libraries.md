@@ -1,6 +1,8 @@
 # Implementation Plan — The Forecasting Layer (companion to `docs/design_forecasting_libraries.md`)
 
-**Status:** PLAN — nothing built. **Zero dependencies are admitted by this plan as written.** FL-1…FL-6 are
+**Status:** PLAN — nothing built. Executes against the parent design **frozen at v1.2** (its §11.0); no item
+here may change FD-1, the contract's semantics, or authoritative ownership. **Zero dependencies are admitted
+by this plan as written.** FL-1…FL-6 are
 the contract, the registry, the refusal rows, the admission test, the ledger wiring and the benchmark
 declaration. FL-7 is a policy bind; FL-8 is an owner decision.
 **Version:** 1.2 (revises v1.1 and v1.0, 2026-10-03)
@@ -45,6 +47,8 @@ that:
    tool.** Design doc §9.1 makes the offline boundary explicit: a `CONDITIONAL` verdict is **refit-environment**
    admission, never a runtime dependency.
 6. **FD-1** — all five clauses **plus** a benchmarked incremental value.
+7. **The parent design is frozen at v1.2** (design §11.0). These items execute it; **none may alter FD-1, the
+   contract's semantics, or authoritative ownership** — such a change is a design revision, not an FL item.
 
 **Rule-4 impact: none.** No tool, gate, config key, report key or screener column.
 
@@ -230,7 +234,10 @@ item's owner), pointing at FD-1 and FL-4.
 ### FL-8 — Owner decisions
 
 Design doc §11: the licence-tier default (§11.3), `declined` vs `not_admitted` (§11.4, one constant), V1's
-unsupplied members (§11.5) and V1's vendor unblock (§11.6). None blocks FL-1…FL-7.
+unsupplied members (§11.5) and V1's vendor unblock (§11.6). **None blocks implementation-plan execution.**
+But a downstream decision that would change FD-1, the `ForecastContract`'s semantics, or authoritative
+ownership is a **design revision**, not an FL item — it must return to the design doc as a numbered revision
+(design §11.0).
 
 ---
 
@@ -341,7 +348,9 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
    unsupplied `-t`/FIGARCH members.
 7. `docs/AGENT_ONBOARDING.md`'s changelog, `CHANGELOG.md`, `README.md` and `MASTER_DESIGN.md` §19.4 are
    updated in the same pass (rule 9).
-8. `py -3.12 -m ruff check .` clean; affected suites then the full suite with `--session-timeout=5400`.
+8. No item has changed FD-1, the `ForecastContract`'s semantics, or authoritative ownership without a
+   design revision (design §11.0).
+9. `py -3.12 -m ruff check .` clean; affected suites then the full suite with `--session-timeout=5400`.
 
 ---
 
