@@ -98,6 +98,14 @@ the analysts and the risk engine.
 **Depends on.** the vendor decision (section 5); the ML-forecaster dependency decision (scikit-learn or the engine's existing regressions).
 **Doc caveat.** The loss is a risk-management objective, not a trading return - gains concentrate in high-vol regimes, and the paper's Diebold-Mariano is significant against the VIX-switch baseline on 5 of 6 assets but against the rolling-best baseline on only 3.
 
+**Admission path, recorded (forecasting design FD-1, plan FL-7).** Three things are recorded here, and **this card decides none of them**:
+
+1. **If V1 unblocks and its learned members (`GRU`, `XGBoost`) are not expressible with the in-house regressions, that dependency enters as a versioned OFFLINE REFIT ARTEFACT** under this theme's ground rule 8: refit-environment admission only, **never a live call from the decision path**. The forecasting design's §9.1 states the deployment shape - the runtime consumes a versioned artefact carrying `data_snapshot_id` + `model_version` + `parameter_hash` + `code_revision`, and nothing here may be called from `prepare_initial_state`, `finalize_run` or any agent tool. In the dependency table, `statsforecast` and `mlforecast` are the only two `CONDITIONAL` candidates; `arch`, `statsmodels`, `hmmlearn` and `ruptures` are `REJECT`.
+2. **A pool's members are CANDIDATES.** *FD-1 §3.2* (`docs/design_forecasting_libraries.md` §3.2): several members may each emit a value for `realized_volatility @ 1d`, and only the **pool/selector** publishes the authoritative `ForecastRecord` - so V1's pool cannot trip the one-authoritative-producer rule (invariant 8). `CANDIDATE_MEMBERS` in `tradingagents/strategies/forecast_registry.py` is the executable form of that exemption, and it stays empty until V1 unblocks.
+3. **`GARCH(1,1)-t` and `FIGARCH(1,1)-t` have no confirmed supplier anywhere** (verified 2026-10-03 from source and recorded in the forecasting design's §4.2): in-house `garch11_fit` is **Gaussian** MLE (no t/skew/GED), `statsforecast` ships `GARCH`/`ARCH` with **no Student-t option and no FIGARCH class**, and `arch` ships Student-t/GED but lists FIGARCH **only under *Contributing*** - an open request, not code. **V1's owner must drop or re-scope those two members.**
+
+**The full admission rule is FD-1** (`docs/design_forecasting_libraries.md` §3): a capability gap is necessary but **not sufficient** - a dependency is admitted only with a declared producer, a declared benchmark, benchmarked out-of-sample incremental value and a recorded licence tier. Its executable gate is FL-4 (`tests/test_forecast_dependency_admission.py`), and V1's own unblock stays the vendor decision in section 5.
+
 ### V7, V8 - Declined, recorded
 
 **Target.** none. No module, no gate, no config key, no test.

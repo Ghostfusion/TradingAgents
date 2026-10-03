@@ -2667,6 +2667,10 @@ def write_report_tree(
             card["regime_score"] = _regime
         # WP-5 / WP-7 / WP-6 / WP-9: the remaining engine blocks. Each is written
         # only when its own gate is on, so a gate-off card stays byte-identical.
+        # FL-2: the registry's one caller. A pure declaration - it reads no config
+        # and computes nothing - so it is always present and gates nothing.
+        from tradingagents.strategies.forecast_registry import forecast_registry_block
+
         for _key, _block in (
             ("risk_score", _run_card_risk_score(ticker, cfg)),
             ("sentiment_score", _run_card_sentiment_score(ticker, cfg, final_state)),
@@ -2679,6 +2683,9 @@ def write_report_tree(
             # H9: the report-influence / factor-novelty read (advisory, gate off
             # by default; carries the named embedding refusal this repo owes).
             ("report_influence", _run_card_report_influence(final_state, cfg)),
+            # FL-2: the declared forecast producers and the cited refusals. A
+            # declaration, so it is always present and carries no gate of its own.
+            ("forecast_registry", forecast_registry_block()),
         ):
             if _block is not None:
                 card[_key] = _block

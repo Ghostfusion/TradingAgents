@@ -79,8 +79,15 @@ that:
   what makes the immutability claim true rather than aspirational;
 - `producer_id` and `implementation_ref` are both required and are **different fields** (§7.2 rule 8).
 
-**First caller.** `forecast_registry` (FL-2) — without it the symbols have no caller and
-`tests/test_calc_agent_wiring.py` fails them by design.
+**First caller.** `forecast_registry` (FL-2) — it imports `TargetRef` and the contract's vocabularies and
+constructs a `TargetRef` per declared row, so the contract's *target shape* and *status vocabulary* have a
+production consumer from the first commit. Two honest notes: (a) the three *record* types get their
+production consumer in FL-5 (the ledger adapter); until then the suite is what exercises them, which is
+exactly why ground rule 7 binds FL-1 to FL-2 rather than to a later item; (b)
+`tests/test_calc_agent_wiring.py` gates public **functions**, and its module-level case is currently inert
+(the reference blob includes each module's own source, so it can never fire — §9 limit 7), so the record
+types are bound by ground rule 7's intent and not by that test. The registry's *block* function, being a
+public function, is gated — and it fails until its caller lands.
 
 **Phase / run mode.** P1 / in-run, pure, allocation-free, no I/O.
 
@@ -108,12 +115,31 @@ line** (design doc §2, §7.4). FL-2 is its real caller.
 `(target.name, entity_scope, frequency, horizon_steps) -> {unit, producer_id, implementation_ref, gate, status}`.
 
 **Behaviour.** A manifest. It reads no config and computes nothing. Seeded from the design doc §6.1's
-verified table, with **separated** keys and an explicit scope:
+verified table, with **separated** keys and an explicit scope. **Two rows seed it, and both are genuine
+forecasts** — a producer that *measures the present* is not a forecast (design doc §7.2 rule 6), and §7.3
+declares neither a target name nor a unit for one:
 `realized_volatility · single_asset · 1d · 1` ← `strategies/long_memory.py::rv_forecast` (gate
-`enable_long_memory`); `memory_parameter` ← `::memory_parameter`; `jump_share` ←
-`volatility_models.py::bipower_proxy` (gate `enable_jump_robust_proxies`); `regime_stress_probability ·
-index · 1d · 5` ← `regime.py` (gate `enable_hmm_heavy_tails`); plus the conformal interval axis and the
-declined return families (FL-3).
+`enable_long_memory`, unit `variance` — the producer forecasts next-session realized **variance**); and
+`regime_stress_probability · index · 1d · 21` ←
+`strategies/market_breadth.py::forward_stress_probability` (gate `enable_forward_stress_probability`, unit
+`probability` — 21 is the producer's own `_fs_horizon(1)["sessions"]`, `MONTH_SESSIONS`). The declined
+return families ride FL-3; the conformal interval axis is a *benchmark* row (FL-6), never a registry key.
+
+**Seed corrections — v1.2's list did not survive contact with the code.** Three of its four named rows
+changed, and none of the three is an FL-2 edit:
+
+1. `memory_parameter` and `jump_share` (`volatility_models.py::bipower_proxy`) are **contemporaneous
+   measurements**, not forecasts: the memory parameter measures the window's own persistence and the
+   bipower read measures that window's own jump share, both known at the bar they are read on. Seeding
+   them as forecast keys would need a design revision to §7.2 rule 6 and §7.3.
+2. The regime row's anchor was wrong. The forward, calibrated producer is
+   `market_breadth.py::forward_stress_probability` (gate `enable_forward_stress_probability`), **not**
+   `regime.py` behind `enable_hmm_heavy_tails`: `hmm_filtered_regime`'s filtered posteriors are
+   `P(S_t | x_{1:t})` — a state read, and it belongs to the score/state contracts, not here.
+3. The design doc's example key (`regime_stress_probability · index · 1d · 5`) is illustrative; the
+   engine's own horizon arithmetic is 21 sessions at `1d`. §7.3's target-name list also **omits**
+   `realized_volatility`, which its own key examples and §6.1 use — recorded as a doc defect for the
+   design's owner, not silently repaired (design §11.0).
 
 Every `implementation_ref` is a **repo path relative to the `tradingagents/` code package root** and
 resolves by the design doc §7.2 rule 8's fixed transform — strip `.py`, map `/` → `.`, prefix
@@ -139,7 +165,10 @@ registry must never be added to `tests/test_calc_agent_wiring.py`'s whitelist.**
 and must not trip the uniqueness gate — this is the FD-1 §3.2 exemption made executable);
 `test_every_declared_implementation_ref_resolves` (resolves each `implementation_ref` via `importlib`;
 mutation: rename a symbol); `test_every_producer_id_is_stable_and_not_a_code_path` (a `producer_id`
-containing `.py` or `::` fails).
+containing `.py` or `::` fails); `test_every_declared_gate_is_a_real_config_key` (a declared gate must
+exist in `DEFAULT_CONFIG` and must ship **off** — the registry cannot name a switch the tree does not
+have); `test_the_block_is_json_able_and_declares_every_row` (the run-card block is a faithful declaration:
+one entry per row, JSON-able, keyed by the same four-part identity).
 
 **Acceptance.** Every row resolves to exactly one existing symbol; renaming a producer fails the suite with
 the key and missing path named; the registry imports no vendor and no optional dependency.
@@ -152,6 +181,14 @@ the key and missing path named; the registry imports no vendor and no optional d
 Goyal/Welch/Zafirov (2021/2024). `return_rank` carries `RETURN_RANK_NOT_ADMITTED`, citing 2607.27461's
 0.007 log-likelihood gain against the volatility rank's 0.108. **Neither produces a number, ever, and
 neither states a universal claim** — they record that *this engine has not authorized* the target.
+
+**As landed.** `RegistryRow` carries the refusal shape: a `declined` row names **no** `producer_id`,
+`implementation_ref`, gate or benchmark, and it must carry a `reason_code` from the closed declined
+vocabulary **plus** a non-empty citation — an uncited refusal is only an omission. The two rows are keyed
+`absolute_return · single_asset · 1d · 1` (unit `pct`) and `return_rank · cross_section · 1d · 22` (unit
+`rank_decile`, the horizon §7.3's own rank example uses), and the block carries each refusal's code and
+citation into the run card. The test asserts the *policy* as well as the rows: no `DIRECTIONAL_TARGETS` key
+may ever be `ok`.
 
 **Phase / run mode.** P1 / in-run, pure.
 
@@ -172,15 +209,25 @@ option.
 reason**, and — for `CONDITIONAL` — (a) the FD-1 clauses it satisfies and (b) the **benchmark record** that
 would admit it. **A capability gap alone is explicitly insufficient.** Additionally, the licence tier is
 declared per row (design doc §11.3): `default` (MIT/BSD/Apache), `osi_review` (other OSI-approved
-permissive, incl. NCSA), `custom_review` (non-OSI, custom and **model-checkpoint** licences).
+permissive, incl. NCSA), `custom_review` (non-OSI, custom and **model-checkpoint** licences) — plus
+**`unverified`**, the marker the design doc's own §4 table already uses for a licence not read from source.
+`unverified` is a **fact, not a policy tier**: which tiers may be *admitted* is the owner's open §11.3
+decision, so FL-4 records the observation and decides none of it. The declared table lives **in the test
+file**, beside the gate that reads it, and the licence **tier** is the observed family — never the policy.
 
 **Phase / run mode.** P2 / test-only, offline.
 
-**Failing-first tests.** `test_a_new_forecasting_extra_requires_a_verdict`;
-`test_a_conditional_row_must_name_its_benchmark`;
-`test_every_admitted_row_declares_a_licence_tier`.
+**Failing-first tests.** `test_a_new_forecasting_extra_requires_a_verdict` (mutation: append an unlisted
+extra — `sktime` — to a copy of `pyproject.toml`; a *declared* extra is not flagged);
+`test_a_conditional_row_must_name_its_benchmark` (mutation: strip the benchmark off `statsforecast`, and the
+FD-1 clauses off `mlforecast`); `test_every_admitted_row_declares_a_licence_tier` (mutation: drop `arch`'s
+tier, then give it a bogus one). Two more guard the tree itself:
+`test_the_real_pyproject_installs_no_forecasting_dependency` — today's net change is **zero**, measured
+against the real file rather than asserted in prose — and `test_the_declared_table_is_internally_complete`,
+which pins that the only two `CONDITIONAL` libraries are the ones design doc §9 names.
 
-**Acceptance.** All three fixtures fail; the real `pyproject.toml` passes with **zero** forecasting extras.
+**Acceptance.** Every fixture fails by name; the real `pyproject.toml` passes with **zero** forecasting
+extras.
 
 **Doc caveat.** It enforces the *process*, not the *judgement* — a wrong verdict still passes.
 
@@ -207,6 +254,22 @@ has no write access.
 
 **Depends on.** FL-1, FL-2.
 
+**First caller — it lands with the first producer, and that is a sequencing finding (recorded 2026-10-03).**
+Every public symbol the ledger gains here needs a caller in `tradingagents/` or `scripts/` (ground rule 7,
+enforced by `tests/test_calc_agent_wiring.py`), and **nothing in the tree can supply one**: the chain begins
+`candidate models → pool/selector` (design doc §8.1) and that pool is V1, which is blocked on the vendor
+decision. So *"Depends on. FL-1, FL-2"* is incomplete — and the dependency is sharper than a call site: a
+`ForecastRecord` **cannot even be built today**, because `Provenance` is mandatory (§7.2 rule 9) and no
+producer emits one. `rv_forecast`'s record carries a window and a basis but no `data_snapshot_id`,
+`calendar_id`, `padded`, `parameter_hash` or `code_revision`; `forward_stress_probability` carries a
+calibration table and a horizon but the same gaps. Wiring the ledger's write path at an existing site
+(`tradingagents/graph/trading_graph.py:870-873`, which already writes the decision row behind
+`enable_prediction_ledger`) would therefore be a **stub** — a reachable function over a state key nothing
+populates — and this plan will not ship one in place of a caller. **FL-5 lands together with the first
+producer that can publish a record.** The two invariants (the ledger is the only writer of
+`ForecastEvaluation`; the record is byte-identical after a later evaluation is appended) are frozen
+regardless.
+
 ### FL-6 — The benchmark declaration per forecast family
 
 **Target.** A declared table (design doc §8.2) and a test that every non-`declined` registry row names a
@@ -221,8 +284,13 @@ Also binds `2602.07841`'s out-of-sample R² ceiling and H4's base-rate ceiling t
 
 **Phase / run mode.** P2 / in-run declaration + test.
 
-**Failing-first test.** `test_every_admitted_forecast_names_a_benchmark` — mutation: add a registry row with
-no benchmark.
+**Failing-first tests.** `test_every_admitted_forecast_names_a_benchmark` (mutation: add a registry row with
+no benchmark — refused **by name** at construction, since `RegistryRow.benchmark_ref` is mandatory for every
+non-`declined` row *and* must come from the declared set); plus two declaration guards,
+`test_every_target_family_declares_a_benchmark` (every `target.name` in the contract's vocabulary has a
+benchmark family, and the interval floor is declared) and `test_directional_families_carry_both_ceilings`
+(`DIRECTIONAL_TARGETS` names both ceilings — `2602.07841` and `H4`). **The table lives in
+`forecast_registry.py`**, beside the rows it scores, so the declaration and the gate cannot drift apart.
 
 **Depends on.** FL-2.
 
@@ -244,6 +312,13 @@ item's owner), pointing at FD-1 and FL-4.
 **Phase / run mode.** P2 / doc.
 
 **Acceptance.** V1's card names its admission path; this plan does not restate V1's content.
+
+**As landed (2026-10-03).** The paragraph now sits in
+`docs/paper_survey_26/implementation_plan_vol_surface_and_vrp.md` §V1's card under *"Admission path, recorded
+(forecasting design FD-1, plan FL-7)"*, and it decides none of the three points it records: the offline-refit
+admission path (ground rule 8, with the §9.1 artefact shape), the FD-1 §3.2 candidate exemption (pointing at
+`CANDIDATE_MEMBERS`), and the two members with no supplier. It also names the executable gate
+(`tests/test_forecast_dependency_admission.py`) and leaves V1's unblock on the vendor decision.
 
 ### FL-8 — Owner decisions
 
@@ -335,14 +410,22 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
 | `test_candidate_members_do_not_collide_with_the_registry` | FD-1 §3.2 | register a pool member as authoritative |
 | `test_every_declared_implementation_ref_resolves` | the registry cannot drift | rename a producer symbol |
 | `test_every_producer_id_is_stable_and_not_a_code_path` | §7.2 rule 8 | use `a.py::f` as a `producer_id` |
+| `test_every_declared_gate_is_a_real_config_key` | a declared gate names a real switch, and ships off | rename a gate, or flip its default |
+| `test_the_block_is_json_able_and_declares_every_row` | the run-card block is a faithful declaration | drop a row from the block |
 | `test_return_targets_are_declined_with_codes` | the refusal is cited | empty the code |
 | `test_every_admitted_forecast_names_a_benchmark` | §8.2 | add a row with no benchmark |
+| `test_every_target_family_declares_a_benchmark` | every family declares one, including the interval floor | drop a family |
+| `test_directional_families_carry_both_ceilings` | the two ceilings bind directional claims | drop a ceiling |
 | `test_a_new_forecasting_extra_requires_a_verdict` | FL-4 | append an unlisted extra |
 | `test_a_conditional_row_must_name_its_benchmark` | evidence-based admission | strip the benchmark |
 | `test_every_admitted_row_declares_a_licence_tier` | §11.3 | drop the tier |
+| `test_the_real_pyproject_installs_no_forecasting_dependency` | today's net change is zero | add a forecasting extra to the real file |
+| `test_the_declared_table_is_internally_complete` | the table is complete and only two rows are CONDITIONAL | strip a reason, or add a third CONDITIONAL |
 | `tests/test_calc_agent_wiring.py` (existing) | FL-1 has a real caller | — |
 
-**Suite impact.** Seventeen new tests, all offline, sub-second. No vendor call, no network, no GPU.
+**Suite impact.** Every test is offline, pure and sub-second — no vendor call, no network, no GPU. FL-1, FL-2,
+FL-3, FL-4 and FL-6 land twenty-four of them: nine in `tests/test_forecast_contract.py`, ten in
+`tests/test_forecast_registry.py`, five in `tests/test_forecast_dependency_admission.py`.
 
 ---
 
@@ -350,9 +433,9 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
 
 1. `tradingagents/strategies/forecast_contract.py` and `tradingagents/strategies/forecast_registry.py` exist; every public symbol has a
    caller outside its own module.
-2. The registry declares every forecast-like number the engine emits today, each resolving to exactly one
-   existing symbol, with `(target.name, entity_scope, frequency, horizon_steps)` separated per design doc
-   §7.3.
+2. The registry declares every **forecast** the engine emits today — a contemporaneous state read is not
+   one (design doc §7.2 rule 6) — each resolving to exactly one existing symbol, with
+   `(target.name, entity_scope, frequency, horizon_steps)` separated per design doc §7.3.
 3. `ForecastRecord` carries **no** evaluation field; `ForecastEvaluation` is written only by the ledger.
 4. `absolute_return` and `return_rank` are `declined` with codes that cite the design doc — and neither
    states a universal claim about markets.
@@ -406,3 +489,16 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
    §13.1). Library capability is not evidence of financial usefulness.
 6. **The `-t`/FIGARCH finding is a negative read of one ref on one day** (design doc §13.5); V1's owner
    should re-verify when the item unblocks.
+7. **The calc-wiring gate's module-level case is inert.** `tests/test_calc_agent_wiring.py` builds its
+   reference blob from every `.py` under `tradingagents/` and `scripts/` — which **includes the module being
+   tested** — so `_MODULE_CASES` is always empty and `test_module_reachable_or_whitelisted` is skipped. Only
+   public **functions** are actually gated. That is why FL-2's caller is enforced (its block is a function)
+   while FL-1's record types are bound by ground rule 7's intent and not by a test. Recorded, not repaired:
+   activating the case would flag modules repo-wide, which belongs to that gate's owner rather than to this
+   plan.
+8. **FL-5 has neither a caller nor a record to write.** It is the one item whose ground-rule-7 caller cannot
+   be named from the tree as it stands: the first producer of a `ForecastRecord` is the pool design doc §8.1
+   puts at the head of the chain, and that pool is V1 (blocked). Sharper still, no producer emits the
+   mandatory `Provenance` (§7.2 rule 9), so a record cannot be constructed at all — and wiring the ledger at
+   an existing site would be a **stub over an unpopulated state key**, which this plan refuses. FL-5 therefore
+   lands with the first producer. See FL-5's *First caller* note.
