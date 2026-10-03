@@ -1,401 +1,616 @@
-# Design: The Forecasting Layer — Library Landscape, Admission Rule, and the ForecastContract
+# Design: The Forecasting Layer — Ownership, Admission Rule, and the ForecastContract
 
-**Status:** DESIGN — the *admission rule and the contract* are proposed; **no library is admitted and no
-producer is built by this document**. Three items are `WORK` in the companion plan.
-**Version:** 1.0
+**Status:** DESIGN — the *admission invariant and the contract* are proposed; **no library is admitted and
+no producer is built by this document**. Seven items are `WORK` in the companion plan.
+**Version:** 1.1 (revises v1.0, 2026-10-03)
 **Date:** 2026-10-03
-**Scope:** The question *"should this engine adopt a time-series forecasting library stack?"* — the
-library landscape, the evidence on what is actually forecastable in equities, what this repo already
-owns, and the one artifact worth adopting: a **declaration**, not a producer.
+**Scope:** Whether this engine should adopt a third-party time-series forecasting stack, what a forecast
+*is* in this repository, and the contract a forecast number must satisfy to be admissible evidence.
 **Parent:** `docs/design_fin_paper_survey_26.md` (v1.0, SURVEY)
-**Owners (the docs this one must not double-own):**
-`docs/paper_survey_26/design_vol_surface_and_vrp.md` (volatility + surface), the same folder's
-`design_regime_estimation_hardening.md` (regime), `design_cross_section_and_allocation.md`
-(cross-section + ranks), `design_risk_tail_and_coverage.md` (tails, drawdown, VaR),
-`design_research_honesty_gates.md` (the evaluation gates).
-**Plan:** [`implementation_plan_forecasting_libraries.md`](implementation_plan_forecasting_libraries.md) — the item-level plan (v1.0, PLAN).
-**Rule-4 impact:** none. No tool, gate, config key, report key or screener column is added by this
-document.
+**Owners (docs this one must not double-own):** `docs/paper_survey_26/design_vol_surface_and_vrp.md`
+(volatility, surface), `design_regime_estimation_hardening.md` (regime),
+`design_cross_section_and_allocation.md` (cross-section, ranks), `design_risk_tail_and_coverage.md`
+(tails, drawdown, VaR), `design_research_honesty_gates.md` (H1–H11, the evaluation gates).
+**Plan:** [`implementation_plan_forecasting_libraries.md`](implementation_plan_forecasting_libraries.md) (v1.1, PLAN).
+**Rule-4 impact:** none. No tool, gate, config key, report key or screener column changes.
+
+**Revision note (v1.1).** Rewritten in response to an external review. The substantive corrections:
+*v1.0 turned "no authoritative return forecast is admitted" into "returns are not forecastable"* — those
+are different claims and only the first is defensible (§5.1); *v1.0 required `realized_coverage` in the
+forecast interval*, which cannot exist at forecast time — production and evaluation metadata are now
+separated (§7.1); *v1.0 admitted `horizon = 0` state reads into the forecast namespace*, which is
+namespace leakage (§7.2 rule 6); and *v1.0's admission rule was capability-based*, which lets a missing
+package justify itself (§3). §12 records the disposition of every review point.
 
 ---
 
 ## 1. Executive summary
 
-An external proposal recommended adopting a forecasting stack for this engine — a 40-library survey
-whose "starting recommendation" is
-**`StatsForecast + MLForecast + arch + statsmodels + hmmlearn + ruptures`**, plus a `ForecastContext`
-object carrying `return_forecast`, `volatility_forecast`, `probability`, `prediction_interval` and
-`regime_forecast` keyed by horizon.
+This document evaluates a proposal to add a forecasting stack (`StatsForecast + MLForecast + arch +
+statsmodels + hmmlearn + ruptures`, plus a horizon-keyed `ForecastContext`) to this repository.
 
-Read against the code and the corpus already in this repo, the recommendation splits cleanly:
+**The headline finding is not "we don't need forecasting libraries."** It is:
 
-| Half of the recommendation | Verdict |
+> **This engine already owns the forecasting *methods*. What it does not have is a general-purpose
+> learned forecast-*pool* producer — and even that is already designed (V1), blocked on a vendor data
+> dependency rather than on a library.**
+
+| Half of the proposal | Verdict |
 |---|---|
-| **The model families** (GARCH/ARCH, HAR + long memory, HMM/Markov regime, conformal intervals, jump-robust realized measures) | **Already owned and largely already built in-house.** Five of the six themes the proposal names have a shipped, gated, tested producer. Adopting a library here would create a **second producer** of a number this repo already produces — invariant 8 forbids it. |
-| **The `ForecastContext` shape** (horizons, intervals, probabilities, provenance) | **Worth adopting — as a *declaration*, not a producer.** This is the proposal's genuinely useful contribution and the reason this doc exists. |
-| **As a dependency** (`StatsForecast`, `MLForecast`, `arch`, …) | **Not admitted.** See §7 — for the one open item (V1's forecast pool, currently blocked) the verdict is *conditional*, and even there the mechanism is the offline refit, not a live dependency. |
+| **Model families** — GARCH/ARCH, HAR + long memory, HMM regime, change-point, conformal intervals, covariance, RND recovery, eigenspace rotation | **Already owned, and five of six already shipped.** A library here would be a **second producer** of a number this repo already computes — forbidden by invariant 8. |
+| **The `ForecastContext` shape** | **Worth adopting — as a declaration, not a producer.** The contract in §7 is the artifact this document exists to specify. |
+| **The dependencies** | **Not admitted.** `statsforecast`/`mlforecast` are `CONDITIONAL`; the rest are rejected with categorized reasons (§9). **Net dependency change: zero.** |
 
-The one thing this document *builds* is a rule: **a forecasting dependency is admitted only when a
-declared producer needs it, and never when it would restate a number the engine already computes.**
+### The core principle
 
-And the proposal's own architecture advice turns out to be the repo's existing architecture — it says
-*"I wouldn't create one giant ForecastScore"* and *"your existing engines remain independent"*; that is
-`docs/scores/README.md` §2.1 invariants 8–18 verbatim, reached from the outside.
+> **A forecasting library is not a forecasting capability, and a forecast is not an authoritative
+> research fact.** A dependency is admitted only to support a *declared producer* with a defined target,
+> definition and consumer; a forecast becomes *admissible evidence* only after it satisfies this
+> repository's ownership, provenance, out-of-sample evaluation and research-honesty requirements.
 
-### The corpus's own answer, already recorded here
+### The boundary this document is bound by
 
-`docs/design_fin_paper_survey_26.md` §3 states the finding this doc is bound by:
+`docs/design_fin_paper_survey_26.md` §3, already recorded in-house:
 
 > **forecasts exist, but in volatility** — structure, rank, volatility and covariance are estimable and
 > stable; **the level of the return is the part that resists.**
 
-The proposal's `return_forecast` field is therefore the one member of its `ForecastContext` this engine
-must **refuse to populate with a number**, and the corpus is unusually explicit about why (§4).
+---
+
+## 2. What a forecast is here — and is not
+
+The single most likely future defect this design must prevent:
+
+```
+Forecast = +2.3%  →  ForecastScore = 73  →  BUY
+```
+
+That recreates exactly the problem the score architecture exists to avoid. The layers are distinct:
+
+| Layer | Question it answers | Owner |
+|---|---|---|
+| **Forecast** | *What does a model estimate will happen?* | a declared producer (§7), recorded in the prediction ledger |
+| **Score** | *How does the engine rate the current evidence?* | `docs/scores/README.md`, the engines |
+| **Signal** | *What actionable research implication follows?* | `strategies/signal_action.py` |
+| **Decision** | *What does the research process conclude?* | the LLM adjudication layer + `decision_packet` |
+
+**Forecasting is not scoring.** A forecast never becomes a score by adjacency, and no forecast enters
+`COMPOSITE_ENGINES` (which stays `(fundamental, technical, regime, risk)`).
+
+The repository already states the correct boundary for the one place a forecast is consumed as an input:
+`strategies/portfolio.py:452` `kelly_weights` — *"the excess returns must be declared by the caller (**a
+forecast source**)"*. A forecast is a **declared input**, never an internal authority.
 
 ---
 
-## 2. The recommendation under evaluation
+## 3. The Forecasting Dependency Admission Invariant
 
-Restated neutrally so the verdict can be checked against it. The proposal:
+v1.0 buried this in §1 as a conclusion. It is the primary principle, so it is stated as an invariant in
+the same spirit as `MASTER_DESIGN.md` §2 and `docs/scores/README.md` §2.1.
 
-1. broadens an earlier list to 40 libraries across seven problem types (return, price, volume,
-   volatility, regime, probabilistic, multivariate);
-2. names six functional groups and a two-tier stack — Tier 1 *integrate* (`StatsForecast`,
-   `MLForecast`, `arch`, `statsmodels`, `hmmlearn`, `ruptures`), Tier 2 *research* (`NeuralForecast`,
-   `Darts`, `PyMC`, `GluonTS`, `PyTorch Forecasting`, `AutoGluon-TimeSeries`), Tier 3 *foundation
-   models* (`Chronos`, `TimesFM`, `Moirai`, `Lag-Llama`, `MOMENT`), Tier 4 *probably unnecessary*
-   (`Prophet`, `PyAF`, `Greykite`, `Kats`, `PyFlux`);
-3. recommends against one giant `ForecastScore`, and for a `ForecastContext` that preserves the
-   forecast information beside the score engines;
-4. notes that `StatsForecast` "already has probabilistic forecasting and GARCH/ARCH support, so you may
-   not actually need three separate dependencies";
-5. ends with a **six-library** starting recommendation.
+> **FD-1. A forecasting dependency may be admitted only when all five hold:**
+>
+> 1. a **declared forecast producer** requires a capability not available from any existing
+>    authoritative producer;
+> 2. that producer has a **named consumer** (a tool, an engine, a report row, or a sizing input);
+> 3. the **target is fully defined** — target name, measurement definition, unit, frequency and horizon
+>    (§7.1, §7.3);
+> 4. the producer **passes the applicable research-honesty gates** (`design_research_honesty_gates.md`:
+>    H1 trial ledger, H4 accuracy ceiling, H5 verdict, H10 coverage, H11 intervals);
+> 5. **no existing authoritative producer owns the same quantity.**
+>
+> **Capability gap is necessary but not sufficient.** A missing package never justifies itself: admission
+> additionally requires a *benchmarked out-of-sample incremental value* against the target family's
+> declared benchmark (§8.2). The sequence is:
+>
+> ```
+> capability gap → research hypothesis → benchmark → incremental value
+>                                              → producer specification → admission
+> ```
 
-Claims (1), (4) and (5) are checkable and are checked in §3. Claim (3) is architectural and is checked
-in §5 against the repo's invariant 8.
-
----
-
-## 3. Verified library facts
-
-Read from each project's current `pyproject.toml` / `LICENSE` / model source on 2026-10-03, not from
-memory. **Four of the proposal's framing assumptions are wrong or incomplete**, and two of them matter
-for this engine.
-
-| Library | Licence (verified) | Core runtime deps (verified) | Build | Note |
-|---|---|---|---|---|
-| `statsforecast` 2.1.1 | **Apache-2.0** ✅ | `coreforecast`, `numpy`, `pandas<3.0.0`, `scipy`, **`statsmodels>=0.14.5`**, `fugue`, `utilsforecast`, `threadpoolctl`, `cloudpickle`, `tqdm` | **compiled** (`scikit-build-core` + `pybind11`) | **`statsmodels` is a hard dep of `statsforecast`.** **`numba` is not** — the proposal's mental model of the Nixtla stack is out of date. |
-| `mlforecast` 1.1.0 | **Apache-2.0** ✅ | `coreforecast`, **`scikit-learn`**, `optuna`, `narwhals`, `fsspec`, `pandas<3.0` | pure-python | **`LightGBM`/`XGBoost` are NOT core deps** — they appear only under the `dask`/`ray`/`spark` extras. The proposal's "→ LightGBM/XGBoost" arrow needs an extra. |
-| `arch` | **NCSA** — *not* MIT/BSD/Apache | `numpy`, `pandas`, `scipy`, `statsmodels`, `packaging` | **compiled** (`meson-python` + Cython) | The proposal groups `arch` with permissive-licensed peers; NCSA is OSI-approved and permissive but it is a **distinct licence with a distinct attribution clause** — a legal review item, not a footnote. |
-| `qlib` | **MIT** ✅ | (platform) | pure-python | Already has a design + plan pair here — `docs/design_qlib_integration.md`, `docs/implementation_qlib_integration.md`. |
-| `finrl` | **MIT** ✅ | (platform) | pure-python | Already has a design + plan pair here — `docs/design_finrl_integration.md`, `docs/implementation_plan_finrl.md`. |
-| `hmmlearn`, `ruptures`, `statsmodels`, `darts`, `neuralforecast`, `pymc`, foundation models | **not verified in this pass** | — | mixed | Recorded as **unadmitted until verified**. The foundation-model row carries a second trap: *code* licence and *checkpoint* licence are separate instruments and can differ. `[INFERENCE]` |
-
-### 3.1 Two facts the proposal gets right
-
-**`StatsForecast` really does ship `GARCH` and `ARCH` models.** Verified in
-`python/statsforecast/models.py` — `class GARCH` and `class ARCH(GARCH)`, documented as their own group
-("Suited for modeling time series that exhibit non-constant volatility over time").
-
-Two details the proposal does not mention, and both are the interesting part for this repo:
-
-- The GARCH implementation is **in-house** — `fit()` calls `garch_model(y, p, q)` and
-  `predict()` calls `garch_forecast(...)`. It does **not** delegate to `arch`, which is why `arch` is
-  absent from its dependency list. The proposal implies the opposite grouping.
-- `predict()` returns a dict of **`{"mean", "sigma2"}`** — i.e. it hands back the *conditional variance
-  forecast*, which is precisely the quantity this engine's risk path consumes. Intervals are
-  `quantile × sqrt(sigma2)` (a Gaussian assumption) unless `prediction_intervals=ConformalIntervals(...)`
-  is passed, in which case they are conformal.
-
-**The proposal's "cannot beat the unconditional mean" instinct is correct and is the corpus's central
-result** — see §4.
-
-### 3.2 The proposal's three-groups framing is the wrong axis here
-
-It groups libraries by *problem type* (return/price/volume/volatility/regime/probabilistic). This engine
-groups by **who owns the number**. The same library can be correct under the first axis and forbidden
-under the second — which is exactly what happens to `statsforecast` and `arch` in §7.
+`arch` fails clause 5. `darts` fails clauses 1–2. `statsforecast` passes 1–2 **conditionally** and is
+blocked on 4 until a benchmark exists.
 
 ---
 
-## 4. What is actually forecastable: the evidence
+## 4. Verified library facts
 
-Four primary sources, all read in this pass.
+Read from each project's current `pyproject.toml` / `LICENSE` / model source on 2026-10-03.
 
-### 4.1 The return level is the part that resists
+| Library | Licence (verified) | Core runtime deps (verified) | Build |
+|---|---|---|---|
+| `statsforecast` 2.1.1 | **Apache-2.0** | `coreforecast`, `numpy`, `pandas<3.0.0`, `scipy`, **`statsmodels>=0.14.5`**, `fugue`, `utilsforecast`, `threadpoolctl`, `cloudpickle`, `tqdm` | **compiled** (`scikit-build-core` + `pybind11`) |
+| `mlforecast` 1.1.0 | **Apache-2.0** | `coreforecast`, **`scikit-learn`**, **`optuna`**, `narwhals`, `fsspec`, `pandas<3.0` | pure-python |
+| `arch` | **NCSA** — not MIT/BSD/Apache | `numpy`, `pandas`, `scipy`, `statsmodels`, `packaging` | **compiled** (`meson-python` + Cython) |
+| `qlib` | **MIT** | (platform) | pure-python |
+| `finrl` | **MIT** | (platform) | pure-python |
+| `chronos-forecasting` | **Apache-2.0** (README + `LICENSE`) | torch | model weights from HF |
+| `timesfm` | source **Apache-2.0**; weights **≤ 2.5 Apache-2.0**; **3.0 weights non-commercial** | torch / MLX | model weights from HF |
+| `hmmlearn`, `ruptures`, `statsmodels`, `darts`, `neuralforecast`, `pymc` | **not verified in this pass** | — | mixed |
 
-**Hjalmarsson (2006), Federal Reserve IFDP 855.** *"Using Monte Carlo simulations, I show that typical
-out-of-sample forecast exercises for stock returns are unlikely to produce any evidence of
-predictability, even when there is in fact predictability and the correct model is estimated."*
+### 4.1 Corrections to the evaluated proposal's dependency model
 
-The mechanism is not a lack of structure — it is estimation noise against a small coefficient. His
-T=600-monthly, c=−20 simulations find the conditional forecast only beats the constant-return
-(β=0) benchmark **on average** once the true β exceeds ~0.015, while the Diebold-Mariano test's
-rejection rate at β=0.015 is 5.8%. His conclusion is the design instruction:
+Four of its framing assumptions do not match the verified versions. Stated factually, since the point is
+the dependency surface, not the argument:
 
-> *"in order to produce good forecasts when the slope coefficient in a linear regression is small, you
-> are often better off setting it equal to zero, rather than using a noisy estimate of it."*
+- **`statsforecast` takes `statsmodels` as a hard dependency and does not declare `numba`.** The
+  proposal's mental model of the Nixtla stack is inaccurate for the verified versions.
+- **`arch` is NCSA**, a distinct licence with its own attribution clause — not the MIT/BSD/Apache class
+  the proposal groups it with.
+- **`mlforecast`'s core dependency is `scikit-learn` + `optuna`.** `LightGBM`/`XGBoost` appear only under
+  the `dask`/`ray`/`spark` extras, so the "→ LightGBM/XGBoost" path needs an extra, not just the package.
+- **Licensing must be version- and checkpoint-specific, never class-level.** The clearest case is
+  TimesFM, whose README states plainly: *"TimesFM 3.0 pretrained weights are distributed under the
+  separate `timesfm-non-commercial-license-v1.0` license and are restricted to non-commercial,
+  non-production use. Commercial or production use of downloaded / self-hosted weights is **not
+  permitted**"* — while its source and its ≤2.5 weights are Apache-2.0, and commercial 3.0 use is
+  permitted only through Google Cloud services. A blanket "foundation models are free" rule and a blanket
+  "foundation models are non-free" rule are both wrong.
 
-**Goyal, Welch & Zafirov (2021 SFI WP 21-85; RFS 2024, 37(11) 3490).** The 2022 re-examination tested
-the original 17 predictors plus 29 variables from 26 post-2008 papers, samples ending 2021:
-*"Much of the extant literature seems obsolete, with a majority of variables no longer having empirical
-support even in-sample. A small number still perform reasonably well."*
+### 4.2 Verified capabilities relevant to this design
 
-Read together: a `return_forecast` number produced by fitting a model to a single name's price history
-is not a weak signal — **it is a statistically unsupported one**, and it would enter this engine as a
-number indistinguishable from a measured one.
+**`StatsForecast` ships `GARCH` and `ARCH` models** (`python/statsforecast/models.py`, their own
+documented group), and both are **implemented in-house** — `fit()` calls `garch_model(y, p, q)`,
+`predict()` calls `garch_forecast(...)`. It does **not** delegate to `arch`, which is why `arch` is absent
+from its dependency list.
 
-### 4.2 The volatility level is forecastable, and HAR is the baseline to beat
+`predict()` returns **`{"mean", "sigma2"}`** — the conditional-variance forecast, which is the quantity
+this engine's risk path consumes. Intervals are `quantile × sqrt(sigma2)` (Gaussian) unless
+`prediction_intervals=ConformalIntervals(...)` is passed.
 
-**Corsi (2009), *J. Financial Econometrics* 7(2):174–196.** The HAR-RV model:
+> **Note on ownership, not equivalence.** `StatsForecast.GARCH` and `strategies/volatility_models.py:438`
+> `garch11_fit` both produce GARCH-family conditional-variance forecasts. That overlap is sufficient to
+> establish an **ownership conflict** under FD-1 clause 5. This document does **not** claim the two are
+> numerically equivalent, and it does not need to: two GARCH implementations differ in likelihood,
+> distributional assumption, initialization, parameter constraints, optimizer, scaling, horizon handling
+> and missing-data policy. Establishing equivalence would require its own measurement.
+
+**The evaluated proposal's architectural advice is consistent with this repository's invariant 8** — it
+declines "one giant `ForecastScore`" and keeps the score engines independent, which is
+`docs/scores/README.md` §2.1 restated.
+
+---
+
+## 5. What is forecastable: the evidence, by target family
+
+### 5.1 The absolute return level — **not admitted**, and that is not the same as "unforecastable"
+
+v1.0 stated this badly. The correct claim is:
+
+> **No authoritative absolute return-level forecast is admitted by this design unless a declared producer
+> demonstrates out-of-sample incremental value against this repository's prescribed benchmark and passes
+> the research-honesty gates.**
+
+That is a **statement about this engine's authorization**, not about markets. The distinction matters
+because it is falsifiable and it names what would change it. Three separate things have been conflated in
+the past and are kept apart here:
+
+| Claim | Status |
+|---|---|
+| "A univariate price-history model fitted to one name produces an authoritative expected return" | **Rejected.** This is what the evidence bears on. |
+| "Stock returns are not forecastable" (universal) | **Not claimed, and not supported by the cited evidence.** |
+| "No absolute return-level forecast is currently authorized in this engine" | **The operative rule.** |
+
+The evidence supports *skepticism about the specific, weakest construction*:
+
+**Hjalmarsson (2006), Fed IFDP 855.** *"Using Monte Carlo simulations, I show that typical out-of-sample
+forecast exercises for stock returns are unlikely to produce any evidence of predictability, even when
+there is in fact predictability and the correct model is estimated."* His T=600-monthly, c=−20 runs put
+the conditional forecast ahead of the constant-return benchmark **on average** only above a true
+β ≈ 0.015, with a Diebold-Mariano rejection rate of 5.8% at that β. The instruction that follows —
+*"you are often better off setting it equal to zero, rather than using a noisy estimate of it"* — is an
+argument about **estimation noise against a small coefficient**, not about the absence of structure.
+
+**Goyal, Welch & Zafirov (2021 SFI WP 21-85; RFS 2024, 37(11) 3490).** 17 original predictors plus 29
+variables from 26 post-2008 papers, samples ending 2021: *"Much of the extant literature seems obsolete,
+with a majority of variables no longer having empirical support even in-sample. A small number still
+perform reasonably well."* Note the last clause: **a small number still work.** A universal claim would
+have to contradict it.
+
+So the rule is a **gate, not a verdict**: it declines the construction that has repeatedly failed, and it
+leaves the door open for a producer that clears §8.2's benchmark.
+
+### 5.2 The four return-adjacent targets are different objects
+
+This is the second place v1.0 was too coarse. A single `return_forecast` concept cannot express:
+
+| Target | Meaning | Evidence |
+|---|---|---|
+| `absolute_return` | a name's expected absolute return over a horizon | the weak construction above — **not authorized** |
+| `relative_return` | a name's return in excess of a benchmark/peer set | distinct question; the cross-section channel |
+| `return_rank` | the name's ordinal position in the cross-section | **explicitly near-unforecastable** — see below |
+| `residual_return` | the return after market/factor residualization | distinct again; `cross_section.residualize_returns:223` already produces the *input* |
+
+The repository's own survey result (`design_cross_section_and_allocation.md` §1, paper 2607.27461) is
+precise: the **volatility-rank** transition matrix is forecastable with multi-step memory (out-of-sample
+monthly log-likelihood gain **0.108**) while the **return-rank** matrix is close to unforecastable
+(**0.007**); return-rank mean absolute error sits at 2.5 deciles and covariates do not move it, while the
+volatility rank's falls from 2.05 to 1.78 with covariates.
+
+So `return_rank` carries a `declined` status with a cited reason — exactly like `absolute_return` — and
+neither statement is allowed to stand in for the other.
+
+### 5.3 Volatility — forecastable, with HAR-RV as the benchmark to beat
+
+**Corsi (2009), *J. Financial Econometrics* 7(2):174–196.** HAR-RV:
 
 ```
 RV_{t+1} = c + b_d * RV_t + b_w * RV_w + b_m * RV_m
 ```
 
-His abstract records the finding this engine's design already assumes: *"direct time series modeling of
+Its abstract records the finding this engine's design already assumes — *"direct time series modeling of
 realized volatility strongly outperforms, in terms of out-of-sample forecasting, the popular GARCH and
 stochastic volatility models"* — with S&P 500 coefficients b_d=0.372, b_w=0.343, b_m=0.224. The model
-reproduces long memory, fat tails and self-similarity **without** being a long-memory process, which is
-why a three-term regression is the correct benchmark rather than a null hypothesis.
+reproduces long memory, fat tails and self-similarity **without being a long-memory process**, which is
+why a three-term regression is the right benchmark rather than a null.
 
-**Leushuis & Petkov (2026), *Financial Innovation* 12:14** (open access, DOI 10.1186/s40854-025-00809-5).
-A review of 32 realized-volatility models from 41 papers, 2000–H1 2024. Its findings: ARMA/HAR remain the
-**linear baselines**, the best-performing architecture is a CNN-LSTM hybrid, and the paper enumerates the
-six empirical properties any model must address — autocorrelation/clustering, asymmetry, leptokurtosis,
-mean reversion, seasonality, co-movement. It **deliberately excludes GARCH** as a latent-volatility
-model. The honest reading for this engine: the deep-learning increment over HAR is real but modest, and
-the review's own sibling literature flags the risk — a 2025 paper in the same journal's related list is
-titled *"Examining Challenges in Implied Volatility Forecasting: A Critical Review of Data Leakage and
-Feature Engineering combined with High-Complexity Models."*
+**Leushuis & Petkov (2026), *Financial Innovation* 12:14** (open access). A review of 32 realized-volatility
+models from 41 papers, 2000–H1 2024. It reports stronger performance for some deep architectures (a
+CNN-LSTM hybrid leads on its aggregated metrics) and enumerates the six empirical properties any model must
+address. **That evidence is a literature aggregate, not a measurement on this engine's data, and therefore
+does not justify adoption without an engine-specific evaluation** (§8.2). The review also deliberately
+excludes GARCH as a latent-volatility model, and a 2025 paper in the same journal's related list —
+*"Examining Challenges in Implied Volatility Forecasting: A Critical Review of Data Leakage and Feature
+Engineering combined with High-Complexity Models"* — is a standing warning about this model class.
 
-### 4.3 The engine's own survey reached the same conclusion first
+### 5.4 The precise gap — not "no forecasting", but "no learned forecast pool"
 
-`docs/design_fin_paper_survey_26.md` §3 (2026-09-23), on the 2026 corpus:
+```
+evaluated proposal
+   ├── GARCH ───────────── already owned  (volatility_models.garch11_fit:438)
+   ├── HAR + long memory ── already owned  (strategies/long_memory.py, V2)
+   ├── HMM / regime ─────── already owned  (regime.py:545, R2)
+   ├── change-point ─────── already owned  (regime.py:1013, :1327)
+   ├── conformal intervals ─ already owned  (conformal.py, H11)
+   ├── covariance ──────── already owned  (covariance_models.py:85, :132)
+   │
+   └── ML forecast pool ─── genuine capability gap  → V1 (already designed, BLOCKED)
+```
 
-| Paper | Finding |
+The repository has most of the forecasting **methods** but no general-purpose **learned forecast-pool
+producer** with online scoring and regime-similarity routing. That is the accurate architectural
+conclusion, and it is V1's item — blocked on a **vendor state vector** (`VXV` + a HY-spread series), not
+on a library.
+
+---
+
+## 6. What this repo already owns (verified)
+
+### 6.1 The owners
+
+| Theme | Producer(s), verified | State |
+|---|---|---|
+| GARCH / ARCH / range / semivariance | `strategies/volatility_models.py:68` `semivariance`, `:155` `parkinson_vol`, `:185` `garman_klass_vol`, `:288` `yang_zhang_vol`, `:332` `yang_zhang_vol_series`, `:397` `ewma_vol`, `:438` `garch11_fit` (MLE, `:53` `_IGARCH_AB` breakdown guard) | built |
+| Jump-robust realized measures | `volatility_models.py` `bipower_proxy` / `quarticity_proxy` behind `enable_jump_robust_proxies` | built — V6 |
+| HAR + semiparametric memory | `strategies/long_memory.py:146` `memory_parameter` (GPH + local Whittle), `:236` `rv_forecast`, `:58` `long_memory_enabled`; consumed by `mean_reversion.py::memory_profile` | built — V2, `gate_registry.md:273` |
+| HMM / Markov regime | `regime.py:545` `hmm_filtered_regime` (Baum-Welch `_hmm_em:355`, **causal filtered** posteriors), `:781` `regime_conditional_var`, `:743` `hmm_regime` delegating so there is ONE producer | built — R2 |
+| Change-point / structure break | `regime.py:1013` `cusum`, `:1327` `bocpd`, `:1494` `spectral_change_read`; `complexity.py` | built |
+| Kalman / state-space | `statistical_kalman.py:42` `kalman_spread` | built |
+| Conformal / probabilistic intervals | `conformal.py` `quantile_band` (CQR), `rolling_band`, `iid_interval`, `block_bootstrap_interval`, `information_gap`, `adf_t`, `block_length` | built — H11 |
+| Option-implied / risk-neutral | `options_surface.py:25` `iv_skew`, `:201` `surface_shape`, `:227` `term_structure_slope`, `:294` `pre_event_iv_lift`, `:489` `rn_skew_proxy`; `rnd_recovery.py` | built — V3, V4, K3 |
+| Covariance / eigenstructure | `covariance_models.py:132` `ewma_covariance`, `:85` `ledoit_wolf_shrink`; `eigen_rotation.py` | built — V5 |
+| Tails / drawdown / VaR-CVaR | `tail_risk.py`, `book_risk.py::drawdown_envelope`, `triadic_stress.py` | built — K1, K2 |
+| Evaluation harness | `prediction_ledger.py`, `evaluate.py`, `trial_ledger.py`, `calibration.py:151`, `signal_analysis.py:64` `rank_ic` | built — H1, H5 |
+
+### 6.2 The Tier-1 audit, stated precisely
+
+All six Tier-1 proposals are either **redundant with an existing authoritative producer** or **belong to
+an already-defined but currently blocked producer capability**:
+
+- **`arch`** → `garch11_fit` is the GARCH producer. Fails FD-1 clause 5. `REJECT_DUPLICATE`.
+- **`statsmodels`** → its regime/econometric surface is covered by `regime.py` + `covariance_models.py`.
+  It is also a **hard dependency of `statsforecast`**, so it arrives transitively if that is ever
+  admitted — no direct case. `REJECT_DIRECT`.
+- **`hmmlearn`** → `hmm_filtered_regime` exists **and feeds `book_risk`'s VaR**. A second regime label is
+  the highest-risk duplicate in this table, because two disagreeing labels are indistinguishable from a
+  regime change. `REJECT_DUPLICATE`.
+- **`ruptures`** → `cusum` + `bocpd` + `spectral_change_read` cover the declared change-point surface.
+  `REJECT_DUPLICATE`.
+- **`StatsForecast`** → its distinct artifact is V1's scored, regime-routed **pool**, which is designed and
+  blocked on a vendor state vector. `CONDITIONAL`.
+- **`MLForecast`** → the pool's learned members. This is *not* a wrapper around something already built;
+  learned-member forecasting is genuinely the capability gap. `CONDITIONAL`.
+
+---
+
+## 7. The ForecastContract
+
+The contract is a **declaration**. It computes nothing, and it is deliberately not gated — a declaration
+that must be switched on is one nobody uses. The producers it reads are each already individually gated
+(`enable_long_memory`, `enable_jump_robust_proxies`, `enable_hmm_heavy_tails`, `enable_bootstrap_intervals`, …).
+
+### 7.1 The record
+
+```
+ForecastRecord
+├── key                  : str            # semantic name; carries NO horizon (see §7.4)
+├── producer             : str            # "strategies/long_memory.py::rv_forecast"  <- the authority
+├── gate                 : str | None     # "enable_long_memory" | None
+│
+├── target                                # MANDATORY - "volatility" alone is not a target (§7.3)
+│   ├── name             : str            # "realized_volatility" | "return_rank" | ...
+│   ├── definition       : str            # the measurement, e.g. "sqrt(sum of squared daily returns)"
+│   ├── unit             : str            # "annualized_vol" | "probability" | "rank_decile" | ...
+│   └── annualization    : int | None     # 252, or None
+│
+├── frequency            : str            # "1d" | "5m" | "1w"   <- 5d@1d is not 5d@5m
+├── horizon              : int            # steps in `frequency` units; >= 1 (rule 6)
+├── forecast_origin      : timestamp      # the as-of date the forecast is made FOR
+│
+├── value                : float | None    # None <=> status != "ok"  (NEVER 0.0 as a placeholder)
+├── status               : str            # "ok" | "unavailable" | "declined"
+├── reason_code          : str | None     # MACHINE-READABLE (§7.2 rule 4)
+├── reason_detail        : str | None     # human prose, optional
+│
+├── interval                              # PRODUCTION metadata: known when the forecast is made
+│   ├── low              : float
+│   ├── high             : float
+│   ├── nominal_coverage : float          # 0.90
+│   ├── method           : str            # "CQR" | "block_bootstrap" | "gaussian_sigma"
+│   └── calibration_ref  : str | None     # the calibration window/source the band was calibrated on
+│
+├── provenance
+│   ├── data_version     : str
+│   ├── training_start   : timestamp
+│   ├── training_end     : timestamp
+│   ├── requested_window : int
+│   ├── effective_window : int
+│   ├── padded           : bool           # a padded window is BIASED, not merely low-confidence
+│   ├── missing_obs      : int
+│   ├── imputed_obs      : int
+│   ├── adjusted_prices  : bool           # adjusted vs unadjusted changes the economic meaning
+│   └── model_version    : str
+│
+└── evaluation                            # POST-HOC metadata: DECLARED, not populated at forecast time
+    ├── evaluated        : bool           # False at creation; the ledger fills this later
+    ├── realized_coverage: float | None
+    ├── n_observations   : int | None
+    ├── scoring_rule     : str | None     # "CRPS" | "QLIKE" | "RMSE" | "MAE"
+    ├── benchmark_ref    : str | None     # which §8.2 benchmark it was scored against
+    ├── benchmark_delta  : float | None
+    └── evaluated_as_of  : timestamp
+```
+
+### 7.2 The rules
+
+1. **`value is None` iff `status != "ok"`.** A forecast that cannot be made is `unavailable`; it is never
+   `0.0` and never a shrunk-to-zero pseudo-number (`NA != 0`, `ScoreContextContract.md`, restated for
+   forecasts).
+2. **One producer per `(key, frequency, horizon)`.** Declared once, asserted by a test. Invariant 8, made
+   checkable for forecasts.
+3. **`declined` is a first-class status**, distinct from `unavailable`:
+   - `ok` — a producer was authorized and produced a value.
+   - `unavailable` — authorized, but not currently producible. Codes: `INSUFFICIENT_HISTORY`,
+     `MISSING_VENDOR_SERIES`, `MODEL_FIT_FAILURE`, `COVERAGE_FAILURE`, `GATE_OFF`.
+   - `declined` — the engine **intentionally does not produce this by policy**. Codes:
+     `RETURN_LEVEL_NOT_ADMITTED`, `RETURN_RANK_NOT_ADMITTED`, `TARGET_NOT_ADMITTED`.
+   A `declined` row is a **cited, reversible policy statement**; an absent row is an invitation.
+4. **`reason_code` is machine-readable** and drawn from a closed vocabulary; `reason_detail` is optional
+   prose. A test asserts every non-`ok` row carries a code from the vocabulary.
+5. **Production and evaluation metadata are separate.** `interval.realized_coverage` does **not** exist —
+   the interval carries only what is knowable when the forecast is made. Realized coverage lives in
+   `evaluation` and is populated by the prediction ledger after the outcome resolves. *This was a v1.0
+   error.*
+6. **A state read is not a forecast.** `horizon >= 1` is required. A regime/current-state read belongs in
+   the score/state contracts, not here — otherwise `ForecastRecord(key="regime.current", horizon=0)`
+   appears and the forecast namespace becomes a generic analytics namespace, destroying the ability to
+   reason about the ledger.
+7. **No forecast without a target definition.** `target.name`, `target.definition`, `target.unit`,
+   `frequency` and `horizon` are mandatory. This matters because the repo carries at least nine distinct
+   volatility concepts (`ewma_vol`, `parkinson_vol`, `garman_klass_vol`, `yang_zhang_vol`, `garch11_fit`,
+   realized vol, `semivariance`, `bipower_proxy`, `quarticity_proxy`) — **a forecast of one is not
+   interchangeable with a forecast of another.**
+8. **Provenance is mandatory**, including `padded`. The corpus's temporal-coverage-bias result is that a
+   padded window *suppresses measured volatility in a known direction* — it is biased, not merely
+   uncertain — and `adjusted_prices` changes the economic meaning of a return series while leaving the
+   arithmetic reproducible.
+
+### 7.3 The target vocabulary
+
+Declared once, so `key` stays a name rather than a semantic soup:
+
+```
+absolute_return      relative_return      return_rank      residual_return
+volatility           variance             volatility_rank
+regime_probability   regime_stress_probability
+```
+
+`unit` is drawn from: `annualized_vol`, `variance`, `probability`, `rank_decile`, `pct`,
+`raw_return_bps`.
+
+Key/horizon are **separated**, not combined:
+
+```
+key = "realized_volatility"      frequency = "1d"   horizon = 1    unit = "annualized_vol"
+key = "volatility_rank"          frequency = "1d"   horizon = 22   unit = "rank_decile"
+key = "regime_stress_probability" frequency = "1d"  horizon = 5    unit = "probability"
+```
+
+(`v1.0` wrote keys such as `rv.d1`, which encoded the horizon inconsistently.)
+
+### 7.4 What the contract does not do
+
+- It is **not** a module that computes anything — a declaration, a registry and a test.
+- It does **not** add a member to `COMPOSITE_ENGINES`.
+- It does **not** put a return forecast on the decision path (`kelly_weights`' declaration boundary, §2).
+- It does **not** accept state reads (§7.2 rule 6).
+
+---
+
+## 8. From forecast to admissible evidence
+
+### 8.1 The wiring
+
+v1.0 omitted this entirely; it is the largest architectural gap in that revision.
+
+```
+Forecast producer (declared, gated)
+        │
+        ▼
+ForecastRecord (this contract)
+        │
+        ▼
+strategies/prediction_ledger.py      ← immutable prediction rows, scored against realized outcomes
+        │
+        ▼
+realized outcome
+        │
+        ▼
+evaluation:  evaluate.py · trial_ledger.py · calibration.py · signal_analysis.rank_ic
+        │
+        ├── point:  MAE / RMSE            ── vs benchmark
+        ├── dist:   CRPS / QLIKE          ── vs benchmark
+        └── band:   realized coverage     ── vs nominal
+        ▼
+design_research_honesty_gates.md: H1 (trial ledger, deflation) · H4 (accuracy ceiling / base rate)
+                                  H5 (five-gate verdict) · H11 (autocorrelation-aware intervals)
+        ▼
+admission / continued use
+```
+
+The direction is one-way: **the ledger scores the producer; the producer never scores itself.** A
+forecast's `evaluation` block is filled by the ledger, not by the producer, so a producer cannot declare
+its own realized coverage.
+
+### 8.2 Every forecast family needs a declared benchmark
+
+A forecast does not get credit for producing a number. Before admission, each family names its benchmark:
+
+| Target family | Benchmark |
 |---|---|
-| 2607.27461 | a name's 10-decile **volatility-rank** transition matrix is forecastable with multi-step memory; its **return-rank** matrix is close to unforecastable. Out-of-sample monthly log-likelihood gain **0.108 vs 0.007**; rank MAE 2.05→1.78 with covariates for volatility, stuck at 2.5 for return. |
-| 2602.07841 | a **nontrivial upper bound on the out-of-sample R²** in return forecasting — a *ceiling to check claims against*, not a model to fit. |
+| `volatility` / `variance` | **HAR-RV** (Corsi) and naive trailing realized vol; GARCH as a third reference |
+| `absolute_return` | historical mean; zero |
+| `relative_return` / `residual_return` | the appropriate factor or rank baseline |
+| `return_rank` / `volatility_rank` | persistence (today's rank); `centered_rank` of trailing return |
+| `regime_probability` | persistent-state (sticky) Markov baseline |
+| any `interval` | naive empirical quantile band (`conformal.iid_interval` is the floor) |
 
-So the boundary is already drawn in this repo, by the same evidence class, and the new material here
-does not move it.
-
-### 4.4 What follows for a `ForecastContext`
-
-1. **Volatility, covariance, rank and regime are forecastable** → these keys may carry numbers, from the
-   producers that already own them.
-2. **The return level is not** → `return_forecast` must be `unavailable` with a named reason, not a
-   fitted number. A numeric return forecast here would be a **new authoritative producer** of a quantity
-   the engine has already decided not to produce, and `Strategies/` + `CHANGELOG.md` record that
-   decision as taken: the sector-rotation spec's *"expected return/risk"* construction is **"Rejected
-   outright (`evaluate.py` + CPCV/PBO is the repo's method)"**.
-3. **Any forecast that does carry a number must travel with its interval and its realized coverage** —
-   the house rule ("coverage travels with the number") plus the corpus's H11 axis, both already built.
+Plus the repo's existing discipline: `2602.07841`'s **nontrivial upper bound on the out-of-sample R²**
+(surveyed in the H-theme) is a ceiling any return-forecast claim must stay under, and `H4`'s base-rate
+ceiling applies to every directional claim.
 
 ---
 
-## 5. What this repo already owns — and why a library would be a second producer
+## 9. Per-library verdict
 
-### 5.1 The eight invariants
+Reasons are categorized so a future contributor can re-open the *right* argument rather than the whole
+row.
 
-`docs/MASTER_DESIGN.md` §2, invariant 8: **one producer per number**. `docs/scores/README.md` §2.1
-invariants 8–18 restate it as *"no derived quantity may have two independent authoritative producers."*
-
-A "forecasting layer" is, by construction, a second place a number is computed. It is therefore either
-(a) the *declared* producer for numbers nothing else produces, or (b) a duplicate. §5.2 shows it is
-almost entirely (b).
-
-### 5.2 The owners, verified in the tree
-
-| Theme the proposal names | Who already owns it here | State |
+| Candidate | Verdict | Reason |
 |---|---|---|
-| GARCH / ARCH / range / semivariance vol estimators | `strategies/volatility_models.py:68` `semivariance`, `:155` `parkinson_vol`, `:185` `garman_klass_vol`, `:288` `yang_zhang_vol`, `:332` `yang_zhang_vol_series`, `:397` `ewma_vol`, `:438` `garch11_fit` (MLE, with the `:53` `_IGARCH_AB` breakdown guard) | **built** |
-| Jump-robust realized measures (bipower, quarticity, jump share) | `strategies/volatility_models.py` `bipower_proxy` / `quarticity_proxy`, behind `enable_jump_robust_proxies` | **built** — V6 |
-| HAR-family realized-variance forecast + semiparametric memory parameter | `strategies/long_memory.py:146` `memory_parameter` (GPH + local Whittle), `:236` `rv_forecast`, `:58` `long_memory_enabled`; consumed by `strategies/mean_reversion.py::memory_profile` | **built** — V2, `gate_registry.md:273` "wired", `test_long_memory.py` |
-| HMM / Markov regime | `strategies/regime.py:545` `hmm_filtered_regime` — a real Baum-Welch fit (`_hmm_em:355`) with **causal filtered** posteriors, plus `:781` `regime_conditional_var`; `hmm_regime:743` delegates so there is ONE HMM producer. Behind `enable_hmm_heavy_tails` | **built** — R2 |
-| Change-point / structure break | `strategies/regime.py:1013` `cusum`, `:1327` `bocpd`, `:1494` `spectral_change_read` (behind `enable_spectral_null_band`); `strategies/complexity.py` | **built** |
-| Kalman / state-space smoothing | `strategies/statistical_kalman.py:42` `kalman_spread` | **built** |
-| Conformal / probabilistic intervals | `strategies/conformal.py` `quantile_band` (CQR), `rolling_band`, `iid_interval`, `block_bootstrap_interval`, `information_gap`, `adf_t`, `block_length`; `enable_bootstrap_intervals` | **built** — H11 |
-| Option-implied / risk-neutral reads | `strategies/options_surface.py:25` `iv_skew`, `:201` `surface_shape`, `:227` `term_structure_slope`, `:294` `pre_event_iv_lift`, `:489` `rn_skew_proxy`; `strategies/rnd_recovery.py` behind `enable_rnd_recovery` | **built** — V3, V4, K3 |
-| Covariance, eigenstructure, rotation | `strategies/covariance_models.py:132` `ewma_covariance`, `:85` `ledoit_wolf_shrink`; `strategies/eigen_rotation.py` behind `enable_eigen_rotation` | **built** — V5 |
-| Tail / drawdown / VaR-CVaR | `strategies/tail_risk.py` (`enable_tail_risk_layer`), `strategies/book_risk.py::drawdown_envelope`, `strategies/triadic_stress.py` | **built** — K1, K2 |
-| Rank/selection + evaluation harness | `strategies/signal_analysis.py:64` `rank_ic`, `strategies/prediction_ledger.py`, `strategies/evaluate.py`, `strategies/trial_ledger.py`, `strategies/calibration.py` | **built** |
+| `statsforecast` | **CONDITIONAL** | Only for a declared producer whose capability is not already owned, and only as a versioned **offline refit** (ground rule 8). Requires FD-1 cl. 1–4 + §8.2 benchmark. |
+| `mlforecast` | **CONDITIONAL** | Same; the likely source of V1's learned members. Brings `scikit-learn` + `optuna`. |
+| `arch` | **REJECT_DUPLICATE** | `garch11_fit` is the existing GARCH producer (FD-1 cl. 5). |
+| `statsmodels` | **REJECT_DIRECT** | Existing `regime`/`covariance_models` surface; transitive via `statsforecast` if admitted. |
+| `hmmlearn` | **REJECT_DUPLICATE** | `hmm_filtered_regime` exists and feeds `book_risk`'s VaR. |
+| `ruptures` | **REJECT_DUPLICATE** | `cusum` + `bocpd` + `spectral_change_read`. |
+| `darts`, `neuralforecast`, `gluonts`, `pytorch-forecasting`, `autogluon-timeseries` | **REJECT_NO_CONSUMER** | No declared producer; large compiled/torch dependency surface. |
+| `pymc`, `pyro`, `tensorflow-probability` | **REJECT_NO_CONSUMER** | No declared probabilistic producer; `conformal.py` already supplies calibrated bands. |
+| `chronos`, `timesfm`, `moirai`/`uni2ts`, `lag-llama`, `moment` | **REJECT_THIS_PASS** | No declared consumer **and no demonstrated incremental value**. Reopening requires a separate **code-licence / checkpoint-licence / hardware / reproducibility / leakage** evaluation — TimesFM 3.0's non-commercial weights (§4.1) are the worked example of why that review is not a formality. |
+| `prophet`, `pyaf`, `greykite`, `kats`, `pyflux` | **REJECT_NO_RESEARCH_CASE** | No research case; agreed with the evaluated proposal's own Tier 4. |
+| `qlib`, `finrl` | **ALREADY_OWNED** | Existing design+plan pairs in `docs/`. |
 
-### 5.3 The proposal's Tier 1, item by item
-
-- **`arch`** → `garch11_fit` exists, is MLE, and carries an explicit IGARCH guard. `arch` would be a
-  second GARCH producer. **Not admitted.**
-- **`statsmodels`** → its Markov-switching and econometric surface is largely covered by
-  `regime.py` + `covariance_models.py` + the in-house regressions. It is also a *hard dependency of
-  `statsforecast`*, so it arrives transitively if `statsforecast` is ever admitted — no separate case for
-  adding it directly.
-- **`hmmlearn`** → `regime.py::hmm_filtered_regime` exists **and is wired into `book_risk`'s VaR**. A
-  second HMM is a second regime label — the most dangerous kind of duplicate, because two regime labels
-  that disagree are indistinguishable from a regime change. **Not admitted.**
-- **`ruptures`** → `spectral_change_read` + `complexity.py` cover the declared change-point surface.
-- **`StatsForecast`** → its genuinely distinct value here is the **forecast *pool* with online scoring
-  and regime-similarity routing** — which is *already designed*, as **V1**
-  (`design_vol_surface_and_vrp.md` §V1), and **blocked on a vendor state vector** (`VXV` + a HY-spread
-  series), not on a library.
-- **`MLForecast`** → the ML members of that same V1 pool. Same owner, same block.
-
-**Six of six Tier-1 libraries are either already in-house or already owned by a blocked design item.**
-
-### 5.4 The one place a library is plausibly correct
-
-V1's pool names members `HAR-RV, GARCH(1,1)-t, FIGARCH(1,1)-t, GRU, XGBoost` — two econometric members
-(this repo can do) and three learned ones (it cannot, today). **This is a genuine capability gap**, and
-it is the *only* place in the proposal where a dependency buys something the engine does not have.
-
-Its own plan already states the correct shape: *"P4 / offline-ish … the refit is an offline artefact"*
-and ground rule 8 — *"never called from `prepare_initial_state`, `finalize_run`, or any agent tool."*
-So even for the admitted case the artifact is an **offline refit producing a versioned artefact**, not a
-live library call on the decision path. That is the mechanism §7's admission rule encodes.
+**Today's net dependency change: zero.**
 
 ---
 
-## 6. The artifact worth adopting: a `ForecastContract`, not a producer
+## 10. Non-goals
 
-The proposal's `ForecastContext` is right in shape and wrong in one field. Adopted here as a
-**declaration** — a schema every existing producer already satisfies or explicitly refuses — it buys
-three things the repo does not have: a single place that says *which* forecast numbers exist, a
-machine-checkable "no second producer" rule, and a refusal that is as visible as a number.
-
-### 6.1 The shape
-
-```
-ForecastRecord                     # ONE producer per key, per horizon, declared once
-├── key            : str           # e.g. "rv.d1", "vol_rank.d22", "regime.p_stress"
-├── producer       : str           # "strategies/long_memory.py::rv_forecast"  <- the authority
-├── gate           : str | None    # "enable_long_memory" | None (always-on)
-├── horizon        : int           # trading days, or 0 for a state read (not a forecast)
-├── unit           : str           # "annualized_vol" | "probability" | "rank_decile" | ...
-├── value          : float | None  # None  <=>  status != "ok"   (NEVER 0.0 as a placeholder)
-├── status         : str           # "ok" | "unavailable" | "declined"
-├── unavailable    : str | None    # the NAMED reason when status != "ok"
-└── interval       : dict | None   # {low, high, nominal, realized_coverage, block, basis}
-```
-
-### 6.2 The five rules
-
-1. **`value is None` iff `status != "ok"`.** A forecast that cannot be made is `unavailable` with a
-   reason; it is never `0.0`, and it is never a shrunk-to-zero pseudo-number (`NA != 0`, the existing
-   `docs/scores/ScoreContextContract.md` §NA rule, restated for forecasts).
-2. **One producer per `(key, horizon)`.** Declared in the registry, asserted by a test. This is
-   invariant 8 made checkable for forecasts specifically.
-3. **A `declined` key is a first-class status.** `return_forecast` ships **`status="declined"`** with the
-   §4 reason attached — so the absence is discoverable, cited and deliberate rather than an empty field a
-   future contributor helpfully fills in.
-4. **An interval travels with the number, and so does its *realized* coverage.** `conformal.py`'s own
-   module comment states the governing lesson — *"read the realized coverage, never the nominal level
-   alone"* — and `information_gap` already measures whether a band is wide because it knows something.
-5. **Provenance is mandatory.** `as_of`, the window, and whether the window was **padded** — the corpus's
-   temporal-coverage-bias result (a padded window is biased in a known direction, not merely
-   low-confidence) makes `padded: bool` a required field, not a nicety.
-
-### 6.3 What the contract explicitly does NOT do
-
-- It is **not** a new module that computes anything. It is a declaration plus a registry plus a test.
-- It does **not** create a `ForecastScore` engine, and it does not add a member to
-  `COMPOSITE_ENGINES` (which stays `(fundamental, technical, regime, risk)`).
-- It does **not** put a return forecast on the decision path. `strategies/portfolio.py:452`
-  `kelly_weights`' docstring already names the correct boundary — *"the excess returns must be declared
-  by the caller (a forecast source)"* — i.e. **a forecast is a declared input, never an internal
-  authority**. The contract makes that declaration explicit instead of implicit.
+- **V1's volatility forecast pool** — owned by `design_vol_surface_and_vrp.md` §V1; this doc only names its
+  admission path.
+- **V2's memory parameter and HAR forecast** — owned by the same doc; **built** as `strategies/long_memory.py`.
+- **Regime (R1–R9), tails/drawdown (K1–K6), cross-section (X1–X8), evaluation gates (H1–H11)** — each owned
+  by its `docs/paper_survey_26/` pair. Cited here, never restated.
+- **The score set and `COMPOSITE_ENGINES`** — owned by `docs/scores/README.md`.
+- **Report verification** — unrelated ownership.
 
 ---
 
-## 7. Per-library verdict
+## 11. Open owner decisions
 
-Admission has three outcomes. **`INTEGRATE`** = becomes a declared dependency this pass.
-**`CONDITIONAL`** = admitted only when a named `WORK` item unblocks, via the offline-refit mechanism.
-**`REJECT`** = recorded with a reason, so it is not silently re-proposed (the same convention
-`design_vol_surface_and_vrp.md` uses for V7/V8).
+1. **Does `absolute_return` and `return_rank` ship as `declined` rows, or omitted?** §7.2 rule 3 recommends
+   **`declined` with a reason code** — a cited refusal is harder to silently reverse than an absent field.
+2. **Is the dependency policy permissive-OSI only?** `arch` is rejected on duplication grounds regardless,
+   but the *policy* recurs: this repo's dependency set is currently MIT/BSD/Apache. Recommend: **permissive
+   OSI only; NCSA and any checkpoint licence require an explicit sentence** — decided once, not per library.
+3. **V1's vendor unblock** — `VXV` and a HY-spread series are not confirmed live vendor calls. That is V1's
+   blocker and the only thing standing between §9's `CONDITIONAL` verdicts and a real dependency.
 
-| Library | Verdict | Reason |
+---
+
+## 12. Review dispositions (v1.0 → v1.1)
+
+Every point raised in review, with its disposition. Points are numbered by the review's own headings.
+
+| # | Review point | Disposition |
 |---|---|---|
-| `statsforecast` | **CONDITIONAL** (offline only) | Its distinct artifact is V1's forecast pool, which is already designed and blocked on a **vendor state vector**, not a library. If V1 unblocks, `statsforecast` may supply the econometric members **as an offline refit** (ground rule 8). It brings `statsmodels` transitively. |
-| `mlforecast` | **CONDITIONAL** (offline only) | The learned members of that same V1 pool. Note it requires `scikit-learn` **and `optuna`** as core deps. |
-| `arch` | **REJECT** | `garch11_fit` already produces the conditional variance, with an IGARCH guard and a test. A second GARCH is a second producer. (`arch`'s NCSA licence would also be the first non-MIT/BSD/Apache dep here.) |
-| `statsmodels` | **REJECT (direct)** | Arrives transitively with `statsforecast` if that is ever admitted; adding it directly duplicates `regime`/`covariance_models` surface. |
-| `hmmlearn` | **REJECT** | `regime.hmm_filtered_regime` exists and is wired into `book_risk`'s VaR. A second regime label is the highest-risk duplicate in this table. |
-| `ruptures` | **REJECT** | `spectral_change_read` + `complexity.py` cover the declared change-point surface. |
-| `darts`, `neuralforecast`, `gluonts`, `pytorch-forecasting`, `autogluon-timeseries` | **REJECT** | Research-labouratory tools with no declared consumer; each is a large, compiled-or-torch dependency. Reopen only with a hypothesis that names the producer. |
-| `pymc`, `pyro`, `tensorflow-probability` | **REJECT** | The probabilistic-programming surface has no declared consumer; `conformal.py` already supplies calibrated intervals. |
-| `chronos`, `timesfm`, `moirai`/`uni2ts`, `lag-llama`, `moment` | **REJECT (recorded, not adopted)** | Foundation models: code and **checkpoint** licences differ, inference needs weights and GPU, and the corpus's own directional-accuracy paper (2607.12248) is a warning about exactly this class. Recorded so the class is not re-proposed as "free accuracy". |
-| `prophet`, `pyaf`, `greykite`, `kats`, `pyflux` | **REJECT (Tier 4, agreed)** | The proposal already declines these; this doc agrees and records the agreement. |
-| `qlib`, `finrl` | **ALREADY OWNED** | Both have existing design+plan pairs in `docs/`; nothing is added here. |
-
-**Net dependency change this pass: none.** The admission rule is written so that a future change is a
-reviewable declaration rather than a `pip install`.
-
----
-
-## 8. Non-goals — what this document does not own
-
-- **The volatility forecast pool (V1)** — owned by `design_vol_surface_and_vrp.md` §V1. This doc only
-  states its library-admission path.
-- **The memory parameter and HAR forecast (V2)** — owned by the same doc; **already built** as
-  `strategies/long_memory.py`.
-- **Regime estimation (R1–R9)**, **tails/drawdown (K1–K6)**, **cross-section ranks (X1–X8)**,
-  **evaluation gates (H1–H11)** — each owned by its own `docs/paper_survey_26/` pair. This doc cites
-  them and must not restate them.
-- **The expected-return / scoring construction** — `COMPOSITE_ENGINES` and the score set are owned by
-  `docs/scores/README.md`. Nothing here changes a score.
-- **`_float_tokens` / report verification** — unrelated ownership.
-
----
-
-## 9. Open owner decisions
-
-1. **Is `return_forecast` shipped as `declined`, or omitted entirely?** This doc recommends
-   **`declined` with a cited reason** (§6.2 rule 3) — a visible refusal is harder to silently reverse than
-   an absent key. It is one field in a declaration and is the owner's call.
-2. **Does the admission rule permit an NCSA-licensed dependency?** `arch` is REJECT on duplication
-   grounds regardless, but the *policy* question is separate and will recur: this repo's current
-   dependency set is MIT/BSD/Apache. Recommend: **permissive-OSI only, NCSA requires an explicit
-   sentence** — so it is decided once, not per library.
-3. **V1's vendor unblock** — `VXV` and a HY-spread series are not confirmed live vendor calls. That is
-   V1's blocker and an owner/vendor decision, recorded in `design_vol_surface_and_vrp.md` §5, and it is
-   the *only* thing standing between this doc's `CONDITIONAL` verdicts and a real dependency.
+| 1 | Elevate the admission sentence to a formal invariant, with 5 clauses | **Accepted** — §3, FD-1 |
+| 2 | Headline finding is "methods owned, no learned forecast *pool*" | **Accepted** — §1, §5.4 |
+| 3 | Don't say "returns are not forecastable"; say no authoritative return forecast is admitted | **Accepted** — §5.1, the most important correction |
+| 4 | Separate `absolute_return` / `relative_return` / `return_rank` / `residual_return` | **Accepted** — §5.2, §7.3 |
+| 5 | Add `target`, `frequency`, `forecast_origin`, `evaluation` to the record | **Accepted** — §7.1 |
+| 6 | Split interval production from realized-coverage evaluation | **Accepted** — §7.1, §7.2 rule 5 (a genuine v1.0 error) |
+| 7 | Enrich provenance (`padded` insufficient; add adjusted prices, versions, windows) | **Accepted** — §7.1 |
+| 8 | Define `ok` / `unavailable` / `declined` semantics; add machine-readable reason codes | **Accepted** — §7.2 rules 3–4 |
+| 9 | Remove `horizon = 0` state reads from ForecastContract | **Accepted** — §7.2 rule 6 |
+| 10 | Tighten key/horizon identity; pick one convention | **Accepted** — §7.3 (separated, not combined) |
+| 11 | Add a mandatory `target_definition` | **Accepted** — §7.2 rule 7 |
+| 12 | Soften "the proposal's mental model is out of date" | **Accepted** — §4.1 |
+| 13 | Don't claim StatsForecast's GARCH equals the repo's until numerically established | **Accepted** — §4.2, ownership only |
+| 14 | Don't assert "the DL increment over HAR is real but modest" without a basis | **Accepted** — §5.3 |
+| 15 | Foundation models: `REJECT_THIS_PASS` + explicit review list, not a class verdict | **Accepted — and strengthened**: verified TimesFM 3.0's non-commercial weights |
+| 16 | `CONDITIONAL` needs two conditions (gap **and** in-house infeasibility) | **Accepted** — §3, §9 |
+| 17 | Admission must be evidence-based, not capability-based | **Accepted** — §3 |
+| 18 | Add "forecasting is not scoring" | **Accepted** — §2 |
+| 19 | Connect the contract to the prediction ledger and evaluation gates | **Accepted** — §8.1 |
+| 20 | Mandatory benchmark per forecast family | **Accepted** — §8.2 |
+| 21 | Categorize rejection reasons | **Accepted** — §9 |
+| 22 | "Six of six Tier-1" needs qualification | **Accepted** — §6.2 |
+| 23 | Add "no library was evaluated for forecast quality on this universe" | **Accepted** — §13.1 |
+| 24 | Make the doc less conversational / stand alone | **Accepted in part** — the doc's scope *is* an evaluation, so the object is named neutrally ("the evaluated proposal") in §1–§2 and §12, rather than removed. §1–§3 now read standalone. |
+| 25 | Revised decision matrix | **Accepted** — §9 |
+| 26 | Revised `ForecastRecord` | **Accepted with modifications** — §7.1 retains `NA != 0` (a refusal can never carry a zero), mandatory `padded`, and closed vocabularies for `status` / `reason_code` / `unit`, so the record stays machine-testable |
+| 27 | "No forecast without a target definition" | **Accepted** — §7.2 rule 7 |
+| 28 | Recommended final architecture | **Accepted** — §2 + §8.1 |
+| 29 | Keep-list | **Retained** |
 
 ---
 
-## 10. Honest limits
+## 13. Honest limits
 
-1. **Four library licences were not verified from source in this pass** (`hmmlearn`, `ruptures`,
-   `statsmodels`, the foundation models). They are marked unadmitted rather than assumed permissive.
-2. **`statsforecast`'s `GARCH` was read in source but not executed.** The claim that it emits
-   `{"mean", "sigma2"}` is a read of `predict()`'s return dict, not an observed run. `[INFERENCE]` for
-   the *behaviour*, fact for the *code*.
-3. **The CNN-LSTM-over-HAR result in Leushuis & Petkov is a literature aggregate**, not a measurement on
-   this engine's data; their related literature is explicit that the deep-learning increment is fragile
-   under leakage.
-4. **No item here is backtested** — this document authorises no build. Its claims are about *ownership*
-   and *evidence*, both of which are checkable in the tree today.
-5. **This doc's own verdict could be wrong on V1.** If V1 unblocks and its learned members cannot be
-   expressed with the in-house regressions, `statsforecast`/`mlforecast` may be the cheapest correct
-   answer — which is why they are `CONDITIONAL` and not `REJECT`, and why the admission rule exists
-   rather than a ban.
+1. **No library was evaluated for forecast quality on this engine's production universe.** Library
+   capability is therefore not evidence of financial usefulness — §4 establishes what a package
+   *contains*, never that it *works here*.
+2. **No item here is backtested** — this document authorises no build.
+3. **Seven licences were verified from source** (`statsforecast`, `mlforecast`, `arch`, `qlib`, `finrl`,
+   `chronos`, `timesfm`); **every other library in §9 is marked unadmitted rather than assumed
+   permissive**, and several (including `hmmlearn`, `ruptures`, `statsmodels`, `darts`, `neuralforecast`,
+   `pymc`) were not verified in this pass because their verdicts do not turn on the licence.
+4. **`statsforecast`'s `GARCH` was read in source but never executed.** That `predict()` returns
+   `{"mean","sigma2"}` is a read of its return dict. `[INFERENCE]` for the behaviour, fact for the code.
+5. **Leushuis & Petkov's deep-learning result is a literature aggregate**, and their sibling literature is
+   explicit that such increments are fragile under leakage — §5.3 states it as a reason not to adopt.
+6. **`return_rank`'s `declined` status rests on one paper's measurement** (2607.27461's 0.007 vs 0.108),
+   which is the best available evidence here but is not this engine's own measurement. §8.2 names the
+   benchmark that would settle it locally.
+7. **This document's `CONDITIONAL` verdicts could be wrong.** If V1 unblocks and its learned members cannot
+   be expressed with the in-house regressions, `statsforecast`/`mlforecast` may be the cheapest correct
+   answer — which is why they are conditional and why FD-1 is an admission rule rather than a ban.
 
 ---
 
 ## References
 
 - Hjalmarsson, E. (2006). *Should We Expect Significant Out-of-Sample Results when Predicting Stock
-  Returns?* Federal Reserve Board IFDP 855. <https://www.federalreserve.gov/pubs/ifdp/2006/855/ifdp855.pdf>
-- Goyal, A., Welch, I., & Zafirov, A. (2021/2024). *A Comprehensive 2022 Look at the Empirical
-  Performance of Equity Premium Prediction II.* SFI WP 21-85; *Review of Financial Studies* 37(11) 3490.
-  <https://www.sfi.ch/en/publications/n-21-85-a-comprehensive-look-at-the-empirical-performance-of-equity-premium-prediction-ii>
-- Corsi, F. (2009). *A Simple Approximate Long-Memory Model of Realized Volatility.*
-  *J. Financial Econometrics* 7(2):174–196. <https://statmath.wu.ac.at/~hauser/LVs/FinEtricsQF/References/Corsi2009JFinEtrics_LMmodelRealizedVola.pdf>
-- Leushuis, R. M., & Petkov, N. (2026). *Advances in forecasting realized volatility: a review of
-  methodologies.* *Financial Innovation* 12:14. DOI 10.1186/s40854-025-00809-5.
-- Nixtla. `statsforecast` / `mlforecast` `pyproject.toml` and `python/statsforecast/models.py` (main).
-- Sheppard, K. `arch` `pyproject.toml` (main) — licence NCSA.
+  Returns?* Fed IFDP 855. <https://www.federalreserve.gov/pubs/ifdp/2006/855/ifdp855.pdf>
+- Goyal, A., Welch, I., & Zafirov, A. (2021/2024). SFI WP 21-85; *Review of Financial Studies* 37(11) 3490.
+- Corsi, F. (2009). *J. Financial Econometrics* 7(2):174–196.
+- Leushuis, R. M., & Petkov, N. (2026). *Financial Innovation* 12:14. DOI 10.1186/s40854-025-00809-5.
+- Nixtla `statsforecast` / `mlforecast` `pyproject.toml` + `python/statsforecast/models.py` (main).
+- Sheppard, K. `arch` `pyproject.toml` (main) — NCSA.
+- `google-research/timesfm` `LICENSE` (Apache-2.0) + README licence notice (3.0 weights non-commercial).
+- `amazon-science/chronos-forecasting` `LICENSE` + README (Apache-2.0).
 - Microsoft `qlib` LICENSE (MIT); AI4Finance `FinRL` LICENSE (MIT).
-- Internal: `docs/design_fin_paper_survey_26.md` §3, §5; `docs/paper_survey_26/design_vol_surface_and_vrp.md`
-  §2, §V1, §V2, §5; `docs/paper_survey_26/design_cross_section_and_allocation.md` §1;
-  `docs/MASTER_DESIGN.md` §2 (invariant 8); `docs/scores/README.md` §2.1; `CHANGELOG.md`
-  (the *"Rejected outright"* entry).
+- Internal: `design_fin_paper_survey_26.md` §3/§5; `paper_survey_26/design_vol_surface_and_vrp.md`
+  §2/§V1/§V2/§5; `paper_survey_26/design_cross_section_and_allocation.md` §1; `MASTER_DESIGN.md` §2
+  (invariant 8); `docs/scores/README.md` §2.1; `CHANGELOG.md` (the *"Rejected outright"* entry).
