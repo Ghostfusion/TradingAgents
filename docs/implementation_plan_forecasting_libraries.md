@@ -123,8 +123,14 @@ resolves by the design doc §7.2 rule 8's fixed transform — strip `.py`, map `
 `.py`, no `__init__.py`), so the prefix is mandatory at resolution time — the bare `strategies.long_memory`
 raises `ModuleNotFoundError`. A **new** module is named with its full path for the same reason.
 
-**First caller.** the report/run-card writer that lists declared forecast keys beside the score engines —
-the registry must be *reachable*, not merely present (ground rule 7) — plus its own tests.
+**First caller.** `tradingagents/reporting.py::write_report_tree` (`:2087`) — the run-card assembler, which
+dumps `run_card.json` at `:2697` from a list of `(key, _block)` pairs. The registry's block **is produced by
+`forecast_registry.py`** and `write_report_tree` adds it to that list, so the registry is *reachable*, not
+merely present (ground rule 7), and the edit to `reporting.py` is one pair rather than a new helper. **The
+registry must never be added to `tests/test_calc_agent_wiring.py`'s whitelist.**
+
+**Owner-file caveat.** `tradingagents/reporting.py` is the owner's **in-flight, modified-unstaged** file
+(2026-10-03). Land FL-2's caller only once the owner frees it, or the diff will collide.
 
 **Phase / run mode.** P1 / in-run, pure.
 
@@ -379,6 +385,12 @@ restate it. FL-7 is the only place this plan touches V1, and it adds a bind plus
    "verified" tables were found to have drifted (`design_vol_surface_and_vrp.md` §2: eight of ten rows;
    `design_cross_section_and_allocation.md` §2: eight rows), and `design_vol_surface_and_vrp.md` §3 still
    described V2–V6 as open gaps after all five had shipped. FL-2's resolution test is the structural fix.
+
+7. **FL-2's first caller lives in the owner's in-flight file.** `write_report_tree`
+   (`tradingagents/reporting.py:2087`) writes `run_card.json` at `:2697`; that module was
+   **modified-unstaged by the owner** when this plan was written. Sequence FL-2 after the owner frees it, or
+   the diff collides. Mitigated by having `forecast_registry.py` *produce* the block and `write_report_tree`
+   add only the one `(key, _block)` pair.
 
 ---
 
