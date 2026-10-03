@@ -526,14 +526,28 @@ row.
 
 ---
 
-## 11. Open owner decisions
+## 11. Owner decisions
 
-1. **Does `absolute_return` and `return_rank` ship as `declined` rows, or omitted?** §7.2 rule 3 recommends
-   **`declined` with a reason code** — a cited refusal is harder to silently reverse than an absent field.
-2. **Is the dependency policy permissive-OSI only?** `arch` is rejected on duplication grounds regardless,
+### Answered (owner, 2026-10-03)
+
+1. **`absolute_return` and `return_rank` ship as `declined` rows** — with their reason codes and citations
+   (§7.2 rule 3, plan FL-3). They are **not** omitted: the refusal is a cited, reversible policy statement,
+   and §8.2 names the benchmark that would change it.
+2. **This repo's `contracts/research_decision.v1.schema.json` is the authoritative side** of the
+   research↔execution contract. `../TradingExecution/contracts/` was synced to it byte-for-byte, and the
+   settlement exposed a real defect on the executor's side: it converted `recommended_allocation_pct` from
+   percent to fraction only when `pct > 1.0`, so every allocation in **(0, 1] percent** was read as a
+   fraction — a 100× error that inflated the derived notional into the per-order cap, which the gate
+   answers by shrinking *to* the cap. Fixed in the executor with a failing-first test; see that repo's
+   `CHANGELOG.md`. The two fields legitimately carry **different units** (`recommended_allocation_pct` is
+   percent, `position.size_pct_book` is a fraction) and only the first is documented in the schema.
+
+### Still open
+
+3. **Is the dependency policy permissive-OSI only?** `arch` is rejected on duplication grounds regardless,
    but the *policy* recurs: this repo's dependency set is currently MIT/BSD/Apache. Recommend: **permissive
    OSI only; NCSA and any checkpoint licence require an explicit sentence** — decided once, not per library.
-3. **V1's vendor unblock** — `VXV` and a HY-spread series are not confirmed live vendor calls. That is V1's
+4. **V1's vendor unblock** — `VXV` and a HY-spread series are not confirmed live vendor calls. That is V1's
    blocker and the only thing standing between §9's `CONDITIONAL` verdicts and a real dependency.
 
 ---

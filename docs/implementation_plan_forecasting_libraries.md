@@ -207,8 +207,13 @@ rule 8 — never as a live call from the decision path — and only after cleari
 
 ### FL-8 — Owner decisions
 
-Design doc §11: whether the return families ship `declined` or omitted (recommend `declined`), and whether
-the dependency policy is permissive-OSI-only. Neither blocks FL-1…FL-7.
+**Answered (2026-10-03):** the return families **ship as `declined` rows** (design doc §11.1) — this is now
+part of FL-3's acceptance criteria, not an option. The other decision settled the same day was the
+cross-repo contract authority (design doc §11.2), which is **not** this theme's work but surfaced a 100×
+allocation-unit defect on the executor side while it was being applied.
+
+**Still open:** whether the dependency policy is permissive-OSI-only (design doc §11.3). Neither blocks
+FL-1…FL-7.
 
 ---
 
