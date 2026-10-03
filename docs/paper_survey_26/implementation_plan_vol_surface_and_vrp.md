@@ -34,7 +34,7 @@ the analysts and the risk engine.
 
 ### V6 - Jump-robust proxies on daily bars
 
-**Target.** `strategies/volatility_models.py`, beside `semivariance:55`, `parkinson_vol:142`, `garman_klass_vol:172`, `yang_zhang_vol:275`: new public `bipower_proxy(ohlc)` and `quarticity_proxy(ohlc)` plus the jump share they imply. First caller: `book_risk`'s tail read, which measures tail risk today "without asking whether the tail came in one print".
+**Target.** `strategies/volatility_models.py`, beside `semivariance:68`, `parkinson_vol:155`, `garman_klass_vol:185`, `yang_zhang_vol:288`: new public `bipower_proxy(ohlc)` and `quarticity_proxy(ohlc)` plus the jump share they imply. First caller: `book_risk`'s tail read, which measures tail risk today "without asking whether the tail came in one print".
 **Phase / run mode.** P1 / in-run.
 **Behaviour.** Daily-bar analogues of bipower variation and realized quarticity - a squared-return-based jump-robust estimator and a quarticity proxy - so a jump is distinguishable from a diffusion without tick data. Every output is named a **proxy**, never a realized measure.
 **Gate.** `enable_jump_robust_proxies`, default off.
@@ -45,7 +45,7 @@ the analysts and the risk engine.
 
 ### V2 - A memory parameter, not just a Hurst exponent
 
-**Target.** New `strategies/long_memory.py`: `memory_parameter(returns) -> {gph_d, whittle_d, se}` and a HAR-family `rv_forecast(...)` whose extra regressors are the cross-sectional and sector persistence aggregates. The roughness leg stays where it is: `mean_reversion.hurst_exponent` (`:112`).
+**Target.** New `strategies/long_memory.py`: `memory_parameter(returns) -> {gph_d, whittle_d, se}` and a HAR-family `rv_forecast(...)` whose extra regressors are the cross-sectional and sector persistence aggregates. The roughness leg stays where it is: `mean_reversion.hurst_exponent` (`:113`).
 **Phase / run mode.** P1 / in-run.
 **Behaviour.** A rolling semiparametric memory parameter per stock by GPH log-periodogram regression and local Whittle (`log I(lambda_j) = c - 2d*log(lambda_j) + e`) on 750-day windows, feeding layered HAR / HAR-X / shrinkage / pooled-Lasso regressions (`RV_{t+1} = b0 + b_d*RV_t + b_w*RV_w + b_m*RV_m (+ X_t)`). `d` is reported **beside** the forecast, never instead of it.
 **Gate.** `enable_long_memory`, default off.
@@ -56,13 +56,13 @@ the analysts and the risk engine.
 
 ### V4 - The event shape, not the surface forecast
 
-**Target.** `strategies/options_surface.py` (`:25` `iv_skew`, `:126`, `:152`), consuming `catalyst.fed_imminence:142`: new `pre_event_iv_lift(chain, event_date)`.
+**Target.** `strategies/options_surface.py` (`:25` `iv_skew`, `:201` `surface_shape`, `:227` `term_structure_slope`), consuming `catalyst.fed_imminence:169`: new `pre_event_iv_lift(chain, event_date)`.
 **Phase / run mode.** P1 / in-run.
 **Behaviour.** Describes the ATM term-structure shape in **event time** - days to event, not calendar days - around a scheduled catalyst: the part of 2608.10693 that is robust (ATM implied volatility rises about two days before FOMC, up to +50% at 0DTE on announcement day). It is not a surface forecaster.
 **Gate.** `enable_event_iv_lift`, default off.
 **Failing-first test.** `tests/test_options_surface.py::test_pre_event_lift_is_indexed_in_event_time`. Mutation: index the shape by calendar days instead of days to event. The test asserts the same chain read against two different event dates yields different event-time shapes, and fails by name under that mutation.
 **Acceptance.** With a scheduled event in the calendar the shape is indexed by days to event and carries the event date; with no event in the window it returns `unavailable`; no value is produced for a date after the as-of date (there is no forecasting leg).
-**Depends on.** nothing (P1): the chain is already fetched and `catalyst.fed_imminence:142` already exists.
+**Depends on.** nothing (P1): the chain is already fetched and `catalyst.fed_imminence:169` already exists.
 **Doc caveat.** The forecasting half is statistically insignificant by the authors' own tests; adopting it would be adopting a negative result as a positive one.
 
 ### V3 - Recover a density only when it is identifiable, and say when it is not
@@ -78,7 +78,7 @@ the analysts and the risk engine.
 
 ### V5 - Eigenspace rotation as a state variable
 
-**Target.** New `strategies/eigen_rotation.py`, beside `strategies/covariance_models.py` (`:63` `ledoit_wolf_shrink`, `:106` `ewma_covariance`): `eigen_rotation(prev_corr, curr_corr) -> {rec, angles, mp_edge_check}`.
+**Target.** New `strategies/eigen_rotation.py`, beside `strategies/covariance_models.py` (`:85` `ledoit_wolf_shrink`, `:132` `ewma_covariance`): `eigen_rotation(prev_corr, curr_corr) -> {rec, angles, mp_edge_check}`.
 **Phase / run mode.** P3 / in-run (the weekly-pass question is raised in section 5).
 **Behaviour.** Removes the market mode from a rolling 12-month correlation matrix, takes the subdominant eigenvectors, and measures rotation as the mean squared sine of the three principal angles between consecutive windows' subdominant eigenspaces - with a **mandatory** check that the subdominant block is outside the Marchenko-Pastur edge, because inside that edge the eigenvectors are noise and the rotation is meaningless. Inside the edge the output is `unavailable`.
 **Gate.** `enable_eigen_rotation`, default off.
@@ -89,7 +89,7 @@ the analysts and the risk engine.
 
 ### V1 - Volatility forecast pool and regime-similarity routing
 
-**Target.** New module beside `strategies/volatility_models.py` (whose `garch11_fit:425` and range estimators are the econometric members): `vol_forecast_pool(returns, state) -> {forecast, members[], weights, regime}`, over the members HAR-RV, GARCH(1,1)-t, FIGARCH(1,1)-t, GRU and XGBoost.
+**Target.** New module beside `strategies/volatility_models.py` (whose `garch11_fit:438` and range estimators are the econometric members): `vol_forecast_pool(returns, state) -> {forecast, members[], weights, regime}`, over the members HAR-RV, GARCH(1,1)-t, FIGARCH(1,1)-t, GRU and XGBoost.
 **Phase / run mode.** P4 / offline-ish, **BLOCKED on the vendor decision** (section 5). Ground rule 8: the refit is an offline artefact.
 **Behaviour.** Scores each member online with the risk-sensitive loss `L = QLIKE(y, yhat) + lambda*max(y - yhat, 0)^2 / y^2` against the best active member (`R_m = L_m - min_j L_j`), weights the last 252 dates by recency and regime similarity (`w ~ exp(-gamma_time*(t-s)) * exp(-||z_t - z_s||^2 / gamma_reg^2)`), routes by a shrunk quantile threshold into pre-specified calm/stress pools, blends through a second gate against the rolling-best forecast, and applies a conditional HAR floor. The underprediction penalty stays a **separate** reported loss beside QLIKE.
 **Gate.** none (needs the full state vector - `log VIX`, `log(VIX/VXV)`, 20-day realized vol, vol-of-vol, term spread, HY spread - and `VXV` plus a HY-spread series are not in the engine's fetch surface).

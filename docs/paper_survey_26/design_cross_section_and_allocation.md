@@ -57,20 +57,20 @@ estimators largely exist; the validation does not.**
 
 | Instrument | Where, verified |
 |---|---|
-| Winsorize, cross-sectional z, industry-neutral z | `strategies/cross_section.py:31`, `:70`, `:89` |
-| Centered rank, quantile split | `strategies/cross_section.py:140` `centered_rank`, `:169` `quantile_split` |
-| Return residualization against a market | `strategies/cross_section.py:201` `residualize_returns` |
-| Dollar/beta/sector-neutral projection, no-trade band | `strategies/cross_section.py:237` `neutralize_book`, `:321` `no_trade_band` |
-| Momentum book | `strategies/cross_section.py:376` `momentum_book` |
+| Winsorize, cross-sectional z, industry-neutral z | `strategies/cross_section.py:31` `winsorize`, `:70` `cross_sectional_z`, `:111` `industry_neutral_z` |
+| Centered rank, quantile split | `strategies/cross_section.py:162` `centered_rank`, `:191` `quantile_split` |
+| Return residualization against a market | `strategies/cross_section.py:223` `residualize_returns` |
+| Dollar/beta/sector-neutral projection, no-trade band | `strategies/cross_section.py:259` `neutralize_book`, `:343` `no_trade_band` |
+| Momentum book | `strategies/cross_section.py:398` `momentum_book` |
 | Top-k drop weights | `strategies/portfolio_strategy.py:35` `topk_drop_weights` |
-| Peer resolution (resolved names, sector medians) | `strategies/peer_universe.py:150` `resolved_peer_names`, `:174` `resolve_peer_universe`, `:304` `resolve_growth_medians` |
-| Amihud illiquidity, **Kyle lambda** | `strategies/liquidity_risk.py:71` `amihud_illiquidity`, `:262` `kyle_lambda` |
-| Roll spread, Corwin-Schultz, slippage models | `strategies/liquidity_risk.py:309`, `:363`, `:220`, `:243` |
-| Covariance estimators (EWMA, Ledoit-Wolf) | `strategies/covariance_models.py:106`, `:63` |
+| Peer resolution (resolved names, sector medians) | `strategies/peer_universe.py:209` `resolved_peer_names`, `:233` `resolve_peer_universe`, `:380` `resolve_growth_medians` |
+| Amihud illiquidity, **Kyle lambda** | `strategies/liquidity_risk.py:71` `amihud_illiquidity`, `:367` `kyle_lambda` |
+| Roll spread, Corwin-Schultz, slippage models | `strategies/liquidity_risk.py:414` `roll_spread`, `:468` `corwin_schultz`, `:325` `volume_share_slippage`, `:348` `market_impact_slippage` |
+| Covariance estimators (EWMA, Ledoit-Wolf) | `strategies/covariance_models.py:132` `ewma_covariance`, `:85` `ledoit_wolf_shrink` |
 | HRP, optimizer, Kelly weights | `strategies/hierarchical_risk_parity.py`, `portfolio_optimizer.py`, `portfolio.py:452` |
 | Rank IC / IC-IR, quantile signal analysis | `strategies/signal_analysis.py:64` `rank_ic` |
-| Factor-expression DSL + AST purity gate + zoo bench | `strategies/factor_expressions.py`, `alpha_zoo.py:243` `bench_zoo` |
-| Breadth (market-wide and sector, McClellan, RRG) | `strategies/market_breadth.py`, `sector_breadth.py:60` `multi_breadth` |
+| Factor-expression DSL + AST purity gate + zoo bench | `strategies/factor_expressions.py`, `alpha_zoo.py:258` `bench_zoo` |
+| Breadth (market-wide and sector, McClellan, RRG) | `strategies/market_breadth.py`, `sector_breadth.py:165` `multi_breadth` |
 | Rotation, relative strength, sector rank | `strategies/rotation.py`, `relative_strength.py`, `sector_rank.py` |
 
 ## 3. The gaps, as builders

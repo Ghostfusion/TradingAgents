@@ -56,21 +56,49 @@ declined.
 
 | Instrument | Where, verified |
 |---|---|
-| Realized vol (close-to-close) | `strategies/regime.py:31` `realized_vol` |
-| Semivariance | `strategies/volatility_models.py:55` `semivariance` |
-| Parkinson, Garman-Klass, Yang-Zhang (+ series) | `strategies/volatility_models.py:142` `parkinson_vol`, `:172` `garman_klass_vol`, `:275` `yang_zhang_vol`, `:319` `yang_zhang_vol_series` |
-| EWMA vol | `strategies/volatility_models.py:384` `ewma_vol` |
-| GARCH(1,1) MLE, with an IGARCH breakdown guard | `strategies/volatility_models.py:425` `garch11_fit`, `:40` `_IGARCH_AB = 0.999` |
+| Realized vol (close-to-close) | `strategies/regime.py:39` `realized_vol` |
+| Semivariance | `strategies/volatility_models.py:68` `semivariance` |
+| Parkinson, Garman-Klass, Yang-Zhang (+ series) | `strategies/volatility_models.py:155` `parkinson_vol`, `:185` `garman_klass_vol`, `:288` `yang_zhang_vol`, `:332` `yang_zhang_vol_series` |
+| EWMA vol | `strategies/volatility_models.py:397` `ewma_vol` |
+| GARCH(1,1) MLE, with an IGARCH breakdown guard | `strategies/volatility_models.py:438` `garch11_fit`, `:53` `_IGARCH_AB` |
 | Variance-swap strike, model-free implied variance | `strategies/options_math.py:244` `variance_swap_strike`, `:399` `model_free_implied_variance` |
-| IV skew, surface shape, term-structure slope | `strategies/options_surface.py:25`, `:126`, `:152` |
+| IV skew, surface shape, term-structure slope | `strategies/options_surface.py:25` `iv_skew`, `:201` `surface_shape`, `:227` `term_structure_slope` |
 | Dealer gamma per strike, OPEX, max pain | `strategies/derivatives_gamma.py:52` `gex_per_strike`, + OPEX/max-pain |
-| EWMA covariance, Ledoit-Wolf shrinkage | `strategies/covariance_models.py:106` `ewma_covariance`, `:63` `ledoit_wolf_shrink` |
-| FOMC imminence, economic calendar | `strategies/catalyst.py:142` `fed_imminence` |
+| EWMA covariance, Ledoit-Wolf shrinkage | `strategies/covariance_models.py:132` `ewma_covariance`, `:85` `ledoit_wolf_shrink` |
+| FOMC imminence, economic calendar | `strategies/catalyst.py:169` `fed_imminence` |
+
+*(Anchors re-verified 2026-10-03; the **symbol name** is the contract, the line number is
+decoration. Eight of the ten rows above had drifted since this table was written — the
+`file:line` pair is therefore written as `path:line symbol` everywhere in this doc set, so a
+moved symbol is detectable by grep rather than by a reader who never re-checks.)*
 
 So the engine has a good **estimator battery** and no **combination, memory-parameter, or
 surface-geometry** layer at all.
 
 ## 3. The gaps, as builders
+
+**Status (2026-10-03).** Five of the six items below are **no longer gaps** - they shipped, and this
+section is retained as the design rationale rather than as a to-do list. Per
+[`implementation_plan_vol_surface_and_vrp.md`](implementation_plan_vol_surface_and_vrp.md)'s status
+header, re-verified in the tree:
+
+| Item | Status | Evidence |
+|---|---|---|
+| V6 jump-robust proxies | **LANDED** (2026-09-23) | `volatility_models.bipower_proxy` / `quarticity_proxy`; `docs/gate_registry.md:271` wired |
+| V2 memory parameter + HAR | **LANDED** (2026-09-23) | `strategies/long_memory.py`; `docs/gate_registry.md:273` wired; `tests/test_long_memory.py` |
+| V4 event-time surface shape | **LANDED** (2026-09-23) | `options_surface.pre_event_iv_lift`; `docs/gate_registry.md:275` wired |
+| V3 RND recovery + refusal | **LANDED** (2026-09-24) | `strategies/rnd_recovery.py`; `docs/gate_registry.md:281` wired |
+| V5 eigenspace rotation | **LANDED** (2026-09-24) | `strategies/eigen_rotation.py`; `docs/gate_registry.md:282` wired |
+| **V1 forecast pool** | **OPEN - blocked** | on the vendor state vector (`VXV` + a HY-spread series); see §5 |
+
+So each item's "**Finding**" paragraph below is the **state before the work**, kept because it records
+why the item exists and what it must not become - not a claim about today. Read the table first.
+
+**Library note.** [`../design_forecasting_libraries.md`](../design_forecasting_libraries.md) (v1.0) evaluates an
+external proposal to adopt a third-party forecasting stack for this exact channel. Its conclusion:
+**V1's pool is the only open item a library could serve, and its block is the vendor state vector, not
+the library.** V2, V3, V5, V6 and the whole estimator battery are already in-house, so a library there
+would be a **second producer** of a number this repo already computes - which invariant 8 forbids.
 
 ### V1 - A volatility forecast pool with risk-sensitive routing
 
@@ -106,7 +134,7 @@ baseline on 5 of 6 assets but against the rolling-best baseline on only 3.
 
 ### V2 - A memory parameter, not just a Hurst exponent
 
-**Finding.** `mean_reversion.hurst_exponent` (`:112`) estimates roughness. There is no
+**Finding.** `mean_reversion.hurst_exponent` (`:113`) estimates roughness. There is no
 semiparametric long-memory parameter and no HAR/HAR-X regression, so the engine cannot express the
 distinction the corpus keeps making between short and long memory.
 
@@ -173,7 +201,7 @@ not build the learned version.
 
 ### V4 - The event shape, not the surface forecast
 
-**Finding.** The engine has `fed_imminence` (`catalyst.py:142`) and a term-structure slope read, but
+**Finding.** The engine has `fed_imminence` (`catalyst.py:169`) and a term-structure slope read, but
 no description of how the surface *behaves around* a scheduled event - which is the part of
 2608.10693 that is robust.
 
