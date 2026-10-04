@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from tradingagents.strategies.sentiment_research import (
+    LEAD_LAG_RELATIONS,
     analyst_agreement,
     ic_term_structure,
     inst_flow_z,
@@ -71,6 +72,26 @@ def test_lead_lag_innovations_reduces_autocorrelation():
 
 def test_lead_lag_short_none():
     assert sentiment_lead_lag([0.1, 0.2, 0.3], [0.01, 0.02, 0.03], max_lags=2) is None
+
+
+def test_lead_lag_rows_carry_the_relation_not_just_the_sign():
+    """E14: lag <= 0 is labelled, so a correlation is not read as a prediction.
+
+    The tool reported the strongest |corr| with its lag and left the reader to
+    know that a negative lag means the RETURN moved first - the classic misread
+    of a lead/lag table as evidence of forecasting skill.
+    """
+    _, _, _, rets, signals = _panel()
+    rows = sentiment_lead_lag(signals["T00"], rets["T00"], max_lags=3)
+    assert rows is not None
+    relations = {r["lag_days"]: r["relation"] for r in rows}
+    assert set(relations.values()) <= set(LEAD_LAG_RELATIONS)
+    for lag, relation in relations.items():
+        expected = "leads" if lag > 0 else ("contemporaneous" if lag == 0 else "priced_in")
+        assert relation == expected, (lag, relation)
+    assert relations[1] == "leads"
+    assert relations[0] == "contemporaneous"
+    assert relations[-1] == "priced_in"
 
 
 def test_multi_horizon_detects_planted_signal():

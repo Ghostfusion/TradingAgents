@@ -128,7 +128,10 @@ how a number is computed — grouped so they can be decided in batches.
 **Forecasting / volatility**
 - `rv_forecast` fits HAR in RV **levels** with `returns**2` as the proxy, while
   the cited benchmarks define **log-RV** from 5-minute realized variance; the
-  publisher labels it `har_rv.ols.v1` without disclosing the target.
+  publisher labels it `har_rv.ols.v1` without disclosing the target. **The
+  second half of this row is REFUTED** — the target is disclosed in the record's
+  mandatory `target.definition` (`unit="variance"`, `definition_version`
+  `realized_volatility.v2`); see §5. The level-vs-log-RV difference stands.
 - `memory_profile` passes raw **returns** into `memory_parameter`, whose own
   docstring says the series is "the series the window is cut from" — but the
   literature locates long memory in **volatility**, so a near-zero `d` may be
@@ -199,6 +202,35 @@ developed with a source, a repo surface and a concrete step in the book named.
 | E14 | **Morning/afternoon and lead-lag labelling**: label lag ≤ 0 correlations as contemporaneous/priced-in | [04](04-sentiment-text.md) | `analysis_tools.get_sentiment_lead_lag` |
 | E15 | **Sticky-Markov persistence benchmark** for the regime rows (see D5) | [07](07-regime-changepoint.md) | `regime.py` (new) |
 
+**Dispositions (2026-10-04).** Each row was re-checked against the live tree
+before anything was taken, because a `Status` column written against *code* can
+call an item `absent` when the `26xx` plans already own it.
+
+- **Shipped:** **E2** (`evaluate.min_track_record_length`, verified against
+  Bailey & López de Prado's own three published examples) and **E14** (the
+  lead/lag `relation` label plus the non-lead call-out). **E3**'s remaining half
+  is done: `calibration.excess_accuracy` is H4, shipped behind
+  `enable_accuracy_ceiling`, and the paired tests H4's own card names now ship
+  with it.
+- **E15 landed as D5.**
+- **E4 is H3.** The overlap grep above missed it: `implementation_plan_research_
+  honesty_gates.md`'s **H3 — synthetic-null workflow falsification** *is* "replay
+  the whole pipeline on induced-null panels", five reference classes at N = 1000.
+  H3 is not started and is the plan of record.
+- **Owned by the survey, do not duplicate:** **E1** (CSCV PBO — H1's card), **E6**
+  (Diebold–Mariano — named in H4's and V1's cards), **E7** (QLIKE — V1's loss),
+  **E8** (`CANDIDATE_MEMBERS` is `design_vol_surface_and_vrp.md` §V1's pool), **E9**
+  (the allocation path — survey ground rule 2 binds **K4** to *replace* rather
+  than sit beside `ledoit_wolf_shrink`), **E13** (the design doc already lists
+  Yang-Zhang as an existing producer; the tool at `analysis_tools.py:11298`
+  still returns Parkinson/Garman-Klass, which is a wiring choice inside that
+  theme).
+- **Still open, no owner:** **E5** (cost-floor precondition on the G5 gate —
+  `[verified]` absent), **E10** (regime-conditional sign test — `[verified]`
+  absent), **E11** (per-event-class sentiment half-life — `sentiment.decayed_
+  weight` still takes one global `half_life=7.0`), **E12** (RMT edge guard —
+  `[verified]` absent from `market_breadth` / `eigen_rotation`).
+
 ## 5. Claims that did not survive verification
 
 - **"`max_pain`, `notify`, `isotonic_calibrate` etc. are dead code."** Not dead
@@ -215,6 +247,18 @@ developed with a source, a repo surface and a concrete step in the book named.
   disagreement is between the docstring's contract and the literature's
   definition of variance memory — a design question, not a call-site bug.
   `[verified]`
+- **"The publisher labels the HAR forecast `har_rv.ols.v1` without disclosing
+  the target."** It **does** disclose it, and in the mandatory field: the
+  registry's `realized_volatility` row carries a `TargetRef.definition` —
+  *"next-session realized VARIANCE: HAR-RV fitted on RV = squared close-to-close
+  log returns (RV_{t+1} = b0 + b_d RV_t + b_w RV_w + b_m RV_m)…"* — with
+  `definition_version="realized_volatility.v2"` and `unit="variance"`, and
+  `publish_realized_volatility_forecast` passes `target=row.target` into every
+  record it publishes (`forecast_publisher.py:363`). `MODEL_VERSION` names the
+  *model*, and the record carries the target beside it. The **level-vs-log-RV**
+  half of §3's row stands (the literature's HAR-RV is log-RV from intraday
+  realized variance) — that is a method difference, disclosed, and the V2
+  territory of the `26xx` survey. Recorded rather than acted on. `[verified]`
 
 ## 6. How these were found, and how far to trust them
 

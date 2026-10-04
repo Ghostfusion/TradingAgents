@@ -70,3 +70,18 @@ def test_an_unmeasured_ledger_never_reads_as_zero_dispersion(tmp_path, monkeypat
     v = gate_verdict(returns, train_len=60, test_len=20, ledger_dir=str(tmp_path))
     assert v["n_trials"] == 20
     assert "ledger unavailable" in v["dispersion"]
+
+
+def test_the_verdict_carries_the_minimum_track_record():
+    """E2: the length the record would need, beside the numbers it is judged by.
+
+    Per-observation units (Bailey & Lopez de Prado's own convention), so the
+    years conversion is the module's ``periods_per_year`` and nothing else.
+    """
+    returns = [0.002 if i % 2 else 0.001 for i in range(200)]
+    v = gate_verdict(returns, train_len=60, test_len=20)
+    mintrl = v["min_track_record"]
+    assert mintrl is not None
+    assert mintrl["n"] == 200 and mintrl["benchmark_sharpe"] == 0.0
+    assert mintrl["min_track_record"] > 0
+    assert mintrl["min_track_record_years"] == pytest.approx(mintrl["min_track_record"] / 252.0)

@@ -56,10 +56,16 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     is and the record says so. The deflation's known unit limitation and the
     scale-correct alternative are documented at ``evaluate.deflated_sharpe`` and
     ``evaluate.deflated_sharpe_ratio``.
+
+    ``min_track_record`` adds E2: the length the record would need before the
+    measured Sharpe could be called above zero at 95% confidence, given its own
+    skewness and kurtosis - per-observation units (the paper's own convention),
+    beside the annualized Sharpe the other numbers are built from.
     """
     from tradingagents.strategies.evaluate import (
         deflated_sharpe,
         deflated_sharpe_ratio,
+        min_track_record_length,
         pbo_flag,
         sharpe,
         walk_forward_splits,
@@ -84,6 +90,7 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     n_trials, dispersion, provenance = _trials_and_dispersion(trials, ledger_dir)
     is_deflated = deflated_sharpe(returns, n_trials=n_trials, sharpe_dispersion=dispersion)
     dsr = deflated_sharpe_ratio(returns, n_trials=n_trials, sharpe_dispersion=dispersion)
+    mintrl = min_track_record_length(returns)
     ok = (not ow) and (is_deflated > 0)
     return {
         "ok": ok,
@@ -92,6 +99,7 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
         "oos_best": round(oos_best, 3) if oos_best else None,
         "deflated_sharpe": round(is_deflated, 3),
         "deflated_sharpe_ratio": None if dsr is None else round(dsr, 4),
+        "min_track_record": mintrl,
         "n_trials": n_trials,
         "dispersion": provenance,
     }
@@ -117,6 +125,10 @@ def main(argv=None) -> int:
     print("oos_best:", band.get("oos_best"))
     print("deflated_sharpe:", band.get("deflated_sharpe"))
     print("deflated_sharpe_ratio:", band.get("deflated_sharpe_ratio"))
+    mintrl = band.get("min_track_record")
+    print("min_track_record:", None if mintrl is None else round(mintrl["min_track_record"], 1))
+    print("min_track_record_years:",
+          None if mintrl is None else round(mintrl["min_track_record_years"], 3))
     print("n_trials:", band.get("n_trials"))
     print("dispersion:", band.get("dispersion"))
     return 0

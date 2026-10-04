@@ -268,6 +268,46 @@ def test_clean_dataframe_still_forward_fills_interior_gaps():
     assert cleaned.iloc[1]["Open"] == 10.0  # filled from the earlier row
 
 
+def test_clean_dataframe_flags_the_cells_it_invents(caplog):
+    """A forward-filled cell is a synthetic bar, and the count is stated.
+
+    A downstream volatility or autocorrelation read cannot tell a carried-forward
+    price from a measured one, so a silent fill hid that part of the series was
+    never measured anywhere (flagged 2026-10-04). A leading gap stays NaN and
+    invents nothing, so it says nothing.
+    """
+    gapped = pd.DataFrame({
+        "Date": pd.to_datetime(["2026-08-10", "2026-08-11", "2026-08-12"]),
+        "Open": [10.0, float("nan"), 30.0],
+        "Close": [10.0, 10.5, 30.5],
+    })
+    with caplog.at_level("WARNING", logger=su.logger.name):
+        filled = su._clean_dataframe(gapped)
+    assert filled.iloc[1]["Open"] == 10.0
+    assert any("forward-filled 1 price cell" in r.getMessage() for r in caplog.records)
+
+    whole = pd.DataFrame({
+        "Date": pd.to_datetime(["2026-08-10", "2026-08-11"]),
+        "Open": [10.0, 11.0],
+        "Close": [10.0, 11.5],
+    })
+    caplog.clear()
+    with caplog.at_level("WARNING", logger=su.logger.name):
+        su._clean_dataframe(whole)
+    assert not caplog.records
+
+    leading = pd.DataFrame({
+        "Date": pd.to_datetime(["2026-08-10", "2026-08-11"]),
+        "Open": [float("nan"), 11.0],
+        "Close": [10.0, 11.5],
+    })
+    caplog.clear()
+    with caplog.at_level("WARNING", logger=su.logger.name):
+        out = su._clean_dataframe(leading)
+    assert not caplog.records
+    assert pd.isna(out.iloc[0]["Open"])
+
+
 # ---------------------------------------------------------------------------
 # date_window: undated items are not admitted for a window that ended yesterday
 # ---------------------------------------------------------------------------

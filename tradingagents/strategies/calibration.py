@@ -12,9 +12,15 @@ From the prediction ledger (W1-1) rows scored against realized outcomes:
 
 All inputs are SCORED ledger rows (dicts with `outcome`); all output is
 counts/ratios, None when there is nothing to measure (honest).
+
+The two paired-significance producers (`mcnemar_paired`, `diebold_mariano`) are
+plain functions over two arms' per-row values - no ledger, no config - and
+`excess_accuracy` calls them on the rows it already scored.
 """
 
 from __future__ import annotations
+
+import math
 
 _BINS = [(0.0, 0.5), (0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 0.9), (0.9, 1.0001)]
 
@@ -296,9 +302,143 @@ def _ceiling_gate() -> bool:
     return bool(cfg.get("enable_accuracy_ceiling", False))
 
 
+def mcnemar_paired(correct_a: list, correct_b: list) -> dict | None:
+    """McNemar's paired test on two arms' per-row correctness (H4).
+
+    ``correct_a`` / ``correct_b`` are the two arms' hit booleans on the IDENTICAL
+    rows, in order - the pairing is the whole test, and comparing two hit rates
+    as if they were independent throws away the correspondence between them.
+    Only the DISCORDANT pairs carry information:
+
+    ``b`` = A right and B wrong, ``c`` = A wrong and B right. Under the null of
+    no difference each discordant pair is a fair coin, so the exact two-sided
+    p-value is ``min(1, 2 * P(X <= min(b, c)))`` for ``X ~ Binomial(b + c, 0.5)``.
+    The exact binomial is used rather than the asymptotic chi-square because a
+    paired hit test at these sample sizes is routinely too small for it, and an
+    approximate p-value inside a significance claim is the thing these
+    instruments exist to avoid.
+
+    Returns ``{"agree_both", "agree_neither", "b", "c", "n_pairs",
+    "n_discordant", "p_value", "method", "basis"}``, or ``None`` when the arms
+    are not the same length or there are no rows. Nothing discordant reads
+    ``p_value = 1.0``: two arms that agreed on every row are not evidence of a
+    difference.
+    """
+    arm_a = list(correct_a or [])
+    arm_b = list(correct_b or [])
+    if not arm_a or len(arm_a) != len(arm_b):
+        return None
+    agree_both = agree_neither = b = c = 0
+    for x, y in zip(arm_a, arm_b, strict=True):
+        xv, yv = bool(x), bool(y)
+        if xv and yv:
+            agree_both += 1
+        elif not xv and not yv:
+            agree_neither += 1
+        elif xv:
+            b += 1
+        else:
+            c += 1
+    discordant = b + c
+    if discordant == 0:
+        p_value = 1.0
+        method = "exact_binomial (no discordant pair)"
+    else:
+        lower = min(b, c)
+        tail = sum(math.comb(discordant, i) for i in range(lower + 1)) / (2.0 ** discordant)
+        p_value = min(1.0, 2.0 * tail)
+        method = "exact_binomial"
+    return {
+        "agree_both": agree_both,
+        "agree_neither": agree_neither,
+        "b": b,
+        "c": c,
+        "n_pairs": len(arm_a),
+        "n_discordant": discordant,
+        "p_value": p_value,
+        "method": method,
+        "basis": (
+            f"McNemar on {len(arm_a)} paired row(s): {b} row(s) only A got right, "
+            f"{c} only B; the exact two-sided binomial p over the {discordant} "
+            "discordant pair(s), which is where all the information is"
+        ),
+    }
+
+
+def diebold_mariano(losses_a: list, losses_b: list, *, max_lag: int = 0,
+                    alpha: float = 0.05) -> dict | None:
+    """Diebold-Mariano test on two loss series over the same forecast origins.
+
+    ``losses_a`` / ``losses_b`` are per-origin losses (lower is better) for the
+    two forecasts on the IDENTICAL origins, in order. The test is on the mean
+    loss differential ``d_t = a_t - b_t``: the statistic is
+    ``mean(d) / sqrt(HAC_var(d) / n)`` with a Newey-West Bartlett kernel of
+    ``max_lag`` lags and weights ``1 - L/(max_lag + 1)``. The HAC variance is
+    what makes the test valid when the differentials are serially correlated -
+    overlapping forecast windows make them so, and ``max_lag = h - 1`` is the
+    standard choice for an ``h``-step horizon (``0`` for one-step, which
+    degenerates to a t-test on the mean). It is also what McNemar does not do:
+    that test's exact p assumes independent pairs.
+
+    The p-value is two-sided from the normal (DM's own asymptotic result;
+    Harvey-Leybourne-Newbold's small-sample ``t_{n-1}`` refinement is NOT
+    applied, and the basis says so).
+
+    Returns ``{"mean_differential", "statistic", "p_value", "hac_variance",
+    "max_lag", "n", "favours", "significant", "alpha", "method", "basis"}`` or
+    ``None`` for fewer than 3 paired losses or a non-positive HAC variance.
+    ``favours`` names the arm the SIGN points to (``"a"`` when A's mean loss is
+    lower, ``"b"`` when B's is, ``"neither"`` on an exact tie), so the direction
+    never rests on a sign convention.
+    """
+    arm_a = [float(x) for x in (losses_a or [])]
+    arm_b = [float(x) for x in (losses_b or [])]
+    n = min(len(arm_a), len(arm_b))
+    if n < 3:
+        return None
+    diffs = [arm_a[i] - arm_b[i] for i in range(n)]
+    mean = sum(diffs) / n
+    dev = [d - mean for d in diffs]
+    lag = max(0, int(max_lag))
+    hac = sum(d * d for d in dev) / n
+    for step in range(1, min(lag, n - 1) + 1):
+        weight = 1.0 - step / (lag + 1.0)
+        cov = sum(dev[t] * dev[t - step] for t in range(step, n)) / n
+        hac += 2.0 * weight * cov
+    if hac <= 0.0 or not math.isfinite(hac):
+        return None
+    statistic = mean / math.sqrt(hac / n)
+    from statistics import NormalDist
+
+    p_value = 2.0 * (1.0 - NormalDist().cdf(abs(statistic)))
+    if mean < 0.0:
+        favours = "a"
+    elif mean > 0.0:
+        favours = "b"
+    else:
+        favours = "neither"
+    return {
+        "mean_differential": mean,
+        "statistic": statistic,
+        "p_value": p_value,
+        "hac_variance": hac,
+        "max_lag": lag,
+        "n": n,
+        "favours": favours,
+        "significant": bool(p_value <= float(alpha)),
+        "alpha": float(alpha),
+        "method": "normal (DM asymptotic; no HLN t refinement)",
+        "basis": (
+            f"Diebold-Mariano on {n} paired loss(es), Newey-West Bartlett kernel with "
+            f"{lag} lag(s); mean loss differential {mean:+.6f} (negative = A's loss is "
+            f"lower), statistic {statistic:+.4f}, two-sided normal p {p_value:.6f}"
+        ),
+    }
+
+
 def excess_accuracy(pred, realized, baseline: str = "always_up", *,
                     folds: int = EXCESS_FOLDS, alpha: float = 0.1,
-                    min_n: int = EXCESS_MIN_N) -> dict:
+                    min_n: int = EXCESS_MIN_N, dm_max_lag: int = 0) -> dict:
     """H4: the model's hit rate minus the always-up baseline's, on the same rows.
 
     ``pred`` and ``realized`` are the forecast and the realized return on the
@@ -316,8 +456,13 @@ def excess_accuracy(pred, realized, baseline: str = "always_up", *,
     is a mean over adjacent observations, and an IID interval under-covers it.
 
     Returns ``{n, folds, per_fold, model_hit_rate, baseline_hit_rate, excess,
-    interval, baseline, basis, unavailable}``. Missing, thin or unknown input —
-    under ``min_n`` usable rows, an unknown ``baseline``, the gate off — is
+    interval, mcnemar, diebold_mariano, baseline, basis, unavailable}``.
+    ``mcnemar`` is the paired whole-series hit test and ``diebold_mariano`` the
+    paired test on the per-row 0/1 miss loss (so both judge the same object; the
+    DM carries the HAC correction the exact McNemar, which assumes independent
+    pairs, cannot). ``per_fold`` carries each fold's McNemar p and whether it
+    survives the family correction over the folds. Missing, thin or unknown input
+    — under ``min_n`` usable rows, an unknown ``baseline``, the gate off — is
     ``unavailable`` with the reason, never a zero.
     """
     rec = {
@@ -328,6 +473,8 @@ def excess_accuracy(pred, realized, baseline: str = "always_up", *,
         "baseline_hit_rate": None,
         "excess": None,
         "interval": None,
+        "mcnemar": None,
+        "diebold_mariano": None,
         "baseline": baseline,
         "basis": None,
         "unavailable": None,
@@ -376,14 +523,41 @@ def excess_accuracy(pred, realized, baseline: str = "always_up", *,
             continue
         model = sum(1.0 for pv, rv in block if pv * rv > 0.0) / len(block)
         base = sum(1.0 for _, rv in block if rv > 0.0) / len(block)
+        fold_test = mcnemar_paired(
+            [pv * rv > 0.0 for pv, rv in block],
+            [rv > 0.0 for _pv, rv in block],
+        )
         per.append({
             "fold": i + 1,
             "n": len(block),
             "model_hit_rate": round(model, 4),
             "baseline_hit_rate": round(base, 4),
             "excess": round(model - base, 4),
+            "mcnemar_p": None if fold_test is None else round(fold_test["p_value"], 6),
+            "survives": False,
         })
+    # The fold tests are corrected as a family. What the family IS is stated
+    # rather than implied: these are sequential blocks of ONE series, so the
+    # correction covers looking at the same sample k times - not the number of
+    # candidates searched across a population (that family is the score panel's).
+    from tradingagents.strategies.evaluate import benjamini_yekutieli
+
+    fold_fdr = benjamini_yekutieli([p["mcnemar_p"] for p in per], alpha)
+    if fold_fdr is not None:
+        for row, survives in zip(per, fold_fdr["surviving"], strict=True):
+            row["survives"] = bool(survives)
     rec["per_fold"] = per
+    # The whole-series paired tests on the SAME object - the per-row hit / its
+    # 0/1 miss loss. The DM carries the HAC correction for serially correlated
+    # differentials, which is precisely what McNemar's exact p cannot do.
+    rec["mcnemar"] = mcnemar_paired(
+        [pv * rv > 0.0 for pv, rv in rows], [rv > 0.0 for _pv, rv in rows],
+    )
+    rec["diebold_mariano"] = diebold_mariano(
+        [0.0 if pv * rv > 0.0 else 1.0 for pv, rv in rows],
+        [0.0 if rv > 0.0 else 1.0 for _pv, rv in rows],
+        max_lag=int(dm_max_lag), alpha=alpha,
+    )
     try:
         from tradingagents.strategies.conformal import block_bootstrap_interval
 
@@ -394,9 +568,12 @@ def excess_accuracy(pred, realized, baseline: str = "always_up", *,
         f"excess accuracy {rec['excess']:+.4f} over {len(rows)} row(s) on "
         f"identical rows: model hit rate {rec['model_hit_rate']:.4f} minus "
         f"always-up {rec['baseline_hit_rate']:.4f}; {k} sequential walk-forward "
-        f"fold(s); the interval is a moving-block bootstrap over the paired "
-        f"per-row differences, so read the realized block length, never the "
-        f"nominal level alone"
+        f"fold(s), their McNemar p-values corrected as a family "
+        f"({fold_fdr['method'] if fold_fdr else 'uncorrected - FDR unavailable'}); "
+        f"paired whole-series McNemar and Diebold-Mariano (max_lag={int(dm_max_lag)}) "
+        f"judge the same per-row miss object; the interval is a moving-block "
+        f"bootstrap over the paired per-row differences, so read the realized "
+        f"block length, never the nominal level alone"
     )
     return rec
 
@@ -405,4 +582,5 @@ __all__ = ["calibration_table", "scorecard", "_BINS", "fit_buckets",
            "fit_buckets_by_regime", "calibrated_confidence",
            "calibrated_confidence_by_regime", "isotonic_calibrate",
            "calibration_table_text", "record_calibration_entry",
-           "excess_accuracy", "EXCESS_FOLDS", "EXCESS_MIN_N"]
+           "excess_accuracy", "EXCESS_FOLDS", "EXCESS_MIN_N",
+           "mcnemar_paired", "diebold_mariano"]

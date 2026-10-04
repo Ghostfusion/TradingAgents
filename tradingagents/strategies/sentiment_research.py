@@ -30,6 +30,7 @@ __all__ = [
     "inst_flow_z",
     "analyst_agreement",
     "sentiment_lead_lag",
+    "LEAD_LAG_RELATIONS",
     "multi_horizon_sentiment_regression",
     "sector_neutral_z",
     "residualize_sentiment",
@@ -169,6 +170,22 @@ def analyst_agreement(rows: list[dict] | None, *, min_ratings: int = 2) -> dict 
     }
 
 
+#: The relation vocabulary for one lead/lag row. ``lag_days > 0`` is sentiment at
+#: ``t`` against the return at ``t + k`` - the only cell where the sentiment
+#: moved first. Zero is the same session. A negative lag is the RETURN moving
+#: before the sentiment, i.e. the news arriving after the move, which is not
+#: evidence the sentiment predicted anything - so the two are labelled apart
+#: rather than left to the reader to infer from the sign of a coefficient.
+LEAD_LAG_RELATIONS = ("leads", "contemporaneous", "priced_in")
+
+
+def _lead_lag_relation(lag: int) -> str:
+    """One lag -> its member of ``LEAD_LAG_RELATIONS`` (one producer of it)."""
+    if lag > 0:
+        return "leads"
+    return "contemporaneous" if lag == 0 else "priced_in"
+
+
 def sentiment_lead_lag(
     sentiment: list, returns: list, max_lags: int = 10, innovations: bool = False
 ) -> list[dict] | None:
@@ -181,8 +198,11 @@ def sentiment_lead_lag(
     modeling caveat).
 
     Positive lag k = sentiment at t vs return at t+k (sentiment LEADS).
-    Returns ``[{lag_days, pearson_corr, pearson_pval, spearman_corr,
-    spearman_pval, sample_size}]`` or None with < 10 usable rows.
+    Returns ``[{lag_days, relation, pearson_corr, pearson_pval, spearman_corr,
+    spearman_pval, sample_size}]`` or None with < 10 usable rows. ``relation``
+    carries ``LEAD_LAG_RELATIONS``' label for the lag sign, so no reader has to
+    infer "predictive" from a sign convention: zero is contemporaneous and a
+    negative lag is *priced in* - the news trailing the move it correlates with.
     """
     s = _clean(sentiment)
     r = _clean(returns)
@@ -211,6 +231,7 @@ def sentiment_lead_lag(
         out.append(
             {
                 "lag_days": lag,
+                "relation": _lead_lag_relation(lag),
                 "pearson_corr": round(float(pr), 4),
                 "pearson_pval": round(float(pp), 4),
                 "spearman_corr": round(float(sr), 4),

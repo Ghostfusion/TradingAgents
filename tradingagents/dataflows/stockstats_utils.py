@@ -73,7 +73,27 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     # Forward-fill only. A bfill would pull a leading gap's value from a LATER
     # row, which may be dated after the run's as-of date (this cleaning runs
     # before load_ohlcv's curr_date filter) - future data leaking into a backtest.
-    data[price_cols] = data[price_cols].ffill()
+    if price_cols:
+        # Which cells this fill INVENTS: an interior gap is carried forward, a
+        # leading gap stays NaN. A filled cell is a synthetic bar that a
+        # downstream volatility/autocorrelation read cannot tell from a measured
+        # one, so the count is stated instead of discarded (2026-10-04 - until
+        # then this fill was silent, and the paper corpus flags exactly that).
+        missing_before = data[price_cols].isna()
+        filled = data[price_cols].ffill()
+        invented_mask = missing_before & filled.notna()
+        invented = int(invented_mask.to_numpy().sum())
+        if invented:
+            logger.warning(
+                "forward-filled %d price cell(s) across %d row(s) in column(s) %s: the "
+                "filled values are synthetic (carried from an earlier bar), and a "
+                "downstream volatility/autocorrelation read cannot distinguish them "
+                "from measured ones",
+                invented,
+                int(invented_mask.any(axis=1).to_numpy().sum()),
+                ", ".join(c for c in price_cols if bool(invented_mask[c].any())),
+            )
+        data[price_cols] = filled
 
     return data
 

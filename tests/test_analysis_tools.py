@@ -3213,6 +3213,50 @@ def test_sentiment_lead_lag_strongest_corr_spans_both_metrics(monkeypatch):
     assert "pearson" in out and "lag +6" in out
 
 
+def test_sentiment_lead_lag_calls_out_a_non_lead_strongest_cell(monkeypatch):
+    """E14: a lag of zero or below is not a lead, and the tool says so.
+
+    The strongest |corr| cell is where a reader's eye lands, so a negative-lag
+    winner has to be labelled priced-in rather than left to the sign convention
+    - and a genuine lead must NOT draw the warning.
+    """
+    import tradingagents.strategies.sentiment_research as sr_mod
+
+    rows = [
+        {"lag_days": -2, "relation": "priced_in", "pearson_corr": -0.41,
+         "pearson_pval": 0.001, "spearman_corr": -0.39, "spearman_pval": 0.002,
+         "sample_size": 50},
+        {"lag_days": 0, "relation": "contemporaneous", "pearson_corr": 0.12,
+         "pearson_pval": 0.4, "spearman_corr": 0.10, "spearman_pval": 0.5,
+         "sample_size": 50},
+        {"lag_days": 3, "relation": "leads", "pearson_corr": 0.21,
+         "pearson_pval": 0.2, "spearman_corr": 0.19, "spearman_pval": 0.25,
+         "sample_size": 50},
+    ]
+    monkeypatch.setattr(sr_mod, "sentiment_lead_lag", lambda *a, **k: rows)
+    monkeypatch.setattr(
+        "tradingagents.dataflows.eodhd._sentiment_points_eodhd",
+        lambda *a, **k: [{"date": "2026-09-01", "score": 0.5}] * 40,
+    )
+    monkeypatch.setattr(
+        T, "_ohlcv",
+        lambda *a, **k: {"closes": [100.0] * 40, "dates": ["2026-09-01"] * 40,
+                          "highs": [], "lows": [], "volumes": [], "opens": []},
+    )
+    out = T.get_sentiment_lead_lag.invoke({"ticker": "TST"})
+    assert "| relation |" in out and "| priced_in |" in out
+    assert "strongest |corr|: 0.410" in out and "lag -2" in out
+    assert "relation priced_in" in out
+    assert "NOTE" in out and "not a lead" in out
+
+    leading = [rows[0], rows[1],
+               {**rows[2], "pearson_corr": 0.61, "spearman_corr": 0.59}]
+    monkeypatch.setattr(sr_mod, "sentiment_lead_lag", lambda *a, **k: leading)
+    led = T.get_sentiment_lead_lag.invoke({"ticker": "TST"})
+    assert "relation leads" in led
+    assert "NOTE" not in led
+
+
 def test_composite_rank_lists_ranked_peers(monkeypatch):
     """Regression (INTU 2026-09-08): the report listed 10 company peers while
     the composite said 'vs 4 peers'. The tool must surface WHICH tickers it

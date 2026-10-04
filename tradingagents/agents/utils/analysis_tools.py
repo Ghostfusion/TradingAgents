@@ -11148,6 +11148,12 @@ def get_sentiment_lead_lag(
     returns (Pearson + Spearman, lags -max_lags..+max_lags). Positive lag =
     sentiment leads price; the row with the strongest |correlation| shows the
     observed lead relation. Grounds any 'sentiment leads/lags the move' claim.
+
+    Each row carries the producer's ``relation`` label (``leads`` /
+    ``contemporaneous`` / ``priced_in``), and a strongest cell that is not a
+    lead is called out: a lag of zero is the same session and a negative lag is
+    the move happening first, so the news did not lead it (2026-10-04 - the
+    table previously reported the strongest lag with no such distinction).
     """
     try:
         from datetime import datetime, timedelta
@@ -11222,16 +11228,17 @@ def get_sentiment_lead_lag(
         if not out:
             return f"sentiment lead/lag unavailable for {ticker}: degenerate series"
         lines = [f"## Sentiment Lead/Lag — {ticker} (source {label})", ""]
-        lines.append("| lag | pearson | p | spearman | p | n |")
-        lines.append("| --- | --- | --- | --- | --- | --- |")
+        lines.append("| lag | relation | pearson | p | spearman | p | n |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- |")
         for row in out:
             lines.append(
-                f"| {row['lag_days']:+d} | {row['pearson_corr']:.3f} | "
+                f"| {row['lag_days']:+d} | {row.get('relation') or ''} | "
+                f"{row['pearson_corr']:.3f} | "
                 f"{row['pearson_pval']:.3f} | {row['spearman_corr']:.3f} | "
                 f"{row['spearman_pval']:.3f} | {row['sample_size']} |"
             )
         if out:
-            best: tuple[float, int, str] | None = None
+            best: tuple[float, int, str, str] | None = None
             for r2 in out:
                 for col, metric in (
                     ("spearman_corr", "spearman"),
@@ -11239,13 +11246,27 @@ def get_sentiment_lead_lag(
                 ):
                     v = abs(float(r2[col]))
                     if best is None or v > best[0]:
-                        best = (v, int(r2["lag_days"]), metric)
+                        best = (v, int(r2["lag_days"]), metric,
+                                str(r2.get("relation") or ""))
             if best is not None:
-                return (
+                tail = f", relation {best[3]}" if best[3] else ""
+                line = (
                     "\n".join(lines)
                     + f"\n- strongest |corr|: {best[0]:.3f} "
-                    f"({label}, {best[2]}, lag {best[1]:+d})"
+                    f"({label}, {best[2]}, lag {best[1]:+d}{tail})"
                 )
+                if best[3] and best[3] != "leads":
+                    # The sign convention is not self-evident to a reader, and a
+                    # strong |corr| at a non-positive lag is the classic
+                    # misread: 'sentiment moves price' from a cell where the
+                    # price moved first (or at the same time).
+                    line += (
+                        f"\n- NOTE: the strongest cell is not a lead - a "
+                        f"'{best[3]}' cell is the move and the sentiment "
+                        "measured in the same or the reverse order, so it is not "
+                        "evidence that the sentiment predicted the move."
+                    )
+                return line
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - degrades, never crashes
         return f"sentiment lead/lag unavailable for {ticker}: {exc}"

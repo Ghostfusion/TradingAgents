@@ -217,6 +217,9 @@ def deflated_sharpe_report(returns: list[float], n_trials: int = 100,
             returns, n_trials=n_trials, risk_free=risk_free,
             periods_per_year=periods_per_year, sharpe_dispersion=sharpe_dispersion,
         ),
+        "min_track_record": min_track_record_length(
+            returns, periods_per_year=periods_per_year,
+        ),
         "n_trials": max(1, int(n_trials)),
         "sharpe_dispersion": float(sharpe_dispersion)
         if provenance == "measured" else None,
@@ -306,6 +309,98 @@ def deflated_sharpe_ratio(returns: list[float], n_trials: int = 100,
         per_period = risk_free / periods_per_year
         excess = [r - per_period if r is not None else None for r in returns]
     return probabilistic_sharpe(excess, benchmark_sharpe=threshold)
+
+
+def _mintrl_observations(observed: float, benchmark: float, skew: float,
+                         kurtosis: float, z: float) -> float | None:
+    """Bailey & Lopez de Prado's closed form, in per-observation units.
+
+    ``MinTRL = 1 + [1 - g3*SR + ((g4 - 1)/4)*SR^2] * (z / (SR - SR*))^2``, the
+    paper's Eq. (13). ``g4`` is the STANDARDIZED kurtosis (3 for a normal, not
+    the excess) - the same moment convention ``probabilistic_sharpe`` uses, for
+    the same reason. ``None`` when ``SR <= SR*``: no finite record can reject
+    the hypothesis, so any length would be a fabrication.
+    """
+    spread = observed - benchmark
+    if spread <= 0:
+        return None
+    bracket = 1.0 - skew * observed + ((kurtosis - 1.0) / 4.0) * observed * observed
+    if not math.isfinite(bracket) or bracket <= 0:
+        return None
+    return 1.0 + bracket * (z / spread) ** 2
+
+
+def min_track_record_length(returns: list[float], benchmark_sharpe: float = 0.0,
+                            alpha: float = 0.05,
+                            periods_per_year: float = 252.0) -> dict | None:
+    """E2: the minimum track record length (MinTRL) for the measured Sharpe.
+
+    Bailey & Lopez de Prado, "The Sharpe Ratio Efficient Frontier" (2012) - the
+    record length at which the measured Sharpe would exceed ``benchmark_sharpe``
+    at confidence ``1 - alpha``, given the record's own skewness and kurtosis.
+    The inverse question to :func:`probabilistic_sharpe`: that one asks "does
+    this record clear the bar", this one asks "how long would it have to be".
+
+    **Units (the paper's own words):** *"MinTRL is expressed in terms of number
+    of observations, not annual or calendar terms"* - so ``observed_sharpe`` and
+    ``benchmark_sharpe`` are BOTH the per-observation ``mean/std`` Sharpe, the
+    same estimator and scale ``probabilistic_sharpe`` uses. The paper's three
+    published worked examples reproduce exactly under that convention, with the
+    normal moments ``g3 = 0, g4 = 3``: daily needs 688.2 observations (2.73
+    years) for an annualized Sharpe of 2 to clear 1 at 95%, weekly 147.1 (2.83)
+    and monthly 38.9 (3.24).
+
+    Returns ``{"min_track_record", "min_track_record_years", "observed_sharpe",
+    "benchmark_sharpe", "alpha", "confidence", "skewness", "kurtosis", "n",
+    "basis"}``, or ``None`` for < 4 observations, a degenerate (zero-variance)
+    series, an ``alpha`` outside ``(0, 1)``, a non-finite moment, or
+    ``observed_sharpe <= benchmark_sharpe`` - the paper's own case where no
+    length suffices.
+
+    A *length*, never a verdict: it says how much record the claim would need,
+    not whether the strategy is any good. It assumes the record is IID enough
+    for the estimator's asymptotic distribution (the paper trusts the CLT above
+    30 observations).
+    """
+    if not 0.0 < float(alpha) < 1.0:
+        return None
+    vals = _clean(returns)
+    if len(vals) < 4:
+        return None
+    mean = sum(vals) / len(vals)
+    sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / (len(vals) - 1))
+    if sd <= 0:
+        return None
+    observed = mean / sd
+    g3 = skewness(vals)
+    g4 = kurtosis(vals)
+    if g3 is None or g4 is None:
+        return None
+    from statistics import NormalDist
+
+    z = NormalDist().inv_cdf(1.0 - float(alpha))
+    obs = _mintrl_observations(observed, float(benchmark_sharpe), g3, g4, z)
+    if obs is None:
+        return None
+    years = obs / float(periods_per_year) if periods_per_year else None
+    return {
+        "min_track_record": obs,
+        "min_track_record_years": years,
+        "observed_sharpe": observed,
+        "benchmark_sharpe": float(benchmark_sharpe),
+        "alpha": float(alpha),
+        "confidence": 1.0 - float(alpha),
+        "skewness": g3,
+        "kurtosis": g4,
+        "n": len(vals),
+        "basis": (
+            f"MinTRL {obs:.1f} observation(s) at {1.0 - float(alpha):.0%} confidence for a "
+            f"per-observation Sharpe of {observed:.6f} to clear {float(benchmark_sharpe):.6f} "
+            f"(return skewness {g3:.3f}, standardized kurtosis {g4:.3f}, n={len(vals)}): "
+            "Bailey & Lopez de Prado (2012) Eq. (13), in observations not calendar terms - "
+            "a length, not a verdict"
+        ),
+    }
 
 
 def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
@@ -768,6 +863,65 @@ def materiality_verdict(stat: float, ci_low: float, ci_high: float,
     return "INCONCLUSIVE"
 
 
+def benjamini_yekutieli(p_values: list[float], alpha: float = 0.05,
+                        *, independent: bool = False) -> dict | None:
+    """The one producer of the family false-discovery step-up.
+
+    Benjamini-Yekutieli (2001) by default: find the largest rank ``r`` with
+    ``p_(r) <= (r / K) * alpha / H_K`` (``H_K`` the K-th harmonic number) and
+    reject that p-value together with every smaller one. ``H_K`` is 1 only at
+    ``K == 1``, so this is the conservative correction that stays valid for
+    arbitrarily dependent p-values - which is what a family of candidate signals
+    is, since they are computed from the same returns. ``independent=True``
+    switches to Benjamini-Hochberg (``H_K = 1``), valid only under independence
+    or PRDS; the caller has to be able to say which it is, so the method travels
+    with the result.
+
+    Returns ``{"surviving", "reject", "cut_rank", "k", "alpha", "harmonic",
+    "method", "basis"}``, or ``None`` when handed no p-values. ``surviving`` is
+    positional - one bool per input - so a caller cannot mis-align it against a
+    re-sorted list.
+
+    ``family_materiality`` and ``calibration.excess_accuracy`` both read this:
+    with two copies of the arithmetic, two families would be corrected by
+    different sums and both numbers would look authoritative.
+    """
+    raw = list(p_values or [])
+    if not raw or any(p is None for p in raw):
+        # A None would silently drop out of a positional `surviving` list and
+        # mis-align every caller that zips it back to its own rows.
+        return None
+    ps = [float(p) for p in raw]
+    k = len(ps)
+    if k == 0:
+        return None
+    harmonic = 1.0 if independent else sum(1.0 / i for i in range(1, k + 1))
+    order = sorted(range(k), key=lambda j: ps[j])
+    cut = 0
+    for rank, j in enumerate(order, start=1):
+        if ps[j] <= (rank / k) * alpha / harmonic:
+            cut = rank
+    surviving = [False] * k
+    for rank, j in enumerate(order, start=1):
+        if rank <= cut:
+            surviving[j] = True
+    return {
+        "surviving": surviving,
+        "reject": [ps[j] for j in order[:cut]],
+        "cut_rank": cut,
+        "k": k,
+        "alpha": float(alpha),
+        "harmonic": harmonic,
+        "method": "BH" if independent else "BY",
+        "basis": (
+            f"{'Benjamini-Hochberg' if independent else 'Benjamini-Yekutieli'} step-up "
+            f"over {k} p-value(s) at alpha={alpha}: every p-value at or below the largest "
+            f"rank r with p_(r) <= (r/{k})*alpha/{harmonic:g} is rejected, together with "
+            "every smaller one"
+        ),
+    }
+
+
 def family_materiality(candidates, benchmark, *, delta_s: float | None = None,
                        delta_r: float | None = None, alpha: float = 0.05,
                        n_boot: int = 1000, block_len: int = 5,
@@ -826,13 +980,10 @@ def family_materiality(candidates, benchmark, *, delta_s: float | None = None,
             if boot - observed[j] >= observed[j]:
                 exceed[j] += 1
     p_values = [(1.0 + e) / (n_boot + 1.0) for e in exceed]
-    harmonic = sum(1.0 / i for i in range(1, k + 1))
-    order = sorted(range(k), key=lambda j: p_values[j])
-    cut = 0
-    for rank, j in enumerate(order, start=1):
-        if p_values[j] <= (rank / k) * alpha / harmonic:
-            cut = rank
-    surviving = {j for rank, j in enumerate(order, start=1) if rank <= cut}
+    fdr = benjamini_yekutieli(p_values, alpha)
+    if fdr is None:  # unreachable (k >= 2 above), but never a silent default
+        return None
+    surviving = {j for j, ok in enumerate(fdr["surviving"]) if ok}
     from tradingagents.strategies.conformal import block_bootstrap_interval
 
     rows = []
@@ -1483,11 +1634,12 @@ def implementation_shortfall(
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
     "deflated_sharpe", "deflated_sharpe_report", "deflated_sharpe_ratio",
+    "min_track_record_length",
     "max_drawdown", "equity_curve", "walk_forward_splits",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",
     "benchmark_table",
-    "materiality_verdict", "family_materiality",
+    "materiality_verdict", "family_materiality", "benjamini_yekutieli",
     "skewness", "kurtosis", "downside_deviation", "sortino",
     "tracking_error", "information_ratio", "beta", "alpha", "treynor",
     "rolling_beta", "probabilistic_sharpe", "underwater_drawdowns",

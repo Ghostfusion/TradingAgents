@@ -5,6 +5,8 @@ All offline/deterministic. Endpoints verified against the standard
 definitions (per working-agreement §7, formulas web-checked first).
 """
 
+import random
+
 from tradingagents.strategies.mean_reversion import hurst_exponent
 from tradingagents.strategies.momentum import twap
 from tradingagents.strategies.orderflow import vpin
@@ -138,12 +140,27 @@ def test_ff5_none_when_factor_shape_missing():
 
 # --- Tier 2: Black-Litterman ------------------------------------------------
 
+def _bl_series() -> dict:
+    """A 40-observation three-name panel for the Black-Litterman tests.
+
+    The fixture used to be five observations per name. ``_covariance_matrix``
+    now refuses a sample covariance below the repo's observation floor (30, and
+    at least ``k + 1`` so the matrix can have full rank), so a five-row panel
+    never reaches the equilibrium/views arithmetic these tests exist to
+    exercise - the subject is preserved, the fixture is what moved.
+    """
+    rng = random.Random(17)
+    return {
+        "A": [rng.gauss(0.006, 0.012) for _ in range(40)],
+        "B": [rng.gauss(0.003, 0.008) for _ in range(40)],
+        "C": [rng.gauss(0.001, 0.020) for _ in range(40)],
+    }
+
+
 def test_bl_no_views_equals_market_caps():
     from tradingagents.strategies.portfolio_optimizer import black_litterman_weights
 
-    ret_by = {"A": [0.01, -0.005, 0.02, 0.0, 0.008],
-              "B": [0.005, 0.01, -0.01, 0.02, 0.0],
-              "C": [-0.02, 0.01, 0.005, -0.01, 0.02]}
+    ret_by = _bl_series()
     caps = {"A": 100.0, "B": 50.0, "C": 20.0}
     out = black_litterman_weights(ret_by, caps)
     assert out["weights"]["A"] > out["weights"]["B"] > out["weights"]["C"]
@@ -155,9 +172,7 @@ def test_bl_no_views_equals_market_caps():
 def test_bl_strong_view_shifts_weights():
     from tradingagents.strategies.portfolio_optimizer import black_litterman_weights
 
-    ret_by = {"A": [0.01, -0.005, 0.02, 0.0, 0.008],
-              "B": [0.005, 0.01, -0.01, 0.02, 0.0],
-              "C": [-0.02, 0.01, 0.005, -0.01, 0.02]}
+    ret_by = _bl_series()
     caps = {"A": 100.0, "B": 50.0, "C": 20.0}
     base = black_litterman_weights(ret_by, caps)["weights"]
     view = black_litterman_weights(

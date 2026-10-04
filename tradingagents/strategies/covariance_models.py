@@ -39,6 +39,7 @@ import math
 __all__ = [
     "ledoit_wolf_shrink",
     "ewma_covariance",
+    "COV_MIN_OBS",
     "SPECTRAL_MIN_OBS",
     "SPECTRAL_NULL_Z",
     "SPECTRAL_DETECTED",
@@ -51,7 +52,16 @@ __all__ = [
     "spectral_functionals",
 ]
 
-_MIN_OBS = 30
+#: The observation floor every covariance estimator in this module refuses below.
+#: One literal for the repo: ``portfolio_optimizer._covariance_matrix`` imports
+#: this name, because its helper "mirrors this module's alignment" by its own
+#: docstring and used to carry no floor at all - so a sample covariance over two
+#: observations reached every allocator. A second copy here and a third there is
+#: exactly the drift this constant exists to prevent.
+COV_MIN_OBS = 30
+
+#: The internal default-argument spelling of the same floor.
+_MIN_OBS = COV_MIN_OBS
 
 
 def _aligned_matrix(returns_by_name: dict, min_obs: int = _MIN_OBS):

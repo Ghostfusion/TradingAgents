@@ -15,21 +15,40 @@ from __future__ import annotations
 
 import math
 
+from tradingagents.strategies.covariance_models import COV_MIN_OBS
 
-def _covariance_matrix(returns_by_name: dict) -> dict | None:
+
+def _covariance_matrix(returns_by_name: dict,
+                       min_obs: int = COV_MIN_OBS) -> dict | None:
     """Empirical covariance matrix over aligned return series (sample cov).
 
     Returns ``{'names', 'cov'}`` where ``cov[i][j]`` corresponds to
     ``names[i]``/``names[j]`` and diagonal variance is strictly positive.
-    None when fewer than two aligned names or a degenerate (zero-variance)
-    name.
+    None when fewer than two aligned names, fewer than ``min_obs`` aligned
+    observations, or a degenerate (zero-variance) name.
+
+    **The observation floor (2026-10-04).** This helper used to accept as few as
+    **two** aligned observations, so a covariance with one degree of freedom
+    reached every caller below. Only the inverting ones noticed, because a
+    centred sample covariance over ``n`` observations and ``k`` names has rank
+    at most ``n - 1``: ``risk_parity_weights`` and ``risk_contribution`` never
+    invert, so on a rank-deficient matrix they reported a confident-looking
+    allocation from two data points with nothing in the output saying so. The
+    floor is now ``max(COV_MIN_OBS, k + 1)`` - statically identifiable (rank
+    ``k``) *and* the observation floor ``covariance_models`` already applies to
+    every covariance estimator it publishes, imported rather than restated so
+    the two cannot drift. Below it the allocators take their documented
+    equal-weight degrade.
     """
     names = [n for n in (returns_by_name or {}) if returns_by_name.get(n)]
     if len(names) < 2:
         return None
     series = [list(returns_by_name[n]) for n in names]
     n = min(len(s) for s in series)
-    if n < 2:
+    # A centred sample covariance over n rows has rank <= n - 1, so n <= k is
+    # exactly singular however the numbers read; the floor is the stricter of
+    # that and the repo's declared covariance observation floor.
+    if n < max(int(min_obs), len(names) + 1):
         return None
     mean = [sum(s[:n]) / n for s in series]
     cov = []

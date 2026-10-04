@@ -13,7 +13,11 @@ import math
 import random
 
 from tradingagents.strategies.alpha_eval import ceiling_ratio
-from tradingagents.strategies.calibration import excess_accuracy
+from tradingagents.strategies.calibration import (
+    diebold_mariano,
+    excess_accuracy,
+    mcnemar_paired,
+)
 
 #: 300 rows: a 255-row fit window and a 45-row hold-out (``train_frac=0.85``).
 _N_TRAIN = 255
@@ -173,3 +177,65 @@ def test_gate_off_is_unavailable(monkeypatch):
     excess = excess_accuracy([1.0] * 40, [0.01] * 40)
     assert excess["excess"] is None
     assert excess["unavailable"] == "excess accuracy off (enable_accuracy_ceiling)"
+
+
+def test_mcnemar_counts_only_the_discordant_pairs():
+    """The pairs both arms got right (or both got wrong) carry no information.
+
+    ``b`` is A right and B wrong, ``c`` the reverse; the exact two-sided p over
+    the ``b + c`` discordant pairs is the test. Two arms that agreed everywhere
+    are not evidence of a difference, and unpaired input is refused rather than
+    truncated to the shorter arm.
+    """
+    a = [True, True, True, True, False, True, True]
+    b = [True, False, False, True, False, True, True]
+    out = mcnemar_paired(a, b)
+    assert (out["b"], out["c"], out["n_discordant"]) == (2, 0, 2)
+    assert out["agree_both"] == 4 and out["agree_neither"] == 1
+    assert out["p_value"] == 0.5  # 2 * P(X <= 0), X ~ Binomial(2, 0.5)
+    assert out["method"] == "exact_binomial"
+    agreed = mcnemar_paired(a, a)
+    assert agreed["p_value"] == 1.0 and "no discordant pair" in agreed["method"]
+    assert mcnemar_paired([True], [True, False]) is None
+    assert mcnemar_paired([], []) is None
+
+
+def test_diebold_mariano_reports_direction_and_carries_the_hac_lag():
+    """The sign names the arm, and the HAC lag travels with the result.
+
+    The Newey-West variance is what makes the test valid on a serially
+    correlated differential - the correction McNemar's exact p, which assumes
+    independent pairs, cannot make.
+    """
+    a = [0.0, 1.0, 0.0, 1.0, 1.0]
+    b = [1.0, 1.0, 1.0, 1.0, 1.0]
+    out = diebold_mariano(a, b)
+    assert out["mean_differential"] < 0 and out["favours"] == "a"
+    assert out["statistic"] < 0 and 0.0 <= out["p_value"] <= 1.0
+    assert out["max_lag"] == 0 and out["method"].startswith("normal")
+    assert diebold_mariano(b, a)["favours"] == "b"
+    assert diebold_mariano(a, b, max_lag=2)["max_lag"] == 2
+    assert diebold_mariano([1.0], [0.0]) is None                  # < 3 pairs
+    assert diebold_mariano([1.0] * 5, [1.0] * 5) is None          # zero-variance differential
+
+
+def test_excess_accuracy_carries_the_paired_tests_and_the_fold_family(monkeypatch):
+    """The whole-series tests judge the SAME per-row object, and the per-fold
+    p-values are corrected as a family rather than reported one by one."""
+    _gate(monkeypatch, on=True)
+    realized = [0.01 if i % 3 else -0.01 for i in range(120)]
+    calls = [1.0 if i % 3 else -1.0 for i in range(120)]
+    rec = excess_accuracy(calls, realized)
+    assert rec["mcnemar"] is not None and rec["diebold_mariano"] is not None
+    # The model calls every row right, so every row the always-up baseline got
+    # wrong is a discordant pair in the model's favour and none is against it.
+    baseline_wrong = sum(1 for r in realized if r < 0)
+    assert rec["mcnemar"]["b"] == baseline_wrong
+    assert rec["mcnemar"]["c"] == 0
+    assert rec["mcnemar"]["agree_both"] == len(realized) - baseline_wrong
+    assert rec["mcnemar"]["n_discordant"] == baseline_wrong
+    assert rec["diebold_mariano"]["favours"] == "a"
+    assert len(rec["per_fold"]) == rec["folds"]
+    assert all(isinstance(f["mcnemar_p"], float) for f in rec["per_fold"])
+    assert any(f["survives"] for f in rec["per_fold"])
+    assert "as a family" in rec["basis"]

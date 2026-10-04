@@ -345,6 +345,34 @@ def test_risk_parity_degrade_on_single_name():
     assert out["note"].startswith("equal-weight")
 
 
+def test_the_allocators_refuse_a_covariance_below_the_observation_floor():
+    """A rank-deficient sample covariance is not a covariance.
+
+    A centred sample covariance over ``n`` observations and ``k`` names has rank
+    at most ``n - 1``, so the helper used to hand ``risk_parity_weights`` and
+    ``risk_contribution`` - the two that never invert, so never noticed - a
+    confident-looking allocation built from as few as two data points. The floor
+    is the repo's declared covariance floor, so those callers now take their
+    documented equal-weight degrade instead (2026-10-04).
+    """
+    rng = random.Random(4)
+    five = {n: [rng.gauss(0.0, 0.01) for _ in range(5)] for n in "AB"}
+    assert portfolio_optimizer._covariance_matrix(five) is None
+    assert portfolio_optimizer.risk_parity_weights(five)["note"].startswith("equal-weight")
+    assert portfolio_optimizer.risk_contribution({"A": 0.5, "B": 0.5}, five) == {}
+    # n == k is exactly singular even though every number in it is finite.
+    square = {n: [rng.gauss(0.0, 0.01) for _ in range(3)] for n in "ABC"}
+    assert portfolio_optimizer._covariance_matrix(square) is None
+    # Above the floor nothing changes.
+    long = {n: [rng.gauss(0.0, 0.01) for _ in range(60)] for n in "AB"}
+    assert portfolio_optimizer._covariance_matrix(long) is not None
+    assert portfolio_optimizer.risk_parity_weights(long)["note"] == "risk-parity"
+    # The floor is imported from the module that already declared it - not a
+    # second literal that could drift from the covariance estimators' own.
+    from tradingagents.strategies.covariance_models import COV_MIN_OBS
+    assert COV_MIN_OBS == 30
+
+
 # --------------------------------------------------------------------------
 # risk_manager.py (Lean L1)
 # --------------------------------------------------------------------------

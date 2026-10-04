@@ -1,6 +1,6 @@
 # Implementation Plan - Honest Evaluation Gates
 
-Status: **IN PROGRESS** - wave 0 (P0) is COMPLETE: H10, H1, H7, H11 (both halves), H4 and H6 all landed (2026-09-23); the T1 batch adds H2 (2026-09-24), whose availability classes stop at what this repo can honestly state because H8's sourced lag table is not built; the T2 batch adds **H9** (2026-09-27) behind a NEW gate key, `enable_report_influence` (the named `enable_report_attribution` was already taken by DSA-2 - see the card). H5, H8 and H3 remain.
+Status: **IN PROGRESS** - wave 0 (P0) is COMPLETE: H10, H1, H7, H11 (both halves), H4 and H6 all landed (2026-09-23); the T1 batch adds H2 (2026-09-24), whose availability classes stop at what this repo can honestly state because H8's sourced lag table is not built; the T2 batch adds **H9** (2026-09-27) behind a NEW gate key, `enable_report_influence` (the named `enable_report_attribution` was already taken by DSA-2 - see the card). H5, H8 and H3 remain. **H4's card also names paired McNemar / Diebold-Mariano tests under FDR control (`2607.12248`), which the H4 batch did not build; they landed 2026-10-04** — see the card, and note the FDR step-up is now one producer shared with H6.
 2026 `q-fin` corpus survey - the gates that decide whether a claim the engine publishes is
 *earned*. Parent survey: [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md).
 **Parent design:** [`design_research_honesty_gates.md`](design_research_honesty_gates.md)
@@ -84,6 +84,8 @@ SR*_0 = sqrt(V) * [ (1-g)*Phi^-1(1 - 1/N) + g*Phi^-1(1 - 1/(N*e)) ]   g = Euler-
 **Acceptance.** The impossible point above the 45-degree line is flagged, and dropping the out-of-sample requirement on `sigma_hat` turns the test red. `O(T)` plus one MLE fit - sub-second at these lengths.  
 **Depends on.** H11 (block-bootstrap intervals for the excess-accuracy report).  
 **Doc caveat.** 2602.07841 is an inequality derived from a constructed oracle, not a test - it can flag an impossible point but cannot reject a forecast, and `kappa` assumes sign/magnitude independence.
+
+**Landed (2026-10-04).** The paired tests this card names - 2607.12248's *"paired McNemar / Diebold-Mariano tests under FDR control"* - were **not** part of the H4 batch, which shipped its two statistics and H11's interval. They now ship with it: `calibration.mcnemar_paired` (exact two-sided binomial over the discordant pairs, the pairing being the whole test), `calibration.diebold_mariano` (Newey-West Bartlett kernel, so a serially correlated differential is not read as independent - the correction McNemar's exact p cannot make), both on the **same** per-row hit / miss object so the two cannot describe different things, and each walk-forward fold's McNemar p-value corrected as a family by `evaluate.benjamini_yekutieli` - the Benjamini-Yekutieli step-up **extracted** out of `family_materiality` (H6) so one producer serves both families rather than two copies of the arithmetic. The gate is unchanged (`enable_accuracy_ceiling`, default off), so nothing switches on; `dm_max_lag` is the new keyword for the HAC lag (`0` for the one-step default).
 
 ### H6 - Three-way verdict and family FDR
 
