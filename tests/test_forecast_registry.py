@@ -228,3 +228,36 @@ def test_return_targets_are_declined_with_codes():
     # ...and an `ok` row may not carry a refusal's code/citation.
     with pytest.raises(fr.ForecastRegistryError):
         _row(reason_code="GATE_OFF", citation="x")
+
+
+# ---------------------------------------------------------------------------
+# FL-6: a ref the registry binds to an implementation must resolve.
+# ---------------------------------------------------------------------------
+
+
+def test_every_bound_benchmark_ref_resolves_against_the_live_tree():
+    """A ref in ``BENCHMARK_IMPLEMENTATIONS`` must name a real symbol.
+
+    This is the rule ``implementation_ref`` already gets, applied to the
+    benchmark half: a renamed producer has to fail a build rather than leave a
+    row declaring a benchmark nobody can produce - which is how
+    ``regime.sticky_markov`` was missing before E15 implemented it (D5).
+    """
+    for ref, (module_path, symbol) in fr.BENCHMARK_IMPLEMENTATIONS.items():
+        assert ref in fr.BENCHMARK_REFS, f"{ref} is not a declared benchmark ref"
+        producer = fr.benchmark_producer(ref)
+        assert producer is not None, f"{module_path}::{symbol} does not resolve"
+        assert producer.__name__ == symbol
+
+
+def test_a_label_only_benchmark_has_no_producer():
+    """Most refs are labels: the caller supplies the score (FINDINGS §5)."""
+    assert fr.benchmark_producer("volatility.har_rv") is None
+    assert fr.benchmark_producer("no.such.ref") is None
+
+
+def test_the_regime_rows_declared_benchmark_is_producible():
+    row = next(r for r in fr.FORECAST_REGISTRY
+               if r.target.name == "regime_stress_probability")
+    assert row.benchmark_ref == "regime.sticky_markov"
+    assert fr.benchmark_producer(row.benchmark_ref) is not None

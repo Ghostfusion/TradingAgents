@@ -761,6 +761,38 @@ invalidates, and update §12. It may never ride in silently on an FL item's diff
 | 26 | Final contract shape | **Accepted with the P0 split** — §7.1 |
 | 27 | Disposition table | **Accepted** — this table |
 
+### 12.3 Post-freeze revision 1 — the regime benchmark is now producible (D5)
+
+**Numbered revision, per §11.0.** The reading of the `E:\fin paper` corpus
+(`Strategies/books/`) verified that §8.2's `regime.sticky_markov` benchmark ref
+named a method **no producer implemented**: the string occurred only in
+`forecast_registry.py` (`:195`, `:196`, `:269`) and no `sticky_markov` existed in
+`regime.py` or anywhere else. The `regime_stress_probability` row was `status="ok"`
+while its declared benchmark could never be scored.
+
+**What changed.**
+
+| surface | before | after |
+|---|---|---|
+| `strategies/regime.py` | no sticky-Markov estimator | `sticky_markov(states, *, threshold_quantile=None)` — two-state maximum-likelihood transition counts, `p_stay`, and the stationary law; an absorbing chain reports `unavailable` rather than `p_stay = 1` |
+| `forecast_registry.BENCHMARK_IMPLEMENTATIONS` | (did not exist) | a ref → `(module, symbol)` map, resolved against the live tree by `tests/test_forecast_registry.py`, so a ref can no longer claim a producer that has been renamed away |
+| `scripts/forecast_ledger.py` | took `--benchmark-score` on trust | refuses to score when a bound ref does not resolve, and reports `benchmark_ref` / `benchmark_implementation` |
+
+**What this does NOT change.** FD-1's five clauses, the three-record contract and
+its two-immutable split, capability-vs-quantity ownership, the one-authoritative-
+producer rule, the evidence/evaluation boundary and the §9 verdict categories are
+untouched (§11.0). The other eleven declared benchmark refs remain
+**declaration-only labels** — their documented state (§5 of
+`Strategies/books/FINDINGS.md`): the caller supplies the benchmark's score to
+`prediction_ledger.evaluate_forecast`. `BENCHMARK_IMPLEMENTATIONS` names only the
+refs whose *method* this repo implements.
+
+**Why it is a revision and not an FL item.** A benchmark ref is a contract with
+the caller: it says what a row must beat. A ref that resolves to nothing makes that
+contract unverifiable — the same class of defect as the wiring gate's `__all__`
+hole, a declaration that reads as enforcement. E15 in
+`Strategies/books/FINDINGS.md` §4 is the enhancement this discharges.
+
 ---
 
 ## 13. Honest limits

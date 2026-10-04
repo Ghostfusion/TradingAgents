@@ -205,6 +205,45 @@ BENCHMARK_REFS = frozenset(
     {ref for refs in BENCHMARK_BY_FAMILY.values() for ref in refs} | {INTERVAL_BENCHMARK}
 )
 
+#: The declared benchmark refs whose **method this repo implements in code**, as
+#: ``(path relative to the ``tradingagents`` package, symbol)``. A ref absent from
+#: this map is a declaration-only *label* - the documented state of the rest
+#: (``Strategies/books/FINDINGS.md`` §5): the benchmark is named so the caller
+#: knows what to beat, and the caller supplies its score to
+#: ``prediction_ledger.evaluate_forecast``. A ref that IS in the map must resolve
+#: against the live tree, so a ref cannot keep claiming a producer that has been
+#: renamed away.
+BENCHMARK_IMPLEMENTATIONS: dict[str, tuple[str, str]] = {
+    # E15 (2026-10-04): the regime rows' persistence benchmark. Before this the
+    # ref named a method that existed nowhere in the tree, so the
+    # regime_stress_probability row declared a benchmark nobody could produce.
+    "regime.sticky_markov": ("strategies/regime.py", "sticky_markov"),
+}
+
+
+def benchmark_producer(ref: str):
+    """The callable implementing a declared benchmark ref, or ``None``.
+
+    ``None`` means the ref is a label, which is the normal case. A ref listed in
+    :data:`BENCHMARK_IMPLEMENTATIONS` that resolves to ``None`` has been renamed
+    away and is a defect - ``scripts/forecast_ledger.py`` refuses to score such a
+    row rather than let a dangling declaration through.
+    """
+    spec = BENCHMARK_IMPLEMENTATIONS.get(str(ref))
+    if spec is None:
+        return None
+    import importlib
+
+    module_path, symbol = spec
+    try:
+        module = importlib.import_module(
+            "tradingagents." + module_path.removesuffix(".py").replace("/", ".")
+        )
+    except Exception:  # noqa: BLE001 - an unimportable module is no producer
+        return None
+    return getattr(module, symbol, None)
+
+
 #: Targets whose claims are **directional** - they must carry both ceilings, not
 #: only a benchmark: the H-theme's out-of-sample R² ceiling (`2602.07841`) and
 #: `H4`'s base-rate ceiling. Binding them is a declaration, so a directional claim
@@ -430,6 +469,7 @@ def forecast_registry_block() -> dict:
 
 __all__ = [
     "BENCHMARK_BY_FAMILY",
+    "BENCHMARK_IMPLEMENTATIONS",
     "BENCHMARK_REFS",
     "CANDIDATE_MEMBERS",
     "DIRECTIONAL_CEILINGS",
@@ -438,5 +478,6 @@ __all__ = [
     "ForecastRegistryError",
     "INTERVAL_BENCHMARK",
     "RegistryRow",
+    "benchmark_producer",
     "forecast_registry_block",
 ]

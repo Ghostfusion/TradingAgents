@@ -3678,6 +3678,7 @@ def get_gamma_profile(
             gamma_regime,
             gex_levels,
             gex_per_strike,
+            max_pain,
         )
 
         out = _options_chain_rows_lambda(ticker)
@@ -3707,6 +3708,20 @@ def get_gamma_profile(
             lines.append(f"- top |GEX| levels (strike, signed gamma, vs spot): {rendered}")
         else:
             lines.append(f"- top |GEX| levels: n/a ({levels['withheld']})")
+        # The payout-minimising settlement strike, off the same chain rows: the
+        # walls above say where the gamma sits, this says where expiry value
+        # would be minimised. `derivatives_gamma.max_pain` was exported and
+        # tested but never reached an agent (D3 triage, 2026-10-04).
+        mp = max_pain(rows)
+        if mp:
+            lines.append(
+                f"- max pain: {mp['strike']:,.2f} (payout {mp['pain']:,.0f} over "
+                f"{mp['strikes']} strike(s) carrying open interest)"
+            )
+        else:
+            lines.append(
+                "- max pain: n/a (fewer than two strikes carry open interest)"
+            )
         lines.append("- note: market-structure heuristic, not a price law")
         return "\n".join(lines)
     except Exception as exc:  # noqa: BLE001 - advisory, never blocks

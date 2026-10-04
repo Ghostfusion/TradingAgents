@@ -77,7 +77,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tradingagents.strategies import alpha_health, evaluate  # noqa: E402
+from tradingagents.strategies import alpha_health, coverage_window, evaluate  # noqa: E402
 
 # --- The source's own cost model (SEC EDGAR fair access) ---------------------
 
@@ -666,6 +666,7 @@ def build_panel(
     chunk_size: int = CHUNK_SIZE,
     technical: bool = True,
     fetched_at: str | None = None,
+    universe_provenance: str | None = None,
 ) -> dict:
     """Build (or load) one panel file per date; never re-fetch a cached date.
 
@@ -675,6 +676,13 @@ def build_panel(
     ``alpha_health.cross_section_status``. ``transport`` and ``price_provider``
     are the two injectable legs; with both ``None`` the call is a pure cache
     read.
+
+    ``universe_provenance`` declares where the universe came from, and the record
+    carries ``universe_label`` accordingly (H10): ``survivor_only`` for a
+    current-constituent list - the default, because every universe this repo
+    builds is today's - and ``None`` for a point-in-time one. The label travels
+    WITH the panel record, so a backtest cannot be published without the survivor
+    caveat; before this it was defined and never written anywhere.
     """
     cache_dir = cache_dir or default_cache_dir()
     dates = [str(d) for d in (dates or []) if str(d).strip()]
@@ -849,6 +857,7 @@ def build_panel(
         "dates": dates,
         "universe": universe_all,
         "universe_n": len(universe_all),
+        "universe_label": coverage_window.universe_label(universe_provenance),
         "chunks": len(chunks),
         "chunk_size": int(chunk_size),
         "per_date": per_date,

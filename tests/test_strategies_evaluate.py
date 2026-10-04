@@ -1,8 +1,12 @@
 """Phase 0 unit tests: cost-aware evaluation metrics (offline)."""
 
+import pytest
+
 from tradingagents.strategies.evaluate import (
     cagr,
     deflated_sharpe,
+    deflated_sharpe_ratio,
+    deflated_sharpe_report,
     equity_curve,
     information_ratio,
     max_drawdown,
@@ -14,6 +18,8 @@ from tradingagents.strategies.evaluate import (
     volatility,
     walk_forward_splits,
 )
+
+pytestmark = pytest.mark.timeout(120)
 
 
 def test_net_returns_subtracts_costs():
@@ -89,3 +95,54 @@ def test_walk_forward_splits():
 def test_pbo_flag_detects_overfit():
     assert pbo_flag([1.0, 2.0, 0.5], [0.2, -0.5, 0.3]) is True  # best trial tanks
     assert pbo_flag([1.0, 2.0], [0.4, 0.5]) is False
+
+
+# Alternating +/- returns: per-observation SR ~0.08 (mean 0.0008, sd 0.01), so
+# the ANNUALIZED Sharpe is ~1.3 while the 50-trial per-observation selection
+# threshold is ~2.80 - the scale gap the legacy difference mixes.
+_ALTERNATING = [0.0108, -0.0092] * 250
+
+
+def test_deflated_sharpe_ratio_is_per_observation_and_probabilistic():
+    """Eq. (2) is applied in per-observation units and returns a probability.
+
+    The legacy ``deflated_sharpe`` subtracts a unit-scale threshold from an
+    annualized Sharpe, so its value here is a large negative Sharpe-unit
+    difference; the DSR is a confidence in [0, 1] and reads the same series as
+    indistinguishable from noise after 50 trials.
+    """
+    dsr = deflated_sharpe_ratio(_ALTERNATING, n_trials=50)
+    assert dsr is not None
+    assert 0.0 <= dsr <= 1.0
+    assert dsr < 0.5
+    assert deflated_sharpe(_ALTERNATING, n_trials=50) < 0.0
+
+
+def test_deflated_sharpe_ratio_falls_as_trials_grow():
+    small = deflated_sharpe_ratio(_ALTERNATING, n_trials=10)
+    large = deflated_sharpe_ratio(_ALTERNATING, n_trials=1000)
+    assert small is not None and large is not None
+    assert large <= small
+
+
+def test_deflated_sharpe_ratio_guards_degenerate_inputs():
+    assert deflated_sharpe_ratio(_ALTERNATING, n_trials=1) is None        # N < 2
+    assert deflated_sharpe_ratio([0.01, 0.02], n_trials=10) is None       # < 4 obs
+    assert deflated_sharpe_ratio(_ALTERNATING, n_trials=10,
+                                 sharpe_dispersion=0.0) is None           # no dispersion
+
+
+def test_deflated_sharpe_ratio_uses_the_measured_dispersion():
+    """A tightly clustered search deflates less than the unit-variance default:
+    V is what the selection threshold is actually built from."""
+    assumed = deflated_sharpe_ratio(_ALTERNATING, n_trials=50)
+    measured = deflated_sharpe_ratio(_ALTERNATING, n_trials=50,
+                                     sharpe_dispersion=0.0005)
+    assert assumed is not None and measured is not None
+    assert measured > assumed
+
+
+def test_deflated_sharpe_report_carries_the_ratio():
+    rep = deflated_sharpe_report([0.001, -0.002, 0.003] * 40, n_trials=10)
+    assert rep["ratio"] is not None and 0.0 <= rep["ratio"] <= 1.0
+    assert rep["ratio"] != rep["value"]  # a probability beside the difference

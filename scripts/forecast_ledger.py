@@ -145,6 +145,8 @@ def main(argv=None) -> int:
     record_forecast(record, args.results_dir)
 
     evaluation = None
+    benchmark_ref = None
+    benchmark_implementation = None
     if args.realized is not None:
         row = _registry_row(record.producer_id)
         if args.score is None or args.benchmark_score is None or row is None or not row.benchmark_ref:
@@ -154,6 +156,22 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             return 2
+        benchmark_ref = row.benchmark_ref
+        # A ref the registry binds to an implementation must still resolve: a
+        # renamed producer would otherwise leave the row declaring a benchmark
+        # nobody can produce, which is exactly how `regime.sticky_markov` went
+        # missing before it was implemented (D5).
+        impl_ref = fr.BENCHMARK_IMPLEMENTATIONS.get(benchmark_ref)
+        if impl_ref is not None:
+            if fr.benchmark_producer(benchmark_ref) is None:
+                print(
+                    f"{ticker}: the registry binds {benchmark_ref} to "
+                    f"{impl_ref[0]}::{impl_ref[1]}, which does not resolve; "
+                    "nothing was scored",
+                    file=sys.stderr,
+                )
+                return 2
+            benchmark_implementation = f"{impl_ref[0]}::{impl_ref[1]}"
         evaluation = evaluate_forecast(
             forecast_id=record.forecast_id,
             realized_outcome=args.realized,
@@ -182,6 +200,10 @@ def main(argv=None) -> int:
         "ledger_records": sum(1 for r in rows if r.get("kind") == "record"),
         "ledger_evaluations": sum(1 for r in rows if r.get("kind") == "evaluation"),
         "evaluated": evaluation is not None,
+        "benchmark_ref": benchmark_ref if evaluation is not None else None,
+        "benchmark_implementation": (
+            benchmark_implementation if evaluation is not None else None
+        ),
     }
     if args.json:
         print(json.dumps(summary, indent=2))

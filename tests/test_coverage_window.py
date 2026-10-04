@@ -11,7 +11,10 @@ import pandas as pd
 
 from tradingagents.strategies.coverage_window import (
     SURVIVOR_ONLY,
+    UNIVERSE_CURRENT,
+    UNIVERSE_POINT_IN_TIME,
     coverage_window,
+    universe_label,
 )
 from tradingagents.strategies.data_quality import panel_statistic
 
@@ -94,3 +97,15 @@ def test_empty_and_all_missing_degrade_not_to_zero_coverage(monkeypatch):
     assert all_nan["unavailable"]
     assert panel_statistic([float("nan")])["statistic"] is None
     assert SURVIVOR_ONLY == "survivor_only"
+
+
+def test_universe_label_marks_a_current_constituent_universe():
+    assert universe_label() == SURVIVOR_ONLY
+    assert universe_label(None) == SURVIVOR_ONLY
+    assert universe_label(UNIVERSE_CURRENT) == SURVIVOR_ONLY
+
+
+def test_only_an_explicit_point_in_time_universe_clears_the_label():
+    assert universe_label(UNIVERSE_POINT_IN_TIME) is None
+    # An unrecognised value fails SAFE: the caveat stays on.
+    assert universe_label("unknown") == SURVIVOR_ONLY

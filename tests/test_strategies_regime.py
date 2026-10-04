@@ -5,6 +5,7 @@ it is covered here rather than skipped for a missing optional dependency.
 """
 
 import numpy as np
+import pytest
 
 from tradingagents.strategies.regime import (
     CHOP_TREND_THRESHOLD,
@@ -13,9 +14,12 @@ from tradingagents.strategies.regime import (
     hmm_regime,
     realized_vol,
     regime_label,
+    sticky_markov,
     trend_strength,
     vol_percentile,
 )
+
+pytestmark = pytest.mark.timeout(120)
 
 
 def _uptrend(n=260, base=100.0, step=0.3):
@@ -353,3 +357,37 @@ def test_hmm_regime_is_the_label_view_of_the_same_filter():
     assert hmm_regime([100.0] * 30, 2) == "unknown"
     assert hmm_regime([], 2) == "unknown"
     assert hmm_regime(_two_regime_closes(), 2) == "bear"
+
+
+# --- the regime rows' declared benchmark (E15) -----------------------------
+
+
+def test_sticky_markov_reads_persistence_off_the_transition_counts():
+    """``0,0,1,1,0,1`` pairs to (0,0) (0,1) (1,1) (1,0) (0,1)."""
+    out = sticky_markov([0, 0, 1, 1, 0, 1])
+    assert out["transition_counts"] == [[1, 2], [1, 1]]
+    assert out["n_transitions"] == 5
+    assert out["n_switches"] == 3
+    assert out["p_stay_by_state"] == {0: round(1 / 3, 6), 1: 0.5}
+    assert out["p_stay"] == 0.5  # the current (last) state is 1
+    assert out["stationary"] == [round(3 / 7, 6), round(4 / 7, 6)]
+    assert out["unavailable"] is None
+
+
+def test_sticky_markov_refuses_an_absorbing_chain_instead_of_calling_it_certain():
+    out = sticky_markov([1, 1, 1, 1])
+    assert out["p_stay"] is None
+    assert out["n_switches"] == 0
+    assert "absorbing" in out["unavailable"]
+
+
+def test_sticky_markov_accepts_a_numeric_series_with_a_stress_quantile():
+    out = sticky_markov(list(range(20)), threshold_quantile=0.9)
+    assert out["unavailable"] is None
+    assert out["p_stay"] == 1.0  # the top decile runs consecutively
+    assert out["n_switches"] == 1
+
+
+def test_sticky_markov_guards_a_short_or_non_numeric_series():
+    assert sticky_markov([0, 1])["unavailable"] is not None
+    assert sticky_markov([0, 1, "x"])["p_stay"] is None

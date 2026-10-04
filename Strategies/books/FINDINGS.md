@@ -20,10 +20,19 @@ Both are documentation-only: no computed number changes.
 | F1 | `tradingagents/strategies/rnd_recovery.py:1` cited its source as `(V3, 2512.xxxx)` — a placeholder id is not a citable source. `[verified]` The real paper is **arXiv 2607.27188v1**, *"Inverse Learning of Latent Risk-Neutral Densities from Irregular Option Quotes"*, whose two-component lognormal mixture, NIFTY held-out quotes and declined learned operator match this module exactly. | Header now cites `(V3, 2607.27188)`. |
 | F2 | `tradingagents/strategies/market_session.py:336` documented `ratio = inst_net / (\|inst_net\| + \|retail_net\|)` while line 349 computes `(inst + retail) / (\|inst\| + \|retail\|)`. `[verified]` The **code is right** and self-consistent — its own inline comment already says "signed net / total flow: +1 = all institutional buying, 0 = perfectly balanced", and a caller using the documented formula would mis-scale the ratio by up to 2×. The stale formula appears nowhere else, including no agent-facing tool description (`market_analyst.py:90` quotes only the verdict bands). | Docstring formula corrected to match the code. |
 
-## 2. Confirmed defects that need an owner decision (5)
+## 2. Confirmed defects — the decision, and what landed (5)
 
-Each is verified, each is a real problem, and each changes behaviour or policy
-if fixed — which is why they are here and not in §1.
+Each was verified, and each changed behaviour or policy if fixed — which is why
+they were decisions and not §1 patches. The owner took the class-level route for
+D3 and authorised the rest, so all five are now fixed or explicitly recorded.
+
+| # | Defect | Disposition |
+| --- | --- | --- |
+| D1 | `deflated_sharpe` mixes scales | **Fixed** — `evaluate.deflated_sharpe_ratio` applies the paper's Eq. (2) in per-observation units and returns a probability; the scale-coupled legacy difference is kept (its docstring promised bit-for-bit) and now states the unit caveat it always had |
+| D2 | the G5 gate deflates from a hard-coded trial count | **Fixed** — `gate_verdict` reads `trial_ledger.trial_stats` (N and V) whenever `enable_trial_ledger` is on, and reports which it used |
+| D3 | the wiring gate under-detects unwired calculators | **Fixed** — the detector counts AST uses plus string constants, excluding docstrings and the `__all__` assignment. **115** orphans surfaced, not six (see the correction in the entry below); each is declared by class in `tests/test_calc_agent_wiring.py`, and the verified wiring gaps are registered as `GAP_CALCULATORS` with the consumer that should own them |
+| D4 | `SURVIVOR_ONLY` is defined but never written | **Fixed** — `coverage_window.universe_label` plus the `score_panel` build record's `universe_label` |
+| D5 | `regime.sticky_markov` cannot be evaluated | **Fixed** — `regime.sticky_markov` implemented, bound through `forecast_registry.BENCHMARK_IMPLEMENTATIONS` and resolved by the registry test; numbered design revision §12.3 |
 
 ### D1. `deflated_sharpe` mixes an annualized Sharpe with a unit-scale threshold `[verified]`
 `tradingagents/strategies/evaluate.py:161-186` computes `sharpe(returns, risk_free, periods_per_year)`
@@ -41,6 +50,11 @@ verdict. Correcting it changes published gate outcomes.
 **Options:** (a) compose `probabilistic_sharpe` into `deflated_sharpe` behind a
 new flag, keeping the old path as the default; (b) fix the scale in place and
 accept the verdict change; (c) document the approximation as deliberate.
+**Taken: (a)** — a new, literature-correct statistic (`deflated_sharpe_ratio`)
+landed beside the legacy difference rather than replacing it, because the legacy
+number is what the G5 gate publishes and its docstring promised the pre-existing
+result bit for bit. The legacy path also gained the unit caveat (c) would have
+required, so nothing about it is silent either way.
 Sources: `2608.23808v2`, `2608.27734v1` (books 02, 14, 15).
 
 ### D2. The G5 gate deflates from a hard-coded trial count `[verified]`
@@ -66,6 +80,16 @@ a policy call about the repo's own "a calculator that never reaches a tool loop
 is incomplete work" rule, not a bug fix I should make silently.
 Note also the module-level case is inert (`_MODULE_CASES` is empty because
 `_reference_blob()` includes the module under test).
+
+**Correction (2026-10-04, measured).** "Six" was the subset the corpus happened
+to name; the gate's real blind spot is **115 of the 1,399 public functions in
+scope (8.2%)**, across ~60 modules — measured by re-implementing the gate and
+diffing it against the corrected rule. Two detection holes compound: an `__all__`
+entry satisfied `text.count(fn) > 1`, and `blob.count(fn)` matched substrings
+(`max_pain` passed on the retired `max_pain_dist_atr`; `tail_risk` passed on 55
+docstring and tool-name hits while having no call site anywhere). The module-level
+note above is stale too: under the corrected rule `_MODULE_CASES` is live again
+(`strategies/monitor.py`, `strategies/triadic_stress.py`).
 
 ### D4. The corpus sweep confirms `SURVIVOR_ONLY` is defined but never written `[verified]`
 `coverage_window.py:45` defines it and `:140` exports it; nothing else in
@@ -203,3 +227,63 @@ developed with a source, a repo surface and a concrete step in the book named.
   decisions rather than patches.
 - Two files were changed in this pass, both docstrings (`§1`). **No computational
   behaviour was altered**, and no test was weakened.
+
+---
+
+## 7. The D3 gap register — the 38 verified wiring gaps
+
+The corrected wiring detector (see §2 D3) surfaced 115 unreferenced public
+calculators. Triaging them left **38 verified wiring gaps**: a read with no wired
+equivalent, and a consumer that should own it. They are declared in
+`tests/test_calc_agent_wiring.py::GAP_CALCULATORS` — that dict is the
+authoritative register, because the gate refuses a declaration that is stale or
+misspelled — and repeated here so the work list is readable without opening a
+test file. **One is already wired** (`derivatives_gamma.max_pain`, into
+`get_gamma_profile`); wiring another removes its entry, and the guard then refuses
+a key that is no longer orphaned.
+
+| module:function | consumer that should own it |
+| --- | --- |
+| `alpha_eval:insight_accuracy` | `analysis_tools:get_alpha_scoring` |
+| `complexity:approximate_entropy` | `analysis_tools:get_mean_reversion_quality` |
+| `debate_score:divergence_check` | the debate read (design_multi_agent_debate §4.5) |
+| `debate_score:reweight_to_baseline` | `structured_debate:create_debate_finalize` |
+| `derivatives_gamma:max_pain` | **wired 2026-10-04** → `analysis_tools:get_gamma_profile` |
+| `domain_bundles:get_fundamental_profile` | `fundamentals_analyst` |
+| `domain_bundles:get_market_technicals` | `market_analyst` |
+| `domain_bundles:get_portfolio_risk_envelope` | `aggressive_debator` |
+| `domain_bundles:get_sentiment_flow_feed` | `news_analyst` |
+| `factor_expressions:apply_winsorize` | `analysis_tools:get_factor_profile` |
+| `factor_expressions:apply_zscore` | `analysis_tools:get_factor_profile` |
+| `factor_expressions:fit_winsorize` | `analysis_tools:get_factor_profile` |
+| `falsification:monitor_conditions` | `monitor:notify` |
+| `falsification:record_breaches` | `falsification:monitor_conditions` |
+| `mean_reversion:memory_profile` | `analysis_tools:get_mean_reversion_quality` |
+| `monitor:notify` | `falsification:monitor_conditions` |
+| `portfolio_optimizer:confidence_weights` | `analysis_tools:get_risk_parity_alloc` |
+| `quant_baseline:baseline_rating` | `prediction_ledger:log_decision` |
+| `quant_baseline:quant_signal` | `prediction_ledger:log_decision` |
+| `reflection:build_reflection_context` | `trading_graph:prepare_initial_state` (enable_reflection) |
+| `regime:market_stress_composite` | `analysis_tools:get_regime_components` |
+| `regime:relative_vol_ratio` | `analysis_tools:get_regime_components` |
+| `regime:upside_downside_beta` | `analysis_tools:get_regime_components` |
+| `risk_sizing:risk_quantity` | `analysis_tools:get_fixed_risk_size` |
+| `sector_screener:stock_screen` | `analysis_tools:get_sector_rotation_screen` |
+| `sentiment:event_study` | *(none named from the tree)* |
+| `sentiment:gini_coefficient` | *(none named from the tree)* |
+| `sentiment:sentiment_dynamics` | `analysis_tools:_sentiment_depth_rows` |
+| `signal_analysis:ic_decay_half_life` | `analysis_tools:get_signal_quality` |
+| `signal_analysis:pred_autocorr` | `analysis_tools:get_signal_quality` |
+| `technical_score:technical_disagreement` | `analysis_tools:get_technical_score` |
+| `technical_score:technical_state` | `analysis_tools:get_technical_score` |
+| `triadic_stress:triadic_stress` | `analysis_tools:_risk_components` |
+| `dataflows/alpaca:get_calendar` | `scripts/value_screener.py` |
+| `dataflows/pit_registry:markup_label` | *(none named from the tree)* |
+| `dataflows/preopen:postfill_drift` | `scripts/strategy_quality_report.py:build_report` |
+| `dataflows/stockdata:get_market_snapshot_stockdata` | `market_position_tools:get_market_snapshot` |
+| `dataflows/yfinance_sector:fetch_eps_revisions` | `scripts/value_screener.py:_fetch_revision_guarded` |
+
+**A reminder about the other 77.** They are declared `reference` / `dead` and are
+*not* work: a recipe the vault documents as a formula, a debug or schema-self-check
+helper, a duplicate of a wired symbol, or a read that needs an input no vendor
+supplies. The register above is the actionable remainder.

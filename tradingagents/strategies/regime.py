@@ -1619,6 +1619,92 @@ def spectral_change_read(
     }
 
 
+def sticky_markov(states: list, *, threshold_quantile: float | None = None) -> dict:
+    """Two-state sticky-Markov persistence benchmark (E15, design doc §8.2).
+
+    ``forecast_registry.BENCHMARK_BY_FAMILY`` declares ``regime.sticky_markov``
+    as the benchmark the ``regime_probability`` / ``regime_stress_probability``
+    rows must beat before they may be scored. This is that benchmark's producer:
+    it fits the maximum-likelihood transition matrix of a first-order two-state
+    chain on an observed state series and reports the persistence read - the
+    probability the next state repeats the current one - beside the chain's
+    stationary law and the counts it was fitted on. A forecast that cannot beat
+    "it persists" has shown no regime skill.
+
+    ``states`` is a chronological 0/1 (or ``False``/``True``) sequence, or a
+    numeric series with ``threshold_quantile`` set, in which case observations at
+    or above that quantile mark state 1 - the stress state, the same convention
+    ``market_breadth.forward_stress_probability`` uses.
+
+    Returns ``{'p_stay', 'p_stay_by_state', 'stationary', 'transition_counts',
+    'n_transitions', 'n_switches', 'unavailable', 'basis'}``. A series that never
+    leaves one state has **no** persistence to measure: it reports
+    ``unavailable`` with the reason rather than ``p_stay == 1``, because an
+    absorbing chain is not a perfect predictor.
+    """
+    raw = [v for v in states if v is not None]
+    base = {
+        "p_stay": None, "p_stay_by_state": {}, "stationary": None,
+        "transition_counts": None, "n_transitions": 0, "n_switches": 0,
+        "basis": "sticky-Markov persistence benchmark (two-state transition counts)",
+    }
+    if len(raw) < 3:
+        return {**base,
+                "unavailable": f"{len(raw)} observation(s), 3 needed for a transition"}
+    try:
+        nums = [float(v) for v in raw]
+    except (TypeError, ValueError):
+        return {**base, "unavailable": "non-numeric state series"}
+    if threshold_quantile is not None:
+        ordered = sorted(nums)
+        rank = min(len(ordered) - 1,
+                   max(0, int(round(float(threshold_quantile) * (len(ordered) - 1)))))
+        cut = ordered[rank]
+        seq = [1 if x >= cut else 0 for x in nums]
+    else:
+        seq = [1 if x >= 0.5 else 0 for x in nums]
+
+    counts = [[0, 0], [0, 0]]
+    for prev, nxt in zip(seq, seq[1:], strict=False):
+        counts[prev][nxt] += 1
+    n_transitions = counts[0][0] + counts[0][1] + counts[1][0] + counts[1][1]
+    n_switches = counts[0][1] + counts[1][0]
+    if n_switches == 0:
+        return {
+            **base,
+            "transition_counts": counts,
+            "n_transitions": n_transitions,
+            "unavailable": (
+                f"the series never left state {seq[-1]} over {n_transitions} "
+                "transition(s): an absorbing chain has no persistence to measure "
+                "(never read as p_stay = 1)"
+            ),
+        }
+    p_stay_by_state = {}
+    for state in (0, 1):
+        row = counts[state][0] + counts[state][1]
+        p_stay_by_state[state] = round(counts[state][state] / row, 6) if row else None
+    p01 = counts[0][1] / (counts[0][0] + counts[0][1])
+    p10 = counts[1][0] / (counts[1][0] + counts[1][1])
+    stationary = [round(p10 / (p01 + p10), 6), round(p01 / (p01 + p10), 6)]
+    current = seq[-1]
+    return {
+        "p_stay": p_stay_by_state[current],
+        "p_stay_by_state": p_stay_by_state,
+        "stationary": stationary,
+        "transition_counts": counts,
+        "n_transitions": n_transitions,
+        "n_switches": n_switches,
+        "unavailable": None,
+        "basis": (
+            f"two-state maximum-likelihood transition counts over {n_transitions} "
+            f"transition(s), {n_switches} switch(es); p_stay is P(S_t = S_(t-1)) for "
+            f"the current state {current} - the persistence a regime probability "
+            "forecast must beat to show skill"
+        ),
+    }
+
+
 __all__ = [
     "realized_vol",
     "vol_percentile",
@@ -1652,6 +1738,7 @@ __all__ = [
     "market_stress_composite",
     "hmm_transition_read",
     "regime_state_metadata",
+    "sticky_markov",
 ]
 
 

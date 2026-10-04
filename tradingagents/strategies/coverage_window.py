@@ -44,6 +44,29 @@ import numpy as np
 #: then. Defined here so the label has one definition site.
 SURVIVOR_ONLY = "survivor_only"
 
+#: The provenance a universe declaration may carry. ``current_constituent`` is
+#: the honest default for this repo: every panel it builds comes from *today's*
+#: list (``Strategies/preferred_universe.txt``, the S&P panel, the screener's
+#: constituents) and it has no point-in-time membership source.
+UNIVERSE_CURRENT = "current_constituent"
+UNIVERSE_POINT_IN_TIME = "point_in_time"
+
+
+def universe_label(provenance: str | None = UNIVERSE_CURRENT) -> str | None:
+    """The findings-record label for a backtest's universe (H10).
+
+    ``survivor_only`` when the universe is the CURRENT constituent list - the
+    universe is what survived to today, not what was investable then - and
+    ``None`` for a point-in-time universe, which carries no survivor caveat.
+    Only an explicit ``point_in_time`` declaration clears the label; missing
+    provenance, and any value this module does not recognise, keep it, because
+    the fail-safe direction is to carry the caveat rather than drop it - and no
+    point-in-time membership source exists in this repo at all.
+    """
+    if provenance is not None and str(provenance) == UNIVERSE_POINT_IN_TIME:
+        return None
+    return SURVIVOR_ONLY
+
 
 def _is_missing(value) -> bool:
     """True for ``None`` and any float/numpy NaN; never raises on odd types."""
@@ -137,4 +160,5 @@ def coverage_window(series, *, alignment: str | None = None) -> dict:
     }
 
 
-__all__ = ["SURVIVOR_ONLY", "coverage_window"]
+__all__ = ["SURVIVOR_ONLY", "UNIVERSE_CURRENT", "UNIVERSE_POINT_IN_TIME",
+           "coverage_window", "universe_label"]

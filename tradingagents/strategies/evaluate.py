@@ -178,6 +178,17 @@ def deflated_sharpe(returns: list[float], n_trials: int = 100,
     the argument is ignored and the result is the pre-existing approximation bit
     for bit. ``deflated_sharpe_report`` returns the same number beside its N and
     whether the dispersion was measured or assumed.
+
+    **Unit caveat (known limitation, 2026-10-04).** ``observed`` here is
+    ``sharpe``'s **annualized** CAGR-based Sharpe, while the *assumed* threshold
+    ``sqrt(2*ln(N))`` is the expected maximum of ``N`` standard-normal draws -
+    a **per-observation** quantity. Those are different scales, so the assumed
+    path's difference is dimensionally mixed. The measured path is consistent
+    (the ledger's V is annualized too, so both sides match). For the
+    scale-correct statistic use :func:`deflated_sharpe_ratio`, which applies the
+    paper's Eq. (2) in per-observation units and returns a probability; this
+    function is retained unchanged because the G5 gate publishes its number and
+    its docstring promised the pre-existing result bit for bit.
     """
     observed = sharpe(returns, risk_free, periods_per_year)
     threshold, _ = _selection_threshold(n_trials, sharpe_dispersion)
@@ -202,6 +213,10 @@ def deflated_sharpe_report(returns: list[float], n_trials: int = 100,
     threshold, provenance = _selection_threshold(n_trials, sharpe_dispersion)
     return {
         "value": observed if threshold is None else observed - threshold,
+        "ratio": deflated_sharpe_ratio(
+            returns, n_trials=n_trials, risk_free=risk_free,
+            periods_per_year=periods_per_year, sharpe_dispersion=sharpe_dispersion,
+        ),
         "n_trials": max(1, int(n_trials)),
         "sharpe_dispersion": float(sharpe_dispersion)
         if provenance == "measured" else None,
@@ -239,6 +254,58 @@ def equity_curve(returns: list[float], start: float = 100.0) -> list[float]:
         level *= 1.0 + (r if r is not None else 0.0)
         curve.append(level)
     return curve
+
+
+def deflated_sharpe_ratio(returns: list[float], n_trials: int = 100,
+                          risk_free: float = 0.0,
+                          periods_per_year: float = 252.0,
+                          sharpe_dispersion: float | None = None) -> float | None:
+    """Bailey & Lopez de Prado's Deflated Sharpe Ratio (2014), Eq. (2).
+
+    ``DSR = Z[(SR_hat - SR*_0) * sqrt(T-1) / sqrt(1 - g3*SR_hat + ((g4-1)/4)*SR_hat^2)]``
+    - the Probabilistic Sharpe Ratio with its rejection threshold raised to the
+    expected MAXIMUM of ``n_trials`` independent trials. The answer is the
+    confidence that the selected strategy's true SR beats the best a search of
+    that size finds on noise alone: a probability in ``[0, 1]``. ``None`` when
+    the estimator is degenerate (``n_trials < 2``, under four observations, a
+    zero/negative dispersion or a non-positive variance estimate).
+
+    **Everything is per-observation, which is the paper's own scale.** Its worked
+    example converts an annualized 2.5 to a non-annualized ``sqrt(2/250)`` before
+    applying Eq. (2); ``SR*_0`` is built from the trials' *per-observation*
+    Sharpes. This function composes the two pieces the module already owns -
+    the selection threshold and ``probabilistic_sharpe``'s moment-corrected
+    standard error - instead of re-deriving either.
+
+    ``sharpe_dispersion`` is V **as the ledger records it**: the variance of the
+    trials' *annualized* Sharpe ratios, because ``trial_ledger.trial_stats``
+    records ``evaluate.sharpe``'s output. It is therefore divided by
+    ``periods_per_year`` before entering the threshold. That conversion is exact
+    when the annualized Sharpe is the per-observation one scaled by
+    ``sqrt(periods_per_year)`` - true for the mean/std estimator composed below,
+    an **approximation** for ``sharpe``'s CAGR-based one. Pass a
+    per-observation V with ``periods_per_year=1.0`` when you already hold one.
+    """
+    if n_trials < 2:
+        return None
+    if sharpe_dispersion is None:
+        # Unit-variance per-observation trials: E[max Z] under independence.
+        threshold = math.sqrt(2.0 * math.log(n_trials))
+    else:
+        try:
+            var = float(sharpe_dispersion)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(var) or var <= 0.0:
+            return None
+        threshold = _dispersion_threshold(n_trials, var / periods_per_year)
+        if threshold is None:
+            return None
+    excess = returns
+    if risk_free:
+        per_period = risk_free / periods_per_year
+        excess = [r - per_period if r is not None else None for r in returns]
+    return probabilistic_sharpe(excess, benchmark_sharpe=threshold)
 
 
 def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
@@ -1415,7 +1482,7 @@ def implementation_shortfall(
 
 __all__ = [
     "net_returns", "total_return", "cagr", "volatility", "sharpe",
-    "deflated_sharpe", "deflated_sharpe_report",
+    "deflated_sharpe", "deflated_sharpe_report", "deflated_sharpe_ratio",
     "max_drawdown", "equity_curve", "walk_forward_splits",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",

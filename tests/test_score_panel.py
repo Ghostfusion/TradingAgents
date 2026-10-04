@@ -239,6 +239,24 @@ def test_the_universe_is_chunked_for_batching_and_the_estimate_is_what_runs(tmp_
                        cache_dir=str(tmp_path))["cost"]["api_calls"] == est["api_calls"]
 
 
+def test_the_panel_record_carries_the_survivor_label(tmp_path):
+    """H10: the label travels with the record.
+
+    ``coverage_window.SURVIVOR_ONLY`` was defined and never written anywhere, so
+    a published backtest could still omit the survivor caveat. The panel record
+    is the findings record of a universe backtest, so the label rides on it - and
+    only an explicit point-in-time declaration clears it.
+    """
+    from tradingagents.strategies.coverage_window import SURVIVOR_ONLY
+
+    current = build_panel([DATES[0]], UNIVERSE, transport=Transport(),
+                          cache_dir=str(tmp_path))
+    assert current["universe_label"] == SURVIVOR_ONLY
+    pit = build_panel([DATES[0]], UNIVERSE, transport=Transport(),
+                      cache_dir=str(tmp_path), universe_provenance="point_in_time")
+    assert pit["universe_label"] is None
+
+
 def test_the_cost_does_not_grow_with_the_number_of_dates(monkeypatch):
     """The companyfacts payload is per-FILER, so a 30-date panel is one request
     a name, not thirty. That property lives in the transport, and it is what
