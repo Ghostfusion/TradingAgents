@@ -1,4 +1,4 @@
-"""Risk-neutral density recovery from a covered option chain (V3, 2512.xxxx).
+"""Risk-neutral density recovery from a covered option chain (V3, 2607.27188).
 
 A covered option chain does not contain a density; it contains prices. Recovering
 the risk-neutral density is an inverse problem, and the only honest answer when

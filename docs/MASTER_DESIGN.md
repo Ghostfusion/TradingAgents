@@ -974,6 +974,20 @@ rediscover them.
 - `docs/paper_survey_26/`, `docs/research/scoring_round3/`,
   `remediation_{chatgpt,claude,gemini}.md`.
 
+**The paper library — `Strategies/books/` (2026-10-04).** A second, wider pass over
+the corpus that `design_fin_paper_survey_26.md` sampled: **all 4,372 papers** in
+`E:\fin paper` (4,348 PDFs, 1997–2026) classified into **19 multi-label
+categories**, every paper carrying an annotated sweep row (takeaway, candidate
+repo surface, relevance grade), and one book document per category whose
+learnings name an exact repo surface with a `shipped`/`partial`/`absent` status
+checked against the live tree. `README.md` holds the taxonomy, method and limits;
+`CORPUS_INDEX.md` the complete index; `evidence/<slug>.md` the per-category sweep
+rows; `FINDINGS.md` the consolidated defect register (2 fixed, 5 awaiting an
+owner decision, the rest triaged and marked `[verified]`/`[reported]`).
+**`docs/design_fin_paper_survey_26.md` + `docs/paper_survey_26/` keep authority
+over the 309 `26xx` papers they judged** — the books cover a superset, and the
+overlap is named in `Strategies/books/README.md` §6.
+
 ### 19.5 The score doc set (`docs/scores/`, 20 files)
 
 `README.md` is the set's master design; `MASTER_PLAN.md` is the ordered work

@@ -333,9 +333,10 @@ def order_imbalance(inst_net: float | None, retail_net: float | None) -> dict:
 
     ``inst_net`` / ``retail_net`` are the net signed flows (e.g. from
     ``orderflow.institutional_net`` / ``retail_net``). Returns
-    ``{verdict, ratio}`` where ratio = inst_net / (|inst_net| + |retail_net|)
-    and verdict is buy-heavy / sell-heavy / balanced. None when both are
-    missing.
+    ``{verdict, ratio}`` where ratio = (inst_net + retail_net) /
+    (|inst_net| + |retail_net|) - the signed net flow over total flow, so +1 is
+    all-institutional buying, -1 all-retail selling, 0 perfectly balanced - and
+    verdict is buy-heavy / sell-heavy / balanced. None when both are missing.
     """
     if inst_net is None and retail_net is None:
         return {"verdict": None, "ratio": None}
