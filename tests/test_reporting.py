@@ -1188,7 +1188,7 @@ def test_the_price_block_reaches_the_decision_sections(tmp_path):
     """The block the Trader's and the PM's nodes append to their own output must
     land in BOTH decision files and the consolidated report - that is the point
     of carrying it on their outputs rather than only in section IVa's dump."""
-    marker = "**Entry / Exit price (§103, computed - advisory):**\n- Final entry price: 98.50"
+    marker = "**Entry / Exit price (computed - advisory):**\n- Final entry price: 98.50"
     state = _state()
     state["trader_investment_plan"] = "Trader plan\n\n" + marker
     state["risk_debate_state"]["judge_decision"] = "**Rating**: Buy\n\n" + marker

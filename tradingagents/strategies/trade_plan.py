@@ -34,6 +34,7 @@ the risk governor / strict value-dip flags).
 from __future__ import annotations
 
 import contextlib
+import re
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
 from tradingagents.strategies.entry_exit_families import ENTRY_MEMBERS, EXIT_MEMBERS
@@ -437,6 +438,25 @@ f"- Execution cost (advisory, §74-§78): buffer {_pct(execution['buffer_fractio
     return "\n".join(lines)
 
 
+#: ``§103:``, ``§74-§78:``, ``§27/§41:`` - a member's citation of the design
+#: document section it was constructed from.
+_SECTION_REF = re.compile(r"§\d+(?:\s*[-/]\s*§?\d+)*\s*[:,-]?\s*")
+
+
+def _plain(text: str) -> str:
+    """A rendered string without its design-document section numbers.
+
+    The citations belong to the member DATA: ``research_decision.json``
+    publishes them, so dropping them from the reason strings would rewrite a
+    contract artifact - and they are the right thing to read beside a formula
+    in the plan card. They are noise in ``trader.md`` / ``decision.md`` / the
+    completed report, whose reader wants the level and the basis. This is the
+    one renderer those three surfaces share, so the strip lives here and the
+    stored reasons keep their citations.
+    """
+    return _SECTION_REF.sub("", text).strip()
+
+
 def render_entry_exit_block(block: dict | None) -> str:
     """Render §103's complete ENTRY/EXIT object as markdown.
 
@@ -459,7 +479,7 @@ def render_entry_exit_block(block: dict | None) -> str:
     exit_block = block.get("exit") or {}
     entry_members = entry.get("members") or {}
     exit_members = exit_block.get("members") or {}
-    out = ["**Entry / Exit price (§103, computed - advisory):**"]
+    out = ["**Entry / Exit price (computed - advisory):**"]
 
     for title, members, names in (
         ("ENTRY", entry_members, ENTRY_MEMBERS),
@@ -472,7 +492,7 @@ def render_entry_exit_block(block: dict | None) -> str:
                 out.append(f"- {name}: unavailable - this run produced no such member")
                 continue
             value = record.get("value")
-            reason = record.get("reason") or "no reason recorded"
+            reason = _plain(record.get("reason") or "no reason recorded")
             if value is None:
                 out.append(f"- {name}: unavailable - {reason}")
             elif isinstance(value, bool):
@@ -492,7 +512,7 @@ def render_entry_exit_block(block: dict | None) -> str:
     else:
         predicate = "no exit condition could be evaluated"
     out.append(
-        "- §101 exit predicate: " + predicate + " - evaluated "
+        "- exit predicate: " + predicate + " - evaluated "
         + ("; ".join(f"{k}={v}" for k, v in conditions.items()) if conditions else "none")
         + f" (coverage {exit_block.get('coverage')}/{len(precedence)})"
     )

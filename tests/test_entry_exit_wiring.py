@@ -73,7 +73,7 @@ _BLOCK = {
     },
 }
 
-_BLOCK_HEADING = "**Entry / Exit price (§103, computed - advisory):**"
+_BLOCK_HEADING = "**Entry / Exit price (computed - advisory):**"
 
 # Every §103 name, so the renderer is exercised on the complete object. Two
 # members that no run can produce stay absent-with-a-reason, so the test sees
@@ -156,12 +156,16 @@ def test_the_trader_output_carries_the_103_price_block(monkeypatch):
     plan = out["trader_investment_plan"]
 
     assert _BLOCK_HEADING in plan
-    assert "- final_entry_price: 98.50 - §100: min(target, max) over the terms present" in plan
+    assert "- final_entry_price: 98.50 - min(target, max) over the terms present" in plan
     assert "- stop_loss_price: 95.00 - the plan's unified stop (invalidation)" in plan
     assert "- momentum_entry_price: unavailable - no calibrated momentum-score" in plan
     assert "- event_exit: unavailable - needs the forward calendar" in plan
-    assert "- §101 exit predicate:" in plan
+    assert "- exit predicate:" in plan
     assert "no exit condition fired" in plan
+    # The reader gets the level and the basis, never the design-document section
+    # numbers. The fixture's own reason DOES cite §100 (see _BLOCK), so this
+    # covers the header, the member rows and the predicate label alike.
+    assert "§" not in plan
 
 
 def test_the_pm_decision_carries_the_same_block():

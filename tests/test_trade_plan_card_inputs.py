@@ -217,8 +217,17 @@ def test_the_rendered_price_block_prints_every_103_member(monkeypatch):
         assert f"- {name}:" in text
     assert "- final_entry_price: " in text
     assert "- momentum_entry_price: unavailable - " in text  # no score -> price map
-    assert "- §101 exit predicate:" in text
+    assert "- exit predicate:" in text
     assert "risk_gate" in text and "thesis_break" in text
+    # No design-document section numbers reach the report. The strip belongs to
+    # this renderer; the member DATA keeps its citations, because
+    # research_decision.json publishes /entry_exit/*/members with them.
+    assert "§" not in text
+    assert any(
+        isinstance(v, dict) and "§" in str(v.get("reason"))
+        for side in ("entry", "exit")
+        for v in block[side]["members"].values()
+    ), "the fixture must exercise at least one cited reason"
     # It travels inside text `reporting._looks_truncated` scans for a max_tokens
     # cut, so the block ends on a sentence, never on a bare measured name.
     assert text.rstrip().endswith(".")
