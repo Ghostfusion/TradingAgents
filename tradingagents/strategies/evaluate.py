@@ -161,7 +161,8 @@ def _selection_threshold(n_trials: int,
 def deflated_sharpe(returns: list[float], n_trials: int = 100,
                     risk_free: float = 0.0,
                     periods_per_year: float = 252.0,
-                    sharpe_dispersion: float | None = None) -> float:
+                    sharpe_dispersion: float | None = None,
+                    n_effective: int | None = None) -> float:
     """Lopez de Prado style deflated Sharpe: penalize multi-trial tuning.
 
     The expected maximum Sharpe across n independent trials is approximated
@@ -191,7 +192,12 @@ def deflated_sharpe(returns: list[float], n_trials: int = 100,
     its docstring promised the pre-existing result bit for bit.
     """
     observed = sharpe(returns, risk_free, periods_per_year)
-    threshold, _ = _selection_threshold(n_trials, sharpe_dispersion)
+    # C4: a raw trial count overstates the search when candidates are correlated;
+    # when the effective (decorrelated) count is supplied it is the N the
+    # threshold is indexed to - the number of INDEPENDENT candidates the search
+    # really was (`effective_candidates`).
+    trials = int(n_effective) if (n_effective is not None and int(n_effective) > 1) else int(n_trials)
+    threshold, _ = _selection_threshold(trials, sharpe_dispersion)
     if threshold is None:
         return observed
     return observed - threshold
@@ -200,7 +206,8 @@ def deflated_sharpe(returns: list[float], n_trials: int = 100,
 def deflated_sharpe_report(returns: list[float], n_trials: int = 100,
                            risk_free: float = 0.0,
                            periods_per_year: float = 252.0,
-                           sharpe_dispersion: float | None = None) -> dict:
+                           sharpe_dispersion: float | None = None,
+                           n_effective: int | None = None) -> dict:
     """The deflated Sharpe WITH the N it was deflated by, and its provenance.
 
     ``dispersion`` is ``"measured"`` when the ledger's Sharpe dispersion entered
@@ -210,9 +217,11 @@ def deflated_sharpe_report(returns: list[float], n_trials: int = 100,
     against. ``value`` is exactly ``deflated_sharpe``'s return.
     """
     observed = sharpe(returns, risk_free, periods_per_year)
-    threshold, provenance = _selection_threshold(n_trials, sharpe_dispersion)
+    trials = int(n_effective) if (n_effective is not None and int(n_effective) > 1) else int(n_trials)
+    threshold, provenance = _selection_threshold(trials, sharpe_dispersion)
     return {
         "value": observed if threshold is None else observed - threshold,
+        "n_effective": None if n_effective is None else max(1, int(n_effective)),
         "ratio": deflated_sharpe_ratio(
             returns, n_trials=n_trials, risk_free=risk_free,
             periods_per_year=periods_per_year, sharpe_dispersion=sharpe_dispersion,

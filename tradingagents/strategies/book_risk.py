@@ -384,7 +384,8 @@ def return_autocorrelation(returns: list, max_lag: int = 5) -> dict:
 
 
 def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
-                     method: str = "empirical") -> dict:
+                     method: str = "empirical",
+                     tail_index: float | None = None) -> dict:
     """Value-at-Risk / CVaR at a multi-day horizon (QuantLib Q1).
 
     - ``empirical``: scale the historical daily VaR/CVaR quantile by sqrt(T)
@@ -397,7 +398,8 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
     """
     vals = [float(r) for r in returns if r is not None]
     out = {"emp_var": None, "emp_cvar": None, "param_var": None,
-           "param_cvar": None, "scaling_valid": False, "n": len(vals)}
+           "param_cvar": None, "heavy_tail_var": None, "slope_exponent": None,
+           "scaling_valid": False, "n": len(vals)}
     T = max(1, int(horizon_days))
     n = len(vals)
     if n < 2:
@@ -411,6 +413,14 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
     # empirical sqrt(T) scaling
     out["emp_var"] = daily_var * math.sqrt(T)
     out["emp_cvar"] = daily_cvar * math.sqrt(T)
+    # C8: sqrt(T) is a variance-additive (finite-variance) scaling; under heavy
+    # tails the stable scaling is T^(1/alpha) with alpha the tail index. When a
+    # tail index is supplied (> 1) report that VAR beside the sqrt(T) one -
+    # additive, off by default, so no existing number moves.
+    if tail_index is not None and float(tail_index) > 1.0:
+        exponent = 1.0 / float(tail_index)
+        out["slope_exponent"] = round(exponent, 6)
+        out["heavy_tail_var"] = daily_var * (T ** exponent)
     # parametric (normal)
     mean = sum(vals) / n
     sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1))

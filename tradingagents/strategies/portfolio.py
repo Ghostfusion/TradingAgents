@@ -453,6 +453,7 @@ def kelly_weights(
     expected_excess_returns: dict,
     returns_by_name: dict,
     fraction: float = 0.25,
+    shrinkage: bool = True,
 ) -> dict:
     """Multi-asset fractional Kelly weights (Merton log-utility optimum).
 
@@ -463,6 +464,13 @@ def kelly_weights(
     is clipped to 0 and the remainder renormalized (long-only fractional
     Kelly). Degrades to equal-weight on a singular / degenerate covariance —
     never fabricates.
+
+    ``shrinkage`` (default on) builds the covariance with the Ledoit-Wolf shrink
+    (``covariance_models.ledoit_wolf_shrink``) instead of the raw sample
+    covariance (FINDINGS §3: "``kelly_weights`` computes ``Sigma^-1 mu`` on the
+    raw sample covariance"); with ``False`` it is the pre-C12 raw matrix. The
+    shrink is skipped, and the raw sample matrix used, when the panel is too
+    short for the estimator's own observation floor.
     """
     names = [n for n in (expected_excess_returns or {}) if n in (returns_by_name or {})]
     if len(names) < 2:
@@ -470,16 +478,25 @@ def kelly_weights(
     # Reuse the gaussian-elimination inverse used by the other allocators.
     import numpy as np
 
-    series = []
-    for n in names:
-        s = [float(v) for v in returns_by_name[n] if v is not None]
-        if len(s) < 2:
-            return {}
-        series.append(s)
-    n_obs = min(len(s) for s in series)
-    mat = np.array([s[-n_obs:] for s in series], dtype=float)  # N x T
-    mat = mat - mat.mean(axis=1, keepdims=True)
-    cov = (mat @ mat.T) / (n_obs - 1)  # N x N sample covariance
+    cov = None
+    if shrinkage:
+        from tradingagents.strategies.covariance_models import ledoit_wolf_shrink
+
+        lw = ledoit_wolf_shrink({n: list(returns_by_name[n]) for n in names})
+        if lw.get("cov") is not None and lw.get("names"):
+            names = list(lw["names"])
+            cov = np.array(lw["cov"], dtype=float)
+    if cov is None:
+        series = []
+        for n in names:
+            s = [float(v) for v in returns_by_name[n] if v is not None]
+            if len(s) < 2:
+                return {}
+            series.append(s)
+        n_obs = min(len(s) for s in series)
+        mat = np.array([s[-n_obs:] for s in series], dtype=float)  # N x T
+        mat = mat - mat.mean(axis=1, keepdims=True)
+        cov = (mat @ mat.T) / (n_obs - 1)  # N x N sample covariance
     import contextlib as _cl
 
     inv = None

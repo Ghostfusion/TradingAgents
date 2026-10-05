@@ -143,7 +143,8 @@ def _refuse(record: dict, reason: str) -> dict:
     return record
 
 
-def memory_parameter(returns, as_of=None, *, window: int = MEMORY_WINDOW) -> dict:
+def memory_parameter(returns, as_of=None, *, window: int = MEMORY_WINDOW,
+                     on_volatility: bool = False) -> dict:
     """Semiparametric memory parameter ``d`` by GPH and local Whittle (V2).
 
     ``returns`` is the series the window is cut from - a pandas Series (its
@@ -166,6 +167,12 @@ def memory_parameter(returns, as_of=None, *, window: int = MEMORY_WINDOW) -> dic
     observations, or a window reaching the as-of date returns
     ``status: "unavailable"`` with the estimates None and the reason named -
     never a zero.
+
+    ``on_volatility`` (default off) squares the series before fitting, so ``d``
+    measures memory in the VOLATILITY proxy rather than the return - the
+    literature locates long memory in variance, and a near-zero ``d`` on raw
+    returns can be read as "no long memory" when volatility memory was never
+    measured (FINDINGS §3). The record's ``target`` says which was fit.
     """
     record: dict = {
         "gph_d": None,
@@ -176,9 +183,13 @@ def memory_parameter(returns, as_of=None, *, window: int = MEMORY_WINDOW) -> dic
         "n": 0,
         "window": window,
         "bandwidth": None,
+        "target": "returns",
         "basis": "",
     }
     pairs = _finite_pairs(returns)
+    if on_volatility:
+        pairs = [(label, value * value) for label, value in pairs]
+    record["target"] = "volatility" if on_volatility else "returns"
     if not pairs:
         return _refuse(record, "no finite observations in the series")
     if as_of is not None:
@@ -207,6 +218,13 @@ def memory_parameter(returns, as_of=None, *, window: int = MEMORY_WINDOW) -> dic
             record, f"bandwidth floor: {n} observations give {m} usable ordinates (< 8)"
         )
     freq, density = _periodogram(values, m)
+    # A constant series has a zero periodogram; `log I` is then undefined and
+    # the Whittle objective raises a domain error. Refuse - no memory is
+    # measurable - rather than crash (a confirmed defect, fixed on sight).
+    if not np.all(np.isfinite(density)) or float(density.mean()) <= 0.0:
+        return _refuse(
+            record, f"degenerate periodogram over {n} observation(s) (constant series)"
+        )
     gph = _gph_d(freq, density)
     whittle = _whittle_d(freq, density)
     se = math.pi / math.sqrt(24.0 * m)
@@ -240,6 +258,7 @@ def rv_forecast(
     window: int = MEMORY_WINDOW,
     rv=None,
     extra=None,
+    log_rv: bool = False,
 ) -> dict:
     """HAR-family next-day realized-variance forecast, ``d`` beside it (V2).
 
@@ -248,6 +267,12 @@ def rv_forecast(
     22-day means of ``RV``. ``RV`` is ``returns ** 2`` - a daily squared-return
     proxy, the closest thing to a realized measure a daily engine holds - unless
     ``rv`` supplies the realized-variance series directly.
+
+    ``log_rv`` (default off) fits the HAR on ``log(RV)`` instead of RV levels -
+    the benchmarks' own target (FINDINGS §3: the literature's HAR-RV is log-RV
+    from intraday realized variance, not squared-return levels). The record
+    carries ``rv_space`` (``"log"`` / ``"level"``) so a reader can see which
+    target a coefficient belongs to; a non-positive RV refuses the log path.
 
     ``extra`` is the optional ``X_t`` regressor column (one value per
     observation, aligned with ``rv``) - the cross-sectional / sector persistence
@@ -284,6 +309,7 @@ def rv_forecast(
         "extra": extra_record,
         "n": 0,
         "window": window,
+        "rv_space": "log" if log_rv else "level",
         "basis": "",
     }
     rv_pairs = (
@@ -291,6 +317,10 @@ def rv_forecast(
         if rv is None
         else _finite_pairs(rv)
     )
+    if log_rv:
+        if any(value <= 0.0 for _label, value in rv_pairs):
+            return _refuse(record, "log-RV needs strictly positive realized variance")
+        rv_pairs = [(label, float(np.log(value))) for label, value in rv_pairs]
     if not rv_pairs:
         return _refuse(record, "no finite realized-variance observations")
     if as_of is not None:

@@ -169,6 +169,32 @@ how a number is computed — grouped so they can be decided in batches.
 - `statistical.correlation_matrix` defaults to Pearson on heavy-tailed returns.
 - `granger_causality` / `ols_factors` report IID-homoskedastic p-values.
 
+**Batch C dispositions (2026-10-04).** The owner's go-ahead landed the additive
+items, each as an opt-in that leaves the default unchanged: **C4**
+(`deflated_sharpe` / `deflated_sharpe_report` take `n_effective`, the
+decorrelated trial count, instead of the raw count), **C5**
+(`rv_forecast(log_rv=True)` fits log-RV; `rv_space` names the target), **C6**
+(`memory_parameter(on_volatility=True)` measures memory in the variance proxy,
+not the return — the §3 "near-zero d on returns" note), **C8**
+(`var_cvar_horizon(tail_index=…)` reports the `T^(1/α)` heavy-tail scale beside
+sqrt(T)), **C12** (`kelly_weights` uses the Ledoit-Wolf covariance by default,
+as E9 did for the optimizer — the §3 "kelly_weights computes Σ⁻¹μ on the raw
+sample covariance" row), **C17** (`correlation_matrix` reports the panel's excess
+kurtosis beside the linear matrix), **C18** (`ols_factors(hac=True)` uses
+Newey-West standard errors). **C16 REFUTED**: `stockstats_utils._clean_dataframe`
+already counts and logs the forward-filled OHLC cells — it is **not** silent.
+**Also fixed on sight (rule 10):** a real defect the C5 test exposed —
+`memory_parameter` raised a `ValueError` (math domain error) on a constant series
+instead of refusing; it now refuses with "degenerate periodogram". **Superseded
+earlier:** the §3 "no minimum-track-record check" row (E2 shipped), the "no
+significance test on forecast evaluations" row and the "SCORING_RULES admits
+CRPS/QLIKE but neither is implemented" row (both landed in Batch B as E6/E7).
+**Remaining, needing an owner value/shape/default decision:** C2 (purge embargo
+default), C3 (regime-stability gate on promoted strategies), C7 (conformal
+band default), C9 (var-coverage chi-square floor), C10 (`extreme_quantile_var`
+0.90), C11 (copula `nu`), C13 (three impact shapes), C14 (participation caps),
+C15 (`kyle_lambda` regressor).
+
 ## 4. Enhancement backlog — the highest-value learnings
 
 Not defects; the corpus's constructive proposals, in rough value order. Each is

@@ -228,7 +228,31 @@ def correlation_matrix(returns_by_name: dict, method: str = "pearson") -> dict:
                 r = None
             corr[ni][nj] = r
             corr.setdefault(nj, {})[ni] = r
-    return {"names": names, "corr": corr}
+    # C17: Pearson is the default, but it is a LINEAR coefficient and the
+    # literature generalises beyond it on fat-tailed returns. Report the panel's
+    # mean excess kurtosis beside the matrix (never instead of it), so a reader
+    # can see when a linear correlation is being read off heavy-tailed data.
+    kurt = []
+    for s in series:
+        v = s[:n]
+        mean = sum(v) / n
+        var = sum((x - mean) ** 2 for x in v) / n
+        if var > 0:
+            kurt.append(sum((x - mean) ** 4 for x in v) / (n * var * var) - 3.0)
+    heavy = (sum(kurt) / len(kurt)) if kurt else None
+    used = (method or "pearson").lower()
+    return {
+        "names": names,
+        "corr": corr,
+        "method": used,
+        "mean_excess_kurtosis": (round(heavy, 4) if heavy is not None else None),
+        "basis": (
+            f"linear correlation ({used}) over {n} aligned observation(s); mean "
+            f"excess kurtosis {heavy if heavy is None else round(heavy, 4)} - "
+            "Pearson is the default on heavy-tailed returns (C17): a high value "
+            "means read the spearman/kendall matrix instead"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +374,17 @@ def capm_decomposition(returns: list, market: list) -> dict:
     return out
 
 
-def ols_factors(y: list, factors: dict) -> dict:
+def ols_factors(y: list, factors: dict, *, hac: bool = False,
+                hac_lag: int | None = None) -> dict:
     """Multiple OLS of ``y`` on the given ``factors`` (dict name -> series).
     Reports params, R², per-coef t/p/bse/CI. None when fewer rows than
-    columns + 2."""
+    columns + 2.
+
+    ``hac`` (default off) replaces the IID-homoskedastic standard errors with
+    Newey-West HAC ones (Bartlett kernel, ``hac_lag`` or the data-dependent
+    ``floor(4*(T/100)^(2/9))``), so the t/p-values are valid when the residuals
+    are serially correlated - the FINDINGS §3 defect ("``ols_factors`` reports
+    IID-homoskedastic p-values"). Off, the p-values are unchanged."""
     ys = _clean(y)
     names = [k for k in (factors or {}) if factors.get(k)]
     series = [_clean(factors[k]) for k in names]
@@ -374,7 +405,25 @@ def ols_factors(y: list, factors: dict) -> dict:
         df_resid = n - X.shape[1]
         mse = rss / df_resid if df_resid > 0 else 0.0
         XtX_inv = _np.linalg.inv(X.T @ X)
-        se = [math.sqrt(mse * float(XtX_inv[i, i])) for i in range(X.shape[1])]
+        if hac:
+            # Newey-West HAC covariance V = (X'X)^-1 S (X'X)^-1 (C18).
+            u = _np.asarray(resid, dtype=float)
+            lag = (int(hac_lag) if hac_lag is not None
+                   else max(1, int(4.0 * (n / 100.0) ** (2.0 / 9.0))))
+            S = _np.zeros((X.shape[1], X.shape[1]))
+            for t in range(n):
+                xt = X[t][:, None]
+                S += (u[t] ** 2) * (xt @ xt.T)
+            for lag_i in range(1, min(lag, n - 1) + 1):
+                w = 1.0 - lag_i / (lag + 1.0)
+                gamma = _np.zeros((X.shape[1], X.shape[1]))
+                for t in range(lag_i, n):
+                    gamma += u[t] * u[t - lag_i] * (X[t][:, None] @ X[t - lag_i][None, :])
+                S += w * (gamma + gamma.T)
+            cov_hac = XtX_inv @ S @ XtX_inv
+            se = [math.sqrt(max(float(cov_hac[i, i]), 0.0)) for i in range(X.shape[1])]
+        else:
+            se = [math.sqrt(mse * float(XtX_inv[i, i])) for i in range(X.shape[1])]
         params = {}
         for i, nm in enumerate(["const"] + names):
             b = float(beta[i])
