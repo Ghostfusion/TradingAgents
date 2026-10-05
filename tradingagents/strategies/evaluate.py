@@ -683,11 +683,88 @@ def oos_split(signal: list, forward: list, train_frac: float = 0.7):
 
 def pbo_flag(results_by_trial: list[float], test_results: list[float],
              threshold: float = 0.0) -> bool:
-    """Crude overfit flag: best-trial in-sample picks fail out-of-sample."""
+    """Crude overfit flag: best-trial in-sample picks fail out-of-sample.
+
+    The single-index degraded path; :func:`cscv_pbo` is the literature's
+    probability over the full candidate x fold matrix, and is preferred whenever
+    that matrix is available.
+    """
     if not results_by_trial or not test_results:
         return False
     best_idx = max(range(len(results_by_trial)), key=lambda i: results_by_trial[i])
     return test_results[best_idx] < threshold
+
+
+def cscv_pbo(performance_by_candidate: list[list[float]], S: int = 8) -> dict | None:
+    """E1: the Combinatorially Symmetric Cross-Validation PBO - a PROBABILITY.
+
+    ``pbo_flag`` above is the crude boolean: it picks the single best in-sample
+    trial and asks whether THAT trial failed out-of-sample. The literature's
+    Probability of Backtest Overfitting is a probability over the whole
+    candidate x fold matrix (Bailey, Borwein, Lopez de Prado & Zhu): partition
+    the ``T`` periods into ``S`` contiguous blocks, and for each of the
+    ``C(S, S/2)`` symmetric ways to split them into in-sample/out-of-sample
+    halves, find the in-sample-best candidate and take its OUT-OF-SAMPLE rank
+    among the candidates. PBO is the fraction of splits in which that winner
+    lands at or below the out-of-sample median - the chance a search's winner is
+    a fluke rather than an edge.
+
+    ``S = 8`` is the H1 card's own directive (16 is 12,870 recombinations). The
+    ``pbo_flag`` is kept as the documented degraded path when no candidate
+    matrix is available. ``None`` on fewer than two candidates, fewer than two
+    periods, an odd ``S``, ``S`` exceeding the periods, or a candidate too short
+    to give every block a period.
+    """
+    rows = [[float(v) for v in row] for row in (performance_by_candidate or [])]
+    k = len(rows)
+    if k < 2:
+        return None
+    t = min(len(r) for r in rows)
+    blocks = int(S)
+    if t < 2 or blocks < 2 or blocks % 2 or blocks > t:
+        return None
+    rows = [r[:t] for r in rows]
+    # Contiguous blocks, as equal as the period count allows.
+    edges = [round(i * t / blocks) for i in range(blocks + 1)]
+    block_idx = [list(range(edges[i], edges[i + 1])) for i in range(blocks)]
+    if any(not b for b in block_idx):
+        return None
+    from itertools import combinations
+
+    half = blocks // 2
+    n_splits = 0
+    overfit = 0
+    for chosen in combinations(range(blocks), half):
+        is_cols = [c for i in chosen for c in block_idx[i]]
+        oos_cols = [c for i in range(blocks) if i not in chosen for c in block_idx[i]]
+        if not is_cols or not oos_cols:
+            continue
+        is_perf = [sum(r[c] for c in is_cols) / len(is_cols) for r in rows]
+        oos_perf = [sum(r[c] for c in oos_cols) / len(oos_cols) for r in rows]
+        winner = max(range(k), key=lambda i: is_perf[i])
+        # Relative OOS rank of the in-sample winner (1 = worst); <= 0.5 of the
+        # rank scale is the logit-rank <= 0 event the PBO counts.
+        rank = sum(1 for x in oos_perf if x <= oos_perf[winner])
+        n_splits += 1
+        if rank / (k + 1) <= 0.5:
+            overfit += 1
+    if n_splits == 0:
+        return None
+    pbo = overfit / n_splits
+    return {
+        "pbo": round(pbo, 4),
+        "n_splits": n_splits,
+        "S": blocks,
+        "n_candidates": k,
+        "n_obs": t,
+        "basis": (
+            f"CSCV PBO (Bailey-Lopez de Prado) over {n_splits} symmetric "
+            f"{half}-of-{blocks} block split(s), {k} candidate(s) x {t} period(s), "
+            f"S={blocks}: the in-sample winner's out-of-sample rank fell at or "
+            f"below the median in {overfit} split(s) -> PBO {pbo:.4f}; "
+            "pbo_flag is the single-index degraded path"
+        ),
+    }
 
 
 def _mean_var(values: list[float]) -> tuple[float, float]:
@@ -1766,7 +1843,8 @@ __all__ = [
     "min_track_record_length",
     "max_drawdown", "equity_curve", "walk_forward_splits",
     "z_statistic", "max_abs_z", "effective_candidates", "inflation_diagnostics",
-    "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
+    "pbo_flag",
+    "cscv_pbo", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",
     "benchmark_table",
     "materiality_verdict", "family_materiality", "benjamini_yekutieli",

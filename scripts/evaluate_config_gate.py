@@ -45,7 +45,8 @@ def _trials_and_dispersion(trials: int, ledger_dir: str | None) -> tuple[int, fl
 
 
 def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials: int = 20,
-                 ledger_dir: str | None = None, round_trip_cost: float = 0.0) -> dict:
+                 ledger_dir: str | None = None, round_trip_cost: float = 0.0,
+                 candidate_matrix: list | None = None) -> dict:
     """Walk-forward over the series; flag when the best-trial strategy tanks OOS.
 
     ``trials`` is only the *fallback* trial count. With ``enable_trial_ledger``
@@ -71,8 +72,16 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     reported either way, so the grossness of the test is never silent, and the
     default 0.0 is the off state: a caller that supplies no cost keeps the
     previous verdict exactly.
+
+    ``candidate_matrix`` adds E1: when the full candidate x period performance
+    matrix is supplied, the overfit test becomes the CSCV PBO - a probability
+    over the whole matrix (``evaluate.cscv_pbo``, ``S = 8``) - reported as
+    ``pbo_probability`` and used for the verdict (refuse when it exceeds 0.5).
+    Without it the single-index ``pbo_flag`` remains the degraded path, and
+    ``pbo_probability`` is ``None``.
     """
     from tradingagents.strategies.evaluate import (
+        cscv_pbo,
         deflated_sharpe,
         deflated_sharpe_ratio,
         min_track_record_length,
@@ -96,7 +105,13 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
         return {"ok": None, "reason": "no valid walk-forward splits"}
 
     oos_best = max(out_of_sample) if out_of_sample else None
-    ow = pbo_flag(in_sample, out_of_sample, threshold=-0.1)
+    # E1: with the full candidate x period matrix available, the overfit test is
+    # the CSCV PBO (a probability over the whole matrix) instead of the
+    # single-index pbo_flag; the flag stays the degraded path without a matrix.
+    cscv = cscv_pbo(candidate_matrix) if candidate_matrix else None
+    pbo_probability = None if cscv is None else cscv["pbo"]
+    ow = (pbo_probability > 0.5) if pbo_probability is not None else pbo_flag(
+        in_sample, out_of_sample, threshold=-0.1)
     n_trials, dispersion, provenance = _trials_and_dispersion(trials, ledger_dir)
     is_deflated = deflated_sharpe(returns, n_trials=n_trials, sharpe_dispersion=dispersion)
     dsr = deflated_sharpe_ratio(returns, n_trials=n_trials, sharpe_dispersion=dispersion)
@@ -120,6 +135,7 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
         "reason": reason,
         "gross_edge": None if gross_edge is None else round(gross_edge, 6),
         "cost_floor": float(round_trip_cost),
+        "pbo_probability": pbo_probability,
         "in_best": round(max(in_sample), 3) if in_sample else None,
         "oos_best": round(oos_best, 3) if oos_best else None,
         "deflated_sharpe": round(is_deflated, 3),
@@ -142,18 +158,35 @@ def main(argv=None) -> int:
         help="E5: refuse the verdict when the mean per-period return is below "
              "this round-trip cost (default 0.0 = gross-significance test only)",
     )
+    parser.add_argument(
+        "--candidates", default=None,
+        help="E1: ';'-separated candidate return series (each ','-separated); "
+             "enables the CSCV PBO probability over the candidate x period matrix",
+    )
     args = parser.parse_args(argv)
     try:
         returns = [float(x) for x in args.returns.split(",") if x.strip()]
     except ValueError as exc:
         print(f"bad returns list: {exc}")
         return 2
+    candidates = None
+    if args.candidates:
+        try:
+            candidates = [
+                [float(x) for x in c.split(",") if x.strip()]
+                for c in args.candidates.split(";") if c.strip()
+            ]
+        except ValueError as exc:
+            print(f"bad candidates list: {exc}")
+            return 2
     band = gate_verdict(returns, train_len=args.train, test_len=args.test,
-                        round_trip_cost=args.round_trip_cost)
+                        round_trip_cost=args.round_trip_cost,
+                        candidate_matrix=candidates)
     print("verdict:", band.get("ok"))
     print("reason:", band.get("reason"))
     print("gross_edge:", band.get("gross_edge"))
     print("cost_floor:", band.get("cost_floor"))
+    print("pbo_probability:", band.get("pbo_probability"))
     print("in_sample_best:", band.get("in_best"))
     print("oos_best:", band.get("oos_best"))
     print("deflated_sharpe:", band.get("deflated_sharpe"))

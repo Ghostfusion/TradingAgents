@@ -39,6 +39,7 @@ forecast keys only if a producer forecasts them.
 from __future__ import annotations
 
 import importlib
+import math
 from dataclasses import dataclass
 
 from tradingagents.strategies import forecast_contract as _contract
@@ -415,6 +416,45 @@ def _candidate_collisions(authoritative, candidates) -> list[tuple[str, str, str
 # ---------------------------------------------------------------------------
 
 
+def equal_weight_combination(member_values: list) -> dict | None:
+    """E8: the equal-weight combination arm for a pool of member forecasts.
+
+    The forecast literature's simplest combining benchmark: average the pool
+    members' point forecasts with equal weights. It is a **candidate** output,
+    never authoritative (FD-1 §3.2's candidate-output exemption), so it claims
+    no registry key and does not displace the one authoritative producer.
+
+    ``CANDIDATE_MEMBERS`` is empty today - V1's volatility pool and its member
+    list are owned by ``design_vol_surface_and_vrp.md`` §V1 (this design's §10
+    non-goal) - so the arm is built and callable, ready for the pool, rather
+    than inventing members the repo cannot justify. ``None`` when no member
+    carries a finite value; the member count and the spread travel with the mean
+    so a degenerate pool is visible, never silently combined to a
+    confident-looking number.
+    """
+    vals = []
+    for v in member_values or []:
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(fv):
+            vals.append(fv)
+    if not vals:
+        return None
+    return {
+        "value": round(sum(vals) / len(vals), 6),
+        "n_members": len(vals),
+        "spread": round(max(vals) - min(vals), 6),
+        "basis": (
+            "equal-weight combination of pool member forecasts (E8): a CANDIDATE "
+            "output, never authoritative (FD-1 §3.2); the pool itself is V1's"
+        ),
+    }
+
+
 def forecast_registry_block() -> dict:
     """The registry as a JSON-able run-card block.
 
@@ -480,4 +520,5 @@ __all__ = [
     "RegistryRow",
     "benchmark_producer",
     "forecast_registry_block",
+    "equal_weight_combination",
 ]

@@ -19,13 +19,22 @@ from tradingagents.strategies.covariance_models import COV_MIN_OBS
 
 
 def _covariance_matrix(returns_by_name: dict,
-                       min_obs: int = COV_MIN_OBS) -> dict | None:
-    """Empirical covariance matrix over aligned return series (sample cov).
+                       min_obs: int = COV_MIN_OBS,
+                       shrinkage: bool = True) -> dict | None:
+    """Covariance matrix over aligned return series, Ledoit-Wolf shrunk (E9).
 
-    Returns ``{'names', 'cov'}`` where ``cov[i][j]`` corresponds to
-    ``names[i]``/``names[j]`` and diagonal variance is strictly positive.
-    None when fewer than two aligned names, fewer than ``min_obs`` aligned
-    observations, or a degenerate (zero-variance) name.
+    With ``shrinkage`` on (the default), the matrix is
+    ``covariance_models.ledoit_wolf_shrink`` - ``Sigma = (1-delta)*S + delta*F``
+    - so a raw sample covariance is never inverted unshrunk by the allocators
+    below (FINDINGS §3: "shrinkage exists but is not in the allocation path").
+    ``shrinkage`` off keeps the pre-E9 raw sample matrix, bit for bit.
+
+    Returns ``{'names', 'cov', 'shrinkage'}`` where ``cov[i][j]`` corresponds to
+    ``names[i]``/``names[j]`` and diagonal variance is strictly positive; the
+    ``shrinkage`` intensity travels with the matrix so the read says how far it
+    was pulled toward the target. None when fewer than two aligned names, fewer
+    than ``min_obs`` aligned observations, or a degenerate (zero-variance)
+    name.
 
     **The observation floor (2026-10-04).** This helper used to accept as few as
     **two** aligned observations, so a covariance with one degree of freedom
@@ -50,6 +59,23 @@ def _covariance_matrix(returns_by_name: dict,
     # that and the repo's declared covariance observation floor.
     if n < max(int(min_obs), len(names) + 1):
         return None
+    # E9: the allocators invert this matrix, so it is the Ledoit-Wolf shrunk
+    # estimate by default rather than the raw sample covariance (FINDINGS §3:
+    # "shrinkage exists but is not in the allocation path"). A degenerate LW
+    # read - or shrinkage off - falls through to the raw sample matrix below.
+    if shrinkage:
+        from tradingagents.strategies.covariance_models import ledoit_wolf_shrink
+
+        lw = ledoit_wolf_shrink(
+            {name: list(returns_by_name[name]) for name in names},
+            min_obs=max(int(min_obs), len(names) + 1),
+        )
+        if lw.get("cov") is not None and lw.get("names"):
+            return {
+                "names": list(lw["names"]),
+                "cov": lw["cov"],
+                "shrinkage": lw["shrinkage"],
+            }
     mean = [sum(s[:n]) / n for s in series]
     cov = []
     for i in range(len(names)):
@@ -63,7 +89,7 @@ def _covariance_matrix(returns_by_name: dict,
         cov.append(row)
     if any(cov[i][i] <= 0 for i in range(len(names))):
         return None
-    return {"names": names, "cov": cov}
+    return {"names": names, "cov": cov, "shrinkage": 0.0}
 
 
 def _normalize(w: list[float]) -> list[float] | None:

@@ -365,6 +365,87 @@ def mcnemar_paired(correct_a: list, correct_b: list) -> dict | None:
     }
 
 
+def mz_regression(actual: list, forecast: list, *, alpha: float = 0.05) -> dict | None:
+    """E6: the Mincer-Zarnowitz calibration regression ``actual = a + b*forecast``.
+
+    Regresses the realized value on the forecast: a *calibrated* forecast has
+    ``a = 0`` and ``b = 1`` (the forecast is an unbiased, unit-slope predictor).
+    Reports the OLS slope/intercept with their standard errors, R-squared, and
+    the joint F-test of ``(a, b) = (0, 1)`` (the restricted model is
+    ``actual = forecast``); ``calibrated`` is whether that joint null is NOT
+    rejected at ``alpha`` - the MZ diagnostic the Diebold-Mariano test does not
+    provide (DM says which arm is better, MZ says whether the forecast is even
+    the right scale).
+
+    ``None`` on fewer than three usable pairs, a forecast with no variance (the
+    slope is undefined), or a constant actual. A perfect fit (``actual ==
+    forecast``) is ``calibrated`` with ``f_stat`` ``None`` - there is no residual
+    variance to test against.
+    """
+    pairs = []
+    for a, f in zip(actual or [], forecast or [], strict=False):
+        try:
+            pairs.append((float(a), float(f)))
+        except (TypeError, ValueError):
+            continue
+    n = len(pairs)
+    if n < 3:
+        return None
+    xs = [f for _a, f in pairs]
+    ys = [a for a, _f in pairs]
+    xm = sum(xs) / n
+    ym = sum(ys) / n
+    sxx = sum((x - xm) ** 2 for x in xs)
+    tss = sum((y - ym) ** 2 for y in ys)
+    if sxx <= 0.0 or tss <= 0.0:
+        return None
+    slope = sum((x - xm) * (y - ym) for x, y in pairs) / sxx
+    intercept = ym - slope * xm
+    rss = sum((y - (intercept + slope * x)) ** 2 for x, y in pairs)
+    df = n - 2
+    r2 = 1.0 - rss / tss
+    calibrated = True
+    f_stat = None
+    p_value = None
+    se_slope = None
+    se_intercept = None
+    if rss > 0.0 and df >= 1:
+        s2 = rss / df
+        se_slope = math.sqrt(s2 / sxx)
+        se_intercept = math.sqrt(s2 * (1.0 / n + xm * xm / sxx))
+        # Joint F of (a, b) = (0, 1): restricted residual sum is (y - x)^2.
+        rss_r = sum((y - x) ** 2 for x, y in pairs)
+        f_stat = ((rss_r - rss) / 2.0) / s2
+        try:
+            from scipy import stats as _st
+
+            p_value = float(_st.f.sf(f_stat, 2, df))
+            calibrated = p_value > float(alpha)
+        except Exception:  # noqa: BLE001 - a missing p is not a fabricated one
+            p_value = None
+            calibrated = False
+    return {
+        "slope": slope,
+        "intercept": intercept,
+        "r_squared": r2,
+        "se_slope": se_slope,
+        "se_intercept": se_intercept,
+        "f_stat": f_stat,
+        "p_value": p_value,
+        "n": n,
+        "calibrated": calibrated,
+        "alpha": float(alpha),
+        "basis": (
+            f"Mincer-Zarnowitz OLS actual = {intercept:+.6f} + {slope:.6f}*forecast "
+            f"over {n} pair(s), R^2 {r2:.4f}; a calibrated forecast has "
+            f"(intercept, slope) = (0, 1) - the joint F "
+            f"{'n/a (perfect fit)' if f_stat is None else f'{f_stat:.4f}'} "
+            f"p {'n/a' if p_value is None else f'{p_value:.6f}'} "
+            f"-> {'calibrated' if calibrated else 'NOT calibrated'} at {float(alpha):.0%}"
+        ),
+    }
+
+
 def diebold_mariano(losses_a: list, losses_b: list, *, max_lag: int = 0,
                     alpha: float = 0.05) -> dict | None:
     """Diebold-Mariano test on two loss series over the same forecast origins.
@@ -583,4 +664,4 @@ __all__ = ["calibration_table", "scorecard", "_BINS", "fit_buckets",
            "calibrated_confidence_by_regime", "isotonic_calibrate",
            "calibration_table_text", "record_calibration_entry",
            "excess_accuracy", "EXCESS_FOLDS", "EXCESS_MIN_N",
-           "mcnemar_paired", "diebold_mariano"]
+           "mcnemar_paired", "diebold_mariano", "mz_regression"]

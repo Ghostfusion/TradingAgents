@@ -13,6 +13,17 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Added
+**The books backlog continues — Batch B: the CSCV overfitting probability, the forecast scoring producers, the MZ regression, the pool combination arm, and Ledoit-Wolf in the allocator (2026-10-04).** Six survey-owned E-items. The forecasting theme's frozen surface (design §11.0) was checked first: **none of its rows is touched** — every change is a new producer *beside* the contract, never a field in it. **E13 was refuted** (below).
+
+- **E1 — `evaluate.cscv_pbo`, and the gate reports a probability.** The crude `pbo_flag` (best-trial in-sample pick fails OOS) is kept as the documented degraded path, but when the full candidate × period matrix is available the gate computes the literature's Probability of Backtest Overfitting over the symmetric block splits (`S = 8`, the H1 card's directive), reports `pbo_probability`, and refuses the verdict on it (`--candidates`).
+- **E6 — `calibration.mz_regression`**, the Mincer-Zarnowitz calibration regression (`actual = a + b·forecast`, joint `(a,b)=(0,1)` F-test), composed with the existing `diebold_mariano` in the new offline caller. The frozen `ForecastEvaluation` is not extended; the diagnostics ride beside it.
+- **E7 — the `forecast_scores` module**, the producers for the declared `SCORING_RULES` that had only a vocabulary: `rmse`/`mae`/`qlike` (variance QLIKE) and the ensemble `crps`, with `score_forecast` the dispatcher.
+- **E8 — `forecast_registry.equal_weight_combination`**, the pool combination arm (a candidate output, never authoritative); `CANDIDATE_MEMBERS` stays `()` — V1's pool is `design_vol_surface_and_vrp.md` §V1's (a design §10 non-goal).
+- **E9 — `portfolio_optimizer._covariance_matrix` returns the Ledoit-Wolf shrunk covariance by default** (`shrinkage=False` keeps the raw sample matrix), so the allocators stop inverting an unshrunk sample covariance.
+- **E13 REFUTED.** The row claimed the analyst volatility tool "still returns Parkinson/Garman-Klass"; `analysis_tools.get_volatility_estimators` already computes all three including Yang-Zhang. Recorded, not "fixed".
+- **Web impact: none.** New producers and one offline script the app does not run.
+- **Gate:** `tests/test_findings_batch_b.py` (new) + the allocator/wiring suites → **238 passed**.
+
 **The paper-reading backlog resumes: four §3/§4 items land — a cost-floor precondition on the tuning gate, a regime sign test, a per-event-class sentiment half-life, and a Marchenko-Pastur i.i.d.-premise check (2026-10-04).** The owner authorised the whole remaining `Strategies/books/` backlog; this is Batch A of it. Every item was re-verified against the live tree first, and each fix is additive — a new optional parameter, key or *reported* read, never a silent rewrite of a published number.
 
 - **E5 — `scripts/evaluate_config_gate.py` gains the gross-edge precondition.** The gate's deflated-Sharpe significance is taken on a **gross** return series, so it can pass on an edge a single round trip would consume. `gate_verdict(..., round_trip_cost=0.0)` refuses (`ok` None, reason "gross edge below round-trip cost") when the series' mean per-period return is under the cost; `gross_edge`/`cost_floor` are reported either way and the new `--round-trip-cost` flag drives it. Default `0.0` is the off state, so no existing verdict moves.

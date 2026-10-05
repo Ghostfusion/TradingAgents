@@ -222,14 +222,28 @@ call an item `absent` when the `26xx` plans already own it.
   `Delta_Z`, `K_eff`), called offline by `scripts/null_harness.py`. No gate, per
   H3's card; the familywise warning (5.3% at K=1, 92.3% at K=50) travels in the
   output.
-- **Owned by the survey, do not duplicate:** **E1** (CSCV PBO — H1's card), **E6**
-  (Diebold–Mariano — named in H4's and V1's cards), **E7** (QLIKE — V1's loss),
-  **E8** (`CANDIDATE_MEMBERS` is `design_vol_surface_and_vrp.md` §V1's pool), **E9**
-  (the allocation path — survey ground rule 2 binds **K4** to *replace* rather
-  than sit beside `ledoit_wolf_shrink`), **E13** (the design doc already lists
-  Yang-Zhang as an existing producer; the tool at `analysis_tools.py:11298`
-  still returns Parkinson/Garman-Klass, which is a wiring choice inside that
-  theme).
+- **Landed in Batch B (2026-10-04):** **E1** — `evaluate.cscv_pbo` (the CSCV
+  probability over the candidate × period matrix, `S = 8` per H1's card), with
+  `pbo_flag` kept as the single-index degraded path; `scripts/evaluate_config_gate.py`
+  now reports `pbo_probability` (and uses it for the verdict) when a candidate
+  matrix is supplied (`--candidates`). **E6** — `calibration.mz_regression` (the
+  Mincer–Zarnowitz calibration regression; DM already existed in
+  `calibration.diebold_mariano`), composed with the DM test in
+  `scripts/forecast_scores.py` **beside** the frozen `ForecastEvaluation` (design
+  §11.0 forbids adding a field to it). **E7** — the `forecast_scores` module: the
+  producers behind the declared `SCORING_RULES` (`rmse`/`mae`/`qlike`/`crps`),
+  with `score_forecast` the dispatcher. **E8** —
+  `forecast_registry.equal_weight_combination` (the pool combination arm; the
+  pool itself stays `()` — V1's, design §10 non-goal). **E9** —
+  `portfolio_optimizer._covariance_matrix` now returns the Ledoit-Wolf shrunk
+  covariance by default (`shrinkage=False` keeps the raw sample matrix), so the
+  allocators no longer invert an unshrunk sample covariance.
+- **E13 REFUTED (2026-10-04).** The row said the analyst volatility tool "still
+  returns Parkinson/Garman-Klass". `[verified]` `analysis_tools.py`'s
+  `get_volatility_estimators` (`:11796`) already computes Parkinson,
+  Garman-Klass **and** Yang-Zhang (via `volatility_models.yang_zhang_vol`,
+  `:288`); the cited `:11298` is a sentiment emitter, not a volatility tool. No
+  change was needed — recorded rather than "fixed".
 - **Landed in Batch A (2026-10-04, the owner's go-ahead for the whole backlog):**
   **E5** — `scripts/evaluate_config_gate.py::gate_verdict` takes `round_trip_cost`
   (and a `--round-trip-cost` flag) and refuses a verdict whose gross mean return
