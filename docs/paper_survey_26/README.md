@@ -1,14 +1,17 @@
 # Paper-Survey Adoption - Index
 
-Status: **IN PROGRESS - wave 0 (P0), the wave-1 state reads and the nine T1 items have landed (2026-09-24); the rest is not started.**
-25 of the 44 buildable items are built, proved and pushed - the six P0 honesty instruments (H10, H1, H7, H11,
-H4, H6), ten P1 state reads (R1, R3, R7, V6, V2, K3, V4, X3, X6, X8) and the nine T1 items (K2, R2, K1, H2, X2,
-V3, V5, R5, N5) - each behind its own default-off gate with its failing-first proof, its `CHANGELOG.md` entry
-and its `docs/gate_registry.md` row. Each was proved by mutating the source and watching its named test fail,
-with the source restored byte-identical. **K2 landed REPORT-ONLY:** its `T^(H-1/2)` rescaling reaches the
-strategy-evaluation row and the governor leg stays square-root-of-time, so the mandate question in decision 3
-is still open. R3's in-run panel glue is the one landed read still dormant, and that is decision 2.
-**Date:** 2026-09-24
+Status: **IN PROGRESS - the P0 wave, the wave-1 state reads and the nine T1 items landed 2026-09-24; H9 landed 2026-09-27 and the offline H3 2026-10-04. 17 of the 44 buildable items remain.**
+27 of the 44 buildable items are built, proved and pushed - the six P0 honesty instruments (H10, H1, H7, H11,
+H4, H6), ten P1 state reads (R1, R3, R7, V6, V2, K3, V4, X3, X6, X8), the nine T1 items (K2, R2, K1, H2, X2,
+V3, V5, R5, N5), the T2 **H9** report-influence read (2026-09-27, gate `enable_report_influence` - a *new* key,
+not the card's colliding `enable_report_attribution`) and the offline **H3** null harness (2026-10-04, no gate,
+by its card's decision) - each behind its own default-off gate with its failing-first proof, its `CHANGELOG.md`
+entry and its `docs/gate_registry.md` row; H3, offline by construction, adds none. Each was proved by mutating
+the source and watching its named test fail, with the source restored byte-identical. **K2 landed REPORT-ONLY:**
+its `T^(H-1/2)` rescaling reaches the strategy-evaluation row and the governor leg stays square-root-of-time,
+so the mandate question in decision 3 is still open. R3's in-run panel glue is the one landed read still
+dormant, and that is decision 2.
+**Date:** 2026-10-05
 **Survey:** [`../design_fin_paper_survey_26.md`](../design_fin_paper_survey_26.md) - v1.0 SURVEY, 309 papers read
 (31 high / 111 medium / 124 low / 43 none relevance).
 **Scope:** the six themed design docs derived from that survey, the six implementation plans that
@@ -233,7 +236,7 @@ one in wave 0. What each item decided, and the limits it states, are in its `CHA
 
 | # | Item | What it is | Phase | Gate | Status |
 |---|---|---|---|---|---|
-| 26 | H9 | report attribution and factor novelty | P3 | `enable_report_attribution` | not started |
+| 26 | H9 | report attribution and factor novelty | P3 | `enable_report_influence` | landed 2026-09-27 |
 | 27 | H5 | five-gate verdict, positive controls, next-open variant | P3 | `enable_rule_policy_gates` | not started |
 | 28 | N3 | learned aggregator over labels, confidences and agreement | P2 | `enable_learned_aggregator` | not started |
 | 29 | N6 | embedding news relevance, compared not swapped | P3 | `enable_embedding_relevance` | blocked - encoder decision |
@@ -366,13 +369,15 @@ Each themed plan ends with its own line; those six, plus five the grounding work
     `V` would have to be rescaled (`V / 252`) before it is dimensionally valid against that statistic. The
     owner's call, recorded rather than guessed.
 
-13. **H9's gate key already exists (surfaced by the T1 integration, 2026-09-24).** H9's card names
-    `enable_report_attribution`, and that key **ships today** for the DSA-2 advisory layer
-    (`default_config.py:991`, the DSA family in `docs/gate_registry.md`). A new gate cannot be registered
-    under an existing key - the six-point protocol asserts the key is absent - so H9 takes either an
-    extension of that gate or a new name (`enable_report_influence` is free), and this plan's "34 new config
-    gates" becomes 33 new plus one extension, the shape R1 already has. Every other unbuilt gate name across
-    the six plans was checked the same day: **no other collision**. The card and both tables carry the note.
+13. **[RESOLVED 2026-09-27] H9's gate key collision (surfaced by the T1 integration, 2026-09-24).** H9's card
+    named `enable_report_attribution`, and that key **ships** for the DSA-2 advisory layer
+    (`default_config.py:1010`, the DSA family in `docs/gate_registry.md`). A new gate cannot be registered
+    under an existing key - the six-point protocol asserts the key is absent - so H9 took a **new name**,
+    `enable_report_influence` (`default_config.py:1016`), not an extension: DSA-2's read is a sum-100
+    normalization of four already-computed engine reads, H9's is an NNLS projection of a thesis vector onto
+    report vectors. The headline stays **34 new config gates** (H9's key is genuinely new), plus the one
+    extension of `enable_bocpd` for R1. Every other unbuilt gate name across the six plans was checked the
+    same day: **no other collision**. The card and both tables carry the note.
 
 **Standing constraint, restated:** R9 is not a build. Regime information conditions *how much to
 trust* another read; it is never concatenated onto it.
