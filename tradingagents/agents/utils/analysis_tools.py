@@ -2681,6 +2681,53 @@ def get_regime_components(
             state.append(f"state metadata: {rendered}")
     except Exception:  # noqa: BLE001 - beside-the-score reads are advisory
         state = []
+    # RegimeScore.md §8.1 §18/§20/§22: the market-stress composite, the
+    # relative-vol ratio and the upside/downside beta - three market-level
+    # producers that reached no leaf (D3 triage, 2026-10-04). All three read
+    # the bars this leaf already holds; none moves the label above.
+    stress: list[str] = []
+    try:
+        from tradingagents.strategies.regime import (
+            market_stress_composite as _stress,
+            relative_vol_ratio as _rel_vol,
+            upside_downside_beta as _updown,
+        )
+
+        bench = _benchmark_closes() or []
+        comp = _stress(
+            closes, benchmark=bench or None, volumes=data.get("volumes") or None
+        )
+        if comp.get("score") is not None:
+            legs = ", ".join(
+                f"{k}={comp['legs'][k]:.1f}" for k in comp["measured"]
+            )
+            stress.append(f"stress={comp['score']:.1f}/100 ({legs})")
+        else:
+            stress.append(f"stress=n/a ({comp.get('basis')})")
+        if bench:
+            rv = _rel_vol(closes, bench)
+            if rv.get("ratio") is not None:
+                stress.append(
+                    f"relative_vol={rv['ratio']:.3f}x (a={rv['a_vol']:.4f} vs "
+                    f"b={rv['b_vol']:.4f})"
+                )
+            else:
+                stress.append(f"relative_vol=n/a ({rv.get('withheld')})")
+            cr = _daily_returns(closes)
+            br = _daily_returns(bench)
+            m = min(len(cr), len(br))
+            if m >= 20:
+                ub = _updown(cr[-m:], br[-m:])
+                if ub.get("upside_beta") is not None:
+                    stress.append(
+                        f"up/down beta={ub['upside_beta']:.3f}/"
+                        f"{ub['downside_beta']:.3f} "
+                        f"(asymmetry {ub['asymmetry']:+.3f}, n={ub['n']})"
+                    )
+                else:
+                    stress.append(f"up/down beta=n/a ({ub.get('withheld')})")
+    except Exception:  # noqa: BLE001 - beside-the-score reads are advisory
+        stress = []
     chop_txt = f"{chop:.2f}" if chop is not None else "n/a (insufficient history)"
     # vol_pct is None when the series is too short to percentile (a fabricated
     # 0.5 was the old behaviour and is the defect WP-4 fixed) - the same guard
@@ -2691,6 +2738,8 @@ def get_regime_components(
         line += "\n  market depth: " + "; ".join(depth)
     if state:
         line += "\n  regime state: " + "; ".join(state)
+    if stress:
+        line += "\n  market stress: " + "; ".join(stress)
     return line
 
 
@@ -4284,6 +4333,7 @@ def get_sector_rotation_screen(
         constituent_screens,
         leadership_ratio_ewcw,
         sector_screen,
+        stock_screen,
     )
 
     try:
@@ -4520,6 +4570,27 @@ def get_sector_rotation_screen(
                     if b_state == "fired":
                         hits.append("B:fired")
                     lines.append(f"  {row['ticker']}: " + (", ".join(hits) if hits else "no setup"))
+                # §5.2 per-name stock screen (architecture / relative
+                # outperformance / no-chase) inside the leader sector: the
+                # `stock_screen` predicate reached no agent (D3 triage,
+                # 2026-10-04). Reported per sector - never a gate or a rank.
+                parent_closes = (closes_map or {}).get(parent) or []
+                passed, tested = [], 0
+                for _t, _m in (cons.get(parent) or {}).items():
+                    _cs = (_m.get("closes") if isinstance(_m, dict) else _m) or []
+                    if len(_cs) < 200:
+                        continue
+                    tested += 1
+                    read = stock_screen({_t: _cs}, parent_closes)
+                    if read.get("ok"):
+                        passed.append(_t)
+                if tested:
+                    _names = ", ".join(passed[:8]) + ("..." if len(passed) > 8 else "")
+                    lines.append(
+                        f"  {parent}: stock screen passes {len(passed)} of {tested} "
+                        f"name(s) with >=200 bars"
+                        + (f" ({_names})" if passed else " (none)")
+                    )
 
     # --- the VDU ladder per SECTOR ETF (reported; item 2 of the playbook survey)
     # The screen ranked sectors and read their relative strength; it never asked
@@ -5082,6 +5153,9 @@ def get_risk_parity_alloc(
     returns_by_name: Annotated[
         dict, "dict of name -> return series (aligned daily/monthly returns)"
     ],
+    confidences: Annotated[
+        dict | None, "optional name -> confidence for the proportional confidence-weighted allocation"
+    ] = None,
 ) -> str:
     """Risk-parity / min-variance / confidence-weighted allocation over a book.
 
@@ -5095,6 +5169,7 @@ def get_risk_parity_alloc(
     """
     try:
         from tradingagents.strategies.portfolio_optimizer import (
+            confidence_weights,
             max_diversification_weights,
             min_variance_weights,
             risk_contribution,
@@ -5127,10 +5202,21 @@ def get_risk_parity_alloc(
     rp_s = ", ".join(f"{k}={v:.1%}" for k, v in rp["weights"].items())
     rc_s = ", ".join(f"{k}={v:.1%}" for k, v in rc.items()) if rc else "n/a"
     md_s = ", ".join(f"{k}={v:.1%}" for k, v in md["weights"].items()) if md.get("weights") else "n/a"
+    # Lean L10: the proportional weight-from-confidence allocation. `conf` is
+    # the caller's per-name confidence (the tool has no producer for it, so the
+    # read is rendered only when supplied) - `confidence_weights` reached no leaf
+    # (D3 triage, 2026-10-04).
+    conf_txt = ""
+    if confidences:
+        conf_sub = {n: float(confidences[n]) for n in usable if n in confidences}
+        cw = confidence_weights(conf_sub) if conf_sub else {}
+        if cw:
+            cw_s = ", ".join(f"{k}={v:.1%}" for k, v in cw.items())
+            conf_txt = f"; confidence_weights={{ {cw_s} }}"
     return (
         f"risk_parity_alloc {ticker}: {rp_s} [{rp['note']}]; "
         f"min_var={mv['note']}; max_div={md_s} [{md['note']}]; "
-        f"risk_contribution={{ {rc_s} }}"
+        f"risk_contribution={{ {rc_s} }}{conf_txt}"
     )
 
 
@@ -6022,6 +6108,59 @@ def _render_technical_score(ticker: str, res: dict) -> str:
     return "\n".join(lines)
 
 
+def _technical_state_lines(ticker: str, res: dict) -> str:
+    """The §129 TechnicalState + §131 category disagreement, beside the score.
+
+    Both readers were exported and tested but reached no leaf (D3 triage,
+    2026-10-04). The state's five factors are assembled from the producers the
+    score panel already draws on, over the bars ``_ohlcv`` cached for this run -
+    no new fetch, no new formula. ``structure`` is the price's distance to its
+    200-day SMA (its sign is the leg), the same producer ``near_sma200`` reads.
+    """
+    from tradingagents.strategies.technical_depth import moving_average_depth
+    from tradingagents.strategies.technical_factors import adx, macd_depth
+    from tradingagents.strategies.technical_score import (
+        technical_disagreement,
+        technical_state,
+    )
+    from tradingagents.strategies.value_dip import support_structure
+
+    lines: list[str] = []
+    dis = technical_disagreement(res)
+    if dis.get("disagreement") is not None:
+        lines.append(
+            f"- category disagreement: {dis['disagreement']:.3f} "
+            f"(agreement {dis['agreement']:.3f}, dispersion {dis['dispersion']:.2f} "
+            f"over {dis['n']} categories: {', '.join(dis['compared'])})"
+        )
+    else:
+        lines.append(f"- category disagreement: n/a ({dis.get('reason')})")
+    data = _ohlcv(ticker)
+    closes = data.get("closes") or []
+    highs = data.get("highs") or []
+    lows = data.get("lows") or []
+    mad = moving_average_depth(closes)
+    macd = macd_depth(closes)
+    sup = support_structure(closes, highs, lows)
+    adx_r = adx(highs, lows, closes)
+    legs = {
+        "ma_alignment": mad.get("cross_spread"),
+        "ma_slope": mad.get("ema_slope"),
+        "macd": macd.get("hist"),
+        "structure": sup.get("distance_to_sma200_pct"),
+    }
+    state = technical_state(legs, adx=adx_r.get("adx"))
+    if state.get("state") is not None:
+        lines.append(
+            f"- technical state ({len(state['legs_compared'])} factors): "
+            f"{state['state']} (net {state['net']:+d}, {state['direction']}, "
+            f"adx {state['adx']}, legs {', '.join(state['legs_compared'])})"
+        )
+    else:
+        lines.append(f"- technical state: n/a ({state.get('reason')})")
+    return "\n".join(lines)
+
+
 @tool
 def get_technical_score(
     ticker: Annotated[str, "ticker symbol"],
@@ -6078,9 +6217,14 @@ def get_technical_score(
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"technical score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:
-        return _render_technical_score(ticker, res)
+        text = _render_technical_score(ticker, res)
     except Exception as exc:  # noqa: BLE001
         return f"technical score unavailable for {ticker}: render failed ({exc})"
+    try:
+        extra = _technical_state_lines(ticker, res)
+    except Exception:  # noqa: BLE001 - beside-the-score reads are advisory
+        extra = ""
+    return f"{text}\n\n{extra}" if extra else text
 
 
 def _momentum_components(ticker: str) -> dict:
@@ -6555,6 +6699,19 @@ def _risk_components(ticker: str) -> dict:
                 cd = cdar(eq)
                 if cd and cd.get("cdar") is not None:
                     vals["cdar"] = cd["cdar"]
+        # R7 triadic stress: a COINCIDENT cross-sectional read over the same
+        # book returns, PRINTED beside the score and never scored by it.
+        # `triadic_stress` reached no leaf (D3 triage, 2026-10-04); it degrades
+        # to `tsi` None with its reason, so an unmeasurable read is omitted
+        # rather than zeroed.
+        try:
+            from tradingagents.strategies.triadic_stress import triadic_stress
+
+            tsi = triadic_stress(returns_by_name)
+            if tsi.get("tsi") is not None:
+                vals["triadic_stress_index"] = tsi["tsi"]
+        except Exception:  # noqa: BLE001 - one absent leg is not a failure
+            pass
         dd, _dd_meta = measured_book_drawdown(cfg, closes_for, fallback_symbol=ticker)
         if dd is not None:
             vals["measured_book_drawdown"] = dd
@@ -11040,8 +11197,11 @@ def _sentiment_depth_rows(ticker: str, start: str, end: str) -> str:
     """
     from tradingagents.strategies.sentiment import (
         effective_sample_size,
+        event_study,
+        gini_coefficient,
         negation_adjusted_polarity,
         sentiment_asymmetry,
+        sentiment_dynamics,
         sentiment_output_map,
         sentiment_uncertainty,
         source_breadth,
@@ -11072,6 +11232,39 @@ def _sentiment_depth_rows(ticker: str, start: str, end: str) -> str:
                     f"- output map {mapped['map']}: {mapped['confidence']:.3f} "
                     f"(raw {mapped['raw']:+.3f})"
                 )
+        # SENT-8 sentiment dynamics: the acceleration / AR(1) / half-life /
+        # mean-reversion-speed / persistence reads BESIDE the canonical slope
+        # (owner Q4), over the same chronological point series (D3 triage,
+        # 2026-10-04).
+        dyn = sentiment_dynamics(scores)
+        if dyn is not None:
+            lines.append(
+                f"- dynamics: second_difference {dyn['second_difference']:+.3f} "
+                f"(ar1_phi {dyn['ar1_phi']}, half-life {dyn['half_life']}, "
+                f"mean-reversion-speed {dyn['mean_reversion_speed']}, "
+                f"persistence {dyn['persistence']}, n={dyn['n']})"
+            )
+        # SENT-10 event study around the largest-|score| point: baseline is the
+        # mean of the pre-event points, the window the `window` points after it.
+        finite = [
+            (i, float(s)) for i, s in enumerate(scores)
+            if s is not None and math.isfinite(float(s))
+        ]
+        window = 3
+        if len(finite) >= 4:
+            valid = [
+                (pos, s) for pos, (i, s) in enumerate(finite)
+                if i >= 1 and i + window <= len(scores)
+            ]
+            if valid:
+                pos, _ev_score = max(valid, key=lambda t: abs(t[1]))
+                ev = event_study([s for _, s in finite], pos, window=window)
+                if ev.get("mean_car") is not None:
+                    lines.append(
+                        f"- event study (largest |score| at day {finite[pos][0]}): "
+                        f"CAR {ev['car']:+.3f}, mean_car {ev['mean_car']:+.3f} "
+                        f"(baseline {ev['baseline']:+.3f}, {ev['window']} day(s))"
+                    )
     articles = _av_news_articles(ticker, start, end)
     if articles:
         adjusted = [
@@ -11101,6 +11294,15 @@ def _sentiment_depth_rows(ticker: str, start: str, end: str) -> str:
         if eff.get("n_eff") is not None:
             lines.append(
                 f"- N_eff (Kish) over source counts: {eff['n_eff']:.2f} of {eff['n']}"
+            )
+        # SENT-9 concentration: the Gini over the per-source article counts the
+        # leaf already builds - the share-concentration companion to the source
+        # breadth read above (D3 triage, 2026-10-04). None when too few sources.
+        gini = gini_coefficient(list(counts.values()))
+        if gini.get("gini") is not None:
+            lines.append(
+                f"- source concentration Gini: {gini['gini']:.3f} "
+                f"(n={gini['n']} source(s), mean {gini['mean']:.2f})"
             )
     if not lines:
         return ""
@@ -11363,6 +11565,7 @@ def get_mean_reversion_quality(
             ar1_half_life,
             hurst_exponent,
             mean_reversion_verdict,
+            memory_profile,
             ou_half_life,
             variance_ratio,
         )
@@ -11384,12 +11587,30 @@ def get_mean_reversion_quality(
         # a selected horizon k) + complexity features (structural randomness).
         vr = variance_ratio(diffs, k=min(5, max(2, len(diffs) // 10))) if len(diffs) >= 60 else None
         ent = None
+        apen = None
         try:
-            from tradingagents.strategies.complexity import permutation_entropy as _pe
+            from tradingagents.strategies.complexity import (
+                approximate_entropy as _apen,
+                permutation_entropy as _pe,
+            )
 
             ent = _pe(use)
+            # Approximate entropy is the irregularity companion to permutation
+            # entropy over the same closes; both reached no leaf (D3 triage,
+            # 2026-10-04).
+            apen = _apen(use)
         except Exception:  # noqa: BLE001 - advisory entropy
             ent = None
+        # Long-memory companion to the Hurst leg above: the semiparametric
+        # memory parameter `d` beside the HAR-family next-day realized-variance
+        # forecast, gated by `enable_long_memory` (off by default, so the read
+        # names the disabled gate rather than a number). `memory_profile`
+        # reached no leaf (D3 triage, 2026-10-04); it is fed the same return
+        # series the roughness read stands on.
+        mem = None
+        rets = _daily_returns(use)
+        if len(rets) >= 64:
+            mem = memory_profile(rets)
         lines = [
             f"## Mean-Reversion Quality — {ticker}",
             f"- verdict: {v['verdict']} (n={v['n']})",
@@ -11402,6 +11623,22 @@ def get_mean_reversion_quality(
         if ent is not None:
             lines.append(f"- permutation entropy: {ent:.3f} "
                          f"({'random-like' if ent > 0.9 else 'structured'} vs 1 = iid)")
+        if apen is not None:
+            lines.append(f"- approximate entropy: {apen:.3f} "
+                         f"({'random-like' if apen > 1.0 else 'structured'} "
+                         "vs higher = more irregular)")
+        if mem is not None:
+            if mem.get("unavailable"):
+                lines.append(f"- long-memory profile: n/a ({mem['unavailable']})")
+            else:
+                m = mem.get("memory") or {}
+                f = mem.get("forecast") or {}
+                lines.append(
+                    f"- long-memory d (GPH)={m.get('gph_d')} "
+                    f"(whittle {m.get('whittle_d')}, n={m.get('n')}, "
+                    f"status {m.get('status')}); next-day RV forecast="
+                    f"{f.get('forecast')} (status {f.get('status')})"
+                )
         if hl_ar1 is not None:
             lines.append(f"- AR(1) half-life: {hl_ar1} days")
         if hl_ou is not None:
@@ -12040,6 +12277,7 @@ def get_fixed_risk_size(
     try:
         from tradingagents.strategies.risk_sizing import (
             risk_money,
+            risk_quantity,
             riskable_money,
         )
     except Exception as exc:
@@ -12057,8 +12295,20 @@ def get_fixed_risk_size(
     if e <= 0 or ent <= 0 or st <= 0:
         return "fixed risk size unavailable: equity and prices must be positive"
     budget = riskable_money(e, rf, commission_rate)
-    qty = risk_money(ent, st, e, rf, commission_rate=commission_rate, hard_limit=hard_limit)
     n = max(1, int(units))
+    if n > 1:
+        # `risk_quantity` is the tranche-splitting sizer (D3 triage,
+        # 2026-10-04): it floors each of the `n` tranches to the unit batch and
+        # returns the tranche-quantised total, so the reported size comes from
+        # the producer rather than a raw division of the unquantised quantity.
+        qty = risk_quantity(
+            ent, st, e, rf, commission_rate=commission_rate,
+            hard_limit=hard_limit, units=n,
+        )
+    else:
+        qty = risk_money(
+            ent, st, e, rf, commission_rate=commission_rate, hard_limit=hard_limit
+        )
     per = (qty / n) if qty and n else 0.0
     return (
         f"fixed risk size: total={qty:.0f} units ({n} tranche(s) x {per:.0f}) "
@@ -12800,6 +13050,7 @@ def get_alpha_scoring(
     period_days: Annotated[int | None, "horizon in days"] = None,
     actual_return: Annotated[float | None, "realized return over the horizon"] = None,
     confidence: Annotated[float | None, "decision confidence, if any"] = None,
+    history: Annotated[list[dict] | None, "optional prior insight/outcome dicts to aggregate hit rate over"] = None,
 ) -> str:
     """Magnitude + horizon-scored alpha (Lean L7).
 
@@ -12818,7 +13069,7 @@ def get_alpha_scoring(
         hit / magnitude-error / score / horizon-ok line.
     """
     try:
-        from tradingagents.strategies.alpha_eval import alpha_score
+        from tradingagents.strategies.alpha_eval import alpha_score, insight_accuracy
     except Exception as exc:
         return f"alpha scoring unavailable: {exc}"
     if actual_return is None:
@@ -12830,10 +13081,26 @@ def get_alpha_scoring(
         float(actual_return),
         confidence=confidence,
     )
-    return (
+    line = (
         f"alpha scoring: hit={s.get('hit')} magnitude_err={s.get('magnitude_err')} "
         f"score={s.get('score')} horizon_ok={s.get('horizon_ok')} n=1"
     )
+    # `insight_accuracy` aggregates a LIST of insight/outcome dicts, which the
+    # single-insight scorer above cannot produce; it reached no leaf (D3 triage,
+    # 2026-10-04). Rendered only when the caller supplies the prior rows, so the
+    # single-insight output is unchanged when `history` is None.
+    if history:
+        agg = insight_accuracy(list(history))
+        hr = agg["hit_rate"]
+        av = agg["avg_score"]
+        mr = agg["magnitude_hit_rate"]
+        line += (
+            f"\n- history: over {agg['n']} scored insight(s) "
+            f"hit rate {hr if hr is not None else 'n/a'} "
+            f"avg score {av if av is not None else 'n/a'} "
+            f"magnitude hit rate {mr if mr is not None else 'n/a'}"
+        )
+    return line
 
 
 @tool
@@ -12891,6 +13158,7 @@ def get_signal_quality(
     signal: Annotated[list, "predicted/signal series aligned 1:1 with forward_returns"],
     forward_returns: Annotated[list, "realized forward returns aligned 1:1 with signal"],
     quantile: Annotated[float, "long-short precision quantile, default 0.8"] = 0.8,
+    ic_by_horizon: Annotated[list | None, "optional [(horizon_days, mean_ic), ...] to measure the IC-decay half-life"] = None,
 ) -> str:
     """Signal quality read: rank IC, ICIR, long-short precision + CPCV paths.
 
@@ -12904,8 +13172,10 @@ def get_signal_quality(
     try:
         from tradingagents.strategies.evaluate import purged_cpcv_splits
         from tradingagents.strategies.signal_analysis import (
+            ic_decay_half_life,
             icir,
             long_short_precision,
+            pred_autocorr,
             rank_ic,
         )
 
@@ -12926,6 +13196,24 @@ def get_signal_quality(
         lines.append(f"- icir: {icr:.4f}" if icr is not None else "- icir: n/a")
         lines.append(f"- long_short_precision ({float(quantile):.0%}): {prec:.4f}"
                      if prec is not None else f"- long_short_precision ({float(quantile):.0%}): n/a")
+        # §104 persistence: is the forecast itself sticky? `pred_autocorr` (the
+        # signal-side twin of `return_autocorrelation`) reached no leaf (D3
+        # triage, 2026-10-04) - rendered beside the IC it qualifies.
+        ac = pred_autocorr(list(signal or []))
+        lines.append(
+            f"- prediction autocorrelation (lag 1): {ac:.4f}"
+            if ac is not None else "- prediction autocorrelation (lag 1): n/a"
+        )
+        # IC decay across horizons (only measurable when the caller supplies the
+        # per-horizon ICs the single-horizon read cannot see).
+        if ic_by_horizon:
+            hl = ic_decay_half_life(list(ic_by_horizon))
+            lines.append(
+                f"- IC-decay half-life: {hl:.2f} day(s) over "
+                f"{len(ic_by_horizon)} horizon(s)"
+                if hl is not None
+                else "- IC-decay half-life: n/a (degenerate exponential fit)"
+            )
         if paths:
             lines.append(f"- CPCV train/test paths (5-split, 1d embargo): {paths}")
         lines.append("")
@@ -12992,7 +13280,13 @@ def get_factor_profile(
     """
     try:
         from tradingagents.dataflows.config import get_config
-        from tradingagents.strategies.factor_expressions import cached_expression
+        from tradingagents.strategies.factor_expressions import (
+            apply_winsorize,
+            apply_zscore,
+            cached_expression,
+            fit_winsorize,
+            fit_zscore,
+        )
     except Exception as exc:  # noqa: BLE001
         return f"factor profile unavailable: {exc}"
     if not get_config().get("enable_factor_profile"):
@@ -13008,9 +13302,16 @@ def get_factor_profile(
         if get_config().get("enable_pit_registry"):
             from tradingagents.dataflows import pit_registry
             pit_registry.store_snapshot(ticker, as_of or "unknown", {"kind": "ohlcv_profile", "closes": closes[-5:]})
+            # Alpha158/360 label convention (PIT): the next-execution-day
+            # return with its one-day buffer, persisted as its own snapshot row
+            # (None = no label, never a zero). `pit_registry.markup_label` was
+            # exported and tested but reached no agent (D3 triage, 2026-10-04).
+            label = pit_registry.markup_label(closes)
+            pit_registry.store_snapshot(
+                ticker, as_of or "unknown", {"kind": "label", "label": label}
+            )
             moments = pit_registry.get_moments(ticker)
             if moments is None:
-                from tradingagents.strategies.factor_expressions import fit_zscore
                 m = fit_zscore(closes[-60:])  # train segment only
                 if m:
                     pit_registry.put_moments(ticker, as_of or "unknown", {"mean": m[0], "std": m[1]})
@@ -13030,6 +13331,32 @@ def get_factor_profile(
                 shown += 1
         if not shown:
             return f"factor profile unavailable for {ticker}: no factor with a latest value"
+        # Qlib DataHandlerLP's learn/infer split: fit the clip bounds and the
+        # z-score moments on an earlier TRAIN segment only, then apply them to
+        # the live tail. `fit_winsorize` / `apply_winsorize` / `apply_zscore`
+        # are the repo's own processor and reached no leaf (D3 triage,
+        # 2026-10-04); the read states its normalisation instead of a bare value.
+        sample = next(
+            (s for s in (alpha or {}).values()
+             if s and sum(1 for v in s if v is not None) >= 20),
+            None,
+        )
+        if sample:
+            vals = [v for v in sample if v is not None]
+            cut = max(1, int(len(vals) * 0.7))
+            train, live = vals[:cut], vals[cut:]
+            bounds = fit_winsorize(train)
+            zmoments = fit_zscore(train)
+            if bounds and zmoments and live:
+                wins = apply_winsorize(live, bounds)
+                zs = apply_zscore(live, zmoments)
+                lines.append(
+                    "- learn/infer normalisation (fit on the first "
+                    f"{len(train)} point(s), applied to the last {len(live)}): "
+                    f"winsorize [{bounds[0]:.4f}, {bounds[1]:.4f}] -> last "
+                    f"{wins[-1]:.4f}; z-score (mean {zmoments[0]:.4f}, sd "
+                    f"{zmoments[1]:.4f}) -> last {zs[-1]:.4f}"
+                )
         lines.append("")
         lines.append("computed, advisory - never a gate")
         return "\n".join(lines)

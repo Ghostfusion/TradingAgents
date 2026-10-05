@@ -200,14 +200,24 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
 
     # 2c2. C3 alpha-profile: post-fill drift vs arrival (the "did our fill
     #      leak / did price move against us" test). Uses the paper ledger's own
-    #      arrival_price + realized_return proxies (no new vendor).
+    #      arrival_price + realized_return proxies (no new vendor). The drift
+    #      arithmetic comes from preopen.postfill_drift, which was exported and
+    #      tested but reached no report (D3 triage, 2026-10-04).
     fills = [r for r in pm_rows if r.get("arrival_price") and r.get("prior_close")]
     drift_rows = []
+    drift_reads = []
     for r in fills:
         arr = float(r["arrival_price"])
         # fill proxy = prior_close (the decision-time close) - C1 semantics
-        drift_rows.append((float(r.get("prior_close")) - arr) / arr if arr else None)
-    drift_rows = [d for d in drift_rows if d is not None]
+        try:
+            from tradingagents.dataflows.preopen import postfill_drift
+
+            read = postfill_drift(arr, float(r["prior_close"]), days_held=1)
+        except Exception:  # noqa: BLE001 - one bad row degrades
+            read = None
+        if read and read.get("drift_pct") is not None:
+            drift_rows.append(read["drift_pct"])
+            drift_reads.append(read)
     out["alpha_profile"] = {
         "rows": len(drift_rows),
         "avg_postfill_drift_pct": round(sum(drift_rows) / len(drift_rows) * 100, 3) if drift_rows else None,
@@ -215,6 +225,20 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
         "note": "post-fill drift: (decision-close - arrival)/arrival over the paper "
                 "book. Positive share = fills benign; sustained negative = possible "
                 "adverse selection / leak (review execution).",
+    }
+    # postfill_drift section: the calculator's own per-row reads (days held +
+    # the reason a row is unmeasured), so a missing price is named, not zeroed.
+    out["postfill_drift"] = {
+        "days_held": 1,
+        "rows": len(drift_reads),
+        "avg_drift_pct": (
+            round(sum(d["drift_pct"] for d in drift_reads) / len(drift_reads), 6)
+            if drift_reads
+            else None
+        ),
+        "reason": (
+            drift_reads[0]["reason"] if drift_reads else "no measured arrival/close rows"
+        ),
     }
 
     # 2d. D1 sleeve attribution: the pre-market ledger carries a per-decision

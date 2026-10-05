@@ -51,6 +51,7 @@ def log_decision(
     data_quality: str = "unknown",
     results_dir: str | None = None,
     prompt_condition: str | None = None,
+    closes: list | None = None,
     **extra,
 ) -> dict:
     """Append one immutable prediction row; returns it (never raises on IO).
@@ -75,6 +76,24 @@ def log_decision(
         "data_quality": str(data_quality or "unknown"),
         "prompt_condition": str(prompt_condition) if prompt_condition else None,
     }
+    # W1-5: when the caller supplies the close series the row also carries the
+    # QUANT-ONLY baseline beside the LLM rating, so the ledger can be scored
+    # quant-only vs quant+LLM vs LLM-only - the comparison the baseline module
+    # exists for. Absent closes -> the keys are simply not written, never a
+    # guessed 0.
+    if closes:
+        try:
+            from tradingagents.strategies.quant_baseline import (
+                baseline_rating,
+                quant_signal,
+            )
+
+            sig = quant_signal(list(closes))
+            row["quant_baseline"] = sig.get("score")
+            row["quant_rating"] = baseline_rating(sig.get("score"))
+        except Exception:  # noqa: BLE001 - baseline is advisory metadata
+            row["quant_baseline"] = None
+            row["quant_rating"] = None
     for k, v in (extra or {}).items():
         if k not in row:
             row[k] = v

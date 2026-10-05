@@ -188,45 +188,14 @@ ADVISORY_CALCULATORS = {
 # consumer should own it. Deferred, not forgotten - wiring one is a
 # calc -> tool -> binding -> prompt change of its own, never a rider on this gate
 # fix. `""` marks a gap whose consumer the triage could not name from the tree.
-GAP_CALCULATORS = {
-    "strategies/alpha_eval.py:insight_accuracy": "agents/utils/analysis_tools.py:get_alpha_scoring",
-    "strategies/complexity.py:approximate_entropy": "agents/utils/analysis_tools.py:get_mean_reversion_quality",
-    "strategies/debate_score.py:divergence_check": "docs/design_multi_agent_debate.md §4.5 (no wired equivalent)",
-    "strategies/debate_score.py:reweight_to_baseline": "agents/researchers/structured_debate.py:create_debate_finalize",
-    "strategies/domain_bundles.py:get_fundamental_profile": "agents/analysts/fundamentals_analyst.py",
-    "strategies/domain_bundles.py:get_market_technicals": "agents/analysts/market_analyst.py",
-    "strategies/domain_bundles.py:get_portfolio_risk_envelope": "agents/risk_mgmt/aggressive_debator.py",
-    "strategies/domain_bundles.py:get_sentiment_flow_feed": "agents/analysts/news_analyst.py",
-    "strategies/factor_expressions.py:apply_winsorize": "agents/utils/analysis_tools.py:get_factor_profile",
-    "strategies/factor_expressions.py:apply_zscore": "agents/utils/analysis_tools.py:get_factor_profile",
-    "strategies/factor_expressions.py:fit_winsorize": "agents/utils/analysis_tools.py:get_factor_profile",
-    "strategies/falsification.py:monitor_conditions": "strategies/monitor.py:notify",
-    "strategies/falsification.py:record_breaches": "strategies/falsification.py:monitor_conditions",
-    "strategies/mean_reversion.py:memory_profile": "agents/utils/analysis_tools.py:get_mean_reversion_quality",
-    "strategies/monitor.py:notify": "strategies/falsification.py:monitor_conditions",
-    "strategies/portfolio_optimizer.py:confidence_weights": "agents/utils/analysis_tools.py:get_risk_parity_alloc",
-    "strategies/quant_baseline.py:baseline_rating": "strategies/prediction_ledger.py:log_decision",
-    "strategies/quant_baseline.py:quant_signal": "strategies/prediction_ledger.py:log_decision",
-    "strategies/reflection.py:build_reflection_context": "graph/trading_graph.py:prepare_initial_state (under enable_reflection)",
-    "strategies/regime.py:market_stress_composite": "agents/utils/analysis_tools.py:get_regime_components",
-    "strategies/regime.py:relative_vol_ratio": "agents/utils/analysis_tools.py:get_regime_components",
-    "strategies/regime.py:upside_downside_beta": "agents/utils/analysis_tools.py:get_regime_components",
-    "strategies/risk_sizing.py:risk_quantity": "agents/utils/analysis_tools.py:get_fixed_risk_size",
-    "strategies/sector_screener.py:stock_screen": "agents/utils/analysis_tools.py:get_sector_rotation_screen",
-    "strategies/sentiment.py:event_study": "",
-    "strategies/sentiment.py:gini_coefficient": "",
-    "strategies/sentiment.py:sentiment_dynamics": "agents/utils/analysis_tools.py:_sentiment_depth_rows",
-    "strategies/signal_analysis.py:ic_decay_half_life": "agents/utils/analysis_tools.py:get_signal_quality",
-    "strategies/signal_analysis.py:pred_autocorr": "agents/utils/analysis_tools.py:get_signal_quality",
-    "strategies/technical_score.py:technical_disagreement": "agents/utils/analysis_tools.py:get_technical_score",
-    "strategies/technical_score.py:technical_state": "agents/utils/analysis_tools.py:get_technical_score",
-    "strategies/triadic_stress.py:triadic_stress": "agents/utils/analysis_tools.py:_risk_components",
-    "dataflows/alpaca.py:get_calendar": "scripts/value_screener.py",
-    "dataflows/pit_registry.py:markup_label": "",
-    "dataflows/preopen.py:postfill_drift": "scripts/strategy_quality_report.py:build_report",
-    "dataflows/stockdata.py:get_market_snapshot_stockdata": "agents/utils/market_position_tools.py:get_market_snapshot",
-    "dataflows/yfinance_sector.py:fetch_eps_revisions": "scripts/value_screener.py:_fetch_revision_guarded",
-}
+GAP_CALCULATORS: dict[str, str] = {}
+# ALL 38 GAPS WIRED (2026-10-04). The actionable register is now empty: every
+# key it held became a real call reaching its consumer's rendered output (the
+# 38th, `derivatives_gamma.max_pain`, landed earlier the same day). The dict
+# stays as the MECHANISM - a future verified gap is declared here with the
+# consumer that should own it, and
+# `test_declared_calculators_are_real_and_still_orphaned` still refuses a stale
+# or misspelled key (its list may only shrink as declarations are wired).
 
 
 def _declared(key: str) -> bool:

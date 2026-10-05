@@ -730,6 +730,30 @@ class TradingAgentsGraph:
         track_record = self.memory_log.get_track_record_stats(company_name)
         if track_record:
             past_context = f"{past_context}\n\n{track_record}" if past_context else track_record
+        # Phase 5 reflection: the analyst score/hint ledger is written post-run
+        # (`record_reflection_outcome`) but nothing READ it back into a run, so
+        # the critique never reached a prompt. Under enable_reflection, fold it
+        # into past_context so the agents see their own measured hit-rate and
+        # what to re-check; an empty ledger adds nothing.
+        if self.config.get("enable_reflection"):
+            try:
+                from tradingagents.strategies.reflection import (
+                    ReflectionLedger,
+                    build_reflection_context,
+                )
+
+                _base = Path(
+                    self.config.get("data_cache_dir", "~/.tradingagents")
+                ).expanduser()
+                _store = ReflectionLedger(path=str(_base / "strategy_ledger.jsonl"))
+                _refl = build_reflection_context(
+                    _store, ["market", "news", "fundamentals", "sentiment"]
+                )
+                if _refl and _refl != "(no reflection history)":
+                    _block = f"Reflection (measured analyst hit-rate):\n{_refl}"
+                    past_context = f"{past_context}\n\n{_block}" if past_context else _block
+            except Exception as exc:  # noqa: BLE001 - reflection is advisory
+                logger.warning("reflection context skipped: %s", exc)
         instrument_context = self.resolve_instrument_context(company_name, asset_type)
         init_agent_state = self.propagator.create_initial_state(
             company_name,
@@ -872,6 +896,13 @@ class TradingAgentsGraph:
             if self.config.get("enable_prediction_ledger"):
                 from tradingagents.strategies.prediction_ledger import log_decision
 
+                # W1-5: the quant-only baseline rides on the row so the LLM
+                # rating can be scored against a deterministic one; a fetch
+                # failure must not drop the row itself.
+                try:
+                    _ledger_closes = self._try_fetch_closes(company_name)
+                except Exception:  # noqa: BLE001 - baseline is optional
+                    _ledger_closes = None
                 log_decision(
                     ticker=company_name,
                     date=trade_date,
@@ -882,6 +913,7 @@ class TradingAgentsGraph:
                     horizon_days=int(self.config.get("prediction_horizon_days", 60)),
                     data_quality=(final_state.get("pm_decision") or {}).get("data_quality") or "unknown",
                     results_dir=self.config.get("results_dir"),
+                    closes=_ledger_closes,
                 )
         except Exception:  # noqa: BLE001 - ledger is advisory
             pass

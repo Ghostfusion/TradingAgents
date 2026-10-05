@@ -181,6 +181,12 @@ from tradingagents.agents.utils.benzinga_tools import (
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
+from tradingagents.agents.utils.domain_bundle_tools import (
+    get_fundamental_profile,
+    get_market_technicals,
+    get_portfolio_risk_envelope,
+    get_sentiment_flow_feed,
+)
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet,
     get_cashflow,
@@ -373,6 +379,10 @@ __all__ = [
     "get_catalyst_scale",
     "get_position_sizing",
     "get_factor_profile",
+    "get_fundamental_profile",
+    "get_market_technicals",
+    "get_portfolio_risk_envelope",
+    "get_sentiment_flow_feed",
     "get_lottery_factors",
     "get_execution_schedule",
     "get_financial_history",

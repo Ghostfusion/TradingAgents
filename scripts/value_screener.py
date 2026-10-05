@@ -1031,12 +1031,42 @@ def _as_float(v) -> float | None:
 
 
 def _fetch_revision_guarded(ticker: str) -> dict | None:
+    """Net analyst revisions, two independently-guarded sources.
+
+    The graded-action proxy (``fetch_revision_actions``) is preferred for
+    ``net``; the vendor's own up/down revision COUNTS
+    (``fetch_eps_revisions``, exported+tested but reached no caller - D3
+    triage, 2026-10-04) are kept alongside and fill ``net`` when the action
+    leg is down. A failed leg never breaks the screener.
+    """
+    out: dict = {}
     try:
         from tradingagents.dataflows.yfinance_sector import fetch_revision_actions
 
-        return fetch_revision_actions(ticker)
-    except Exception:  # noqa: BLE001
-        return None
+        actions = fetch_revision_actions(ticker)
+        if actions:
+            out.update(actions)
+            out["rev_source"] = "actions"
+    except Exception:  # noqa: BLE001 - a failed leg never breaks the screener
+        pass
+    try:
+        from tradingagents.dataflows.yfinance_sector import fetch_eps_revisions
+
+        counts = fetch_eps_revisions(ticker)
+        if counts:
+            out["eps_up"] = counts.get("up")
+            out["eps_down"] = counts.get("down")
+            out["eps_net"] = counts.get("net")
+            out["eps_up_7d"] = counts.get("up_7d")
+            out["eps_down_7d"] = counts.get("down_7d")
+            if "net" not in out:
+                out["net"] = counts.get("net")
+                out["up"] = counts.get("up")
+                out["down"] = counts.get("down")
+                out["rev_source"] = "eps_revisions"
+    except Exception:  # noqa: BLE001 - a failed leg never breaks the screener
+        pass
+    return out or None
 
 
 def _inst_accumulation(payload) -> dict | None:
@@ -2824,13 +2854,34 @@ def main(argv: list[str] | None = None) -> int:
     if alloc_extra:
         print(alloc_extra)
     try:
-        from tradingagents.dataflows.alpaca import get_clock as _alpaca_clock
+        from tradingagents.dataflows.alpaca import (
+            get_calendar as _alpaca_calendar,
+            get_clock as _alpaca_clock,
+        )
         from tradingagents.dataflows.config import get_config
 
         if get_config().get("enable_alpaca"):
             clock = _alpaca_clock()
             if clock is not None and not clock.get("is_open"):
-                note = "[alpaca] market CLOSED (use /calendar for next open)"
+                # dataflows/alpaca.get_calendar was exported+tested but reached
+                # no caller (D3 triage, 2026-10-04): use it for the next-session
+                # read instead of only pointing the user at /calendar.
+                try:
+                    from datetime import timedelta
+
+                    cal = _alpaca_calendar(
+                        (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
+                        (datetime.now() + timedelta(days=8)).strftime("%Y-%m-%d"),
+                    )
+                except Exception:  # noqa: BLE001 - calendar is advisory
+                    cal = None
+                if cal and cal.get("date"):
+                    note = (
+                        f"[alpaca] market CLOSED; next session {cal['date']} "
+                        f"{cal.get('open', '?')}-{cal.get('close', '?')}"
+                    )
+                else:
+                    note = "[alpaca] market CLOSED (use /calendar for next open)"
                 print(note)
                 markdown = markdown.rstrip() + "\n\n" + note + "\n"
     except Exception:

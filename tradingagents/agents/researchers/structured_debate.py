@@ -61,6 +61,7 @@ SCORE_SERIES = "score_series"
 # `_complete_round`'s consensus contour. It lives on the section channel because
 # `_complete_round` only ever receives the channel, not the graph state.
 INDEPENDENT_AGREEMENT = "independent_agreement"
+DIVERGENCE = "divergence"
 # Where the sampled stances live in the GRAPH STATE, per section.
 STANCES_KEY = {
     "research": "researcher_independent_stances",
@@ -754,6 +755,34 @@ def _complete_round(
     score_series = prior + [{"round": round_no, **score}]
     ds[SCORE_SERIES] = score_series
 
+    # R2' (design §4.5): the divergence / consensus-trap guard. The two rated
+    # sides' own book-allocation stances say whether the debate actually
+    # disagreed; |bull - bear| below δ_divergence_min is an ARTIFICIAL
+    # consensus, and the finalize node then reweights toward the independent
+    # baseline. ONE producer for the rule - `divergence_check` - rather than
+    # an inline comparison here. Allocations are percent (0..100), so they are
+    # handed over as book fractions to keep the producer's 0..1 floor.
+    if len(roles) == 2:
+        _stance: dict = {}
+        for _rec in reversed(ds.get(ROUND_RECORDS) or []):
+            if not isinstance(_rec, dict):
+                continue
+            for _r in roles:
+                _p = _rec.get(_r)
+                if (isinstance(_p, dict)
+                        and _p.get("recommended_allocation_pct") is not None):
+                    _stance.setdefault(_r, float(_p["recommended_allocation_pct"]))
+            if len(_stance) == len(roles):
+                break
+        if len(_stance) == len(roles):
+            from tradingagents.strategies.debate_score import divergence_check
+
+            ds[DIVERGENCE] = divergence_check(
+                _stance[roles[0]] / 100.0,
+                _stance[roles[1]] / 100.0,
+                divergence_min=float(cfg.get("debate_divergence_min", 0.15)),
+            )
+
     # Contour: consensus-exit from the independent pre-debate stances.
     # Written by `l1_node` from the graph state (see INDEPENDENT_AGREEMENT).
     inv = ds.get(INDEPENDENT_AGREEMENT)
@@ -1034,6 +1063,23 @@ def create_debate_finalize(
         alpha = float(cfg.get("debate_reweight_to_baseline", 0.0))
         if alpha > 0:
             ds["reweight_alpha"] = alpha
+            # R2' (design §4.5): APPLY the blend rather than only recording
+            # alpha - W_final = (1-a)*W_debate + a*W_baseline, through the
+            # strategies producer (an inline second copy of the blend is how
+            # the two drift). The baseline is the independent pre-debate
+            # agreement; absent it nothing is blended.
+            try:
+                from tradingagents.strategies.debate_score import reweight_to_baseline
+
+                _series = ds.get(SCORE_SERIES) or []
+                _w_debate = _series[-1].get("score") if _series else None
+                _w_baseline = ds.get(INDEPENDENT_AGREEMENT)
+                if _w_debate is not None and _w_baseline is not None:
+                    ds["reweighted_score"] = reweight_to_baseline(
+                        float(_w_debate), float(_w_baseline), alpha
+                    )
+            except Exception:  # noqa: BLE001 - advisory
+                pass
         return {channel: ds}
 
     return finalize_node
@@ -1046,6 +1092,7 @@ __all__ = [
     "ROUND_RECORDS",
     "SCORE_SERIES",
     "INDEPENDENT_AGREEMENT",
+    "DIVERGENCE",
     "STANCES_KEY",
     "CLAIM_LEDGER",
     "CLAIM_LEDGER_MD",

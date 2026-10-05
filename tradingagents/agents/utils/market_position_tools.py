@@ -298,18 +298,27 @@ def get_market_snapshot(
 
         return get_market_snapshot_tiingo(tk)
 
+    def _stockdata(tk):
+        # dataflows/stockdata.get_market_snapshot_stockdata was exported and
+        # tested but reached no caller (D3 triage, 2026-10-04): the free-tier
+        # StockData.org quote is a last-resort verification-grade price leg.
+        from tradingagents.dataflows.stockdata import get_market_snapshot_stockdata
+
+        return get_market_snapshot_stockdata(tk)
+
     try:
         out = get_market_snapshot_massive(ticker)
         # Massive returns an explicit 'unavailable' string when the plan lacks
         # snapshot access (403) - fall back to EODHD (EOD plan), then Tiingo's
-        # delayed IEX quote, then Twelve Data's realtime quote. Each degrades
-        # independently so one outage never aborts the read.
+        # delayed IEX quote, then Twelve Data's realtime quote, then the free
+        # StockData.org quote. Each degrades independently so one outage never
+        # aborts the read.
         if out and "unavailable" not in out.lower():
             return out
     except Exception:  # noqa: BLE001 - try the fallbacks below
         pass
 
-    for getter in (_eodhd, _tiingo, _twelve):
+    for getter in (_eodhd, _tiingo, _twelve, _stockdata):
         try:
             out = getter(ticker)
             if out and "unavailable" not in out.lower():

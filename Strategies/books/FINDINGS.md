@@ -284,17 +284,20 @@ call an item `absent` when the `26xx` plans already own it.
 
 ---
 
-## 7. The D3 gap register — the 38 verified wiring gaps
+## 7. The D3 gap register — the 38 wiring gaps, ALL WIRED (2026-10-04)
 
 The corrected wiring detector (see §2 D3) surfaced 115 unreferenced public
 calculators. Triaging them left **38 verified wiring gaps**: a read with no wired
-equivalent, and a consumer that should own it. They are declared in
-`tests/test_calc_agent_wiring.py::GAP_CALCULATORS` — that dict is the
-authoritative register, because the gate refuses a declaration that is stale or
-misspelled — and repeated here so the work list is readable without opening a
-test file. **One is already wired** (`derivatives_gamma.max_pain`, into
-`get_gamma_profile`); wiring another removes its entry, and the guard then refuses
-a key that is no longer orphaned.
+equivalent, and a consumer that should own it. They were declared in
+`tests/test_calc_agent_wiring.py::GAP_CALCULATORS` — the authoritative register,
+because the gate refuses a stale or misspelled declaration — and repeated below
+so the work list was readable without opening a test file.
+
+**All 38 are now wired** (2026-10-04): every key became a real call reaching its
+consumer's rendered output or persisted artifact. `GAP_CALCULATORS` is therefore
+**empty** — the dict stays as the mechanism, and the gate still refuses a key
+that is no longer orphaned. The table below is the record of WHICH consumer took
+each read.
 
 | module:function | consumer that should own it |
 | --- | --- |
@@ -337,7 +340,20 @@ a key that is no longer orphaned.
 | `dataflows/stockdata:get_market_snapshot_stockdata` | `market_position_tools:get_market_snapshot` |
 | `dataflows/yfinance_sector:fetch_eps_revisions` | `scripts/value_screener.py:_fetch_revision_guarded` |
 
+**Landing notes (2026-10-04).** Where the tree named no consumer, the wiring
+chose one and said why: `sentiment.event_study` and `sentiment.gini_coefficient`
+both joined `analysis_tools._sentiment_depth_rows` — the module's own SENT-7/9/10/11
+emitter, which already published SENT-9's attention set and SENT-10's asymmetry —
+and `dataflows/pit_registry.markup_label` joined `analysis_tools.get_factor_profile`,
+the one place that already writes a PIT snapshot and its fitted moments, so the
+label is stored beside them rather than on a new path. `debate_score.divergence_check`
+landed in `structured_debate`'s round completion (R2' of design §4.5), where the two
+rated sides' allocation stances are finally compared, and the reweight it gates is
+applied by `reweight_to_baseline` in the finalize node. The four `domain_bundles`
+composites became tools bound to the analysts the register named
+(`agents/utils/domain_bundle_tools.py`), each with its own trigger line.
+
 **A reminder about the other 77.** They are declared `reference` / `dead` and are
 *not* work: a recipe the vault documents as a formula, a debug or schema-self-check
 helper, a duplicate of a wired symbol, or a read that needs an input no vendor
-supplies. The register above is the actionable remainder.
+supplies. The table above is now the record of the wiring, not a remainder.

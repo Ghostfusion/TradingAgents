@@ -821,6 +821,10 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 
 | Tool | Wraps | Bound to | Returns |
 | --- | --- | --- | --- |
+| `get_market_technicals(ticker)` | `domain_bundles.get_market_technicals` | market | ONE-pass composite (W4-1): regime + swing structure + momentum detail, with the bundle's `data_quality` and `missing_fields` |
+| `get_fundamental_profile(ticker)` | `domain_bundles.get_fundamental_profile` | fundamentals | ONE-pass composite (W4-1): value floors + valuation z + FCF yield + margin of safety (PIT-gated), with `data_quality` / `missing_fields` |
+| `get_sentiment_flow_feed(ticker)` | `domain_bundles.get_sentiment_flow_feed` | news | ONE-pass composite (W4-1): news sentiment series + GDELT tone + order imbalance, with `data_quality` / `missing_fields` |
+| `get_portfolio_risk_envelope(ticker, basket?)` | `domain_bundles.get_portfolio_risk_envelope` | risk debators | ONE-pass composite (W4-1): the name's tail risk + liquidity read + book tail risk, with `data_quality` / `missing_fields` |
 | `get_swing_set(ticker)` | `swing.swing_report` | market | trend stack, RSI band, 1-ATR stop, 2R/3R targets, VCP, trail |
 | `get_swing_exits(ticker)` | `swing.chandelier_exit` + `trail_ema` + `targets_rr` | market | chandelier trailing stop (3x ATR(14, simple mean of TR) below the 22-bar high) + 20-day EMA trail + 2R/3R targets **measured to the chandelier stop** (named in the line; `get_swing_set`'s 2R/3R use its structure stop) |
 | `get_dip_technical(ticker)` | `swing.rsi` + `technical_factors` (KST/MFI/Stoch) + `value_dip.bollinger_pct_b` | market | RSI/%b + Stochastic + MFI + KST dip-timing read (OVERSOLD / not-oversold) |

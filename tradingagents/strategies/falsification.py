@@ -56,10 +56,19 @@ def check_breached(cond: FalsificationCondition, value: float | None) -> bool:
 
 
 def monitor_conditions(conditions: list[FalsificationCondition],
-                       metrics: dict) -> list[dict]:
+                       metrics: dict,
+                       *, ticker: str | None = None,
+                       date: str | None = None,
+                       results_dir: str | None = None,
+                       config: dict | None = None) -> list[dict]:
     """Return the breached conditions against a ``metrics`` snapshot.
 
     Each result: {metric, operator, invalidation, current, impact, breached}.
+
+    When ``ticker`` and ``date`` are supplied this is the full auto-monitor
+    step (W3-7 + W4-7): every breach is RECORDED to the invalidation ledger
+    (``record_breaches``) and ALERTED (``monitor.notify``). Both are advisory
+    and silent when unconfigured - detection never depends on them.
     """
     out = []
     for c in conditions:
@@ -73,6 +82,18 @@ def monitor_conditions(conditions: list[FalsificationCondition],
             "impact": c.thesis_impact,
             "breached": breached,
         })
+    if ticker and date:
+        breached_rows = record_breaches(out, ticker, date, results_dir)
+        from tradingagents.strategies.monitor import notify
+
+        for b in breached_rows:
+            notify(
+                "falsification",
+                f"{ticker} {b['metric']} {b['operator']} "
+                f"{b['invalidation_level']:g} breached "
+                f"(now {b['current_level']:g}) impact={b['impact']}",
+                config,
+            )
     return out
 
 
@@ -88,13 +109,17 @@ def evaluate_debate_claims(bull_conditions: list[FalsificationCondition],
     for side, conds in (("bull", bull_conditions), ("bear", bear_conditions)):
         if not conds:
             issues.append(f"{side}: no falsification conditions (unfalsifiable thesis)")
-        for c in conds:
-            if c.metric_name not in (computed_metrics or {}):
-                issues.append(f"{side}: cites unverified metric '{c.metric_name}'")
+        # ONE producer for the breach map: `monitor_conditions` evaluates each
+        # condition and the judge reads its rows rather than re-calling
+        # `check_breached` here - the two agreed by construction, which is
+        # exactly the drift a second call site eventually causes.
+        for row in monitor_conditions(list(conds), computed_metrics or {}):
+            if row["metric"] not in (computed_metrics or {}):
+                issues.append(f"{side}: cites unverified metric '{row['metric']}'")
                 continue
-            if check_breached(c, computed_metrics.get(c.metric_name)):
+            if row["breached"]:
                 issues.append(f"{side}: thesis ALREADY invalidated "
-                              f"({c.metric_name} {c.invalidation_level:g})")
+                              f"({row['metric']} {row['invalidation_level']:g})")
     return {
         "verdict": "REJECT_INVALIDATED_THESIS" if any(
             "ALREADY invalidated" in i for i in issues) else "PROCEED_TO_SCORING",
