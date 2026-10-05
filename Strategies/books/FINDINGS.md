@@ -194,11 +194,20 @@ instead of refusing; it now refuses with "degenerate periodogram". **Superseded
 earlier:** the §3 "no minimum-track-record check" row (E2 shipped), the "no
 significance test on forecast evaluations" row and the "SCORING_RULES admits
 CRPS/QLIKE but neither is implemented" row (both landed in Batch B as E6/E7).
-**Remaining, needing an owner value/shape/default decision:** C2 (purge embargo
-default), C3 (regime-stability gate on promoted strategies), C7 (conformal
-band default), C9 (var-coverage chi-square floor), C10 (`extreme_quantile_var`
-0.90), C11 (copula `nu`), C13 (three impact shapes), C14 (participation caps),
-C15 (`kyle_lambda` regressor).
+**Landed with conservative choices (owner-selected, 2026-10-04):** **C2** the
+`purged_cpcv_splits` default embargo is now `CPCV_DEFAULT_EMBARGO = 1` (the
+purge itself was already applied — only the default was 0); **C3**
+`regime_stability_check` (sign consistency of the per-regime mean) + the gate's
+`regime_stability` report; **C7** the IID conformal band stays the
+gate-off default (a gate-off band stays byte-identical) - the module's own
+measured table states its 0.45 coverage at rho=0.8, and
+`enable_bootstrap_intervals` is the option; **C9**
+`var_coverage_test(simulate=True)` adds a finite-sample Monte-Carlo p;
+**C10** `extreme_quantile_var` echoes its declared `threshold_quantile`;
+**C11** `copula_scenarios` reports `model_risk` (the fixed `nu`); **C13**
+`IMPACT_MODEL_SHAPES` / `PREFERRED_IMPACT_SHAPE` declare the three shapes and
+label the linear one as literature-rejected; **C14** `PARTICIPATION_CAP = 0.10`
+is the one declared cap; **C15** `kyle_lambda(direction="lagged")`.
 
 ## 4. Enhancement backlog — the highest-value learnings
 

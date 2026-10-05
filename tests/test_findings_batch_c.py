@@ -122,3 +122,99 @@ def test_c18_ols_factors_hac_standard_errors():
     hac = ols_factors(y, {"x": x}, hac=True)
     assert hac["params"]["x"]["coef"] == pytest.approx(iid["params"]["x"]["coef"])
     assert hac["params"]["x"]["std_err"] != iid["params"]["x"]["std_err"]
+
+
+def test_c2_cpcv_default_embargo_is_positive():
+    from tradingagents.strategies.evaluate import CPCV_DEFAULT_EMBARGO, purged_cpcv_splits
+
+    assert CPCV_DEFAULT_EMBARGO >= 1
+    splits = list(purged_cpcv_splits(60, 5))
+    assert splits  # still yields train/test folds
+    # with the default embargo no train index sits within one bar of the test block
+    for train, test in splits:
+        lo, hi = min(test), max(test)
+        assert all(idx < lo - CPCV_DEFAULT_EMBARGO or idx > hi + CPCV_DEFAULT_EMBARGO
+                   for idx in train)
+
+
+def test_c3_regime_stability_flag():
+    from tradingagents.strategies.regime_performance import regime_stability_check
+
+    assert regime_stability_check(
+        {"bull": [0.01, 0.02], "bear": [-0.01, -0.02]}
+    )["stable"] is False
+    assert regime_stability_check(
+        {"bull": [0.01, 0.02], "bear": [0.01, 0.02]}
+    )["stable"] is True
+    assert regime_stability_check({"bull": [0.01]}) is None  # < 2 regimes
+
+
+def test_c7_iid_band_stays_byte_identical_off_gate():
+    from tradingagents.strategies.conformal import rolling_band
+
+    rng = random.Random(2)
+    pairs = [(0.0, rng.gauss(0.0, 0.01)) for _ in range(80)]
+    out = rolling_band(pairs)
+    assert out is not None
+    # C7: the gate-off band stays byte-identical; the honest read
+    # (realized_coverage) travels, and the block interval stays the option.
+    assert "coverage_caveat" not in out
+    assert "realized_coverage" in out
+
+
+def test_c9_coverage_simulation_p():
+    from tradingagents.strategies.book_risk import var_coverage_test
+
+    rng = random.Random(12)
+    returns = [rng.gauss(0.0, 0.02) for _ in range(120)]
+    out = var_coverage_test(returns, simulate=True)
+    assert out["coverage_sim_p"] is not None
+    assert 0.0 <= out["coverage_sim_p"] <= 1.0
+
+
+def test_c10_extreme_quantile_echoes_the_threshold():
+    from tradingagents.strategies.book_risk import extreme_quantile_var
+
+    rng = random.Random(21)
+    returns = [rng.gauss(0.0, 0.02) for _ in range(300)]
+    out = extreme_quantile_var(returns, alpha=0.05)
+    assert out is not None and out["threshold_quantile"] == pytest.approx(0.90)
+
+
+def test_c11_copula_reports_model_risk():
+    from tradingagents.strategies.book_risk import copula_scenarios
+
+    rng = random.Random(13)
+    data = {"A": [rng.gauss(0.0, 0.01) for _ in range(40)],
+            "B": [rng.gauss(0.0, 0.01) for _ in range(40)]}
+    out = copula_scenarios(data, n=50)
+    assert out is not None
+    assert out["model_risk"]["nu"] == 5
+    assert out["model_risk"]["tail_dependence_checked"] is True
+
+
+def test_c13_c14_declared_shapes_and_cap():
+    from tradingagents.strategies.liquidity_risk import (
+        IMPACT_MODEL_SHAPES,
+        PARTICIPATION_CAP,
+        PREFERRED_IMPACT_SHAPE,
+    )
+
+    assert PREFERRED_IMPACT_SHAPE == "square_root"
+    assert set(IMPACT_MODEL_SHAPES) == {"square_root", "quadratic", "linear"}
+    assert pytest.approx(0.10) == PARTICIPATION_CAP
+
+
+def test_c15_kyle_lagged_direction_is_a_different_regressor():
+    from tradingagents.strategies.liquidity_risk import kyle_lambda
+
+    rng = random.Random(15)
+    closes = [100.0]
+    vols = []
+    for _ in range(60):
+        closes.append(closes[-1] * (1.0 + rng.gauss(0.0, 0.01)))
+        vols.append(rng.uniform(1e5, 5e5))
+    raw = kyle_lambda(closes, vols)
+    lagged = kyle_lambda(closes, vols, direction="lagged")
+    assert raw is not None and lagged is not None
+    assert raw != lagged

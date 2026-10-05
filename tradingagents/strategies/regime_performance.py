@@ -58,6 +58,42 @@ def _sign_test(rets: list) -> dict | None:
     }
 
 
+def regime_stability_check(per_regime_returns: dict) -> dict | None:
+    """C3: is a promoted strategy's edge STABLE across regimes?
+
+    ``per_regime_returns`` maps a regime label to that regime's return series.
+    The check is sign consistency of the per-regime mean: a strategy positive in
+    every regime (or negative in every one) is stable; one that reverses sign
+    across regimes is not, whatever its single full-horizon number says - the
+    gate FINDINGS §3 names as missing on promoted strategies.
+
+    ``None`` on fewer than two regimes with data. ``stable`` is ``None`` (never a
+    fabricated ``True``) when any regime's mean is exactly zero.
+    """
+    means: dict = {}
+    signs: list = []
+    for reg, rets in (per_regime_returns or {}).items():
+        vals = [float(x) for x in (rets or []) if x is not None]
+        if not vals:
+            continue
+        m = sum(vals) / len(vals)
+        means[str(reg)] = round(m, 6)
+        signs.append(1 if m > 0 else (-1 if m < 0 else 0))
+    if len(means) < 2:
+        return None
+    stable = None if 0 in signs else len(set(signs)) == 1
+    return {
+        "n_regimes": len(means),
+        "means": means,
+        "stable": stable,
+        "basis": (
+            "C3 regime stability = sign consistency of the per-regime mean "
+            "return; a strategy that reverses sign across regimes is not stable, "
+            "whatever its full-horizon number says"
+        ),
+    }
+
+
 def regime_conditioned_performance(scored_rows: list[dict],
                                    regime_field: str = "regime") -> dict:
     """Tabulate per-regime hit/return from scored ledger rows.
@@ -162,4 +198,5 @@ def macro_regime(rate_change_bps: float | None = None,
                        "vol_percentile": vol_percentile}}
 
 
-__all__ = ["regime_conditioned_performance", "stress_grid", "macro_regime"]
+__all__ = ["regime_conditioned_performance", "regime_stability_check",
+           "stress_grid", "macro_regime"]

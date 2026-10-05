@@ -46,7 +46,8 @@ def _trials_and_dispersion(trials: int, ledger_dir: str | None) -> tuple[int, fl
 
 def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials: int = 20,
                  ledger_dir: str | None = None, round_trip_cost: float = 0.0,
-                 candidate_matrix: list | None = None) -> dict:
+                 candidate_matrix: list | None = None,
+                 regime_returns: dict | None = None) -> dict:
     """Walk-forward over the series; flag when the best-trial strategy tanks OOS.
 
     ``trials`` is only the *fallback* trial count. With ``enable_trial_ledger``
@@ -130,12 +131,20 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     )
     if cost_floor_hit:
         ok, reason = None, "gross edge below round-trip cost"
+    # C3: report whether the strategy is stable across regimes when the
+    # per-regime returns are supplied (additive - None without them).
+    regime_stability = None
+    if regime_returns:
+        from tradingagents.strategies.regime_performance import regime_stability_check
+
+        regime_stability = regime_stability_check(regime_returns)
     return {
         "ok": ok,
         "reason": reason,
         "gross_edge": None if gross_edge is None else round(gross_edge, 6),
         "cost_floor": float(round_trip_cost),
         "pbo_probability": pbo_probability,
+        "regime_stability": regime_stability,
         "in_best": round(max(in_sample), 3) if in_sample else None,
         "oos_best": round(oos_best, 3) if oos_best else None,
         "deflated_sharpe": round(is_deflated, 3),

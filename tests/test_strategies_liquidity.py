@@ -63,10 +63,11 @@ def test_amihud_illiquidity_insufficient_history():
 
 
 def test_days_to_absorb():
-    # 5M shares to liquidate / (1M ADV * 15%) = 33.3 days
-    assert days_to_absorb(5e6, 1e6) == pytest.approx(33.33, rel=0.01)
-    # tighter participation cap -> more days
-    assert days_to_absorb(5e6, 1e6, alpha=0.10) == pytest.approx(50.0)
+    # C14: the ONE declared cap is 10% of ADV, so the default is 50 days
+    # (5M shares / (1M ADV * 0.10)); the arithmetic itself is unchanged.
+    assert days_to_absorb(5e6, 1e6) == pytest.approx(50.0)
+    # a looser participation cap -> fewer days
+    assert days_to_absorb(5e6, 1e6, alpha=0.15) == pytest.approx(33.33, rel=0.01)
 
 
 def test_days_to_absorb_missing():

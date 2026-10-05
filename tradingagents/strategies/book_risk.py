@@ -640,6 +640,10 @@ def extreme_quantile_var(
         "xi": round(xi, 6),
         "beta": round(beta, 6),
         "threshold": round(u, 6),
+        # C10: the POT threshold quantile is a DECLARED policy (caller-overridable
+        # via `threshold_quantile`); echo it so the tail fit's assumption is
+        # visible beside the VaR it produced.
+        "threshold_quantile": q,
         "n_exceed": nu,
         "n": n,
         "alpha": alpha,
@@ -976,6 +980,19 @@ def copula_scenarios(
         basis += f", nu={nu_out}"
     return {
         "scenarios": scenarios,
+        # C11: the copula's model risk, stated rather than left implicit - the
+        # dof is a FIXED policy (no family/dof selection is done), so a published
+        # tail number carries which assumption produced it.
+        "model_risk": {
+            "family": fam,
+            "nu": nu_out,
+            "tail_dependence_checked": True,
+            "note": (
+                "C11: nu is a fixed policy, not fitted; no copula family/dof "
+                "SELECTION is performed, so the scenarios carry an unpriced model "
+                "choice - tail_dependence is the empirical check beside them"
+            ),
+        },
         "family": fam,
         "nu": nu_out,
         "n": n,
@@ -1089,12 +1106,53 @@ def _christoffersen_independence(
     return lr, _chi2_sf(lr, 1)
 
 
+def _coverage_mc_p(n: int, a: float, observed: float, *,
+                   draws: int = 2000, seed: int = 0) -> float | None:
+    """C9: a finite-sample Monte-Carlo p for the joint coverage statistic.
+
+    Simulates ``draws`` i.i.d. Bernoulli(``a``) hit sequences of length ``n`` (the
+    null the asymptotic chi-square assumes), recomputes the joint statistic, and
+    returns the fraction at or above ``observed``. The asymptotic chi-square is
+    anti-conservative in short windows - this is the honest small-sample answer.
+    """
+    import random as _random
+
+    rng = _random.Random(seed)
+    total = 0
+    at_least = 0
+    for _ in range(int(draws)):
+        h = [1 if rng.random() < a else 0 for _ in range(n)]
+        x = sum(h)
+        lr_pof, _p = _kupiec_pof(n, x, a)
+        if lr_pof is None:
+            continue
+        n00 = n01 = n10 = n11 = 0
+        for i in range(1, n):
+            prev, cur = h[i - 1], h[i]
+            if prev == 0 and cur == 0:
+                n00 += 1
+            elif prev == 0 and cur == 1:
+                n01 += 1
+            elif prev == 1 and cur == 0:
+                n10 += 1
+            else:
+                n11 += 1
+        lr_ind, _pi = _christoffersen_independence(n00, n01, n10, n11)
+        if lr_ind is None:
+            continue
+        total += 1
+        if lr_pof + lr_ind >= observed:
+            at_least += 1
+    return (at_least / total) if total else None
+
+
 def var_coverage_test(
     returns: list,
     *,
     alpha: float = 0.05,
     var_series: list | None = None,
     min_window: int = VAR_COVERAGE_MIN_N,
+    simulate: bool = False,
 ) -> dict:
     """Kupiec + Christoffersen joint conditional coverage of a VaR series (R2).
 
@@ -1177,6 +1235,7 @@ def var_coverage_test(
     if lr_pof is not None and lr_ind is not None:
         joint_stat = lr_pof + lr_ind
         joint_p = _chi2_sf(joint_stat, 2)
+    sim_p = _coverage_mc_p(len(hits), a, joint_stat) if (simulate and joint_stat is not None) else None
     if joint_p is not None:
         verdict = "pass" if joint_p >= VAR_COVERAGE_LEVEL else "fail"
         judged_on = "christoffersen joint conditional coverage (LR_cc ~ chi2_2)"
@@ -1208,6 +1267,9 @@ def var_coverage_test(
         },
         "verdict": verdict,
         "judged_on": judged_on,
+        # C9: the finite-sample Monte-Carlo p, only when asked (the asymptotic
+        # chi-square is anti-conservative in short windows).
+        "coverage_sim_p": sim_p,
         "n": len(hits),
         "coverage_level": round(1.0 - a, 6),
         "window": window,

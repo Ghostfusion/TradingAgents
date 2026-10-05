@@ -636,7 +636,12 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
     return {"window": n, "rows": rows}
 
 
-def purged_cpcv_splits(n: int, n_splits: int = 5, embargo: int = 0):
+#: C2: purge WITHOUT embargo on the train side was the default; Lopez de Prado's
+#: CPCV needs both (FINDINGS §3). One session is the minimum meaningful gap.
+CPCV_DEFAULT_EMBARGO = 1
+
+
+def purged_cpcv_splits(n: int, n_splits: int = 5, embargo: int = CPCV_DEFAULT_EMBARGO):
     """Naive-Combinatorial purged cross-validation (CPCV) fold indices (W2-2).
 
     Yields (train_idx, test_idx) for every (test-group, train-complement)

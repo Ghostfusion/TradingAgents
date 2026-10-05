@@ -214,6 +214,11 @@ def rolling_band(
         out["information_gap"] = gap
         if gap is not None:
             out["basis"] = f"{basis}; {gap['basis']}"
+    # C7: the IID band (the gate-off default) under-covers under serial
+    # dependence - the measured table is above (0.45 realized at rho=0.8 against
+    # a nominal 0.90). The autocorrelation-aware alternative already exists as
+    # the option (``enable_bootstrap_intervals``); a gate-off band stays
+    # byte-identical, so the caveat is stated HERE, not added to the record.
     return out
 
 

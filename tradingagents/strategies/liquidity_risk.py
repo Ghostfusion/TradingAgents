@@ -100,10 +100,25 @@ def amihud_illiquidity(closes: list, volumes: list) -> float | None:
     return sum(ratios) / len(ratios)
 
 
+#: C13: the market-impact SHAPES this engine carries. The literature rejects the
+#: LINEAR form for equity impact; square-root is preferred (FINDINGS §3). Declared
+#: in ONE place so a caller chooses one shape, not three that quietly disagree.
+IMPACT_MODEL_SHAPES = {
+    "square_root": "k * sigma * sqrt(q / adv) - preferred (backtest_models)",
+    "quadratic": "price * impact * participation**2 (volume_share_slippage)",
+    "linear": "price * coeff * (q / adv) - literature-rejected (market_impact_slippage)",
+}
+PREFERRED_IMPACT_SHAPE = "square_root"
+
+#: C14: ONE declared participation cap, in fraction of ADV. The producers used
+#: 0.20 / 0.15 / 0.10; 10% is the declared default (the most common, FINDINGS §3).
+PARTICIPATION_CAP = 0.10
+
+
 def days_to_absorb(
     shares_to_liquidate: float | None,
     adv: float | None,
-    alpha: float = 0.15,
+    alpha: float = PARTICIPATION_CAP,
 ) -> float | None:
     """Days for the public market to absorb a block at a participation cap.
 
@@ -121,7 +136,7 @@ def days_to_absorb(
     try:
         alpha = float(alpha)
     except (TypeError, ValueError):
-        alpha = 0.15
+        alpha = PARTICIPATION_CAP
     if sh < 0 or adv <= 0 or alpha <= 0:
         return None
     return sh / (adv * alpha)
@@ -349,9 +364,13 @@ def market_impact_slippage(order_qty: float, adv: float, price: float,
                            impact_coeff: float = 0.1) -> float | None:
     """Lean MarketImpactSlippageModel (Almgren-Chriss style): impact ∝ qty/ADV.
 
-    Per-share cost = price * impact_coeff * (order/ADV). Simpler than the
-    volume-share square term; good for large-block orders. None on missing
-    inputs.
+    Per-share cost = price * impact_coeff * (order/ADV). None on missing inputs.
+
+    **C13.** This is the LINEAR impact shape, which the literature rejects for
+    equity impact (``IMPACT_MODEL_SHAPES``); prefer the square-root form
+    (``backtest_models.square_root_impact``) or ``volume_share_slippage``. Kept
+    - and now labelled - for callers that deliberately want the linear
+    approximation, rather than removed under a caller's feet.
     """
     try:
         q = float(order_qty)
@@ -368,6 +387,7 @@ def kyle_lambda(
     closes: list,
     volumes: list,
     min_obs: int = 30,
+    direction: str = "sign_dp",
 ) -> float | None:
     """Kyle lambda (price-impact slope) from daily bars.
 
@@ -395,7 +415,14 @@ def kyle_lambda(
             continue
         d = cc - pc
         dp.append(d)
-        q.append((1.0 if d >= 0.0 else -1.0) * v)
+        if direction == "lagged" and i >= 2:
+            # C15: sign the flow by the PREVIOUS bar's move, so the regressor is
+            # not mechanically the sign of the price change it explains - with
+            # ``sign_dp`` the OLS slope is positive by construction.
+            prev_d = float(closes[i - 1]) - float(closes[i - 2])
+            q.append((1.0 if prev_d >= 0.0 else -1.0) * v)
+        else:
+            q.append((1.0 if d >= 0.0 else -1.0) * v)
     m = len(dp)
     if m < min_obs:
         return None
