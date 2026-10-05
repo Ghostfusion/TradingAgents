@@ -22,6 +22,7 @@ pipeline also uses. :func:`judge_tree` is the entry point for that - the
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import time
@@ -30,9 +31,35 @@ from collections.abc import Callable, Sequence
 import requests
 from dotenv import dotenv_values
 
-DEFAULT_MODEL = "typesafe/jev-1.13"
-DEFAULT_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-DEFAULT_TIMEOUT = 300.0
+
+def _env_float(name: str, default: float) -> float:
+    """A float from the environment, or ``default`` when the key is unset/blank.
+
+    A key that IS set but unparseable raises here, at import: a typo'd timeout
+    must not be silently replaced by the default. ``tradingagents/__init__.py``
+    loads the project's ``.env`` into ``os.environ`` at package import, so a key
+    declared there is already visible when this module is imported.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name}={raw!r} is not a number") from exc
+
+
+#: The model, its endpoint and the request timeout. Each is overridable from
+#: ``.env`` (``TRADINGAGENTS_JEV_MODEL`` / ``TRADINGAGENTS_JEV_ENDPOINT`` /
+#: ``TRADINGAGENTS_JEV_TIMEOUT``) so a model or host change needs no code edit;
+#: an unset key keeps the literal this module was written against. The timeout
+#: is seconds.
+DEFAULT_MODEL = os.environ.get("TRADINGAGENTS_JEV_MODEL") or "typesafe/jev-1.13"
+DEFAULT_ENDPOINT = (
+    os.environ.get("TRADINGAGENTS_JEV_ENDPOINT")
+    or "https://openrouter.ai/api/alpha/decisions"
+)
+DEFAULT_TIMEOUT = _env_float("TRADINGAGENTS_JEV_TIMEOUT", 300.0)
 
 #: The four analyst report stems, in the order the run produces them.
 ANALYST_STEMS: tuple[str, ...] = ("fundamentals", "market", "news", "sentiment")

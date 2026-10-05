@@ -22,6 +22,7 @@ made that hard to discover, with no vendor and no key:
 
 from __future__ import annotations
 
+import importlib
 import json
 
 import pytest
@@ -50,6 +51,55 @@ def test_resolve_key_is_empty_when_absent(tmp_path):
     env.write_text("SOME_OTHER_KEY=x\n", encoding="utf-8")
 
     assert jev.resolve_key(env) == ""
+
+
+# ---------------------------------------------------------------------------
+# the model / endpoint / timeout - read from the environment, not hardcoded
+# ---------------------------------------------------------------------------
+#
+# Each test reloads ``jev`` (the three defaults are read once, at import) and
+# restores the module under the original environment before it returns, so the
+# reload cannot leak a test value into a later test.
+
+
+def test_the_model_endpoint_and_timeout_come_from_the_environment(monkeypatch):
+    monkeypatch.setenv("TRADINGAGENTS_JEV_MODEL", "typesafe/jev-9.99")
+    monkeypatch.setenv("TRADINGAGENTS_JEV_ENDPOINT", "https://example.test/decisions")
+    monkeypatch.setenv("TRADINGAGENTS_JEV_TIMEOUT", "12.5")
+    try:
+        reloaded = importlib.reload(jev)
+        assert reloaded.DEFAULT_MODEL == "typesafe/jev-9.99"
+        assert reloaded.DEFAULT_ENDPOINT == "https://example.test/decisions"
+        assert reloaded.DEFAULT_TIMEOUT == 12.5
+    finally:
+        monkeypatch.undo()
+        importlib.reload(jev)
+
+
+def test_an_unset_or_blank_key_keeps_the_module_literal(monkeypatch):
+    """The literal is the fallback ``.env.example`` ships; a blank line must not blank it."""
+    monkeypatch.setenv("TRADINGAGENTS_JEV_MODEL", "")
+    monkeypatch.delenv("TRADINGAGENTS_JEV_ENDPOINT", raising=False)
+    monkeypatch.delenv("TRADINGAGENTS_JEV_TIMEOUT", raising=False)
+    try:
+        reloaded = importlib.reload(jev)
+        assert reloaded.DEFAULT_MODEL == "typesafe/jev-1.13"
+        assert reloaded.DEFAULT_ENDPOINT == "https://openrouter.ai/api/alpha/decisions"
+        assert reloaded.DEFAULT_TIMEOUT == 300.0
+    finally:
+        monkeypatch.undo()
+        importlib.reload(jev)
+
+
+def test_an_unparseable_timeout_is_refused_not_defaulted(monkeypatch):
+    """A typo'd timeout must fail loudly at import, not silently become 300s."""
+    monkeypatch.setenv("TRADINGAGENTS_JEV_TIMEOUT", "soon")
+    try:
+        with pytest.raises(ValueError, match="TRADINGAGENTS_JEV_TIMEOUT"):
+            importlib.reload(jev)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(jev)
 
 
 # ---------------------------------------------------------------------------

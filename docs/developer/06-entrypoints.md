@@ -118,8 +118,11 @@ slice or movers universe tractable.
   from `/chat/completions`, and is served only by `POST /api/alpha/decisions`
   with `{model, state, questions}`. The default battery asks about the
   document itself (stance, evidence strength, horizon) and encodes no trading
-  policy; `--questions FILE` overrides it. Hermetic tests:
-  `tests/test_jev_decide.py`.
+  policy; `--questions FILE` overrides it. `--model` / `--endpoint` /
+  `--timeout` default from `TRADINGAGENTS_JEV_MODEL` /
+  `TRADINGAGENTS_JEV_ENDPOINT` / `TRADINGAGENTS_JEV_TIMEOUT` in `.env` (the
+  literals are only the fallback), so a model or host change is a config edit,
+  not a code edit. Hermetic tests: `tests/test_jev_decide.py`.
 
   ```
   py -3.12 scripts/jev_decide.py

@@ -239,7 +239,10 @@ exactly the tree it produced before the gate existed.
 reading a surface, which is why it is not in §6, §7 or §7b. It is also the only
 one whose dependency can be absent without being an error: the engine does not
 require `OPENROUTER_API_KEY`, so the hook skips with a log line rather than
-failing. It is best-effort like `enable_pre_market_review` - a judge that
+failing. The judge's model, endpoint and per-call timeout are the `.env` keys
+`TRADINGAGENTS_JEV_MODEL` / `TRADINGAGENTS_JEV_ENDPOINT` /
+`TRADINGAGENTS_JEV_TIMEOUT` (defaults `typesafe/jev-1.13`, the alpha decisions
+endpoint, 300 s), not code literals. It is best-effort like `enable_pre_market_review` - a judge that
 annotates a finished run must never fail it.
 
 **Every writer of a finished tree calls `post_save_annotations`, and there are three.**
