@@ -837,8 +837,14 @@ class TradingAgentsGraph:
             # the card printed (`strategies/trade_plan.render_entry_exit_block`)
             # instead of a second assembly or a regex over the markdown.
             _capture: dict = {}
+            _bars, _fair_value = self._try_fetch_card_inputs(company_name)
             init_agent_state["computed_decision_context"] = self._compiled_decision_context(
-                company_name, init_agent_state, closes=closes, capture=_capture
+                company_name,
+                init_agent_state,
+                closes=closes,
+                capture=_capture,
+                bars=_bars,
+                fair_value=_fair_value,
             )
             init_agent_state["entry_exit_block"] = _capture.get("entry_exit") or {}
         # Phase 3 (§9): the Decision Packet is now rendered by the `Decision
@@ -1416,6 +1422,31 @@ class TradingAgentsGraph:
             return final_state
         return apply_overlay_to_state(final_state, overlay)
 
+    def _try_fetch_card_inputs(self, ticker) -> tuple[dict | None, float | None]:
+        """The trade-plan card's two non-close inputs, best-effort.
+
+        An OHLCV bundle (used ONLY for §74-§78's dimensionless spread ratio, so
+        it never has to share a price scale with the run's own close series) and
+        the DCF per-share fair value, which fills §103's fair-value pair. Both
+        are advisory: any vendor failure yields an absent value, which leaves
+        the card's rows absent rather than defaulted, and never breaks the run.
+
+        The fair value is memoised per ``(ticker, trade_date)`` inside
+        ``dcf_fair_value_per_share``, so this and every ``get_trade_plan`` call
+        in the same process share ONE statement read - which is also what keeps
+        the two surfaces from printing different numbers.
+        """
+        try:
+            from tradingagents.agents.utils.analysis_tools import (
+                dcf_fair_value_per_share,
+                ohlcv_bundle,
+            )
+
+            fair_value, _reason = dcf_fair_value_per_share(ticker)
+            return ohlcv_bundle(ticker), fair_value
+        except Exception:  # noqa: BLE001 - advisory; the rows stay absent
+            return None, None
+
     def _try_fetch_closes(self, ticker, days=320):
         from tradingagents.dataflows.interface import route_to_vendor
 
@@ -1596,6 +1627,8 @@ class TradingAgentsGraph:
         *,
         closes: list | None = None,
         capture: dict | None = None,
+        bars: dict | None = None,
+        fair_value: float | None = None,
     ) -> str:
         """Compile the deterministic decision context fed to the Trader, PM
         and the 3 risk debators (Phase A-E). All advisory; never blocks.
@@ -1682,6 +1715,14 @@ class TradingAgentsGraph:
             # into a smaller entry price: the governor's PASS/FAIL stays the
             # authoritative gate, and a price term must not override it.
             rctx = (state or {}).get("risk_context") or {}
+            # ``bars`` and ``fair_value`` are the two card inputs the close
+            # series alone cannot carry (an OHLCV bundle for §74-§78's spread
+            # ratio - see `measured_inputs` - and the DCF per-share fair value).
+            # They are fetched by the RUN's setup (`_try_fetch_card_inputs`),
+            # not here: this compiler is called directly by a lot of hermetic
+            # tests that stub the close seam, and a compiler that reaches for
+            # vendors on its own would make every one of them hit the network.
+            # Absent values simply leave their rows absent.
             plan = build_trade_plan(
                 ticker=ticker,
                 price=(closes[-1] if closes else None),
@@ -1690,7 +1731,9 @@ class TradingAgentsGraph:
                 name_cvar=rctx.get("single_cvar"),
                 cvar_budget=rctx.get("cvar_budget_pct"),
                 liquidity_status=(rctx.get("liquidity") or {}).get("verdict"),
-                **measured_inputs(closes, self.config),
+                **measured_inputs(
+                    closes, self.config, bars=bars, fair_value=fair_value
+                ),
             )
             out.append(plan)
         except Exception:  # noqa: BLE001

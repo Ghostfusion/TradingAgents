@@ -20,6 +20,7 @@ analyst then says the signal is unavailable rather than inventing it.
 from __future__ import annotations
 
 import contextlib
+import functools
 import math
 import re
 from typing import Annotated
@@ -210,6 +211,19 @@ def _scale_note(ticker: str, closes: list) -> str:
 
     warn = ohlcv_scale_warning(ticker, closes[-1] if closes else None)
     return ("\n" + warn) if warn else ""
+
+
+def ohlcv_bundle(ticker: str, days: int = 320) -> dict:
+    """The run's verified OHLCV bundle - the public name for :func:`_ohlcv`.
+
+    ``_ohlcv`` is the one parser that reads the look-ahead-filtered
+    ``load_ohlcv`` source every OHLCV-based tool already computes on, and it is
+    cached per ``(ticker, days)`` for the run. The pre-graph trade-plan card in
+    :mod:`tradingagents.graph.trading_graph` needs the same bundle (for §74-§78's
+    spread ratio), and a caller in another layer should depend on a public name
+    rather than on this module's underscore.
+    """
+    return _ohlcv(ticker, days)
 
 
 def _ohlcv(ticker: str, days: int = 320) -> dict:
@@ -3186,6 +3200,78 @@ def _dcf_wacc(rf: float, beta: float, erp: float) -> float:
     from tradingagents.strategies.dcf import wacc_from_beta
 
     return wacc_from_beta(rf, beta, erp)
+
+
+#: The three assumptions ``get_dcf_valuation`` advertises to the model. The
+#: structured helper below measures with the SAME ones, so the number the card
+#: carries and the number the tool prints cannot come from different models.
+_DCF_DEFAULT_ERP = 0.05
+_DCF_DEFAULT_GROWTH = 0.025
+_DCF_DEFAULT_YEARS = 5
+
+
+@functools.lru_cache(maxsize=64)
+def _dcf_fair_value_cached(ticker: str, current_date: str) -> tuple[float | None, str]:
+    """(per-share DCF fair value, reason). ONE vendor read per (ticker, date).
+
+    The same context, model and data-quality guard ``get_dcf_valuation`` uses,
+    reduced to the number the trade-plan card needs. The ``lru_cache`` is what
+    makes carrying it affordable: the pre-graph card and every ``get_trade_plan``
+    call in one process share ONE statement fetch instead of one apiece, which
+    is also what keeps the two surfaces from disagreeing. Keyed on the date, so
+    a later day re-measures rather than re-reading a stale fair value.
+    """
+    try:
+        from tradingagents.strategies.dcf import compute_dcf
+
+        ctx = _dcf_context(ticker, current_date)
+        if ctx.get("error"):
+            return None, str(ctx["error"])
+        res = compute_dcf(
+            ctx["fcf"],
+            rf=ctx["rf"],
+            beta=ctx["beta"],
+            erp=_DCF_DEFAULT_ERP,
+            growth=_DCF_DEFAULT_GROWTH,
+            years=_DCF_DEFAULT_YEARS,
+            shares=ctx["shares"],
+            cash=ctx["cash"],
+            debt=ctx["debt"],
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory; never break a run
+        return None, f"dcf unavailable ({exc})"
+    if not res or res.get("price") is None:
+        return None, "inputs not usable (no positive FCF, or g >= wacc)"
+    fv = float(res["price"])
+    price = ctx.get("price")
+    # The same >5x guard `get_dcf_valuation` applies, for the same reason (TSM
+    # 2026-09-10: fair value 2933.52 against a price of 429.55): a value many
+    # multiples away is unit-mixed or share-basis-inconsistent, so it is NOT a
+    # USD fair value and must never reach the card as one.
+    if price and fv / float(price) > 5.0:
+        return None, (
+            f"data-quality fail: fair value {fv:.2f} is "
+            f"{fv / float(price):.1f}x the price {float(price):.2f} (>5x)"
+        )
+    return fv, ""
+
+
+def dcf_fair_value_per_share(
+    ticker: str, current_date: str | None = None
+) -> tuple[float | None, str]:
+    """The run's per-share DCF fair value as ``(value, reason)``.
+
+    ``value`` is ``None`` **with a reason** whenever the DCF cannot be measured
+    - no usable FCF, an unusable share basis, a data-quality fail, a vendor
+    outage - because the trade-plan card's rule is that an unmeasurable level
+    is named absent and never defaulted. ``current_date`` defaults to the run's
+    ``trade_date`` and is clamped to it by :func:`as_of`.
+    """
+    run_date = get_run_trade_date()
+    date = as_of(current_date or run_date, run_date)
+    if not date:
+        return None, "no run trade_date; a dated statement fetch needs one"
+    return _dcf_fair_value_cached(str(ticker).upper(), str(date))
 
 
 @tool
@@ -12528,13 +12614,22 @@ def get_trade_plan(
         return f"trade plan unavailable: {exc}"
     try:
         cfg = get_config()
-        closes = _ohlcv(ticker).get("closes") or []
+        bars = _ohlcv(ticker)
+        closes = bars.get("closes") or []
         if price is None:
             price = closes[-1] if closes else None
+        # The DCF per-share fair value, best-effort and memoised per
+        # (ticker, date): a vendor outage, an unusable FCF or a data-quality
+        # fail leaves the card's valuation rows absent exactly as before, and
+        # never fails the tool.
+        fair_value, _reason = dcf_fair_value_per_share(ticker)
         # Same measured pieces the graph's own card uses (one implementation):
         # without them every row rendered 'unavailable'.
         return build_trade_plan(
-            ticker=ticker, price=price, config=cfg, **measured_inputs(closes, cfg)
+            ticker=ticker,
+            price=price,
+            config=cfg,
+            **measured_inputs(closes, cfg, bars=bars, fair_value=fair_value),
         )
     except Exception as exc:
         return f"trade plan unavailable: {exc}"

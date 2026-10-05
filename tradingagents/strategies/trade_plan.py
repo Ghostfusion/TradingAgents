@@ -37,7 +37,11 @@ import contextlib
 import re
 
 from tradingagents.strategies.entry_ceiling import CEILING_SOURCES, entry_ceiling
-from tradingagents.strategies.entry_exit_families import ENTRY_MEMBERS, EXIT_MEMBERS
+from tradingagents.strategies.entry_exit_families import (
+    ENTRY_MEMBERS,
+    EXIT_MEMBERS,
+    support_level,
+)
 from tradingagents.strategies.entry_exit_price import entry_exit_price
 from tradingagents.strategies.entry_target import ANCHOR_SOURCES, entry_target
 from tradingagents.strategies.execution_price import COST_SOURCES, execution_price
@@ -533,7 +537,13 @@ def render_entry_exit_block(block: dict | None) -> str:
     )
     return "\n".join(out)
 
-def measured_inputs(closes, config: dict | None = None) -> dict:
+def measured_inputs(
+    closes,
+    config: dict | None = None,
+    *,
+    bars: dict | None = None,
+    fair_value: float | None = None,
+) -> dict:
     """The plan pieces measurable from the close series alone.
 
     ``build_trade_plan`` renders whatever it is handed and prints
@@ -546,7 +556,15 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
 
     ``setup`` is deliberately absent: its rows come from the statement /
     valuation path, so a price-only caller leaves them out rather than
-    inventing rows. Returns ``{}`` when the tranche read is unusable.
+    inventing rows.
+
+    ``bars`` (an ``_ohlcv``-shaped dict) feeds ONLY §74-§78's spread ratio,
+    which is dimensionless; ``fair_value`` is a measured DCF per-share value,
+    which fills §103's fair-value pair and §100's valuation anchor and ceiling.
+    Both are optional, and each stays absent from the card when not supplied -
+    never defaulted.
+
+    Returns ``{}`` when the tranche read is unusable.
     """
     cfg = config or {}
     if not closes:
@@ -604,6 +622,44 @@ def measured_inputs(closes, config: dict | None = None) -> dict:
         trail = trail_ema(closes)
         if trail:
             out["trail"] = trail
+    # §100's TECHNICAL anchor: the level this very card already trusts as its
+    # close-series support (`support_level` is the producer of §103's
+    # `support_entry_price`), so `technical_entry_price` and
+    # `support_entry_price` agree by construction instead of being two derived
+    # numbers that can drift apart. Closes alone - the basis is the documented
+    # close-proxy, which is the basis the card's support row already reports.
+    with contextlib.suppress(Exception):
+        tech, _tech_basis = support_level(closes)
+        if tech is not None:
+            out["technical_price"] = tech
+    # §74-§78's one measured cost term. `spread_estimate` is dimensionless, so
+    # it is fed the verified OHLCV bundle rather than this card's own series: a
+    # ratio cannot carry a foreign price scale into the card, whereas absolute
+    # levels supplied beside it could. Absent - never zero - when the estimators
+    # are undefined, which is exactly what `execution_price`'s contract (owner
+    # decision 2026-10-02) requires of an unmeasured term.
+    with contextlib.suppress(Exception):
+        if bars:
+            from tradingagents.strategies.liquidity_risk import spread_estimate
+
+            est = spread_estimate(
+                bars.get("closes") or [],
+                bars.get("highs") or [],
+                bars.get("lows") or [],
+            )
+            if est and est.get("spread") is not None:
+                out["execution_spread"] = est["spread"]
+    # §103's fair-value pair. Deliberately NOT also §100's valuation anchor and
+    # ceiling: measured 2026-10-05, the repo's DCF returns 14.42 for VST at a
+    # price of 144.89 (0.10x, from a $20.1B debt stack = $60.93/share of net
+    # debt) and 9.85 for KGC at 23.58 (0.42x, from a vendor beta of 3.40).
+    # Feeding that to `entry_ceiling` would set `max_entry_price` - and so the
+    # card's HEADLINE `final_entry_price` - to the DCF value on every leveraged
+    # name, and roughly halve it through the `entry_target` blend. Those two
+    # rows are not empty by accident; whether a perpetuity DCF should cap an
+    # entry is a semantics decision for the owner, not a plumbing one.
+    if fair_value is not None:
+        out["fair_value"] = fair_value
     return out
 
 

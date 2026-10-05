@@ -908,10 +908,11 @@ rediscover them.
 
 | Item | State |
 |---|---|
-| `valuation_entry_price`, `technical_entry_price`, `execution_price` read `unavailable` on a live run | **Plumbing gap, not a missing formula.** The producers and the wiring exist; no call site passes `valuation_price` / `technical_price` / `execution_spread|impact|slippage` into the card. The technical anchor is derivable from closes already in hand. |
+| `technical_entry_price`, `execution_price` | **Wired 2026-10-05.** The technical anchor is the §103 close-series support level (`entry_exit_families.support_level`) - the same producer as the card's own `support_entry_price` row, so the two agree by construction. The execution price takes `liquidity_risk.spread_estimate` over the verified OHLCV bundle: one measured §74-§78 term, so it is a **spread-only floor** and the card names the absent `impact` / `slippage` rather than assuming them. |
+| `valuation_entry_price` | **Held deliberately (2026-10-05), and this is the row to read.** The DCF fair value is measured and available, but it returns **0.10x of price for VST** (14.42 at 144.89) and 0.42x for KGC - arithmetically right, driven by VST's $20.1B debt and KGC's vendor beta of 3.40. Passed as `entry_target`'s valuation anchor or `entry_ceiling`, it would set the card's headline `final_entry_price` to the DCF value on every leveraged name. A semantics decision, not a plumbing one. |
 | Two different entry ceilings for one name in one report tree | The Trader's post-proposal verification pass re-calls `get_trade_plan`, which re-fetches and re-derives. Reported; the fix is a semantic change to a contract the owner deliberately set — ask first. |
 | `momentum_entry_price` / `momentum_target` | Need a calibrated score→price map — the owner's Phase-2 decision. Do not invent one. |
-| `fair_value_price` / `fair_value_target` | Need a statement path into the pre-graph card. |
+| `fair_value_price` / `fair_value_target` | **Wired 2026-10-05** via `analysis_tools.dcf_fair_value_per_share` - the same `_dcf_context` + `compute_dcf` as `get_dcf_valuation`, the same >5x data-quality guard, memoised per `(ticker, trade_date)` so the pre-graph card and every `get_trade_plan` call share one statement read. |
 | `event_exit` | Needs the forward calendar in the pre-graph card. |
 | `SEC-16` `IncrementalValue` | The gate for the whole `SEC-*` score board: **nothing is promotable before it exists**. Do not start unprompted. |
 | `MomentumScore.NORMALIZATION_METHOD` | Owner-ratified (`MOM-2`, 2026-09-27). Do not flip. |

@@ -244,6 +244,11 @@ def _block_from_state(monkeypatch, closes, state, **cfg_over):
     graph = object.__new__(tg.TradingAgentsGraph)
     graph.config = _config(**cfg_over)
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    # No vendor call happens here: `_compiled_decision_context` takes the
+    # card's non-close inputs as ARGUMENTS (the run's setup fetches them), so a
+    # test that calls the compiler directly stays hermetic without stubbing
+    # anything else - and `bars`/`fair_value` default to absent, which is the
+    # state these subjects were written against.
     capture: dict = {}
     graph._compiled_decision_context("NVDA", state, capture=capture)
     return (capture.get("entry_exit") or {}).get("entry") or {}
