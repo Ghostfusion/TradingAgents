@@ -169,6 +169,11 @@ how a number is computed — grouped so they can be decided in batches.
 - `statistical.correlation_matrix` defaults to Pearson on heavy-tailed returns.
 - `granger_causality` / `ols_factors` report IID-homoskedastic p-values.
 
+**The §3 register is 18 rows (C1–C18).** C1 is E1 (the CSCV PBO, landed in Batch
+B) and C16 is refuted below, so 16 are distinct §3 items; an earlier working note
+said "17" — it treated C1 as an E-item rather than a §3 row and missed that the
+min-track-record row was already superseded by E2.
+
 **Batch C dispositions (2026-10-04).** The owner's go-ahead landed the additive
 items, each as an opt-in that leaves the default unchanged: **C4**
 (`deflated_sharpe` / `deflated_sharpe_report` take `n_effective`, the
