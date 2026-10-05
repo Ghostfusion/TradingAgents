@@ -1,6 +1,9 @@
-"""The TypeSafe decisions model (``typesafe/jev-1.13``) as a typed judge.
+"""The OpenRouter decisions API as a typed judge - one engine, two deciders.
 
-Two facts this module encodes, both established by probing rather than reading:
+The engine is model-agnostic: :data:`DECIDERS` names the judges that run over a
+finished report tree (``typesafe/jev-1.13`` first, ``perplexity/pplx-decider-v1-27b``
+second), each writing its own verdict file. The facts below were established by
+probing rather than reading, and they hold for both models.
 
 * ``typesafe/jev-1.13`` is a **decisions** model, not a chat model. Sent to
   ``/chat/completions`` it returns HTTP 400, and the error names the endpoint
@@ -27,6 +30,7 @@ import pathlib
 import re
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import requests
 from dotenv import dotenv_values
@@ -60,6 +64,17 @@ DEFAULT_ENDPOINT = (
     or "https://openrouter.ai/api/alpha/decisions"
 )
 DEFAULT_TIMEOUT = _env_float("TRADINGAGENTS_JEV_TIMEOUT", 300.0)
+
+#: The SECOND decider: Perplexity's decisions model. Same endpoint and the same
+#: request/response contract as the TypeSafe one - probed 2026-10-05, the alpha
+#: route answers it as ``perplexity/pplx-decider-v1-27b-20261001`` (provider
+#: ``Perplexity``) for all three question types (``choice``/``score``). Note the
+#: endpoint the vendor page advertises for it, ``/api/v1/decisions``, is a **404**
+#: - the live route is the alpha one above. Overridable from `.env` like the first.
+PPLX_MODEL = (
+    os.environ.get("TRADINGAGENTS_PPLX_DECIDER_MODEL")
+    or "perplexity/pplx-decider-v1-27b"
+)
 
 #: The four analyst report stems, in the order the run produces them.
 ANALYST_STEMS: tuple[str, ...] = ("fundamentals", "market", "news", "sentiment")
@@ -414,8 +429,28 @@ def result_lines(data: dict, questions: dict) -> list[str]:
 # the post-run verdict: what the report pipeline writes into its own tree
 # ---------------------------------------------------------------------------
 
-#: Where the verdict lands inside a report tree.
+#: Where each decider's verdict lands inside a report tree. One file per
+#: decider, so a tree that ran both carries both and neither overwrites the other.
 VERDICT_FILENAME = "jev_verdict.json"
+PPLX_VERDICT_FILENAME = "pplx_verdict.json"
+
+
+@dataclass(frozen=True)
+class Decider:
+    """One decisions-API judge: its label, its model, its verdict filename."""
+
+    label: str
+    model: str
+    filename: str
+
+
+#: The deciders, in the order they run after a finished tree is written. The
+#: TypeSafe one first (it is what the hook was built for), Perplexity's second -
+#: same endpoint, same battery, same position neutralisation, a different model.
+DECIDERS: tuple[Decider, ...] = (
+    Decider(label="jev", model=DEFAULT_MODEL, filename=VERDICT_FILENAME),
+    Decider(label="pplx", model=PPLX_MODEL, filename=PPLX_VERDICT_FILENAME),
+)
 
 
 def verdict_for_tree(
@@ -499,11 +534,36 @@ def write_verdict(
     return path
 
 
-def judge_tree(tree: pathlib.Path | str, *, key: str, **kwargs) -> tuple[pathlib.Path, dict]:
-    """Judge ``tree`` and write the verdict into it. Returns ``(path, payload)``.
+def judge_tree(
+    tree: pathlib.Path | str,
+    *,
+    key: str,
+    decider: Decider = DECIDERS[0],
+    **kwargs,
+) -> tuple[pathlib.Path, dict]:
+    """Judge ``tree`` with ``decider`` and write the verdict into it.
 
-    One call, so a caller cannot judge without storing - the point of the step is
-    that the verdict travels with the report it is about.
+    Returns ``(path, payload)``. One call, so a caller cannot judge without
+    storing - the point of the step is that the verdict travels with the report
+    it is about. ``decider`` defaults to :data:`DECIDERS`'s first entry, so an
+    existing caller's behaviour is unchanged. ``kwargs`` (``stems``, ``timeout``,
+    ``poster``, ...) pass through; ``model`` overrides the decider's own.
     """
-    payload = verdict_for_tree(tree, key=key, **kwargs)
-    return write_verdict(tree, payload), payload
+    options = {"model": decider.model, **kwargs}
+    payload = verdict_for_tree(tree, key=key, **options)
+    return write_verdict(tree, payload, name=decider.filename), payload
+
+
+def judge_tree_all(
+    tree: pathlib.Path | str,
+    *,
+    key: str,
+    deciders: Sequence[Decider] = DECIDERS,
+) -> list[tuple[Decider, pathlib.Path, dict]]:
+    """Run every decider over one tree, in order.
+
+    Returns ``[(decider, path, payload), ...]``. Each decider writes its own
+    file, so a second judge accumulates beside the first rather than replacing
+    it - which is what makes the two verdicts comparable after the fact.
+    """
+    return [(d, *judge_tree(tree, key=key, decider=d)) for d in deciders]

@@ -121,6 +121,79 @@ def test_gate_on_calls_the_judge(monkeypatch, tmp_path):
     assert called == [tmp_path]
 
 
+# ---------------------------------------------------------------------------
+# the second decider - its own gate, its own file, run after the first
+# ---------------------------------------------------------------------------
+
+
+def test_the_second_decider_gate_ships_off_by_default():
+    """A second paid judge is its own opt-in, so it ships off."""
+    assert _shipped_default("enable_pplx_decider") is False
+
+
+def test_pplx_gate_off_never_calls_the_second_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [], "the second decider ran while its gate was off"
+
+
+def test_pplx_gate_on_calls_the_second_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": True},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [tmp_path]
+
+
+def test_the_two_decider_gates_are_independent(monkeypatch, tmp_path):
+    """Each judge is its own opt-in: one on must not drag the other on."""
+    seen: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append(("jev", d)))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append(("pplx", d)))
+
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": False},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == [("jev", tmp_path)]
+
+    seen.clear()
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": True},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == [("pplx", tmp_path)]
+
+
+def test_the_second_decider_runs_after_the_first(monkeypatch, tmp_path):
+    """Order is pinned: the tree log and the cost report read top-down."""
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": True},
+    )
+    order: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert order == ["jev", "pplx"]
+
+
 def test_the_two_post_save_gates_are_independent(monkeypatch, tmp_path):
     """Enabling the verdict must not drag the pre-market check along."""
     monkeypatch.setattr(
@@ -245,6 +318,63 @@ def test_no_other_report_reaches_the_judge(tmp_path, _keyed):
     batch._batch_jev_verdict(tree)
 
     assert all(p["state"] != "BULL" for p in _keyed.calls)
+
+
+def test_the_second_decider_writes_its_own_file_beside_the_first(tmp_path, _keyed):
+    """Two deciders, two files - neither verdict overwrites the other."""
+    tree = _tree(tmp_path)
+
+    batch._batch_jev_verdict(tree)
+    batch._batch_pplx_decider(tree)
+
+    assert (tree / jev.VERDICT_FILENAME).is_file()
+    pplx = tree / jev.PPLX_VERDICT_FILENAME
+    assert pplx.is_file(), "the second verdict did not travel with its report"
+    payload = json.loads(pplx.read_text(encoding="utf-8"))
+    assert payload["model"] == jev.PPLX_MODEL
+    assert payload["origin"] == tree.name
+    assert payload["failures"] == 0
+
+
+def test_the_second_decider_sends_the_same_neutralised_battery(tmp_path, _keyed):
+    """Same recipe as the first - only the model differs."""
+    tree = _tree(tmp_path)
+
+    batch._batch_pplx_decider(tree)
+
+    assert len(_keyed.calls) == 4, "one call per analyst report"
+    for payload in _keyed.calls:
+        assert payload["model"] == jev.PPLX_MODEL
+        assert jev.POSITION_MARKER in payload["state"]
+        assert "Buy" not in payload["state"], "the report's own call was sent"
+        assert set(payload["questions"]) == {"rating", "evidence", "horizon"}
+
+
+def test_judge_tree_all_runs_every_decider_in_order(tmp_path, _keyed):
+    tree = _tree(tmp_path)
+
+    results = jev.judge_tree_all(tree, key="sk-or-v1-test")
+
+    assert [d.label for d, _, _ in results] == [d.label for d in jev.DECIDERS]
+    assert [p.name for _, p, _ in results] == [
+        jev.VERDICT_FILENAME, jev.PPLX_VERDICT_FILENAME,
+    ]
+    assert all(p.is_file() for _, p, _ in results)
+    assert [pl["model"] for _, _, pl in results] == [d.model for d in jev.DECIDERS]
+
+
+def test_the_second_decider_is_best_effort_too(monkeypatch, tmp_path):
+    """A vendor failure on the second judge must not raise, and must not
+    remove the first judge's file."""
+    tree = _tree(tmp_path)
+    monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
+    monkeypatch.setattr(jev, "post_json", _Recorder(status=429, body="rate limited"))
+
+    batch._batch_pplx_decider(tree)   # must not raise
+
+    payload = json.loads((tree / jev.PPLX_VERDICT_FILENAME).read_text(encoding="utf-8"))
+    assert payload["failures"] == 4
+    assert all(r["status"] == 429 for r in payload["results"])
 
 
 # ---------------------------------------------------------------------------

@@ -262,6 +262,11 @@ _ENV_OVERRIDES = {
     # TypeSafe verdict (tradingagents/jev.py): opt-in post-run judgement of the
     # four analyst reports, stored in the report tree as jev_verdict.json.
     "TRADINGAGENTS_ENABLE_JV_VERDICT": "enable_jev_verdict",
+    # The second decider (tradingagents/jev.py, DECIDERS[1]): Perplexity's
+    # decisions model on the same endpoint/battery, run after the TypeSafe one
+    # and stored beside it as pplx_verdict.json. Its own gate so enabling one
+    # judge does not start paying for two.
+    "TRADINGAGENTS_ENABLE_PPLX_DECIDER": "enable_pplx_decider",
     # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
     # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
     # decline-driver / mechanics toolset instead of company statement tools.
@@ -1119,6 +1124,11 @@ SHIPPED_DEFAULTS = {
         # Opt-in - off by default, so it costs nothing unless enabled, and a
         # missing OPENROUTER_API_KEY skips it rather than failing the run.
         "enable_jev_verdict": False,
+        # The second decider (tradingagents/jev.py, DECIDERS[1]): Perplexity's
+        # decisions model over the same four analyst reports, run AFTER the
+        # TypeSafe one and written beside it as pplx_verdict.json. Separately
+        # gated (and off) so enabling one paid judge cannot silently enable two.
+        "enable_pplx_decider": False,
         # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md).
         # Every read is additive and default-off: a run's artefacts cannot change
         # unless the flag is set. Each names the tool the agent must cite.

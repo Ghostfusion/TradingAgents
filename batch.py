@@ -278,6 +278,12 @@ def post_save_annotations(symbol: str, report_dir, trade_date: str | None) -> No
     # result in that report's own folder. Writes jev_verdict.json.
     if DEFAULT_CONFIG.get("enable_jev_verdict"):
         _batch_jev_verdict(report_dir)
+    # The second decider, AFTER the first: Perplexity's model on the same
+    # decisions endpoint and battery. Its own gate - enabling one judge must not
+    # silently start paying for two. Writes pplx_verdict.json beside
+    # jev_verdict.json, so a tree that ran both carries both.
+    if DEFAULT_CONFIG.get("enable_pplx_decider"):
+        _batch_pplx_decider(report_dir)
 
 
 def analyze(
@@ -584,14 +590,15 @@ def _batch_pre_market_check(symbol: str, report_dir, trade_date: str) -> None:
         print(f"[pre-market] review skipped for {symbol}: {exc}")
 
 
-def _batch_jev_verdict(report_dir) -> None:
-    """TypeSafe verdict on a just-written report tree, stored inside it.
+def _batch_decider_verdict(report_dir, decider) -> None:
+    """One decisions-API judge over a just-written report tree, stored inside it.
 
     Runs right after ``save_reports``: the four ANALYST reports, their own
     position language neutralised, judged buy/hold/sell
     (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe). The payload
-    lands in the tree as ``jev_verdict.json`` so the verdict travels with the
-    report it is about.
+    lands in the tree under the decider's own filename (``jev_verdict.json``,
+    ``pplx_verdict.json``), so two deciders accumulate rather than overwrite -
+    the verdict travels with the report it is about, and both travel together.
 
     Best-effort, like the pre-market check: the judge annotates a finished run
     and must never fail it. A missing ``OPENROUTER_API_KEY`` skips silently -
@@ -602,15 +609,36 @@ def _batch_jev_verdict(report_dir) -> None:
 
         key = resolve_key(Path(__file__).resolve().parent / ".env")
         if not key:
-            print("[jev] verdict skipped: OPENROUTER_API_KEY not set")
+            print(f"[{decider.label}] verdict skipped: OPENROUTER_API_KEY not set")
             return
-        path, payload = judge_tree(report_dir, key=key)
+        path, payload = judge_tree(report_dir, key=key, decider=decider)
         ratings = ", ".join(
             f"{stem}={v.get('rating')}" for stem, v in payload["ratings"].items()
         )
-        print(f"[jev] verdict -> {path}  ({ratings}; failures={payload['failures']})")
+        print(
+            f"[{decider.label}] verdict -> {path}  "
+            f"({ratings}; failures={payload['failures']})"
+        )
     except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
-        print(f"[jev] verdict skipped for {report_dir}: {exc}")
+        print(f"[{decider.label}] verdict skipped for {report_dir}: {exc}")
+
+
+def _batch_jev_verdict(report_dir) -> None:
+    """The TypeSafe decider (``DECIDERS[0]``)."""
+    from tradingagents.jev import DECIDERS
+
+    _batch_decider_verdict(report_dir, DECIDERS[0])
+
+
+def _batch_pplx_decider(report_dir) -> None:
+    """The Perplexity decider (``DECIDERS[1]``), run after the TypeSafe one.
+
+    Deliberately a separate gate from the TypeSafe verdict: a second paid judge
+    is its own opt-in, and a run that wants only one of the two pays for one.
+    """
+    from tradingagents.jev import DECIDERS
+
+    _batch_decider_verdict(report_dir, DECIDERS[1])
 
 
 def _batch_report_verify(symbol: str, report_dir) -> None:
