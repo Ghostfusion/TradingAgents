@@ -57,6 +57,71 @@ def _spectrum_refused(names: int, window: int, reason: str) -> dict:
     }
 
 
+#: E12: the |lag-1 autocorrelation| above which arXiv 2305.12632 finds the
+#: Marchenko-Pastur fit fails (density deformed, fatter tail). The same 0.2
+#: threshold `book_risk.var_cvar_horizon` already uses for its sqrt(T) validity.
+MP_IID_ACF_THRESHOLD = 0.2
+
+
+def mp_iid_premise(rows: list, threshold: float = MP_IID_ACF_THRESHOLD) -> dict:
+    """E12: does a panel satisfy the Marchenko-Pastur i.i.d. premise?
+
+    The MP lower edge ``(1 - sqrt(n/w))^2`` assumes i.i.d. returns. arXiv
+    2305.12632 shows temporal correlation DEFORMS the MP density (fatter tail,
+    higher peak), with the empirical failure mode at |lag-1 autocorrelation|
+    >= 0.2; arXiv 0909.1383 shows heavy tails localise the edge eigenvectors.
+    The count can therefore be taken over a boundary that is biased when the
+    panel is autocorrelated. This is a REPORTED premise check, never a gate: the
+    read is still returned, with ``iid_ok`` beside it, so a caller on a
+    high-frequency or thin panel can see the edge it is trusting is biased.
+
+    ``rows`` is the panel's per-name return series - the shape
+    ``sector_breadth.mp_lower_spectrum`` already builds. Returns
+    ``{mean_abs_lag1_acf, max_abs_lag1_acf, threshold, n_names, iid_ok, basis}``;
+    ``iid_ok`` is ``None`` (never a fabricated ``True``) when no name carries
+    three usable returns.
+    """
+    acfs = []
+    for series in rows or []:
+        vals = [float(x) for x in (series or []) if x is not None]
+        n = len(vals)
+        if n < 3:
+            continue
+        mean = sum(vals) / n
+        denom = sum((x - mean) ** 2 for x in vals)
+        if denom <= 0.0:
+            continue
+        num = sum((vals[i] - mean) * (vals[i - 1] - mean) for i in range(1, n))
+        acfs.append(abs(num / denom))
+    if not acfs:
+        return {
+            "mean_abs_lag1_acf": None,
+            "max_abs_lag1_acf": None,
+            "threshold": float(threshold),
+            "n_names": 0,
+            "iid_ok": None,
+            "basis": (
+                "E12: no name in the panel carries 3 usable returns, so the "
+                "Marchenko-Pastur i.i.d. premise cannot be checked"
+            ),
+        }
+    mean_acf = sum(acfs) / len(acfs)
+    return {
+        "mean_abs_lag1_acf": round(mean_acf, 4),
+        "max_abs_lag1_acf": round(max(acfs), 4),
+        "threshold": float(threshold),
+        "n_names": len(acfs),
+        "iid_ok": mean_acf < float(threshold),
+        "basis": (
+            "E12: the MP edge assumes i.i.d. returns; arXiv 2305.12632 finds the "
+            "fit fails at |lag-1 autocorrelation| >= 0.2 and arXiv 0909.1383 "
+            "shows heavy tails bias the edge - "
+            f"mean |rho1| = {mean_acf:.3f} over {len(acfs)} name(s), threshold "
+            f"{float(threshold):g}; reported, not gated"
+        ),
+    }
+
+
 def mp_below_count(corr, n: int, w: int) -> dict:
     """Eigenvalues of a panel correlation matrix below the Marchenko-Pastur
     lower bound (X3, 2608.09641).
@@ -798,6 +863,8 @@ def forward_stress_probability(
 __all__ = [
     "market_breadth",
     "mp_below_count",
+    "mp_iid_premise",
+    "MP_IID_ACF_THRESHOLD",
     "advance_decline_line",
     "PANEL_KEY",
     "forward_stress_probability",

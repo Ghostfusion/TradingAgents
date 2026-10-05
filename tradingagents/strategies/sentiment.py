@@ -1420,6 +1420,43 @@ def daily_sentiment_sma(
 _WEIGHTED_NEUTRAL_EPS = 0.05
 
 
+#: E11: DECLARED per-event-class freshness half-lives (days). The literature
+#: measures materially different post-publication trajectories by event class -
+#: quantified fundamental news (earnings, guidance, analyst actions) is still
+#: drifting at days +6..+20 while story/soft news (launch, leadership, macro)
+#: has fully reverted by ~+5 - so one global half-life mis-times both tails
+#: (book 04 §3 L1; arXiv 2608.14014v1). DECLARED, like `news_score.RAMPS`:
+#: carried as policy, not fitted. Keys are the event/tag vocabulary the news
+#: path already speaks (`news_score.FORM_EVENT_SCORES`, `tag_category_read`).
+EVENT_HALF_LIFE_DAYS: dict[str, float] = {
+    "earnings": 30.0,
+    "guidance": 30.0,
+    "analyst": 21.0,
+    "dividend": 21.0,
+    "corporate_events": 21.0,
+    "launch": 5.0,
+    "leadership": 5.0,
+    "macro": 3.0,
+    "promotional": 3.0,
+}
+#: The fallback named in `decayed_weight`; an event class absent from the table
+#: decays at this rate (never a silently-different one).
+DEFAULT_EVENT_HALF_LIFE_DAYS = 7.0
+
+
+def half_life_for_event(event_class, default: float = DEFAULT_EVENT_HALF_LIFE_DAYS) -> float:
+    """E11: the declared freshness half-life (days) for an event class.
+
+    ``event_class`` is matched case-insensitively against
+    ``EVENT_HALF_LIFE_DAYS``; an unknown or absent class returns ``default``
+    (the caller's own half-life, or ``DEFAULT_EVENT_HALF_LIFE_DAYS``). A
+    non-positive ``default`` is returned unchanged - the caller keeps its
+    own decay-off contract.
+    """
+    key = str(event_class or "").strip().lower()
+    return float(EVENT_HALF_LIFE_DAYS.get(key, default))
+
+
 def _weighted_basis(half_life, official_boost, min_n, neutral_eps) -> str:
     if half_life and float(half_life) > 0:
         decay = f"half_life={float(half_life):g}d"
@@ -1510,6 +1547,9 @@ def aggregate_weighted_sentiment(
                 "relevance": relevance,
                 "age_days": age_days,
                 "official": _is_official(_article_url(art)),
+                # E11: the article's event class, if it names one. Absent -> the
+                # global half_life applies, exactly as before.
+                "event_class": art.get("event_class") or art.get("tag") or art.get("event"),
             }
         )
     if not by_day:
@@ -1521,6 +1561,18 @@ def aggregate_weighted_sentiment(
         if not days:
             return None
     basis = _weighted_basis(half_life, official_boost, min_n, neutral_eps)
+    event_classes = sorted({
+        str(it["event_class"]).strip().lower()
+        for items in by_day.values() for it in items
+        if it.get("event_class")
+    })
+    if event_classes and half_life and float(half_life) > 0:
+        basis += (
+            "; E11 per-event half-lives applied to articles naming an event class "
+            f"({', '.join(event_classes)}): long for earnings/guidance/analyst, "
+            "short for launch/leadership/macro (book 04 §3 L1, 2608.14014v1); "
+            "other articles fall back to the half_life above"
+        )
     out = []
     for day in days:
         items = by_day[day]
@@ -1537,7 +1589,11 @@ def aggregate_weighted_sentiment(
                 # guard by accident: drop that clamp and the copy weights a
                 # future-dated article ABOVE 1.0 while the producer answers 0.0
                 # (master rule 15: one quantity, one producer).
-                w *= decayed_weight(float(it["age_days"]), float(half_life))
+                # E11: an article that names its event class decays at THAT
+                # class's declared half-life; the rest fall back to the caller's
+                # half_life, so a feed with no event tags is unchanged.
+                hl = half_life_for_event(it.get("event_class"), default=float(half_life))
+                w *= decayed_weight(float(it["age_days"]), float(hl))
             if it["official"]:
                 w *= float(official_boost)
             weights.append(w)
@@ -1673,6 +1729,9 @@ def weighted_rolling_sentiment(
 
 __all__ = [
     "sentiment_velocity",
+    "EVENT_HALF_LIFE_DAYS",
+    "DEFAULT_EVENT_HALF_LIFE_DAYS",
+    "half_life_for_event",
     "sentiment_dynamics",
     "SENTIMENT_DYNAMICS_MIN_POINTS",
     "negation_adjusted_polarity",

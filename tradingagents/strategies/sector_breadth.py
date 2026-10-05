@@ -140,7 +140,7 @@ def mp_lower_spectrum(closes_by_name: dict, *, window: int = SPECTRUM_WINDOW,
         return None
     # Deferred: ``market_breadth`` imports THIS module at the top (it reuses
     # ``multi_breadth``), so the producer is imported at call time.
-    from .market_breadth import mp_below_count
+    from .market_breadth import mp_below_count, mp_iid_premise
 
     win = int(window)
     offered = len(closes_by_name or {})
@@ -159,7 +159,14 @@ def mp_lower_spectrum(closes_by_name: dict, *, window: int = SPECTRUM_WINDOW,
             ),
         }
     corr = np.corrcoef(np.asarray(rows, dtype=float))
-    return {**mp_below_count(corr, len(names), win), "panel_n": offered}
+    return {
+        **mp_below_count(corr, len(names), win),
+        "panel_n": offered,
+        # E12: report (never gate) whether the panel satisfies the MP i.i.d.
+        # premise the lower edge is cut at, so a high-frequency/thin panel's
+        # biased edge is visible beside the count it calibrated.
+        "iid_premise": mp_iid_premise(rows),
+    }
 
 
 def multi_breadth(closes_map: dict, *, windows: tuple = (20, 50, 200),

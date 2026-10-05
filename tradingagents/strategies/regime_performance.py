@@ -18,12 +18,55 @@ levels), outputs are counts/ratios/labels; missing input -> honest None.
 
 from __future__ import annotations
 
+import math
+
 # Simple label helper kept local; reuses nothing heavy.
+
+#: E10: the regimes a regime-conditional comparison is reported over carry a
+#: sign test on the strategy's own returns. An exact two-sided binomial test at
+#: p = 0.5 asks whether the sign of the return is positive more often than a
+#: coin - a distribution-free check that needs no normal/Sharpe assumption, so a
+#: regime whose average return is positive but whose wins are a minority is not
+#: read as an edge.
+ZERO_TOLERANCE = 0.0
+
+
+def _sign_test(rets: list) -> dict | None:
+    """Two-sided exact binomial sign test on ``sign(rets)`` at p = 0.5.
+
+    Zeros are excluded (the standard sign-test convention): the null is that a
+    non-zero return is positive or negative with equal probability. ``None``
+    when there is no non-zero return to test.
+    """
+    nonzero = [x for x in rets if x is not None and x != ZERO_TOLERANCE]
+    n = len(nonzero)
+    if n == 0:
+        return None
+    positives = sum(1 for x in nonzero if x > 0)
+    k = max(positives, n - positives)
+    tail = sum(math.comb(n, i) for i in range(k, n + 1)) / (2 ** n)
+    p_value = min(1.0, 2.0 * tail)
+    return {
+        "n": n,
+        "positives": positives,
+        "p_value": round(p_value, 4),
+        "basis": (
+            "two-sided exact binomial sign test on sign(return_pct) at p=0.5 "
+            "(zeros excluded); distribution-free, so a positive mean with a "
+            "minority of wins is not read as an edge"
+        ),
+    }
 
 
 def regime_conditioned_performance(scored_rows: list[dict],
                                    regime_field: str = "regime") -> dict:
-    """Tabulate per-regime hit/return from scored ledger rows."""
+    """Tabulate per-regime hit/return from scored ledger rows.
+
+    Each regime also carries a ``sign_test`` (E10): a distribution-free
+    two-sided exact binomial test on the sign of the regime's returns, so the
+    comparison is a per-regime significance read rather than one full-horizon
+    number. ``sign_test`` is ``None`` when the regime has no non-zero return.
+    """
 
     def _stat(rows):
         n = len(rows)
@@ -34,6 +77,7 @@ def regime_conditioned_performance(scored_rows: list[dict],
             "n": n,
             "hit_rate": round(hits / n, 3) if n else None,
             "avg_return_pct": round(sum(rets) / len(rets), 3) if rets else None,
+            "sign_test": _sign_test(rets),
         }
 
     by_regime: dict[str, list[dict]] = {}

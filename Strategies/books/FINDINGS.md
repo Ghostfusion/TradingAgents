@@ -230,21 +230,23 @@ call an item `absent` when the `26xx` plans already own it.
   Yang-Zhang as an existing producer; the tool at `analysis_tools.py:11298`
   still returns Parkinson/Garman-Klass, which is a wiring choice inside that
   theme).
-- **Still open, no owner:** **E5** (cost-floor precondition on the G5 gate —
-  `[verified]` absent: `scripts/evaluate_config_gate.py` names no cost, turnover,
-  fee or slippage term, so its deflated-Sharpe significance is taken on a gross
-  series), **E10** (the per-regime read exists —
-  `regime_performance.regime_conditioned_performance` — but it reports a
-  comparison, not a **sign test**; `[verified]` no sign test anywhere in that
-  module), **E11** (per-event-class sentiment half-life — `sentiment.decayed_
-  weight` still takes one global `half_life=7.0` and its one call site passes a
-  single caller-supplied value, so no event class maps to its own decay), **E12**
-  (the row's ask is an **autocorrelation/tail check on the MP band's i.i.d.
-  premise**; both `market_breadth` and `eigen_rotation` *state* that premise in a
-  docstring and neither tests it — `[verified]`. The **separate** bulk-refusal
-  guard already exists and predates the row: `469a611` refuses a rotation taken
-  inside the MP bulk, and `market_breadth.mp_below_count` is the one producer of
-  the edge (X3, 2608.09641) — so do not re-file E12 as "no MP guard at all").
+- **Landed in Batch A (2026-10-04, the owner's go-ahead for the whole backlog):**
+  **E5** — `scripts/evaluate_config_gate.py::gate_verdict` takes `round_trip_cost`
+  (and a `--round-trip-cost` flag) and refuses a verdict whose gross mean return
+  is under it, reporting `gross_edge`/`cost_floor` either way — the old
+  significance test was taken on a *gross* series. **E10** —
+  `regime_conditioned_performance` carries a per-regime `sign_test`, a
+  distribution-free two-sided exact binomial test on the regime's returns.
+  **E11** — `sentiment.EVENT_HALF_LIFE_DAYS` + `half_life_for_event` declare a
+  per-event-class half-life, and `aggregate_weighted_sentiment` resolves each
+  article's from its `event_class`/`tag` (fallback = the caller's `half_life`, so
+  an untagged feed is unchanged). **E12** — `market_breadth.mp_iid_premise`
+  reports (never gates) the panel's mean |lag-1 autocorrelation| against the 0.2
+  threshold at which `2305.12632` finds the MP fit fails, carried into
+  `sector_breadth.mp_lower_spectrum`. All four are additive. The **separate**
+  bulk-refusal guard already existed (`469a611` refuses a rotation taken inside
+  the MP bulk; `market_breadth.mp_below_count` is the one producer of the edge,
+  X3 `2608.09641`) — E12 was never "no MP guard at all".
 
 ## 5. Claims that did not survive verification
 

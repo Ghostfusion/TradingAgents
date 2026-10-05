@@ -45,7 +45,7 @@ def _trials_and_dispersion(trials: int, ledger_dir: str | None) -> tuple[int, fl
 
 
 def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials: int = 20,
-                 ledger_dir: str | None = None) -> dict:
+                 ledger_dir: str | None = None, round_trip_cost: float = 0.0) -> dict:
     """Walk-forward over the series; flag when the best-trial strategy tanks OOS.
 
     ``trials`` is only the *fallback* trial count. With ``enable_trial_ledger``
@@ -61,6 +61,16 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     measured Sharpe could be called above zero at 95% confidence, given its own
     skewness and kurtosis - per-observation units (the paper's own convention),
     beside the annualized Sharpe the other numbers are built from.
+
+    ``round_trip_cost`` adds E5: the gross-edge precondition. The gate's
+    significance is taken on the raw return series, which is a GROSS series - a
+    deflated Sharpe can pass on an edge that a single round trip would consume.
+    When ``round_trip_cost`` is > 0 the verdict is refused (``ok`` None,
+    ``reason`` "gross edge below round-trip cost") if the series' mean
+    per-period return does not clear it. ``gross_edge`` and ``cost_floor`` are
+    reported either way, so the grossness of the test is never silent, and the
+    default 0.0 is the off state: a caller that supplies no cost keeps the
+    previous verdict exactly.
     """
     from tradingagents.strategies.evaluate import (
         deflated_sharpe,
@@ -92,9 +102,24 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     dsr = deflated_sharpe_ratio(returns, n_trials=n_trials, sharpe_dispersion=dispersion)
     mintrl = min_track_record_length(returns)
     ok = (not ow) and (is_deflated > 0)
+    reason = "PBO" if ow else ("deflated_sharpe<=0" if is_deflated <= 0 else "pass")
+    # E5: a significance test on a GROSS series is not a tradability test. When
+    # a round-trip cost is supplied, refuse the verdict outright if the series'
+    # mean per-period return does not clear it - a strategy whose gross edge
+    # sits under its own trading cost cannot be significant *after* trading,
+    # whatever the deflated Sharpe of the gross series says.
+    gross_edge = (sum(returns) / len(returns)) if returns else None
+    cost_floor_hit = (
+        round_trip_cost > 0.0 and gross_edge is not None
+        and gross_edge < float(round_trip_cost)
+    )
+    if cost_floor_hit:
+        ok, reason = None, "gross edge below round-trip cost"
     return {
         "ok": ok,
-        "reason": "PBO" if ow else ("deflated_sharpe<=0" if is_deflated <= 0 else "pass"),
+        "reason": reason,
+        "gross_edge": None if gross_edge is None else round(gross_edge, 6),
+        "cost_floor": float(round_trip_cost),
         "in_best": round(max(in_sample), 3) if in_sample else None,
         "oos_best": round(oos_best, 3) if oos_best else None,
         "deflated_sharpe": round(is_deflated, 3),
@@ -112,15 +137,23 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--train", type=int, default=60)
     parser.add_argument("--test", type=int, default=20)
+    parser.add_argument(
+        "--round-trip-cost", type=float, default=0.0,
+        help="E5: refuse the verdict when the mean per-period return is below "
+             "this round-trip cost (default 0.0 = gross-significance test only)",
+    )
     args = parser.parse_args(argv)
     try:
         returns = [float(x) for x in args.returns.split(",") if x.strip()]
     except ValueError as exc:
         print(f"bad returns list: {exc}")
         return 2
-    band = gate_verdict(returns, train_len=args.train, test_len=args.test)
+    band = gate_verdict(returns, train_len=args.train, test_len=args.test,
+                        round_trip_cost=args.round_trip_cost)
     print("verdict:", band.get("ok"))
     print("reason:", band.get("reason"))
+    print("gross_edge:", band.get("gross_edge"))
+    print("cost_floor:", band.get("cost_floor"))
     print("in_sample_best:", band.get("in_best"))
     print("oos_best:", band.get("oos_best"))
     print("deflated_sharpe:", band.get("deflated_sharpe"))

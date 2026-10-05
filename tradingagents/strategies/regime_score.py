@@ -172,7 +172,7 @@ COMPONENTS: dict[str, Component] = {
             "breadth",
             "breadth",
             "higher_better",
-            "strategies/market_breadth.py::market_breadth:114",
+            "strategies/market_breadth.py::market_breadth:179",
             "percent above the 50d SMA, 0-100",
             "prerequisite 2 (P0-3); the leaf passes pct_above_50d",
         ),
