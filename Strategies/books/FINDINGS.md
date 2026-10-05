@@ -213,10 +213,15 @@ call an item `absent` when the `26xx` plans already own it.
   `enable_accuracy_ceiling`, and the paired tests H4's own card names now ship
   with it.
 - **E15 landed as D5.**
-- **E4 is H3.** The overlap grep above missed it: `implementation_plan_research_
+- **E4 is H3 — LANDED 2026-10-04.** The overlap grep above missed it: `implementation_plan_research_
   honesty_gates.md`'s **H3 — synthetic-null workflow falsification** *is* "replay
   the whole pipeline on induced-null panels", five reference classes at N = 1000.
-  H3 is not started and is the plan of record.
+  It is now built: `tradingagents/strategies/null_harness.py` (Stage 1 - the
+  generators, the null band, the honest-vs-leaky verdict) plus
+  `evaluate.inflation_diagnostics` beside `walk_forward_splits` (Stage 2 -
+  `Delta_Z`, `K_eff`), called offline by `scripts/null_harness.py`. No gate, per
+  H3's card; the familywise warning (5.3% at K=1, 92.3% at K=50) travels in the
+  output.
 - **Owned by the survey, do not duplicate:** **E1** (CSCV PBO — H1's card), **E6**
   (Diebold–Mariano — named in H4's and V1's cards), **E7** (QLIKE — V1's loss),
   **E8** (`CANDIDATE_MEMBERS` is `design_vol_surface_and_vrp.md` §V1's pool), **E9**

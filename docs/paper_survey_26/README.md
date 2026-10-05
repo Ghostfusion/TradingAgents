@@ -255,7 +255,7 @@ one in wave 0. What each item decided, and the limits it states, are in its `CHA
 | 40 | K4 | covariance from characteristics on the ragged path | P4 | none (deferred) | blocked - training stack |
 | 41 | V1 | volatility forecast pool and regime-similarity routing | P4 | none (needs the state vector) | blocked - VXV and HY spread |
 | 42 | R6 | the gate every early-warning indicator must pass | P4 | none (gate module) | blocked - no onset panel |
-| 43 | H3 | synthetic-null workflow falsification | P4 | none (offline harness) | needs 5 x 1000 replays |
+| 43 | H3 | synthetic-null workflow falsification | P4 | none (offline harness) | landed 2026-10-04 |
 | 44 | K5 | size below Kelly when a costly boundary is near | P2 | `enable_boundary_sizing` | smallest code, largest blast radius |
 
 **Not in the order.** R8 and R9 are constraints that bind now and specify no build; V7, V8 and K6 are

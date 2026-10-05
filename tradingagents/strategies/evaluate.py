@@ -411,6 +411,135 @@ def walk_forward_splits(returns: list[float], train_len: int, test_len: int):
         i += test_len
 
 
+def _default_hac_lags(n: int) -> int:
+    """Newey-West's data-dependent lag rule ``floor(4*(T/100)^(2/9))``, floor 1."""
+    return max(1, int(4.0 * (n / 100.0) ** (2.0 / 9.0)))
+
+
+def z_statistic(series: list[float], *, max_lag: int | None = None) -> float | None:
+    """H3 (2604.15531): ``Z = Rbar / sqrt(VHAC(Rbar))`` - the HAC-standardised mean.
+
+    The paper's ``Z_IS,k`` / ``Z_WF,k``: a candidate's mean return divided by its
+    **HAC standard error**, so a serially correlated statistic is not read as if
+    its observations were independent. The long-run variance is the Bartlett
+    (Newey-West) kernel sum ``s = g0 + 2*sum_l w_l*g_l`` with weights
+    ``1 - l/(L+1)``, and ``VHAC(Rbar) = s / n``; ``max_lag`` defaults to the
+    data-dependent rule ``floor(4*(T/100)^(2/9))`` (floor 1).
+
+    ``None`` on fewer than two usable observations or a non-positive /
+    non-finite long-run variance: the ratio has no value there. An honest
+    (out-of-sample) series returns a small number; an inflation-peeking one
+    returns a large one - which is what :func:`inflation_diagnostics` measures.
+    """
+    vals = _clean(series)
+    n = len(vals)
+    if n < 2:
+        return None
+    mean = sum(vals) / n
+    dev = [v - mean for v in vals]
+    lag = n - 1 if max_lag is None else max(0, min(int(max_lag), n - 1))
+    if max_lag is None:
+        lag = min(lag, _default_hac_lags(n))
+    var = sum(d * d for d in dev) / n
+    for step in range(1, lag + 1):
+        weight = 1.0 - step / (lag + 1.0)
+        cov = sum(dev[t] * dev[t - step] for t in range(step, n)) / n
+        var += 2.0 * weight * cov
+    if var <= 0.0 or not math.isfinite(var):
+        return None
+    return mean / math.sqrt(var / n)
+
+
+def max_abs_z(candidate_matrix: list[list[float]], *,
+              max_lag: int | None = None) -> float | None:
+    """``Z* = max_k |Z_k|`` over a candidate statistic matrix (H3).
+
+    The matrix is one row per candidate (the per-period series it produced), so
+    the winner is the strongest |HAC z| the search could surface. ``None`` when
+    no candidate has a computable ``z_statistic``.
+    """
+    zs = [abs(z) for row in (candidate_matrix or [])
+          if (z := z_statistic(row, max_lag=max_lag)) is not None]
+    return max(zs) if zs else None
+
+
+def effective_candidates(candidate_matrix: list[list[float]]) -> float | None:
+    """``K_eff = (sum lambda_i)^2 / sum lambda_i^2`` from the candidate corr matrix.
+
+    H3's effective number of **independent** candidates: the eigenvalues of the
+    candidate correlation matrix (rows = candidates, columns = periods). A set of
+    ``K`` independent candidates gives ``K_eff = K`` (every ``lambda_i = 1``); a
+    set that is really one candidate repeated gives ``1`` (one eigenvalue ``K``,
+    the rest zero). It is the number a naive trial count overstates - fifty
+    near-identical candidates are not fifty trials.
+
+    ``None`` on fewer than two candidates/periods, a degenerate row (zero
+    variance), or a non-finite spectrum.
+    """
+    rows = [[float(v) for v in row] for row in (candidate_matrix or [])]
+    k = len(rows)
+    if k < 2:
+        return None
+    width = min(len(row) for row in rows)
+    if width < 2:
+        return None
+    try:
+        import numpy as np
+
+        m = np.asarray([row[:width] for row in rows], dtype=float)
+        if not np.all(np.isfinite(m)):
+            return None
+        std = m.std(axis=1)
+        if np.any(std <= 0.0):
+            return None
+        corr = np.corrcoef(m)
+        if not np.all(np.isfinite(corr)):
+            return None
+        eig = np.linalg.eigvalsh(corr)
+    except Exception:  # noqa: BLE001 - a degenerate spectrum is a refusal, not a crash
+        return None
+    total = float(eig.sum())
+    sq = float((eig * eig).sum())
+    if sq <= 0.0 or not math.isfinite(sq):
+        return None
+    return (total * total) / sq
+
+
+def inflation_diagnostics(is_matrix: list[list[float]],
+                          wf_matrix: list[list[float]] | None = None, *,
+                          max_lag: int | None = None) -> dict:
+    """H3 Stage 2: ``Z*_IS``, ``Z*_WF``, ``Delta_Z`` and ``K_eff`` from the matrix.
+
+    ``is_matrix`` is the retained candidate matrix as evaluated **in-sample**,
+    ``wf_matrix`` the **walk-forward winner's** series (the one candidate the
+    honest procedure selected, carried out-of-sample - a single row).
+    ``Delta_Z = Z*_IS - Z*_WF`` is the inflation the in-sample search bought -
+    the paper reports a mean ``|Z*_IS|`` of 2.79 at K=100 against 0.80 for the
+    walk-forward winner, so a large positive ``Delta_Z`` is the overfit signal.
+    ``K_eff`` is :func:`effective_candidates` over the candidate series.
+
+    Every field is independently ``None`` when its input is missing or degenerate
+    - a refused leg is never reported as zero.
+    """
+    z_is = max_abs_z(is_matrix, max_lag=max_lag)
+    z_wf = max_abs_z(wf_matrix, max_lag=max_lag) if wf_matrix is not None else None
+    delta_z = (z_is - z_wf) if (z_is is not None and z_wf is not None) else None
+    k_eff = effective_candidates(is_matrix)
+    return {
+        "z_is_star": z_is,
+        "z_wf_star": z_wf,
+        "delta_z": delta_z,
+        "k_eff": k_eff,
+        "n_candidates": len(is_matrix or []),
+        "basis": (
+            "H3 (2604.15531) Stage 2: Z* = max_k |Z_k| with Z_k the HAC-standardised "
+            f"mean; Z*_IS {z_is}, Z*_WF {z_wf}, Delta_Z {delta_z}; K_eff {k_eff} from "
+            "the candidate correlation matrix - the inflation an in-sample search "
+            "bought, and the number of independent candidates it really was"
+        ),
+    }
+
+
 def _exposure_matched(benchmark_returns, exposure) -> list[float] | None:
     """Benchmark replayed on the strategy's own in-market bars (H6).
 
@@ -1636,6 +1765,7 @@ __all__ = [
     "deflated_sharpe", "deflated_sharpe_report", "deflated_sharpe_ratio",
     "min_track_record_length",
     "max_drawdown", "equity_curve", "walk_forward_splits",
+    "z_statistic", "max_abs_z", "effective_candidates", "inflation_diagnostics",
     "pbo_flag", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
     "reality_check", "spa",
     "benchmark_table",
