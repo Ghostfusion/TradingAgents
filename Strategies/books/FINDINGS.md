@@ -226,10 +226,20 @@ call an item `absent` when the `26xx` plans already own it.
   still returns Parkinson/Garman-Klass, which is a wiring choice inside that
   theme).
 - **Still open, no owner:** **E5** (cost-floor precondition on the G5 gate —
-  `[verified]` absent), **E10** (regime-conditional sign test — `[verified]`
-  absent), **E11** (per-event-class sentiment half-life — `sentiment.decayed_
-  weight` still takes one global `half_life=7.0`), **E12** (RMT edge guard —
-  `[verified]` absent from `market_breadth` / `eigen_rotation`).
+  `[verified]` absent: `scripts/evaluate_config_gate.py` names no cost, turnover,
+  fee or slippage term, so its deflated-Sharpe significance is taken on a gross
+  series), **E10** (the per-regime read exists —
+  `regime_performance.regime_conditioned_performance` — but it reports a
+  comparison, not a **sign test**; `[verified]` no sign test anywhere in that
+  module), **E11** (per-event-class sentiment half-life — `sentiment.decayed_
+  weight` still takes one global `half_life=7.0` and its one call site passes a
+  single caller-supplied value, so no event class maps to its own decay), **E12**
+  (the row's ask is an **autocorrelation/tail check on the MP band's i.i.d.
+  premise**; both `market_breadth` and `eigen_rotation` *state* that premise in a
+  docstring and neither tests it — `[verified]`. The **separate** bulk-refusal
+  guard already exists and predates the row: `469a611` refuses a rotation taken
+  inside the MP bulk, and `market_breadth.mp_below_count` is the one producer of
+  the edge (X3, 2608.09641) — so do not re-file E12 as "no MP guard at all").
 
 ## 5. Claims that did not survive verification
 
