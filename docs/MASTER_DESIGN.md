@@ -644,14 +644,18 @@ Rules that hold at every member:
 - Members that cannot be produced are `None` **with a reason**, never defaulted.
   Three pairs are absent by decision: momentum (no calibrated score→price map —
   the owner's Phase-2 decision, the same one that keeps momentum out of
-  `entry_ceiling`), fair value (needs statement data the pre-graph card does not
-  fetch), and event exit (needs the forward calendar).
+  `entry_ceiling`), fair value (the card measures one at run setup; absent when
+  no fair value was measured), and event exit (needs the forward calendar).
 - A proxy basis travels with its number: `(proxy)` ATR off closes, `close-proxy`
   support off closes.
 - **A level on the wrong side of the entry is refused, not printed.** Every stop
   must sit below the entry, every target above it, and §10's support entry at or
   below the reference price; a failing level keeps its formula and gains
-  `refused: <level> is not below the entry <entry>`. The break-even stop is
+  `refused: <level> is not below the entry <entry>`. The guard covers the whole
+  §103 stop set and the whole **target** set — including the DCF-derived
+  `fair_value_target` (added 2026-10-05, when the fair-value wiring first made
+  that row reachable: VST's 12.98 against an entry of 140.46 is refused rather
+  than printed as a target). The break-even stop is
   exempt by construction (§56 moves the stop *up* once the trade is in profit).
 
 ### 10.5 The decision-disclosure block

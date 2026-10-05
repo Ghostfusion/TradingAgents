@@ -177,6 +177,24 @@ def test_a_supplied_fair_value_fills_both_fair_value_members():
     )
 
 
+def test_a_fair_value_below_the_entry_is_refused_as_a_target():
+    """The DCF can come out far below the price on a leveraged name - VST
+    2026-10-05 returned 14.42 against 144.89. §42's haircut on that is not a
+    target, and printing it under a heading that promises every target sits
+    above the entry would read as a level to sell at. The fair value is still
+    MEASURED (the entry member keeps it); only the target role is refused."""
+    closes = _closes()
+    entry = closes[-1]
+    out = fam.section_103_members(
+        closes=closes, price=entry, entry=entry, fair_value=entry * 0.1
+    )
+
+    assert out["entry"]["fair_value_price"]["value"] == pytest.approx(entry * 0.1)
+    target = out["exit"]["fair_value_target"]
+    assert target["value"] is None
+    assert "refused" in target["reason"]
+
+
 def test_atr_off_closes_is_labelled_a_proxy():
     """The basis travels with the number, so a stop priced off a close-to-close
     proxy cannot be mistaken for one priced off the run's real highs/lows."""

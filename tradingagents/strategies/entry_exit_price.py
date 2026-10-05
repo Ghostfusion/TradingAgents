@@ -194,13 +194,19 @@ def entry_exit_price(
         **families["exit"],
         "stop_loss_price": member(stop, "the plan's unified stop (invalidation)"),
         "time_exit": member(
-            conditions.get("time_exit"), "§58: held past its holding horizon"
+            conditions.get("time_exit"),
+            "§58: held past its holding horizon - a runtime condition, not "
+            "evaluated at plan time",
         ),
         "thesis_break_exit": member(
-            conditions.get("thesis_break"), "§101: the thesis broke"
+            conditions.get("thesis_break"),
+            "§101: the thesis broke - a runtime condition, not evaluated at "
+            "plan time",
         ),
         "expected_value_exit": member(
-            conditions.get("expected_value"), "§101: expected value turned negative"
+            conditions.get("expected_value"),
+            "§101: expected value turned negative - a runtime condition, not "
+            "evaluated at plan time",
         ),
         "final_exit_price": member(
             exit_block["exit_price"] if exit_block["exit"] is True else None,

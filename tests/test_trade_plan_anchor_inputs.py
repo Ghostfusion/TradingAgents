@@ -126,15 +126,16 @@ def test_the_fair_value_fills_the_pair_and_never_the_valuation_anchor():
     """The held seam: two rows filled, and the headline left alone."""
     closes = _closes()
     plain = measured_inputs(closes, {})
-    with_fv = measured_inputs(closes, {}, fair_value=118.40)
+    with_fv = measured_inputs(closes, {}, fair_value=160.0)
 
     block_fv = _block(**with_fv)
     assert _line(block_fv, "- fair_value_price:").startswith(
-        "- fair_value_price: 118.40 "
+        "- fair_value_price: 160.00 "
     )
-    # §42's conservative haircut is 10%.
+    # §42's conservative haircut is 10% - and the result sits ABOVE the entry,
+    # which is what makes it a target at all (see the wrong-side guard).
     assert _line(block_fv, "- fair_value_target:").startswith(
-        "- fair_value_target: 106.56 "
+        "- fair_value_target: 144.00 "
     )
     # The anchor and the ceiling are NOT fed from it, so they stay as they were.
     assert "unavailable" in _line(block_fv, "- valuation_entry_price:")

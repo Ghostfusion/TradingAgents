@@ -23,8 +23,11 @@ Three members are deliberately **not** produced here:
   Phase-2 decision, and the same reason ``entry_ceiling`` excludes momentum
   from its ceiling sources.
 * ``fair_value_price`` / ``fair_value_target`` - a fair value needs statement
-  data, which the pre-graph card does not fetch. A caller that HAS one passes
-  ``fair_value`` and both members fill; otherwise they are absent with a reason.
+  data, which this module never touches (it is pure). The CARD measures one for
+  the run (``TradingAgentsGraph._try_fetch_card_inputs`` -> ``measured_inputs``)
+  and both members fill from it; when no fair value was measured - statement
+  data unavailable, or the data-quality guard refused the number - they are
+  absent with a reason.
 * ``event_exit`` - needs the forward calendar, which the card is built without.
 
 Pure and deterministic: no I/O, no LLM, no vendor calls. Advisory throughout.
@@ -96,10 +99,7 @@ _MOMENTUM_REASON = (
     "no calibrated 0-100 momentum-score -> price map exists (owner Phase-2 "
     "decision; the same reason entry_ceiling excludes momentum)"
 )
-_FAIR_VALUE_REASON = (
-    "needs a per-share fair value from statement data, which the pre-graph card "
-    "does not fetch"
-)
+_FAIR_VALUE_REASON = "no per-share fair value was measured for this run"
 _EVENT_REASON = "needs the forward calendar, which the card is built without"
 
 
@@ -417,7 +417,19 @@ def section_103_members(
     # in profit, so it is above the entry by construction.
     for name in ("volatility_stop", "ATR_stop", "support_stop"):
         exit_members[name] = _refuse_wrong_side(exit_members[name], base, "le", "below")
-    for name in ("volatility_target", "risk_reward_target", "technical_target"):
+    # Every §103 TARGET, not only the ones the close series produces. A DCF fair
+    # value can come out far BELOW the price (VST 2026-10-05: 14.42 against
+    # 144.89), and §42's haircut on it would then print as a usable target under
+    # a heading that promises targets sit above the entry. `momentum_target` is
+    # always absent today, so the guard is a no-op there - it is listed so the
+    # rule reads as the complete target set.
+    for name in (
+        "volatility_target",
+        "risk_reward_target",
+        "technical_target",
+        "fair_value_target",
+        "momentum_target",
+    ):
         exit_members[name] = _refuse_wrong_side(exit_members[name], base, "ge", "above")
     # §10's entry sits just ABOVE support, so support must be at or below the
     # reference price for the level to mean anything.
