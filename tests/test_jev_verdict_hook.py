@@ -357,7 +357,7 @@ def test_judge_tree_all_runs_every_decider_in_order(tmp_path, _keyed):
 
     assert [d.label for d, _, _ in results] == [d.label for d in jev.DECIDERS]
     assert [p.name for _, p, _ in results] == [
-        jev.VERDICT_FILENAME, jev.PPLX_VERDICT_FILENAME,
+        jev.VERDICT_FILENAME, jev.PPLX_VERDICT_FILENAME, jev.NOUL_VERDICT_FILENAME,
     ]
     assert all(p.is_file() for _, p, _ in results)
     assert [pl["model"] for _, _, pl in results] == [d.model for d in jev.DECIDERS]
@@ -375,6 +375,169 @@ def test_the_second_decider_is_best_effort_too(monkeypatch, tmp_path):
     payload = json.loads((tree / jev.PPLX_VERDICT_FILENAME).read_text(encoding="utf-8"))
     assert payload["failures"] == 4
     assert all(r["status"] == 429 for r in payload["results"])
+
+
+# ---------------------------------------------------------------------------
+# the third decider - noul-only, its own gate, its own file, run last
+# ---------------------------------------------------------------------------
+
+
+def _noul_body() -> str:
+    """The answer shape Respan returns: a float per question, no prose."""
+    return json.dumps({
+        "provider": "Respan",
+        "model": "respan/span-01-20260925",
+        "answers": {
+            "rating": {"type": "noul", "noul": 0.03422103},
+            "evidence": {"type": "noul", "noul": 0.31},
+        },
+        "usage": {"input_tokens": 4200, "output_tokens": 0, "cost": 0.00008},
+    })
+
+
+@pytest.fixture
+def _noul_keyed(monkeypatch):
+    """A present key and a transport that answers the NOUL battery."""
+    poster = _Recorder(body=_noul_body())
+    monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
+    monkeypatch.setattr(jev, "post_json", poster)
+    return poster
+
+
+def test_the_noul_decider_gate_ships_off_by_default():
+    """A third judge is its own opt-in, exactly like the second."""
+    assert _shipped_default("enable_noul_decider") is False
+
+
+def test_noul_gate_off_never_calls_the_third_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": False},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [], "the third decider ran while its gate was off"
+
+
+def test_noul_gate_on_calls_the_third_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": True},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [tmp_path]
+
+
+def test_the_noul_gate_is_independent_of_the_other_two(monkeypatch, tmp_path):
+    """Enabling the third judge must not drag either of the other two on - and
+    neither of them may drag it on."""
+    seen: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append("jev"))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: seen.append("noul"))
+
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": False,
+         "enable_noul_decider": False},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == ["jev"]
+
+    seen.clear()
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": True},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == ["noul"]
+
+
+def test_the_noul_decider_runs_last(monkeypatch, tmp_path):
+    """Order is pinned: the tree log and the cost report read top-down."""
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": True,
+         "enable_noul_decider": True},
+    )
+    order: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: order.append("noul"))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert order == ["jev", "pplx", "noul"]
+
+
+def test_the_noul_decider_writes_its_own_file(tmp_path, _noul_keyed):
+    """Three deciders, three files - none overwrites another."""
+    tree = _tree(tmp_path)
+
+    batch._batch_noul_decider(tree)
+
+    path = tree / jev.NOUL_VERDICT_FILENAME
+    assert path.is_file(), "the third verdict did not travel with its report"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["model"] == jev.NOUL_MODEL
+    assert payload["origin"] == tree.name
+    assert payload["failures"] == 0
+    assert payload["scores"]["market"] == {"rating": 0.03422103, "evidence": 0.31}
+
+
+def test_the_noul_decider_asks_the_noul_battery_not_the_shared_one(tmp_path, _noul_keyed):
+    """The reason the recipe is separate at all: Respan 400s on choice/score,
+    and it also refuses a ``criteria`` key on a noul question."""
+    tree = _tree(tmp_path)
+
+    batch._batch_noul_decider(tree)
+
+    assert len(_noul_keyed.calls) == 4, "one call per analyst report"
+    for payload in _noul_keyed.calls:
+        assert payload["model"] == jev.NOUL_MODEL
+        assert set(payload["questions"]) == {"rating", "evidence"}
+        assert {q["type"] for q in payload["questions"].values()} == {"noul"}
+        assert all("criteria" not in q for q in payload["questions"].values())
+        # Same neutralisation as the other deciders.
+        assert jev.POSITION_MARKER in payload["state"]
+        assert "Buy" not in payload["state"], "the report's own call was sent"
+
+
+def test_judge_tree_routes_a_noul_decider_to_the_noul_recipe(tmp_path, _noul_keyed):
+    """The roll-up key follows the decider: ``scores``, never ``ratings``.
+
+    One key for both would invite reading a document statistic as a
+    buy/hold/sell call, which the probe says it is not.
+    """
+    tree = _tree(tmp_path)
+
+    path, payload = jev.judge_tree(tree, key="sk-or-v1-test", decider=jev.DECIDERS[2])
+
+    assert path == tree / jev.NOUL_VERDICT_FILENAME
+    assert "scores" in payload
+    assert "ratings" not in payload
+
+
+def test_the_noul_recipe_is_best_effort_too(monkeypatch, tmp_path):
+    tree = _tree(tmp_path)
+    monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
+    monkeypatch.setattr(jev, "post_json", _Recorder(status=400, body="expected object"))
+
+    batch._batch_noul_decider(tree)   # must not raise
+
+    payload = json.loads((tree / jev.NOUL_VERDICT_FILENAME).read_text(encoding="utf-8"))
+    assert payload["failures"] == 4
+    assert payload["scores"] == {}
 
 
 # ---------------------------------------------------------------------------

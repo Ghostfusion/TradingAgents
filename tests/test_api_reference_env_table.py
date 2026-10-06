@@ -19,11 +19,16 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 DOC = REPO / "docs" / "api_reference.md"
 CONFIG = REPO / "tradingagents" / "default_config.py"
+
+pytestmark = pytest.mark.timeout(120)
 
 
 def _code_surface() -> dict[str, str]:
@@ -113,3 +118,39 @@ def test_no_duplicate_env_var_rows():
         else:
             seen[env] = n
     assert not dupes, f"§1.1 lists the same env var twice: {dupes}"
+
+
+def test_the_generator_can_read_the_defaults_it_prints():
+    """A row saying ``default `?` `` is the generator's fallback for a key its AST
+    scan could not find - and it reads as a default, not as a miss.
+
+    This caught a live defect (2026-10-06): the scan looked only for a bare
+    ``DEFAULT_CONFIG = <dict literal>``, but the config is built as
+    ``DEFAULT_CONFIG = _apply_env_overrides(dict(SHIPPED_DEFAULTS))`` - a dict
+    behind a CALL - so it parsed **0** keys and every row fell back to whatever
+    note the doc already carried. Three rows were shipped stating a ``?``
+    default because of it: both decider gates and ``enable_metric_authority``.
+    """
+    sys.path.insert(0, str(REPO / "scripts"))
+    import gen_api_reference_table as gen
+
+    parsed = gen.config_defaults()
+    assert parsed, "the §1.1 generator parsed no defaults at all - the shape moved"
+    unreadable = sorted(k for k in _code_surface().values() if k not in parsed)
+    assert not unreadable, (
+        f"the §1.1 generator cannot read {len(unreadable)} config defaults, so their "
+        f"notes would print the `?` fallback: {unreadable}"
+    )
+
+
+def test_no_row_states_an_unknown_default():
+    lines = DOC.read_text(encoding="utf-8").splitlines()
+    bad = [
+        f"line {n}: {ln.split('|')[1].strip()}"
+        for n, ln in enumerate(lines, 1)
+        if ln.startswith("| `TRADINGAGENTS_") and "default `?`" in ln
+    ]
+    assert not bad, (
+        "docs/api_reference.md §1.1 rows stating an unknown default - an "
+        "unstated default is honest, a `?` default is a wrong one:\n" + "\n".join(bad)
+    )

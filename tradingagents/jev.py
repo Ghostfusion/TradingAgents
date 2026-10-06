@@ -1,9 +1,10 @@
-"""The OpenRouter decisions API as a typed judge - one engine, two deciders.
+"""The OpenRouter decisions API as a typed judge - one engine, three deciders.
 
 The engine is model-agnostic: :data:`DECIDERS` names the judges that run over a
 finished report tree (``typesafe/jev-1.13`` first, ``perplexity/pplx-decider-v1-27b``
-second), each writing its own verdict file. The facts below were established by
-probing rather than reading, and they hold for both models.
+second, ``respan/span-01`` third), each writing its own verdict file. The facts
+below were established by probing rather than reading, and they hold for the
+first two; the third's are its own, and they are not the same.
 
 * ``typesafe/jev-1.13`` is a **decisions** model, not a chat model. Sent to
   ``/chat/completions`` it returns HTTP 400, and the error names the endpoint
@@ -14,6 +15,20 @@ probing rather than reading, and they hold for both models.
   ``score``. ``choice`` takes a ``criteria`` **record** (label -> rubric or
   null), ``score`` takes a ``criteria`` **array** (lowest -> highest), ``noul``
   takes neither and answers with a **float, not prose**.
+* Respan's decisions models (``respan/span-01``, and its ``-lite`` twin) are
+  decisions models on the **same** route - sent to ``/chat/completions`` they
+  400 with the same "use /api/alpha/decisions" message - but they accept
+  **only** ``noul``, and only with no ``criteria`` key at all: the buy/hold/sell
+  battery is refused with a 400 naming the question. That is why the third
+  decider has its own battery (:data:`NOUL_QUESTIONS`) and its own recipe rather
+  than the shared one. PROBED 2026-10-06, and it matters: its answers are
+  **deterministic** (repeat calls identical to nine significant figures), they
+  report ``output_tokens: 0`` (nothing is generated - the number is computed),
+  ``span-01-lite`` is **byte-identical** to ``span-01`` on every input tried,
+  and the number does **not** track the polarity it is asked for (a plainly
+  bullish document scored 0.0177 and a plainly bearish one 0.0202, where
+  ``typesafe/jev-1.13`` read the same pair as 0.84 vs 0.23). Read that file as a
+  fixed document statistic, never as a rating.
 
 So this is not a summariser: it is a typed judge over a document.
 
@@ -74,6 +89,20 @@ DEFAULT_TIMEOUT = _env_float("TRADINGAGENTS_JEV_TIMEOUT", 300.0)
 PPLX_MODEL = (
     os.environ.get("TRADINGAGENTS_PPLX_DECIDER_MODEL")
     or "perplexity/pplx-decider-v1-27b"
+)
+
+#: The THIRD decider: Respan's ``span-01``. Same decisions route, but a
+#: **different contract** - probed 2026-10-06, it answers ``noul`` only (a
+#: ``choice`` or ``score`` battery is a 400 naming the question) and refuses a
+#: ``criteria`` key on a ``noul`` question too, so it is asked
+#: :data:`NOUL_QUESTIONS` through :func:`noul_verdict_for_tree` rather than the
+#: shared buy/hold/sell battery. Overridable from `.env`
+#: (``TRADINGAGENTS_NOUL_DECIDER_MODEL``). Probed byte-identical to
+#: ``respan/span-01-lite`` (which reports ``cost: 0``) on every document tried,
+#: so this key is also the lever between the paid and the free one.
+NOUL_MODEL = (
+    os.environ.get("TRADINGAGENTS_NOUL_DECIDER_MODEL")
+    or "respan/span-01"
 )
 
 #: The four analyst report stems, in the order the run produces them.
@@ -190,6 +219,35 @@ RATING_QUESTIONS: dict[str, dict] = {
         "criteria": ["none", "weak", "moderate", "strong", "very strong"],
     },
     "horizon": DEFAULT_QUESTIONS["horizon"],
+}
+
+#: The noul-only battery: the THIRD decider's ask, and the only shape Respan's
+#: decisions models accept. Both ``choice`` and ``score`` are a 400 there (the
+#: vendor's message names the offending question), so the buy/hold/sell battery
+#: cannot be asked of those models at all - and a ``noul`` question takes no
+#: ``criteria``, so the *instructions* are the only channel a scale has.
+#:
+#: Read the answers as a document statistic, not as a rating: probed 2026-10-06,
+#: they are deterministic, they report ``output_tokens: 0``, and they do not
+#: follow the polarity written here (a plainly bullish document scored below a
+#: plainly bearish one). The instructions are still worth stating - they do move
+#: the number - but they do not make it a buy/hold/sell call.
+NOUL_QUESTIONS: dict[str, dict] = {
+    "rating": {
+        "type": "noul",
+        "instructions": (
+            "On the evidence in this report alone, rate the ticker on a 0 to 1 "
+            "scale, where 0 means sell, 0.5 means hold and 1 means buy. Answer "
+            "with a single number."
+        ),
+    },
+    "evidence": {
+        "type": "noul",
+        "instructions": (
+            "How strong is the evidence in this report? Answer with a single "
+            "number from 0 (no evidence) to 1 (very strong evidence)."
+        ),
+    },
 }
 
 #: One network boundary, injectable, so the parsing and the CLI are testable
@@ -433,38 +491,61 @@ def result_lines(data: dict, questions: dict) -> list[str]:
 #: decider, so a tree that ran both carries both and neither overwrites the other.
 VERDICT_FILENAME = "jev_verdict.json"
 PPLX_VERDICT_FILENAME = "pplx_verdict.json"
+NOUL_VERDICT_FILENAME = "noul_verdict.json"
 
 
 @dataclass(frozen=True)
 class Decider:
-    """One decisions-API judge: its label, its model, its verdict filename."""
+    """One decisions-API judge: its label, its model, its verdict filename, and
+    the question recipe that model will actually answer."""
 
     label: str
     model: str
     filename: str
+    #: Which battery this model accepts, and therefore which recipe asks it.
+    #: ``"rating"`` is the endpoint's full contract - a ``choice`` buy/hold/sell
+    #: plus ``score`` evidence and horizon (:data:`RATING_QUESTIONS`).
+    #: ``"noul"`` is the noul-only contract Respan's decisions models enforce:
+    #: they refuse ``choice`` and ``score`` outright, so the buy/hold/sell battery
+    #: cannot be asked of them and :data:`NOUL_QUESTIONS` is used instead.
+    recipe: str = "rating"
 
 
 #: The deciders, in the order they run after a finished tree is written. The
 #: TypeSafe one first (it is what the hook was built for), Perplexity's second -
-#: same endpoint, same battery, same position neutralisation, a different model.
+#: same endpoint, same battery, same position neutralisation, a different model -
+#: and Respan's third, same endpoint and same neutralisation but a noul-only
+#: battery, because it refuses the shared one.
 DECIDERS: tuple[Decider, ...] = (
     Decider(label="jev", model=DEFAULT_MODEL, filename=VERDICT_FILENAME),
     Decider(label="pplx", model=PPLX_MODEL, filename=PPLX_VERDICT_FILENAME),
+    Decider(
+        label="noul",
+        model=NOUL_MODEL,
+        filename=NOUL_VERDICT_FILENAME,
+        recipe="noul",
+    ),
 )
 
 
-def verdict_for_tree(
+def _battery_over_tree(
     tree: pathlib.Path | str,
     *,
     key: str,
-    stems: Sequence[str] = ANALYST_STEMS,
-    model: str = DEFAULT_MODEL,
-    endpoint: str = DEFAULT_ENDPOINT,
-    timeout: float = DEFAULT_TIMEOUT,
-    poster: Poster | None = None,
-) -> dict:
-    """The ``--verdict`` recipe over one tree: analyst reports only, position
-    language neutralised, the buy/hold/sell battery.
+    stems: Sequence[str],
+    questions: dict,
+    rollup: str,
+    model: str,
+    endpoint: str,
+    timeout: float,
+    poster: Poster | None,
+) -> tuple[dict, list[tuple[str, dict]]]:
+    """The body both recipes share: ask ``questions`` of every report in ``tree``.
+
+    Returns ``(payload, answers)``, where ``answers`` is ``[(state_name, answers),
+    ...]`` for the calls that came back - the recipe owns what those answers mean,
+    because a noul float and a choice/score record do not summarise the same way.
+    ``rollup`` names the payload key the caller fills with that summary.
 
     Never raises for a vendor failure - a failed call is recorded with the
     vendor's own message and counted. A post-run annotation must not be able to
@@ -475,20 +556,21 @@ def verdict_for_tree(
         "origin": pathlib.Path(tree).name,
         "model": model,
         "endpoint": endpoint,
-        "battery": list(RATING_QUESTIONS),
+        "battery": list(questions),
         "stems": [name for name, _ in states],
         "neutralized": {},
-        "ratings": {},
+        rollup: {},
         "results": [],
         "failures": 0,
         "cost": 0.0,
     }
+    answered: list[tuple[str, dict]] = []
     for name, state in states:
         clean, hits = neutralize_positions(state)
         payload["neutralized"][name] = hits
         try:
             status, body, elapsed = decide(
-                clean, RATING_QUESTIONS, key=key, model=model,
+                clean, questions, key=key, model=model,
                 endpoint=endpoint, timeout=timeout, poster=poster,
             )
         except Exception as exc:  # noqa: BLE001 - recorded, never raised
@@ -509,7 +591,31 @@ def verdict_for_tree(
             {"state": name, "status": status, "elapsed_s": round(elapsed, 3),
              "response": data}
         )
-        answers = data.get("answers") or {}
+        answered.append((name, data.get("answers") or {}))
+    return payload, answered
+
+
+def verdict_for_tree(
+    tree: pathlib.Path | str,
+    *,
+    key: str,
+    stems: Sequence[str] = ANALYST_STEMS,
+    model: str = DEFAULT_MODEL,
+    endpoint: str = DEFAULT_ENDPOINT,
+    timeout: float = DEFAULT_TIMEOUT,
+    poster: Poster | None = None,
+) -> dict:
+    """The ``--verdict`` recipe over one tree: analyst reports only, position
+    language neutralised, the buy/hold/sell battery.
+
+    The per-stem roll-up is ``payload["ratings"][stem]``. A vendor failure is
+    recorded and counted, never raised - see :func:`_battery_over_tree`.
+    """
+    payload, answered = _battery_over_tree(
+        tree, key=key, stems=stems, questions=RATING_QUESTIONS, rollup="ratings",
+        model=model, endpoint=endpoint, timeout=timeout, poster=poster,
+    )
+    for name, answers in answered:
         rating = answers.get("rating") or {}
         evidence = answers.get("evidence") or {}
         horizon = answers.get("horizon") or {}
@@ -519,6 +625,37 @@ def verdict_for_tree(
             "probabilities": rating.get("probabilities"),
             "evidence": evidence.get("score"),
             "horizon": horizon.get("choice"),
+        }
+    return payload
+
+
+def noul_verdict_for_tree(
+    tree: pathlib.Path | str,
+    *,
+    key: str,
+    stems: Sequence[str] = ANALYST_STEMS,
+    model: str = NOUL_MODEL,
+    endpoint: str = DEFAULT_ENDPOINT,
+    timeout: float = DEFAULT_TIMEOUT,
+    poster: Poster | None = None,
+) -> dict:
+    """The noul-only recipe: the same reports, neutralised the same way, but
+    asked :data:`NOUL_QUESTIONS` - because Respan's decisions models refuse every
+    other question type, so the shared battery is a 400 rather than a worse
+    answer.
+
+    The per-stem roll-up is ``payload["scores"][stem]``, one float per question
+    keyed by question id. Deliberately NOT a ``ratings`` block: a noul answer is a
+    computed document statistic, not a buy/hold/sell call, and one key for both
+    would invite reading it as one.
+    """
+    payload, answered = _battery_over_tree(
+        tree, key=key, stems=stems, questions=NOUL_QUESTIONS, rollup="scores",
+        model=model, endpoint=endpoint, timeout=timeout, poster=poster,
+    )
+    for name, answers in answered:
+        payload["scores"][name] = {
+            qid: (answers.get(qid) or {}).get("noul") for qid in NOUL_QUESTIONS
         }
     return payload
 
@@ -548,9 +685,15 @@ def judge_tree(
     it is about. ``decider`` defaults to :data:`DECIDERS`'s first entry, so an
     existing caller's behaviour is unchanged. ``kwargs`` (``stems``, ``timeout``,
     ``poster``, ...) pass through; ``model`` overrides the decider's own.
+
+    The recipe follows the decider: a ``"noul"`` decider is asked
+    :data:`NOUL_QUESTIONS` through :func:`noul_verdict_for_tree` because its model
+    refuses the shared battery, and every other decider gets
+    :func:`verdict_for_tree`.
     """
     options = {"model": decider.model, **kwargs}
-    payload = verdict_for_tree(tree, key=key, **options)
+    recipe = noul_verdict_for_tree if decider.recipe == "noul" else verdict_for_tree
+    payload = recipe(tree, key=key, **options)
     return write_verdict(tree, payload, name=decider.filename), payload
 
 
@@ -563,7 +706,7 @@ def judge_tree_all(
     """Run every decider over one tree, in order.
 
     Returns ``[(decider, path, payload), ...]``. Each decider writes its own
-    file, so a second judge accumulates beside the first rather than replacing
-    it - which is what makes the two verdicts comparable after the fact.
+    file, so a later judge accumulates beside the earlier ones rather than
+    replacing them - which is what makes the verdicts comparable after the fact.
     """
     return [(d, *judge_tree(tree, key=key, decider=d)) for d in deciders]

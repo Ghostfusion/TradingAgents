@@ -284,6 +284,11 @@ def post_save_annotations(symbol: str, report_dir, trade_date: str | None) -> No
     # jev_verdict.json, so a tree that ran both carries both.
     if DEFAULT_CONFIG.get("enable_pplx_decider"):
         _batch_pplx_decider(report_dir)
+    # The third decider, AFTER both: Respan's decisions model, which refuses
+    # choice/score questions and is therefore asked the noul-only battery. Again
+    # its own gate - a third judge is its own opt-in. Writes noul_verdict.json.
+    if DEFAULT_CONFIG.get("enable_noul_decider"):
+        _batch_noul_decider(report_dir)
 
 
 def analyze(
@@ -594,11 +599,13 @@ def _batch_decider_verdict(report_dir, decider) -> None:
     """One decisions-API judge over a just-written report tree, stored inside it.
 
     Runs right after ``save_reports``: the four ANALYST reports, their own
-    position language neutralised, judged buy/hold/sell
-    (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe). The payload
-    lands in the tree under the decider's own filename (``jev_verdict.json``,
-    ``pplx_verdict.json``), so two deciders accumulate rather than overwrite -
-    the verdict travels with the report it is about, and both travel together.
+    position language neutralised, judged with the battery the decider's model
+    accepts (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe for the
+    choice/score judges, the noul-only one for Respan's, which refuses the
+    shared battery). The payload lands in the tree under the decider's own
+    filename (``jev_verdict.json``, ``pplx_verdict.json``, ``noul_verdict.json``),
+    so the deciders accumulate rather than overwrite - the verdict travels with
+    the report it is about, and they all travel together.
 
     Best-effort, like the pre-market check: the judge annotates a finished run
     and must never fail it. A missing ``OPENROUTER_API_KEY`` skips silently -
@@ -612,12 +619,14 @@ def _batch_decider_verdict(report_dir, decider) -> None:
             print(f"[{decider.label}] verdict skipped: OPENROUTER_API_KEY not set")
             return
         path, payload = judge_tree(report_dir, key=key, decider=decider)
-        ratings = ", ".join(
-            f"{stem}={v.get('rating')}" for stem, v in payload["ratings"].items()
-        )
+        # The roll-up key follows the recipe: the choice/score battery fills
+        # ``ratings``, the noul-only one fills ``scores``. Both carry a
+        # ``rating`` entry per stem, so the log line reads the same either way.
+        summary = payload.get("ratings") or payload.get("scores") or {}
+        detail = ", ".join(f"{stem}={v.get('rating')}" for stem, v in summary.items())
         print(
             f"[{decider.label}] verdict -> {path}  "
-            f"({ratings}; failures={payload['failures']})"
+            f"({detail}; failures={payload['failures']})"
         )
     except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
         print(f"[{decider.label}] verdict skipped for {report_dir}: {exc}")
@@ -639,6 +648,20 @@ def _batch_pplx_decider(report_dir) -> None:
     from tradingagents.jev import DECIDERS
 
     _batch_decider_verdict(report_dir, DECIDERS[1])
+
+
+def _batch_noul_decider(report_dir) -> None:
+    """The noul-only decider (``DECIDERS[2]``), run after the other two.
+
+    Respan's decisions model is on the same endpoint and gets the same four
+    neutralised analyst reports, but it refuses ``choice`` and ``score``
+    questions, so it is asked the noul-only battery instead and its verdict
+    lands in ``noul_verdict.json``. Its own gate again: a third judge is its own
+    opt-in, exactly like the second.
+    """
+    from tradingagents.jev import DECIDERS
+
+    _batch_decider_verdict(report_dir, DECIDERS[2])
 
 
 def _batch_report_verify(symbol: str, report_dir) -> None:

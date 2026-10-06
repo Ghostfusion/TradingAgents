@@ -57,20 +57,38 @@ def code_surface() -> dict[str, str]:
     return surface
 
 
+#: The assignments whose literal holds the config's defaults. `SHIPPED_DEFAULTS`
+#: is the dict LITERAL today (`DEFAULT_CONFIG = _apply_env_overrides(dict(
+#: SHIPPED_DEFAULTS))`, 2026-10-04); `DEFAULT_CONFIG` held the literal before that
+#: refactor, so both names are accepted.
+_DEFAULT_ASSIGNMENTS = ("DEFAULT_CONFIG", "SHIPPED_DEFAULTS")
+
+
 def config_defaults() -> dict[str, object]:
-    """Literal defaults, plus the fallback of an `os.getenv` call where it has one."""
+    """Literal defaults, plus the fallback of an `os.getenv` call where it has one.
+
+    The scan unwraps ONE level of call around the dict literal, because that is
+    the shape the config has: reading only a bare dict literal silently parsed
+    **zero** keys once `DEFAULT_CONFIG` became `_apply_env_overrides(dict(
+    SHIPPED_DEFAULTS))`, whose first argument is a `dict(...)` CALL. A zero-key
+    parse does not fail loudly - it turns every note into the "?" fallback, which
+    reads as a default rather than as a missing one.
+    """
     source = SRC.read_text(encoding="utf-8")
     out: dict[str, object] = {}
     for node in ast.walk(ast.parse(source)):
-        if not (
-            isinstance(node, ast.Assign)
-            and any(getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets)
-            and isinstance(node.value, ast.Call)
-        ):
+        if not isinstance(node, ast.Assign):
             continue
-        arg = node.value.args[0]
-        if not isinstance(arg, ast.Dict):
+        if not any(getattr(t, "id", None) in _DEFAULT_ASSIGNMENTS for t in node.targets):
             continue
+        value = node.value
+        if isinstance(value, ast.Call):
+            if not value.args:
+                continue
+            value = value.args[0]
+        if not isinstance(value, ast.Dict):
+            continue
+        arg = value
         for k, v in zip(arg.keys, arg.values, strict=True):
             if not isinstance(k, ast.Constant):
                 continue

@@ -267,6 +267,12 @@ _ENV_OVERRIDES = {
     # and stored beside it as pplx_verdict.json. Its own gate so enabling one
     # judge does not start paying for two.
     "TRADINGAGENTS_ENABLE_PPLX_DECIDER": "enable_pplx_decider",
+    # The third decider (tradingagents/jev.py, DECIDERS[2]): Respan's decisions
+    # model on the same endpoint, but a different contract - it refuses the
+    # choice/score battery the other two use and takes only noul questions - run
+    # after both and stored as noul_verdict.json. Its own gate, so a third judge
+    # is its own opt-in just like the second.
+    "TRADINGAGENTS_ENABLE_NOUL_DECIDER": "enable_noul_decider",
     # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
     # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
     # decline-driver / mechanics toolset instead of company statement tools.
@@ -1133,6 +1139,13 @@ SHIPPED_DEFAULTS = {
         # TypeSafe one and written beside it as pplx_verdict.json. Separately
         # gated (and off) so enabling one paid judge cannot silently enable two.
         "enable_pplx_decider": False,
+        # The third decider (tradingagents/jev.py, DECIDERS[2]): Respan's
+        # noul-only decisions model, run AFTER the other two and written beside
+        # them as noul_verdict.json. Off by default like the others - and for one
+        # more reason: the numbers it returns are a deterministic document
+        # statistic that does not track the polarity it is asked for, not a
+        # buy/hold/sell call (see the probe note in the module), so it is opt-in.
+        "enable_noul_decider": False,
         # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md).
         # Every read is additive and default-off: a run's artefacts cannot change
         # unless the flag is set. Each names the tool the agent must cite.

@@ -232,7 +232,8 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` | default `true` |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` | default `false` |
 | `TRADINGAGENTS_ENABLE_JV_VERDICT` | `enable_jev_verdict` | default `false` |
-| `TRADINGAGENTS_ENABLE_PPLX_DECIDER` | `enable_pplx_decider` | default `?` |
+| `TRADINGAGENTS_ENABLE_PPLX_DECIDER` | `enable_pplx_decider` | default `false` |
+| `TRADINGAGENTS_ENABLE_NOUL_DECIDER` | `enable_noul_decider` | default `false` |
 | `TRADINGAGENTS_FCF_YIELD_FLOOR` | `fcf_yield_floor` | default `0.06` |
 | `TRADINGAGENTS_ENABLE_ETF_ENGINE` | `enable_etf_engine` | default `false` |
 | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | `enable_correlation_penalty` | when on, the allocation plan (`allocation_block` / `get_allocation`) down-weights names whose average pairwise correlation with the rest of the book exceeds `correlation_threshold` (risk-parity concentration control) |
@@ -260,7 +261,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES` | `enable_jump_robust_proxies` | default `false` |
 | `TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM` | `enable_mp_lower_spectrum` | default `false` |
 | `TRADINGAGENTS_ENABLE_LONG_MEMORY` | `enable_long_memory` | default `false` |
-| `TRADINGAGENTS_ENABLE_METRIC_AUTHORITY` | `enable_metric_authority` | default `?` |
+| `TRADINGAGENTS_ENABLE_METRIC_AUTHORITY` | `enable_metric_authority` | default `false` |
 | `TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS` | `enable_bootstrap_intervals` | default `false` |
 | `TRADINGAGENTS_ENABLE_EVENT_IV_LIFT` | `enable_event_iv_lift` | default `false` |
 | `TRADINGAGENTS_ENABLE_TRIADIC_STRESS` | `enable_triadic_stress` | default `false` |
