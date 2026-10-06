@@ -2648,6 +2648,11 @@ def main(argv: list[str] | None = None) -> int:
                     map_identifiers_eodhd,
                     news_word_weights_eodhd,
                     real_yield_points_eodhd,
+                    resolve_symbol_eodhd,
+                )
+                from tradingagents.dataflows.eodhd_quota import (
+                    format_quota_line,
+                    format_spend_breakdown,
                 )
                 from tradingagents.dataflows.federal_reserve import treasury_curve_points
 
@@ -2712,19 +2717,41 @@ def main(argv: list[str] | None = None) -> int:
                 if ranked:
                     rate_lines += [
                         "",
-                        "## Instrument identifiers (EODHD /id-mapping)",
+                        "## Instrument identifiers (EODHD /search + /id-mapping)",
                         "",
-                        "| Ticker | Listing | ISIN | FIGI | LEI | CUSIP |",
-                        "| --- | --- | --- | --- | --- | --- |",
+                        "The vendor symbol is RESOLVED, never assumed from the ticker: "
+                        "`/search` returns the listing the vendor actually indexes, "
+                        "which is not always the US one and not always the spelling "
+                        "`TICKER.US` guesses (the vendor writes the class share "
+                        "`BRK-B`, not `BRK.B`). One extra call per name, bounded to 10.",
+                        "",
+                        "| Ticker | Resolved | Type | ISIN | FIGI | LEI | CUSIP |",
+                        "| --- | --- | --- | --- | --- | --- | --- |",
                     ]
                     for _row in ranked[:10]:
                         _sym = str(_row.get("ticker") or "")
-                        _id = map_identifiers_eodhd(symbol=f"{_sym}.US")
+                        _res = resolve_symbol_eodhd(_sym, preferred_exchange="US")
+                        if not _res.get("resolved"):
+                            rate_lines.append(
+                                f"| {_sym} | - | - | - | - | - | unresolved: "
+                                f"{_res.get('unavailable')} |"
+                            )
+                            continue
+                        _id = map_identifiers_eodhd(symbol=_res["resolved"])
                         if _id.get("unavailable"):
-                            rate_lines.append(f"| {_sym} | - | - | - | - | unavailable |")
+                            # The identifier join can itself be ambiguous (the vendor
+                            # returns two rows for one symbol and `_primary_listing`
+                            # refuses to guess). The ISIN `/search` already gave us is
+                            # still currency, so it is printed rather than a bare "-".
+                            rate_lines.append(
+                                f"| {_sym} | {_res['resolved']} | "
+                                f"{_res['type'] or '-'} | {_res['isin'] or '-'} | - | - | "
+                                f"{_id['unavailable']} |"
+                            )
                             continue
                         rate_lines.append(
-                            f"| {_sym} | {_id['listing']} | {_id['isin'] or '-'} | "
+                            f"| {_sym} | {_res['resolved']} | "
+                            f"{_res['type'] or '-'} | {_id['isin'] or _res['isin'] or '-'} | "
                             f"{_id['figi'] or '-'} | {_id['lei'] or '-'} | "
                             f"{_id['cusip'] or '-'} |"
                         )
@@ -2810,6 +2837,27 @@ def main(argv: list[str] | None = None) -> int:
                         "sentiment number (`/sentiments` owns that, and it is what "
                         "`Sent7`/`SentZ` read). ~40 s per name (measured).",
                     ]
+                # Quota (2026-10-06): the account's remaining allowance plus this
+                # block's own spend. `GET /user` is the one EODHD endpoint that is NOT
+                # counted against the daily limit (measured: a 403 costs 0, /eod costs
+                # 1, /user costs 0), so the reading spends nothing - but it is still a
+                # request, so eodhd_quota caches the snapshot and counts the spend
+                # locally instead of re-reading.
+                rate_lines += [
+                    "",
+                    "## API quota (EODHD /user)",
+                    "",
+                    f"- {format_quota_line()}",
+                ]
+                _spend_line = format_spend_breakdown()
+                if _spend_line:
+                    rate_lines.append(f"- {_spend_line}")
+                rate_lines.append(
+                    "- Counted calls are the vendor's own WEIGHTED numbers (5 for "
+                    "`/symbol-change-history`, 10 for the CBOE / market-cap / insider "
+                    "feeds), not request counts; a path with no declared weight is 1. "
+                    "An endpoint the plan does not include answers 403 and costs 0."
+                )
             except Exception as exc:  # noqa: BLE001 - a failed read is reported, not raised
                 rate_lines += ["", f"unavailable - rate read failed: {exc}"]
         rates_block = "\n".join(rate_lines)

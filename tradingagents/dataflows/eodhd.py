@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime
+from urllib.parse import quote
 
 from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
 
@@ -28,6 +30,15 @@ logger = logging.getLogger(__name__)
 BASE = "https://eodhd.com/api"
 TIMEOUT = 20
 _MAX_RETRIES = 2
+
+#: Ceiling on one exponential-backoff sleep. The transient path retries twice, so the
+#: worst case a single read can add is ~6 s (2 s + 4 s) — bounded, and far below the
+#: 20 s request timeout it is protecting.
+_BACKOFF_MAX = 8.0
+
+#: Ceiling on a vendor-supplied ``Retry-After``. A header is advice, not an order: a
+#: vendor answering ``Retry-After: 86400`` must not park the run for a day.
+_RETRY_AFTER_MAX = 60.0
 
 
 def eodhd_api_key() -> str | None:
@@ -41,6 +52,81 @@ def eodhd_api_key() -> str | None:
     if key:
         return str(key)
     return os.environ.get("EODHD_API_KEY") or os.environ.get("TRADINGAGENTS_EODHD_API_KEY")
+
+
+def _backoff(attempt: int) -> float:
+    """Exponential backoff for the transient retry path: 2 s, 4 s, ... capped."""
+    return min(2.0 * (2**attempt), _BACKOFF_MAX)
+
+
+def _retry_after_seconds(header_value, *, cap: float = _RETRY_AFTER_MAX) -> float | None:
+    """Seconds to wait from a ``Retry-After`` header (RFC 7231 s7.1.3), or ``None``.
+
+    The header is either *delay-seconds* (``"120"``) or an *HTTP-date*
+    (``"Thu, 01 Dec 2025 16:00:00 GMT"``). ``None`` means "no usable header", so the
+    caller falls back to exponential backoff rather than guessing a default - an
+    unparseable header is ABSENT, never 0.
+    """
+    if header_value is None or isinstance(header_value, bool):
+        return None
+    if isinstance(header_value, (int, float)):
+        return max(0.0, min(float(header_value), cap))
+    if not isinstance(header_value, str) or not header_value.strip():
+        return None
+    try:
+        return max(0.0, min(float(header_value.strip()), cap))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        delay = parsedate_to_datetime(header_value.strip()).timestamp() - time.time()
+        return max(0.0, min(delay, cap))
+    except Exception:  # noqa: BLE001 - an unparseable header is simply absent
+        return None
+
+
+def _body_detail(resp) -> str:
+    """The vendor's own words for a refusal, bounded; ``""`` when there are none.
+
+    EODHD explains a refusal in the body - ``"This data is not available for your
+    subscription plan."`` is the entire diagnosis of a 403 - so the sentence is worth
+    carrying into the typed error. Every read here is defensive: a mocked or non-JSON
+    response must yield ``""``, never raise from inside a raise.
+    """
+    try:
+        payload = resp.json()
+    except Exception:  # noqa: BLE001 - a non-JSON body is simply not a dict
+        payload = None
+    if isinstance(payload, dict):
+        for key in ("message", "error", "detail"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+    try:
+        text = resp.text
+    except Exception:  # noqa: BLE001
+        return ""
+    if not isinstance(text, str):
+        return ""
+    return text.strip()[:200]
+
+
+def _quota_note(path: str) -> None:
+    """Record one counted call in the free quota ledger; never break the read.
+
+    ``/user`` is skipped: it is the one endpoint EODHD does NOT count against the
+    daily limit, so recording it would make the ledger overstate the very spend it
+    exists to report.
+    """
+    try:
+        from . import eodhd_quota
+
+        if eodhd_quota.is_free_path(path):
+            return
+        eodhd_quota.note_call(path)
+    except Exception:  # noqa: BLE001 - bookkeeping must not fail a data read
+        logger.debug("EODHD quota ledger unavailable", exc_info=True)
 
 
 def _eodhd_get(
@@ -74,23 +160,63 @@ def _eodhd_get(
             resp = _requests.get(url, params=query, timeout=req_timeout)
         except Exception as exc:  # noqa: BLE001 - network failure degrades
             if attempt < _MAX_RETRIES:
+                time.sleep(_backoff(attempt))
                 continue
             raise VendorRateLimitError(f"EODHD network error: {exc}") from exc
-        if resp.status_code == 429:
-            if attempt < _MAX_RETRIES:
-                import time
 
-                time.sleep(2 * (attempt + 1))
+        status = resp.status_code
+
+        # The vendor's documented status semantics, confirmed live 2026-10-06:
+        #   401 - token missing / invalid / revoked             -> credential fault
+        #   402 - daily limit used up, or plan lacks the endpoint -> NOT retryable
+        #   403 - the key's plan does not include this data      -> valid key, wrong tier
+        #   429 - per-minute rate limit                          -> retryable, carries Retry-After
+        # A 403 is therefore NEVER a credential fault. Probed with a working key, seven
+        # datasets answered 403 ("This data is not available for your subscription
+        # plan." / "...no access to Historical Market Cap Data Feed."), so the previous
+        # "check EODHD_API_KEY" wording sent the operator down the wrong path.
+        if status == 429:
+            if attempt < _MAX_RETRIES:
+                wait = _retry_after_seconds(resp.headers.get("Retry-After"))
+                time.sleep(wait if wait is not None else _backoff(attempt))
                 continue
-            raise VendorRateLimitError(f"EODHD rate limit (429) on {path}")
-        if resp.status_code in (401, 403):
-            raise VendorNotConfiguredError(
-                f"EODHD auth/forbidden (check EODHD_API_KEY): {resp.status_code}"
+            raise VendorRateLimitError(
+                f"EODHD per-minute rate limit (429) on {path} after {attempt + 1} attempts"
             )
-        if resp.status_code != 200:
+        if status == 401:
+            raise VendorNotConfiguredError(
+                f"EODHD token missing, invalid or revoked (401) on {path}: check "
+                f"EODHD_API_KEY / TRADINGAGENTS_EODHD_API_KEY. {_body_detail(resp)}"
+            )
+        if status == 403:
+            raise VendorNotConfiguredError(
+                f"EODHD plan does not include '{path}' (403). The API key is VALID - this "
+                f"dataset needs a higher subscription tier (the vendor gates it to All "
+                f"World Extended / All-In-One). {_body_detail(resp)}"
+            )
+        if status == 402:
+            # Not a throttle: the daily counter (or the plan's endpoint list) is spent
+            # for the UTC day, so a retry inside this run cannot succeed - raised at
+            # once rather than after two blind retries typed as a rate limit.
+            raise VendorRateLimitError(
+                f"EODHD daily quota exhausted, or the plan lacks '{path}' (402): not "
+                f"retried, the counter resets at 00:00 UTC. {_body_detail(resp)}"
+            )
+        if status != 200:
+            if status >= 500 and attempt < _MAX_RETRIES:
+                time.sleep(_backoff(attempt))
+                continue
             if attempt < _MAX_RETRIES:
                 continue
-            raise VendorRateLimitError(f"EODHD {path}: status {resp.status_code}")
+            detail = _body_detail(resp)
+            raise VendorRateLimitError(
+                f"EODHD {path}: status {status}" + (f" - {detail}" if detail else "")
+            )
+        # Counted: a 200 is billed whether or not the body turns out to be an error
+        # envelope (EODHD uses a 200 + JSON body for most failures). The ledger is
+        # pure Python - it makes NO request - and is what `eodhd_quota` reports the
+        # spend from. Guarded, so bookkeeping can never fail a data read.
+        _quota_note(path)
         try:
             data = resp.json()
         except ValueError:
@@ -893,6 +1019,204 @@ def get_bill_auction_rates_eodhd(tenor: str | None = None, *, tail: int | None =
         "note curve point. The nominal par curve is a different read.",
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Symbol resolution - /search
+#
+# The vendor's own guidance for this endpoint is "use this first when a company is
+# named instead of a ticker". Measured live 2026-10-06 on this plan, one call each -
+# it is reachable where the fundamental / credit / calendar datasets answer 403:
+#
+#   search/TSM   -> TSM   US  Common Stock  primary=False  US8740391003
+#   search/GOOG  -> GOOG  US  Common Stock  primary=True   US02079K1079
+#                   (EODHD's GOOG is Alphabet Class C; GOOGL is the other class)
+#   search/BRK.B -> BRK-B US  Common Stock  primary=True   US0846707026
+#                   (the vendor normalises the dot to a dash: "BRK.B.US" is not a
+#                    symbol, so a caller joins Code + Exchange and never edits it)
+#
+# What this fixes that a blind f"{ticker}.US" cannot: a listing whose primary venue is
+# not US at all, and EODHD's own spelling of a class share. `isPrimary` alone is NOT a
+# sufficient selector - every TSM row reports False, including the US common stock - so
+# the US listing is preferred FIRST and the flag only breaks a tie within that group.
+# ---------------------------------------------------------------------------
+
+_SEARCH_PATH = "search"
+
+#: The asset types ``/search`` accepts. An unknown value is refused rather than passed
+#: through, because the vendor ignores an unrecognised filter silently and returns the
+#: whole mixed set - the "parameter that does nothing is worse than a named gap"
+#: defect class this repo refuses.
+SEARCH_ASSET_TYPES = ("stock", "etf", "fund", "bond", "index", "crypto")
+
+#: The all-empty shape a failed or empty resolution returns, so a caller can read
+#: every key unconditionally.
+_EMPTY_RESOLUTION: dict = {
+    "query": "",
+    "resolved": None,
+    "name": "",
+    "isin": "",
+    "type": "",
+    "exchange": "",
+    "is_primary": None,
+    "alternatives": [],
+    "other_matches": 0,
+    "ambiguous": False,
+    "unavailable": None,
+}
+
+
+def _search_ticker(row: dict) -> str:
+    """``SYMBOL.EXCHANGE`` from a ``/search`` row, or ``""`` when either half is absent."""
+    code = str(row.get("Code") or "").strip()
+    exch = str(row.get("Exchange") or "").strip()
+    return f"{code}.{exch}" if code and exch else code
+
+
+def _resolve_row(rows: list[dict], preferred_exchange: str | None) -> dict | None:
+    """Select one listing by rule, never by position.
+
+    Order: the requested exchange when given; else the US listing; within that group
+    ``isPrimary`` breaks a tie; finally the vendor's own first row, because a resolver
+    that returns nothing when the vendor DID return rows is less useful than one that
+    returns a labelled best guess (``ambiguous`` still says the set was not a single
+    answer).
+    """
+    if not rows:
+        return None
+    if preferred_exchange:
+        want = preferred_exchange.strip().upper()
+        exact = [r for r in rows if str(r.get("Exchange") or "").upper() == want]
+        if exact:
+            rows = exact
+    us = [r for r in rows if str(r.get("Exchange") or "").upper() == "US"]
+    pool = us or rows
+    primary = [r for r in pool if r.get("isPrimary") is True]
+    return (primary or pool)[0]
+
+
+def resolve_symbol_eodhd(
+    query: str,
+    *,
+    preferred_exchange: str | None = None,
+    asset_type: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """Resolve a company name / partial ticker / ISIN to ``SYMBOL.EXCHANGE`` + ISIN.
+
+    The vendor's ``/search`` read as one labelled result. **Reports rather than
+    raises** (the same contract as ``map_identifiers_eodhd``), so a caller that only
+    wants a symbol is never aborted by a failed lookup: ``unavailable`` carries the
+    reason and ``resolved`` is ``None``.
+
+    Returns::
+
+        {"query", "resolved", "name", "isin", "type", "exchange", "is_primary",
+         "alternatives", "ambiguous", "unavailable"}
+
+    ``resolved`` is ``None`` when nothing matched - never the raw query repeated back,
+    which is how a caller ends up querying a symbol the vendor never issued.
+    ``alternatives`` carries the SAME instrument on other venues (``TSM.US`` beside
+    ``TSM.BA``) and ``ambiguous`` is True when there is more than one of those: a name
+    listed on several exchanges is a question, not an answer, and returning one of them
+    silently is how the wrong listing gets priced. Other securities a fuzzy text search
+    happened to return are counted in ``other_matches`` and never offered as a listing.
+
+    ``asset_type`` is validated against ``SEARCH_ASSET_TYPES`` - an unrecognised value
+    is a named gap, not a filter the vendor would ignore.
+    """
+    q = str(query or "").strip()
+    if not q:
+        return {**_EMPTY_RESOLUTION, "query": "", "unavailable": "empty query"}
+    if asset_type is not None and asset_type not in SEARCH_ASSET_TYPES:
+        return {
+            **_EMPTY_RESOLUTION,
+            "query": q,
+            "unavailable": (
+                f"asset_type {asset_type!r} is not one of {SEARCH_ASSET_TYPES}"
+            ),
+        }
+
+    params: dict = {"fmt": "json", "limit": max(1, int(limit))}
+    if asset_type:
+        params["type"] = asset_type
+    if preferred_exchange:
+        params["exchange"] = preferred_exchange.strip().upper()
+
+    # The query goes in the PATH, so it is percent-encoded with "." left safe: a
+    # class share ("BRK.B") is a documented path form, while a space or "&" would
+    # otherwise split the URL.
+    try:
+        rows = _eodhd_get(f"{_SEARCH_PATH}/{quote(q, safe='.')}", params)
+    except Exception as exc:  # noqa: BLE001 - a failed lookup is a named gap
+        return {
+            **_EMPTY_RESOLUTION,
+            "query": q,
+            "unavailable": f"symbol search failed: {exc}",
+        }
+
+    candidates = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    best = _resolve_row(candidates, preferred_exchange)
+    if best is None:
+        return {
+            **_EMPTY_RESOLUTION,
+            "query": q,
+            "unavailable": f"no listing matched {q!r}",
+        }
+
+    resolved = _search_ticker(best)
+    best_code = str(best.get("Code") or "").strip().upper()
+    best_exchange = str(best.get("Exchange") or "").strip().upper()
+
+    # Ambiguity means the SAME instrument on more than one venue (the vendor's own
+    # wording: "if ambiguous (multiple exchanges), returns top 10 matches"). `/search`
+    # is a fuzzy TEXT search, so it also returns unrelated securities - a leveraged
+    # ETF whose name embeds the query (search/AAPL returns AAPD/AAPU/APLY, three
+    # different products), or an issuer's sibling class (GOOGL for GOOG). Those are
+    # counted in `other_matches`, never offered as an alternative listing: presenting
+    # a different product as "the other listing" is how the wrong instrument gets
+    # picked.
+    alternatives = []
+    other_matches = 0
+    seen = {resolved}
+    for row in candidates:
+        key = _search_ticker(row)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        same_instrument = (
+            best_code
+            and str(row.get("Code") or "").strip().upper() == best_code
+            and str(row.get("Exchange") or "").strip().upper() != best_exchange
+        )
+        if not same_instrument:
+            other_matches += 1
+            continue
+        alternatives.append(
+            {
+                "ticker": key,
+                "name": str(row.get("Name") or ""),
+                "isin": str(row.get("ISIN") or ""),
+                "type": str(row.get("Type") or ""),
+                "exchange": str(row.get("Exchange") or ""),
+            }
+        )
+
+    return {
+        "query": q,
+        "resolved": resolved or None,
+        "name": str(best.get("Name") or ""),
+        "isin": str(best.get("ISIN") or ""),
+        "type": str(best.get("Type") or ""),
+        "exchange": str(best.get("Exchange") or ""),
+        "is_primary": best.get("isPrimary")
+        if isinstance(best.get("isPrimary"), bool)
+        else None,
+        "alternatives": alternatives[:10],
+        "other_matches": other_matches,
+        "ambiguous": bool(alternatives),
+        "unavailable": None,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -532,6 +532,71 @@ and no new flag. The remaining four Tier-2 declines stand.
 
 ---
 
+## P5 build record — refusal typing, symbol resolution, quota (2026-10-06)
+
+Written after reading the vendor's own MCP server (`EodHistoricalData/EODHD-MCP-Server`)
+and re-probing this plan. Three of the four changes are defect fixes inside
+`dataflows/eodhd.py`; the fourth is a read this plan CAN reach.
+
+**(a) A 403 is a plan gate, not a credential fault.** This document has tabulated the
+plan-gated set since 2026-09-19, but the reader typed it
+`VendorNotConfiguredError("EODHD auth/forbidden (check EODHD_API_KEY)")` — so the
+operator was sent to check a key that was working. **401** (the credential fault: the
+vendor answers 401 for a missing or wrong `api_token`) is now split out and names the
+token; **403** names the entitlement and says in words that the key is VALID. The
+vendor's own text survives in the message, because *"This data is not available for
+your subscription plan."* is the whole diagnosis.
+
+**(b) A 402 is not transient.** It fell through the generic non-200 branch — two
+retries with **no sleep**, then `VendorRateLimitError`. It is now raised on the FIRST
+attempt, naming the daily quota: a retry inside the same run cannot succeed against a
+spent UTC day. 402 is also what the vendor returns when the *plan* lacks an endpoint
+(and the entitlement docs conflate the two), so the message names both possibilities
+rather than guessing one.
+
+**(c) `Retry-After` is honoured** on a 429 (RFC 7231 §7.1.3 — delay-seconds AND
+HTTP-date, capped at 60 s) and the 5xx path backs off exponentially instead of being
+hammered. That was already the policy in `benzinga.py` / `newsapi.py` /
+`alpaca_common.py`; `eodhd.py` was the outlier.
+
+**(d) `resolve_symbol_eodhd(query, preferred_exchange=, asset_type=, limit=)` —
+`/search`, the one new read this plan reaches.** `/search/{query}` answers **200**
+where the eight 403 rows below do not, and it is the vendor's own remedy ("use this
+first when a company is named instead of a ticker"). It selects **by rule, never
+row 0**: the requested exchange, else the US listing, with `isPrimary` only breaking a
+tie — measured: **every** `TSM` row reports `isPrimary=False`, including the US common
+stock, so the flag alone selects nothing. It never re-spells the vendor's code
+(`BRK.B` → `BRK-B.US`; `BRK.B.US` is not a symbol). `alternatives` is the SAME
+instrument on another venue — live `TSM.US` beside `TSM.BA`, `GOOG.US` beside
+`GOOG.TO/NEO/MX/AS/LSE` — which is the vendor's own definition of ambiguous
+("multiple exchanges"). A fuzzy **text** search also returns other *products*
+(`search/AAPL` → `AAPD`/`AAPU`/`APLY`, three unrelated leveraged ETFs); those are
+counted in `other_matches` and never offered as a listing. The first smoke flagged
+`ambiguous=True` for AAPL on exactly that confusion, and the rule was tightened at the
+source. `asset_type` is validated against `SEARCH_ASSET_TYPES`: an unrecognised value
+is a named gap, because the vendor ignores an unknown filter silently.
+
+**Consumer.** The existing `scripts/value_screener.py --rates` block, so the whole
+`enable_eodhd_rates` surface stays one gate and one flag: the identifier table now
+prints the **resolved** symbol and type ahead of the FIGI/LEI/CUSIP join (the `.US`
+suffix is no longer guessed from the ticker), and it prints the ISIN `/search` gave us
+even when the identifier join itself is ambiguous (which it is for `TSM.US`: the
+vendor returns two rows and `_primary_listing` refuses to guess). The block ends with
+the quota reading.
+
+**`dataflows/eodhd_quota.py` (new) — the allowance and the run's own spend.**
+`GET /user` is the one EODHD endpoint that is **not** counted: measured `apiRequests`
+2663 → 2664 across exactly one `/eod` call, **+3** for a 13-request probe, and **0**
+for a 403. So the watcher costs no quota — but it is still a request, so the snapshot
+is TTL-cached (60 s) and **a failed read is cached too**, so an outage is one attempt a
+minute rather than one per call (a defect the first smoke leaked as a live request and
+fixed at the source). `weight_for` carries the vendor's declared **weighted** call
+counts (5 for `/symbol-change-history`, 10 for the CBOE / market-cap / insider feeds)
+because a ledger counting *requests* would understate a CBOE read by 10×. `/user` is
+skipped by the ledger and the payload's `email` is dropped (rule 6).
+
+---
+
 ## Appendix A — the plan-gated set (403, probed 2026-09-19, never wire)
 
 | Endpoint | Exact message |
@@ -556,6 +621,24 @@ and no new flag. The remaining four Tier-2 declines stand.
 | `/mp/unicornbay/options/contracts` | `Forbidden` |
 | ESG / InvestVerte | `Forbidden` |
 | trading hours | `Forbidden` |
+| `/spreads/funding-stress` | `This data is not available for your subscription plan.` |
+| `/credit-risk/sovereign/default-spreads` | `Forbidden. Please contact support@eodhistoricaldata.com` |
+| `/symbol-change-history` | `Forbidden. Please contact support@eodhistoricaldata.com` (5 calls/request when entitled) |
+| `/historical-market-cap/{SYM}` | `Forbidden. You have no access to Historical Market Cap Data Feed.` |
+| `/insider-transactions` | `Forbidden` (10 calls/request when entitled) |
+| `/cboe/indices`, `/cboe/index` | `Forbidden. Please contact support@eodhistoricaldata.com` (10 calls/request) |
+
+The last six rows are the **P5 re-probe (2026-10-06)**, added because they are the
+endpoints the vendor's own MCP server exposes and this plan does not carry: the
+funding-stress spread, the sovereign/corporate credit family, symbol-change history,
+historical market cap, insider transactions and the CBOE index feeds. Two consequences
+were recorded rather than built: **EODHD has no high-yield OAS series** (its credit
+family is sovereign spreads plus *corporate CMDI/HQM*, i.e. investment-grade yields),
+so it cannot unblock the frozen forecasting design's §11.6 HY-spread half; and its
+CBOE dataset is documented as **European and regional** index families (~38 indices,
+codes like `BDE30P`/`BAT20N`), not CBOE's US volatility indices, so it is not a `VXV`
+source either. Both §11.6 blockers therefore survive this probe. `/search` is the one
+endpoint of the nine probed that answers 200.
 
 `/calendar/dividends` is the instructive one: a **422** proves the route is authorized and the
 request was merely malformed, while the **403** on the well-formed request proves the *plan* is

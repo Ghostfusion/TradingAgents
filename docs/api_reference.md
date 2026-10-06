@@ -1234,7 +1234,17 @@ so a tree carries its own consistency record instead of depending on the opt-in
   news-derived number). The per-symbol price-*chain* swap is still not built: no
   measurement shows that path is the bottleneck. All behind the one
   `enable_eodhd_rates` gate, read by `scripts/value_screener.py --rates`. Gate off
-  by default.
+  by default. **P5 is BUILT (2026-10-06)**: the refusal typing is corrected (401 names
+  the token, 403 the entitlement — a 403 is a PLAN gate on a valid key, established
+  live on eight datasets), a 402 is raised on the first attempt instead of being
+  retried twice as a rate limit, `Retry-After` is honoured on a 429 and the 5xx path
+  backs off; `eodhd.resolve_symbol_eodhd` reads the one newly-reachable endpoint,
+  `/search`, and selects a listing **by rule, never row 0** (`isPrimary` alone selects
+  nothing — every `TSM` row reports False — and the vendor's spelling is never
+  re-edited: `BRK.B` → `BRK-B.US`); and the new `dataflows/eodhd_quota.py` reads
+  `GET /user` — the one endpoint EODHD does not count against the daily limit — to
+  report the plan's allowance and the run's own **weighted** spend (5×/10× for the
+  CBOE, market-cap and insider feeds).
 - `docs/design_openbb_enhancements.md` - research-to-design: deep study of
   OpenBB (typed provider envelopes, self-describing REST/CLI/MCP surface,
   quantitative/econometrics/technical toolkit, Tauri desktop + SPA product
