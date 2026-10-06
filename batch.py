@@ -619,11 +619,11 @@ def _batch_decider_verdict(report_dir, decider) -> None:
             print(f"[{decider.label}] verdict skipped: OPENROUTER_API_KEY not set")
             return
         path, payload = judge_tree(report_dir, key=key, decider=decider)
-        # The roll-up key follows the recipe: the choice/score battery fills
-        # ``ratings``, the noul-only one fills ``scores``. Both carry a
-        # ``rating`` entry per stem, so the log line reads the same either way.
-        summary = payload.get("ratings") or payload.get("scores") or {}
-        detail = ", ".join(f"{stem}={v.get('rating')}" for stem, v in summary.items())
+        # Every recipe fills ``ratings`` with a per-stem ``rating``, so one log
+        # line covers all three deciders.
+        detail = ", ".join(
+            f"{stem}={v.get('rating')}" for stem, v in payload["ratings"].items()
+        )
         print(
             f"[{decider.label}] verdict -> {path}  "
             f"({detail}; failures={payload['failures']})"

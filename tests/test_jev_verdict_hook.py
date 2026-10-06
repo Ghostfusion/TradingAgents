@@ -382,14 +382,14 @@ def test_the_second_decider_is_best_effort_too(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _noul_body() -> str:
-    """The answer shape Respan returns: a float per question, no prose."""
+def _noul_body(buy: float = 0.09, hold: float = 0.12, sell: float = 0.31) -> str:
+    """The answer shape Respan returns for the per-class battery: one float each."""
     return json.dumps({
         "provider": "Respan",
         "model": "respan/span-01-20260925",
         "answers": {
-            "rating": {"type": "noul", "noul": 0.03422103},
-            "evidence": {"type": "noul", "noul": 0.31},
+            call: {"type": "noul", "noul": value}
+            for call, value in (("buy", buy), ("hold", hold), ("sell", sell))
         },
         "usage": {"input_tokens": 4200, "output_tokens": 0, "cost": 0.00008},
     })
@@ -492,7 +492,10 @@ def test_the_noul_decider_writes_its_own_file(tmp_path, _noul_keyed):
     assert payload["model"] == jev.NOUL_MODEL
     assert payload["origin"] == tree.name
     assert payload["failures"] == 0
-    assert payload["scores"]["market"] == {"rating": 0.03422103, "evidence": 0.31}
+    row = payload["ratings"]["market"]
+    assert row["rating"] == "sell", "the label is the argmax of the class scores"
+    assert row["margin"] == pytest.approx(0.19)
+    assert (row["buy"], row["hold"], row["sell"]) == (0.09, 0.12, 0.31)
 
 
 def test_the_noul_decider_asks_the_noul_battery_not_the_shared_one(tmp_path, _noul_keyed):
@@ -505,7 +508,7 @@ def test_the_noul_decider_asks_the_noul_battery_not_the_shared_one(tmp_path, _no
     assert len(_noul_keyed.calls) == 4, "one call per analyst report"
     for payload in _noul_keyed.calls:
         assert payload["model"] == jev.NOUL_MODEL
-        assert set(payload["questions"]) == {"rating", "evidence"}
+        assert set(payload["questions"]) == {"buy", "hold", "sell"}
         assert {q["type"] for q in payload["questions"].values()} == {"noul"}
         assert all("criteria" not in q for q in payload["questions"].values())
         # Same neutralisation as the other deciders.
@@ -513,19 +516,50 @@ def test_the_noul_decider_asks_the_noul_battery_not_the_shared_one(tmp_path, _no
         assert "Buy" not in payload["state"], "the report's own call was sent"
 
 
-def test_judge_tree_routes_a_noul_decider_to_the_noul_recipe(tmp_path, _noul_keyed):
-    """The roll-up key follows the decider: ``scores``, never ``ratings``.
+def test_the_three_class_questions_differ_only_in_the_class_word():
+    """The argmax is a fair comparison only if the three asks are otherwise
+    identical - otherwise one class is quietly asked an easier question."""
+    asks = {call: spec["instructions"] for call, spec in jev.NOUL_QUESTIONS.items()}
 
-    One key for both would invite reading a document statistic as a
-    buy/hold/sell call, which the probe says it is not.
-    """
+    assert list(asks) == list(jev.NOUL_CLASSES)
+    normalised = {text.replace(call.upper(), "<CLASS>") for call, text in asks.items()}
+    assert len(normalised) == 1, f"the per-class asks are not otherwise identical: {asks}"
+
+
+def test_noul_summary_takes_the_highest_class_and_reports_the_margin():
+    assert jev.noul_summary({"buy": 0.1, "hold": 0.4, "sell": 0.9}) == {
+        "rating": "sell", "margin": pytest.approx(0.5),
+    }
+
+
+def test_noul_summary_breaks_a_tie_by_the_declared_class_order():
+    """A tie must not be decided by whatever order the dict happens to hold."""
+    scores = {"sell": 0.5, "buy": 0.5, "hold": 0.1}   # dict order puts sell first
+
+    out = jev.noul_summary(scores)
+
+    assert out["rating"] == "buy", "the tie went to the dict's order, not ours"
+    assert out["margin"] == 0.0
+
+
+def test_noul_summary_refuses_a_label_when_a_class_did_not_answer():
+    """A partial response is not a call - the label is None, never a guess."""
+    assert jev.noul_summary({"buy": 0.9, "hold": None, "sell": 0.1}) == {
+        "rating": None, "margin": None,
+    }
+
+
+def test_the_noul_recipe_publishes_a_buy_hold_sell_label(tmp_path, monkeypatch):
+    """The re-battery: the label lands in the same slot the other two deciders
+    fill, so the three verdict files read alike."""
+    monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
+    monkeypatch.setattr(jev, "post_json", _Recorder(body=_noul_body(0.9, 0.2, 0.1)))
     tree = _tree(tmp_path)
 
     path, payload = jev.judge_tree(tree, key="sk-or-v1-test", decider=jev.DECIDERS[2])
 
     assert path == tree / jev.NOUL_VERDICT_FILENAME
-    assert "scores" in payload
-    assert "ratings" not in payload
+    assert {v["rating"] for v in payload["ratings"].values()} == {"buy"}
 
 
 def test_the_noul_recipe_is_best_effort_too(monkeypatch, tmp_path):
@@ -537,7 +571,7 @@ def test_the_noul_recipe_is_best_effort_too(monkeypatch, tmp_path):
 
     payload = json.loads((tree / jev.NOUL_VERDICT_FILENAME).read_text(encoding="utf-8"))
     assert payload["failures"] == 4
-    assert payload["scores"] == {}
+    assert payload["ratings"] == {}
 
 
 # ---------------------------------------------------------------------------

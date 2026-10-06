@@ -19,16 +19,20 @@ first two; the third's are its own, and they are not the same.
   decisions models on the **same** route - sent to ``/chat/completions`` they
   400 with the same "use /api/alpha/decisions" message - but they accept
   **only** ``noul``, and only with no ``criteria`` key at all: the buy/hold/sell
-  battery is refused with a 400 naming the question. That is why the third
-  decider has its own battery (:data:`NOUL_QUESTIONS`) and its own recipe rather
-  than the shared one. PROBED 2026-10-06, and it matters: its answers are
-  **deterministic** (repeat calls identical to nine significant figures), they
-  report ``output_tokens: 0`` (nothing is generated - the number is computed),
-  ``span-01-lite`` is **byte-identical** to ``span-01`` on every input tried,
-  and the number does **not** track the polarity it is asked for (a plainly
-  bullish document scored 0.0177 and a plainly bearish one 0.0202, where
-  ``typesafe/jev-1.13`` read the same pair as 0.84 vs 0.23). Read that file as a
-  fixed document statistic, never as a rating.
+  battery the other two share is refused with a 400 naming the question. So the
+  third decider **forces** the three-way rather than asking for it - one ``noul``
+  question per class (:data:`NOUL_QUESTIONS`, identical wording but for the class
+  word) and the label is the highest score (:func:`noul_summary`). PROBED
+  2026-10-06: that construction orders a bullish / bearish / neutral control 3 of
+  3, where a single 0-1 ``rating`` question does **not** - it returned 0.0179 for
+  the bullish document against 0.0191 for the bearish one, the wrong way round,
+  and no threshold separated the classes across 57 real reports. It is a **third
+  opinion, not a confirmation**: against labels the TypeSafe decider had already
+  fixed it agreed 23 of 36 times (buy 12/12, sell 6/12, **hold 5/12**), so a
+  close call is recorded as one - every entry carries its ``margin``. The answers
+  are **deterministic** (repeats identical to nine significant figures), they
+  report ``output_tokens: 0`` (nothing is generated - the numbers are computed),
+  and ``span-01-lite`` is **byte-identical** to ``span-01`` on every input tried.
 
 So this is not a summariser: it is a typed judge over a document.
 
@@ -221,33 +225,39 @@ RATING_QUESTIONS: dict[str, dict] = {
     "horizon": DEFAULT_QUESTIONS["horizon"],
 }
 
+#: The three answers the noul battery resolves to. The ORDER is load-bearing: an
+#: exact tie is broken by it, so the same document always yields the same label.
+NOUL_CLASSES: tuple[str, ...] = ("buy", "hold", "sell")
+
 #: The noul-only battery: the THIRD decider's ask, and the only shape Respan's
 #: decisions models accept. Both ``choice`` and ``score`` are a 400 there (the
 #: vendor's message names the offending question), so the buy/hold/sell battery
-#: cannot be asked of those models at all - and a ``noul`` question takes no
-#: ``criteria``, so the *instructions* are the only channel a scale has.
+#: the other two deciders share cannot be asked of those models at all.
 #:
-#: Read the answers as a document statistic, not as a rating: probed 2026-10-06,
-#: they are deterministic, they report ``output_tokens: 0``, and they do not
-#: follow the polarity written here (a plainly bullish document scored below a
-#: plainly bearish one). The instructions are still worth stating - they do move
-#: the number - but they do not make it a buy/hold/sell call.
+#: The three-way is therefore FORCED, not asked: one ``noul`` question per class,
+#: with identical wording but for the class word - which is what makes the argmax
+#: a fair comparison - and the label is the highest score
+#: (:func:`noul_summary`). Probed 2026-10-06: this construction orders a bullish
+#: / bearish / neutral control **3 of 3** (bullish 0.357 buy vs 0.176 hold;
+#: bearish 0.429 sell vs 0.408 hold; neutral 0.627 hold), where a single 0-1
+#: ``rating`` question did NOT - that returned 0.0179 for the bullish document
+#: and 0.0191 for the bearish one, the wrong way round, and no threshold
+#: separated the classes across 57 real reports.
+#:
+#: It is a **third opinion, not a confirmation**: on 36 report-stems whose label
+#: the TypeSafe decider had already fixed, the argmax agreed 23 times (**64%**) -
+#: buy 12/12, sell 6/12, hold 5/12 - so `hold` is the weak class and a close call
+#: should be read as one (every roll-up entry carries its ``margin``).
 NOUL_QUESTIONS: dict[str, dict] = {
-    "rating": {
+    call: {
         "type": "noul",
         "instructions": (
-            "On the evidence in this report alone, rate the ticker on a 0 to 1 "
-            "scale, where 0 means sell, 0.5 means hold and 1 means buy. Answer "
-            "with a single number."
+            f"How strongly does this report support a {call.upper()} call on the "
+            "ticker? Answer with a single number from 0 (no support at all) to 1 "
+            "(very strong support)."
         ),
-    },
-    "evidence": {
-        "type": "noul",
-        "instructions": (
-            "How strong is the evidence in this report? Answer with a single "
-            "number from 0 (no evidence) to 1 (very strong evidence)."
-        ),
-    },
+    }
+    for call in NOUL_CLASSES
 }
 
 #: One network boundary, injectable, so the parsing and the CLI are testable
@@ -506,8 +516,9 @@ class Decider:
     #: ``"rating"`` is the endpoint's full contract - a ``choice`` buy/hold/sell
     #: plus ``score`` evidence and horizon (:data:`RATING_QUESTIONS`).
     #: ``"noul"`` is the noul-only contract Respan's decisions models enforce:
-    #: they refuse ``choice`` and ``score`` outright, so the buy/hold/sell battery
-    #: cannot be asked of them and :data:`NOUL_QUESTIONS` is used instead.
+    #: they refuse ``choice`` and ``score`` outright, so the shared battery cannot
+    #: be asked of them and :data:`NOUL_QUESTIONS` is used instead - three
+    #: per-class questions whose argmax (:func:`noul_summary`) is the label.
     recipe: str = "rating"
 
 
@@ -534,7 +545,6 @@ def _battery_over_tree(
     key: str,
     stems: Sequence[str],
     questions: dict,
-    rollup: str,
     model: str,
     endpoint: str,
     timeout: float,
@@ -544,8 +554,9 @@ def _battery_over_tree(
 
     Returns ``(payload, answers)``, where ``answers`` is ``[(state_name, answers),
     ...]`` for the calls that came back - the recipe owns what those answers mean,
-    because a noul float and a choice/score record do not summarise the same way.
-    ``rollup`` names the payload key the caller fills with that summary.
+    because a noul class score and a choice/score record do not summarise the same
+    way. Both fill ``payload["ratings"]``: the per-stem headline is the same slot
+    in the file for every decider, which is what makes the three comparable.
 
     Never raises for a vendor failure - a failed call is recorded with the
     vendor's own message and counted. A post-run annotation must not be able to
@@ -559,7 +570,7 @@ def _battery_over_tree(
         "battery": list(questions),
         "stems": [name for name, _ in states],
         "neutralized": {},
-        rollup: {},
+        "ratings": {},
         "results": [],
         "failures": 0,
         "cost": 0.0,
@@ -612,7 +623,7 @@ def verdict_for_tree(
     recorded and counted, never raised - see :func:`_battery_over_tree`.
     """
     payload, answered = _battery_over_tree(
-        tree, key=key, stems=stems, questions=RATING_QUESTIONS, rollup="ratings",
+        tree, key=key, stems=stems, questions=RATING_QUESTIONS,
         model=model, endpoint=endpoint, timeout=timeout, poster=poster,
     )
     for name, answers in answered:
@@ -629,6 +640,26 @@ def verdict_for_tree(
     return payload
 
 
+def noul_summary(scores: dict) -> dict:
+    """The three-way label and its margin, from the per-class noul scores.
+
+    ``rating`` is the class with the highest score - or ``None``, because a class
+    that did not answer is not a call. An exact tie goes to the first name in
+    :data:`NOUL_CLASSES`, a declared order, so the same document always yields the
+    same label; ``margin`` (highest minus second-highest) is what tells a reader
+    the call was close. Measured over 36 real report-stems: median margin 0.154,
+    smallest 0.003, and 23 of the 36 labels agreed with the TypeSafe decider's.
+    """
+    values = [scores.get(call) for call in NOUL_CLASSES]
+    if any(v is None for v in values):
+        return {"rating": None, "margin": None}
+    top, second = sorted(values, reverse=True)[:2]
+    return {
+        "rating": max(NOUL_CLASSES, key=lambda call: scores[call]),
+        "margin": top - second,
+    }
+
+
 def noul_verdict_for_tree(
     tree: pathlib.Path | str,
     *,
@@ -642,21 +673,22 @@ def noul_verdict_for_tree(
     """The noul-only recipe: the same reports, neutralised the same way, but
     asked :data:`NOUL_QUESTIONS` - because Respan's decisions models refuse every
     other question type, so the shared battery is a 400 rather than a worse
-    answer.
+    answer. The three-way comes from :func:`noul_summary`.
 
-    The per-stem roll-up is ``payload["scores"][stem]``, one float per question
-    keyed by question id. Deliberately NOT a ``ratings`` block: a noul answer is a
-    computed document statistic, not a buy/hold/sell call, and one key for both
-    would invite reading it as one.
+    The per-stem roll-up is ``payload["ratings"][stem]``: the buy/hold/sell label,
+    the ``margin`` it won by, and the three class scores it was derived from. It is
+    the same slot the other two deciders fill, so the three verdict files read
+    alike and the raw numbers stay auditable - but read the label as a **third
+    opinion, not a confirmation**: it agreed with the TypeSafe decider on 23 of 36
+    already-labelled report-stems.
     """
     payload, answered = _battery_over_tree(
-        tree, key=key, stems=stems, questions=NOUL_QUESTIONS, rollup="scores",
+        tree, key=key, stems=stems, questions=NOUL_QUESTIONS,
         model=model, endpoint=endpoint, timeout=timeout, poster=poster,
     )
     for name, answers in answered:
-        payload["scores"][name] = {
-            qid: (answers.get(qid) or {}).get("noul") for qid in NOUL_QUESTIONS
-        }
+        scores = {call: (answers.get(call) or {}).get("noul") for call in NOUL_CLASSES}
+        payload["ratings"][name] = {**noul_summary(scores), **scores}
     return payload
 
 
