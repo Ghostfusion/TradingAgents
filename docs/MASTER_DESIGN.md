@@ -123,7 +123,8 @@ enforced by something, not merely stated.
    *detected* — `strategies/metric_reconcile.py`'s tool→metric index,
    `data_quality.disagreement_flag`, and the report verifier's basis ledger —
    and the enforcement is specified in
-   `docs/design_metric_authority_registry.md` (**DESIGN, not built**).
+   `docs/design_metric_authority_registry.md` (**DESIGN, not built**; its P4
+   gate, `enable_metric_authority`, is owner-approved 2026-10-05 and ships off).
 
 ---
 
