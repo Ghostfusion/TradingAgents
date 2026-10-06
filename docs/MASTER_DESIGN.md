@@ -117,6 +117,13 @@ enforced by something, not merely stated.
    computes it; every consumer reads that result rather than re-deriving it.
    This is what §11's "the §103 object is assembled once and read
    structurally" is an instance of.
+   Enforced by: `strategies/forecast_registry.py` for **forecast keys** (one
+   AUTHORITATIVE producer per key, every `implementation_ref` resolved against
+   the live tree at test time). For **measured inputs** it is today only
+   *detected* — `strategies/metric_reconcile.py`'s tool→metric index,
+   `data_quality.disagreement_flag`, and the report verifier's basis ledger —
+   and the enforcement is specified in
+   `docs/design_metric_authority_registry.md` (**DESIGN, not built**).
 
 ---
 
@@ -964,7 +971,7 @@ rediscover them.
 - Master/architecture: `master_design_original.md` (superseded),
   `master_implementation_plan.md`, `Conditional_Research_Overlays_Design.md`,
   `pre_market_review.md`, `review_parent_tauricradingagents.md`.
-- `design_*.md` (36): integrations (yfinance, finrl, qlib, openbb, webull,
+- `design_*.md` (37): integrations (yfinance, finrl, qlib, openbb, webull,
   fincept, hummingbot, ai_hedge_fund, myhhub, anthropic financial services,
   finnhub/yfinance/eodhd/moomoo unused-surface studies) and engines
   (`design_multi_agent_debate`, `design_decision_context`,
@@ -974,8 +981,12 @@ rediscover them.
   `design_shadow_account`, …), plus `design_quant_formulas_research{,_round2,_round3}`
   and `design_fin_paper_survey_26.md`, plus `design_forecasting_libraries.md`
   (the forecasting-library landscape, the evidence on what is actually forecastable in equities,
-  and the dependency-admission rule; plan: `implementation_plan_forecasting_libraries.md`).
-- `implementation_plan_*.md` (14) and `plan_*.md`, `execution_v1_emitter_plan.md`.
+  and the dependency-admission rule; plan: `implementation_plan_forecasting_libraries.md`),
+  plus `design_metric_authority_registry.md` (the design + plan for a manifest
+  naming **one canonical producer per *measured* metric** — the shape
+  `strategies/forecast_registry.py` already uses for forecast keys, lifted to the
+  measured inputs; the refusal semantics of `resolve_metric`; DESIGN, not built).
+- `implementation_plan_*.md` (13) and `plan_*.md`, `execution_v1_emitter_plan.md`.
 - `docs/paper_survey_26/`, `docs/research/scoring_round3/`,
   `remediation_{chatgpt,claude,gemini}.md`.
 
