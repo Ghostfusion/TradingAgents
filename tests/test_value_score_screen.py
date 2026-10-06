@@ -169,6 +169,133 @@ def test_a_name_that_passes_every_gate_is_kept_and_uncounted(monkeypatch):
     assert sum(fails.values()) == 0
 
 
+# --- the panel is the SCREEN's cross-section, not the intersection ----------
+#
+# Measured 2026-10-06 from the web app: 182 decliners, 6 candidates, and an
+# EMPTY report - because the percentile panel was built from the candidates
+# alone and the composite refuses a peer set below its floor (8 names,
+# factors.category_scores). The screen had already returned 808 matching names;
+# feeding that cross-section to the panel is what these tests defend. The same
+# run also silently cut those 808 to 600, because the page budget was derived
+# from --limit - a financials budget, not a bound on the universe.
+
+
+def _screen_args(**kw):
+    """The arg surface ``stage_value_screen`` reads."""
+    base = {"pe_max": 33.0, "min_mcap": 10e9, "roe_min": 0.0, "chg5d_max": 0.0,
+            "rsi_max": 0.0, "min_price": 15.0, "pb_max": 9.0, "limit": 10,
+            "date": "2026-10-06"}
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_the_screen_returns_its_whole_cross_section_beside_the_candidates(monkeypatch):
+    """``cross_section`` is EVERY screened row; ``candidates`` only the decliners."""
+    import tradingagents.dataflows.moomoo as mm
+
+    monkeypatch.setattr(mm, "screen_value_dip_moomoo", lambda **kw: [
+        {"symbol": "DOWN", "name": "Down Co", "price": 20.0},
+        {"symbol": "FLAT", "name": "Flat Co", "price": 30.0},
+    ])
+    monkeypatch.setattr(mm, "close_context", lambda: None)
+
+    candidates, cross_section = vss.stage_value_screen(_screen_args(), {"DOWN"})
+
+    assert [r["symbol"] for r in candidates] == ["DOWN"]
+    assert [r["symbol"] for r in cross_section] == ["DOWN", "FLAT"]
+
+
+def test_the_screen_page_budget_is_not_derived_from_the_limit(monkeypatch):
+    """``--limit`` is a financials budget; the screen fetches its whole result."""
+    import tradingagents.dataflows.moomoo as mm
+
+    seen: dict = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        return []
+
+    monkeypatch.setattr(mm, "screen_value_dip_moomoo", fake)
+    monkeypatch.setattr(mm, "close_context", lambda: None)
+
+    vss.stage_value_screen(_screen_args(limit=1), set())
+
+    assert seen["max_pages"] == vss.SCREEN_MAX_PAGES
+
+
+def test_the_panel_is_the_screens_cross_section_not_only_the_candidates(monkeypatch):
+    """A 1-candidate intersection over a 6-name screen still builds the panel."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+
+    panel = [{"symbol": s} for s in ("AAA", "BBB", "CCC", "DDD", "EEE", "FFF")]
+    kept, fins, _fails = vss.stage_ratios(
+        _ratio_args(), [{"symbol": "AAA", "price": 20.0}], {"AAA": -3.0},
+        panel_rows=panel,
+    )
+
+    assert set(fins) == {r["symbol"] for r in panel}
+    assert [r["symbol"] for r in kept] == ["AAA"]
+
+
+def test_a_panel_name_is_fetched_but_never_gated(monkeypatch):
+    """The panel is the denominator, not a candidate: its drops are not counted."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin(market_cap=4e9))
+
+    kept, fins, fails = vss.stage_ratios(
+        _ratio_args(), [{"symbol": "CAND", "price": 20.0}], {"CAND": -3.0},
+        panel_rows=[{"symbol": "PEER"}, {"symbol": "CAND"}],
+    )
+
+    assert "PEER" in fins
+    assert fails["cap"] == 1, "the below-floor PEER is not one of the counted drops"
+    assert kept == []
+
+
+def test_a_candidate_outside_the_limit_window_is_still_fetched_and_gated(monkeypatch):
+    """``--limit`` bounds the panel fetch; it never drops a candidate."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+
+    panel = [{"symbol": f"P{i:02d}"} for i in range(10)]
+    kept, fins, _fails = vss.stage_ratios(
+        _ratio_args(limit=2), [{"symbol": "LATE", "price": 20.0}], {"LATE": -3.0},
+        panel_rows=panel,
+    )
+
+    assert set(fins) == {"P00", "P01", "LATE"}, "the window bounds the panel fetch"
+    assert [r["symbol"] for r in kept] == ["LATE"]
+
+
+def test_without_a_screen_the_candidates_are_the_cross_section(monkeypatch):
+    """The ``--no-moomoo`` path is unchanged: the day filter IS the panel."""
+    monkeypatch.setattr(vss, "_fetch_fin_cached", lambda t, d: _fin())
+
+    rows = [{"symbol": "A", "price": 20.0}, {"symbol": "B", "price": 20.0}]
+    kept, fins, _fails = vss.stage_ratios(_ratio_args(), rows, {"A": -3.0, "B": -3.0})
+
+    assert set(fins) == {"A", "B"}
+    assert [r["symbol"] for r in kept] == ["A", "B"]
+
+
+def test_an_unscored_candidate_is_not_reported_as_having_cleared_nothing():
+    """0 scored is not "N scored, none cleared" - nothing was ever scored."""
+    out = vss.render(
+        _rows("ONLY"), {}, {"ONLY": "cross-section too small (needs >= 2 names)"},
+        {}, _tech_args(tech_score_min=0.0), "",
+        "this run's fetched cross-section (too small)",
+    )
+
+    assert "No candidate could be scored" in out
+    assert "None of the 1 scored candidate(s)" not in out
+
+
+def test_a_scored_candidate_that_misses_the_cut_is_counted_as_scored():
+    """The other side: scored, below the cut, and the sentence says how many."""
+    out = vss.render(_rows("A", "B"), {"A": 10.0, "B": 20.0}, {}, {},
+                     _tech_args(tech_score_min=0.0), "", "panel")
+
+    assert "None of the 2 scored candidate(s) cleared" in out
+
+
 def test_the_report_lands_under_its_own_prefix_and_spares_the_sibling(
     tmp_path, monkeypatch
 ):

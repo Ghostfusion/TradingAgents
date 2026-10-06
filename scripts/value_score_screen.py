@@ -108,6 +108,14 @@ NEAREST_PUBLISHED_EDGES = (60.0, 65.0)
 #: interchangeable, and before 2026-09-25 whichever ran last deleted the other's.
 VALUE_SCORE_PREFIX = "value_score_"
 
+#: Safety cap on the server screen's pages (200 rows each). The screen's result
+#: is the PANEL's cross-section, so it must not be truncated by ``--limit`` -
+#: that is a financials budget, not a bound on the universe, and deriving the
+#: page count from it silently cut 808 matching names to 600 at the default 60.
+#: ``last_page`` ends the loop in practice (808 rows on 2026-10-06); this only
+#: stops a bounds-free screen (``--min-mcap 0``) from paging the whole market.
+SCREEN_MAX_PAGES = 25
+
 #: Accepted renderings of the United States in the domicile gate, normalized to
 #: lower case. Yahoo renders the country NAME (``"United States"``) for a US
 #: issuer, but a vendor variant would otherwise be read as foreign, so the
@@ -216,7 +224,7 @@ def stage_decliners(args) -> tuple[dict, set]:
 # --------------------------------------------------------------------------
 
 
-def stage_value_screen(args, universe: set) -> list:
+def stage_value_screen(args, universe: set) -> tuple[list, list]:
     """Rows from moomoo Screening V2 meeting mcap/P-E/P-B, intersected with Stage 0.
 
     ``roe_min`` / ``chg5d_max`` / ``rsi_max`` are the owner's extra anchors. The
@@ -225,6 +233,14 @@ def stage_value_screen(args, universe: set) -> list:
     disables any of the three. ``exchanges`` is deliberately NOT passed to the
     screen: Stage 0's EODHD symbol list already gates NYSE/Nasdaq for one cached
     call, where the screen's own gate costs one ``get_stock_basicinfo`` per row.
+
+    :returns: ``(candidates, cross_section)``. ``candidates`` also cleared Stage
+        0's day filter; ``cross_section`` is EVERY row the screen returned
+        (deduped, non-equity filtered) and is what the percentile PANEL is built
+        from. The two differ whenever the screen is wider than the day filter -
+        the common case - and paneling on the intersection alone is what starved
+        the composite below its peer floor on 2026-10-06 (182 decliners, 6
+        candidates, an empty report).
     """
     from tradingagents.dataflows.moomoo import (
         MoomooNotConfiguredError,
@@ -249,7 +265,9 @@ def stage_value_screen(args, universe: set) -> list:
             dip_days=5,
             exchanges=None,        # Stage 0's EODHD list gates exchange, for free
             page_count=200,
-            max_pages=max(1, -(-args.limit * 8 // 200)),
+            # The panel's cross-section, so fetch the screen's WHOLE result:
+            # --limit is a financials budget, never a bound on the universe.
+            max_pages=SCREEN_MAX_PAGES,
         )
     except MoomooNotConfiguredError as exc:
         raise SystemExit(f"moomoo screen unavailable: {exc}") from exc
@@ -258,20 +276,22 @@ def stage_value_screen(args, universe: set) -> list:
             close_context()
     _bump("moomoo screen V2 (paginated)")
 
-    out, seen = [], set()
+    out, cross_section, seen = [], [], set()
     for row in rows:
         if _is_non_equity(row.get("name")):
             continue
         sym = str(row.get("symbol") or "").upper()
-        if not sym or sym in seen or sym not in universe:
+        if not sym or sym in seen:
             continue
         seen.add(sym)
         row["symbol"] = sym
-        out.append(row)
-    logger.info("value screen: %d rows meet mcap>=%.0fB, 0<P/E<=%.0f, P/B<=%.0f "
-                "and are down on the day", len(out), args.min_mcap / 1e9,
-                args.pe_max, args.pb_max)
-    return out
+        cross_section.append(row)
+        if sym in universe:
+            out.append(row)
+    logger.info("value screen: %d of %d screened rows are also down on the day "
+                "(mcap>=%.0fB, 0<P/E<=%.0f, P/B<=%.0f)", len(out),
+                len(cross_section), args.min_mcap / 1e9, args.pe_max, args.pb_max)
+    return out, cross_section
 
 
 # --------------------------------------------------------------------------
@@ -340,56 +360,95 @@ def stage_domicile(args, rows: list) -> tuple[list, dict]:
 # --------------------------------------------------------------------------
 
 
-def stage_ratios(args, rows: list, change: dict) -> tuple[list, dict, dict]:
+def _ensure_operating_cashflow(sym: str, fin: dict, args) -> None:
+    """Supply ``fin["operating_cashflow"]`` from the annual cash-flow statement.
+
+    ``fetch_ticker`` does not pull a cash-flow statement, so a large share of
+    names arrive without the leg. One annual fetch per name, cached for the run
+    and parsed by the engine's own canonicalizer, supplies it; a name whose OCF
+    stays missing is not repaired - the P/CF gate fails it closed, and the panel
+    simply carries no ``accruals`` / ``fcf_yield`` for it.
+    """
+    if (_f(fin.get("operating_cashflow")) is not None
+            or _f(fin.get("operating_cashflow_ttm")) is not None):
+        return
+    _bump("per-name cash-flow statement")
+    try:
+        cf_key = (sym.upper(), args.date)
+        if cf_key not in _CASHFLOW_CACHE:
+            _CASHFLOW_CACHE[cf_key] = route_to_vendor(
+                "get_cashflow", sym, "annual", args.date
+            )
+        canonical = _canonicalize(_CASHFLOW_CACHE.get(cf_key) or "")
+        ocf = _f((canonical or {}).get("operating_cashflow"))
+        if ocf is not None:
+            fin["operating_cashflow"] = ocf
+    except Exception as exc:  # noqa: BLE001 - a missing leg is a gate failure
+        logger.info("cash-flow leg unavailable for %s: %s", sym, exc)
+
+
+def stage_ratios(args, rows: list, change: dict, *,
+                 panel_rows: list | None = None) -> tuple[list, dict, dict]:
     """Apply P/S and P/CF client-side; keep the financials for the scoring pass.
 
     ``compute_ratios`` never fabricates: a ratio whose input is missing comes
     back ``None``, and a ``None`` bound fails CLOSED here (the name is dropped
     and counted), never treated as a pass.
+
+    ``panel_rows`` is the CROSS-SECTION the percentile panel is built from - the
+    server screen's own result, which is wider than the candidates whenever the
+    day filter is narrower than the screen. Every name in it is fetched (one
+    ``fetch_ticker`` each, memoized, so a candidate costs one fetch and not two)
+    and enters ``fin_by_ticker``; only the CANDIDATES run the ratio gates.
+    ``--limit`` bounds how many panel names are fetched, and every candidate is
+    fetched even when it falls outside that window. Without ``panel_rows`` the
+    candidates ARE the cross-section (the ``--no-moomoo`` path, where the day
+    filter is the only narrowing).
     """
+    panel = list(panel_rows) if panel_rows is not None else list(rows)
+    candidates = {row["symbol"] for row in rows}
+    # Panel first - it is the percentile's denominator - then any candidate the
+    # --limit window did not already cover: a candidate is never dropped by it.
+    order, queued = [], set()
+    for row in list(panel[: args.limit]) + list(rows):
+        sym = row["symbol"]
+        if sym not in queued:
+            queued.add(sym)
+            order.append(row)
+
     kept, fin_by_ticker, fails = [], {}, {"ps": 0, "pcf": 0, "pe": 0, "pb": 0,
                                           "cap": 0, "no_fin": 0}
-    for row in rows[: args.limit]:
+    for row in order:
         sym = row["symbol"]
+        is_candidate = sym in candidates
         try:
             fin = _fetch_fin_cached(sym, args.date)
         except Exception as exc:  # noqa: BLE001 - one name never aborts the screen
             logger.info("skip %s: financials unavailable (%s)", sym, exc)
-            fails["no_fin"] += 1
+            if is_candidate:
+                fails["no_fin"] += 1
             continue
         if not isinstance(fin, dict):
-            fails["no_fin"] += 1
+            if is_candidate:
+                fails["no_fin"] += 1
             continue
         _bump("per-name financials")
 
-        # P/CF needs the cash-flow statement, and fetch_ticker does not pull one
-        # (its payloads are fundamentals, balance sheet and income statement), so
-        # the canonical items arrive without operating_cashflow and P/CF is
-        # uncomputable for EVERY name. One annual cash-flow fetch per name, cached
-        # for the run and parsed by the engine's own canonicalizer, supplies it; a
-        # name whose OCF stays missing then fails the P/CF gate below rather than
-        # passing unscored.
-        if (_f(fin.get("operating_cashflow")) is None
-                and _f(fin.get("operating_cashflow_ttm")) is None):
-            _bump("per-name cash-flow statement")
-            try:
-                cf_key = (sym.upper(), args.date)
-                if cf_key not in _CASHFLOW_CACHE:
-                    _CASHFLOW_CACHE[cf_key] = route_to_vendor(
-                        "get_cashflow", sym, "annual", args.date
-                    )
-                canonical = _canonicalize(_CASHFLOW_CACHE.get(cf_key) or "")
-                ocf = _f((canonical or {}).get("operating_cashflow"))
-                if ocf is not None:
-                    fin["operating_cashflow"] = ocf
-            except Exception as exc:  # noqa: BLE001 - a missing leg is a gate failure
-                logger.info("cash-flow leg unavailable for %s: %s", sym, exc)
+        # P/CF needs the cash-flow statement (see the helper), and the panel's
+        # own metrics read the same leg - so every fetched name gets it, panel
+        # names included, or the percentile would rank the candidates against
+        # peers that carry no accruals.
+        _ensure_operating_cashflow(sym, fin, args)
 
         # Every FETCHED name enters the panel, not only those that pass the ratio
         # gates: the composite is a cross-sectional percentile and the engine
         # refuses a peer set below its own floor, so the panel is the whole
         # fetched cross-section and the survivors are READ OUT of it.
         fin_by_ticker[sym] = fin
+        if not is_candidate:
+            # A panel name: it is here for the percentile's denominator, so it
+            # is never gated and never reaches the table.
+            continue
 
         caps = compute_ratios(fin, price=_f(row.get("price")))
         ps, pcf = _f(caps.get("price_to_sales")), _f(caps.get("price_to_cash_flow"))
@@ -739,10 +798,16 @@ def render(kept: list, scores: dict, withheld: dict, subs: dict,
             _row_cells(row, scores, subs, tech, tech_on)) + " |")
     if not qual:
         # The cut is the owner's criterion, so an empty result must say so and
-        # name the best few rather than printing an empty table in silence.
+        # name the best few rather than printing an empty table in silence. The
+        # sentence counts the SCORED candidates, never the candidate list: with
+        # none scored (a panel below the engine's peer floor) "none cleared the
+        # cut" reads as a verdict on names that were never scored at all.
         best = ", ".join(f"{r['symbol']} {scores[r['symbol']]:.2f}" for r in below[:3])
-        lines += ["", f"**None of the {len(rows)} scored candidate(s) cleared "
-                  f"{cuts}.**"
+        if scored_n:
+            head = f"**None of the {scored_n} scored candidate(s) cleared {cuts}.**"
+        else:
+            head = f"**No candidate could be scored, so nothing clears {cuts}.**"
+        lines += ["", head
                   + (f" Highest on the fundamental cut: {best}." if best else "")
                   + (f" {len(miss)} withheld." if miss else "")
                   + (f" {len(tech_below)} fell below the {tech_min:g} technical "
@@ -913,7 +978,10 @@ def main(argv: list[str] | None = None) -> int:
                              "its per-name OHLCV fetch). A name whose composite "
                              "cannot be measured is withheld, never passed")
     parser.add_argument("--limit", type=int, default=60,
-                        help="max names to fetch financials for (default 60)")
+                        help="max names to fetch financials for - the size of "
+                             "the percentile PANEL, which is the server "
+                             "screen's own cross-section, not only the "
+                             "candidates (default 60)")
     parser.add_argument("--top", type=int, default=40, help="rows to render (default 40)")
     parser.add_argument("--min-price", type=float, default=15.0,
                         help="price floor for the bulk feed and the screen (default 15)")
@@ -959,8 +1027,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[--no-moomoo] server screen skipped; taking the {len(deepest)} "
               f"deepest decliners as the candidate set.")
         rows = [{"symbol": s, "change_p": change.get(s)} for s in deepest]
+        # No server screen: the day filter IS the cross-section.
+        panel_rows = None
     else:
-        rows = stage_value_screen(args, set(change))
+        rows, panel_rows = stage_value_screen(args, set(change))
     if not rows:
         print("no candidates: nothing met both the day filter and the screen.")
         return 0
@@ -975,7 +1045,12 @@ def main(argv: list[str] | None = None) -> int:
         if not rows:
             print("no candidates after the domicile gate (--exclude-foreign).")
             return 0
-    kept, fin_by_ticker, fails = stage_ratios(args, rows, change)
+    kept, fin_by_ticker, fails = stage_ratios(args, rows, change,
+                                              panel_rows=panel_rows)
+    print(f"[panel] {len(fin_by_ticker)} name(s) form the percentile's "
+          "cross-section"
+          + (" (the server screen's own result, wider than the candidates)"
+             if panel_rows else " (the day filter's own result)"))
     print(f"[funnel] decliners {len(change)} -> candidates {len(rows)} -> "
           f"passed the ratio gates {len(kept)} (dropped: {fails['pe']} on P/E, "
           f"{fails['pb']} on P/B, {fails['ps']} on P/S, {fails['pcf']} on P/CF, "

@@ -238,6 +238,34 @@ Cost: `fundamental_score` measured at **0.600 ms** for a 10-peer panel and 1.9 m
 (synthetic fixture, no I/O); a few thousand rows is sub-second. The panel itself is where the money
 went, and it was paid once per date (§6).
 
+**AMENDED 2026-10-06 — without `--panel`, the run's cross-section is now the SERVER SCREEN's own
+result, not the candidate intersection.** The paragraph above was written when the panel could only
+be "every name stage 2 pulled financials for", and stage 2 saw only the candidates. Measured from
+the web app that day: **182 decliners → 5 candidates → 1** after `--exclude-foreign`, so the panel
+was 1-5 names, `min_peers = 8` refused every sub-score, and the report was empty in 9 s — while
+Stage 1 had already returned **808** matching names for one vendor call. The constraint above is
+what makes that a defect rather than a preference: the panel must be WIDER than the survivors, and
+the screen's own result is both wider and free. `stage_value_screen` now returns
+`(candidates, cross_section)`; `stage_ratios(..., panel_rows=)` fetches every cross-section name
+(memoized, so a candidate costs one `fetch_ticker` and not two), enters it into `fin_by_ticker` and
+gates **only the candidates**. `--limit` is the panel's fetch budget and every candidate is fetched
+even when it falls outside that window. `--no-moomoo` passes no `panel_rows`, so the day filter's own
+result is the cross-section exactly as before.
+
+Two further defects were fixed in the same commit, both found while reproducing this. The screen's
+page budget was derived from `--limit` (`max_pages=max(1, -(-args.limit * 8 // 200))`), so the
+**default** 60 fetched 600 of the 808 matching names — a financials budget was bounding the universe;
+it is now `SCREEN_MAX_PAGES = 25` (5,000 rows), a safety cap only, since `last_page` ends the loop in
+practice. And §4.6's "an empty result always states that nothing cleared the cut" was stating it about
+names that were never scored: `render` counted the candidate LIST, so a below-floor panel printed
+`None of the 1 scored candidate(s) cleared the 50 cut` beside `0 of 1 candidates scored`. It now counts
+the scored candidates and reads `No candidate could be scored, so nothing clears the 50 cut` when
+there were none.
+
+The control run for all three: the reported parameters plus `--no-moomoo` → **202 decliners → 169
+US-domiciled candidates → a 169-name panel → 4 scored → 3 clear the 50 cut** (CPRT 68.17, FOXA 68.17,
+CHRW 59.76) in **500 s** — the "few minutes" the owner expected.
+
 ### 4.6 Output
 
 Ranked markdown via `value_screener.save_watchlist` into
