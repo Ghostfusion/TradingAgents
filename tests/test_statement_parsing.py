@@ -725,6 +725,45 @@ def test_sec_annual_series_maps_labels_and_derives_the_untagged_rows(monkeypatch
 
 
 @pytest.mark.unit
+def test_a_filer_that_switches_its_capex_tag_keeps_both_halves(monkeypatch):
+    """AMZN 2026-10-05. A filer that abandons a us-gaap concept mid-history must
+    not have its capex series stop at the switch: with only the first tag the
+    series ended at FY2016, and ``ratios.sbc_adjusted_fcf`` - which pairs the
+    NEWEST value of each series - subtracted a nine-year-old capex from a
+    current-year operating cash flow and published FCF 132,777M against a true
+    7,695M. The merge is by period end, so the two tags' halves join."""
+    _patch_sec(monkeypatch, _sec_facts({
+        # The abandoned concept: the filer used it only through 2023.
+        "PaymentsToAcquirePropertyPlantAndEquipment": _sec_rows(
+            _YEARS[:3], lambda y: 2e9
+        ),
+        # The replacement: 2023 overlaps, 2024-2026 are only here.
+        "PaymentsToAcquireProductiveAssets": _sec_rows(
+            _YEARS[2:], lambda y: 30e9
+        ),
+        "NetCashProvidedByUsedInOperatingActivities": _sec_rows(
+            _YEARS, lambda y: (y - 2020) * 15e9
+        ),
+    }))
+    got = sp.sec_annual_series("TST")
+
+    # Both halves are present, so the series reaches the newest year.
+    assert got["capex_series"]["years"] == list(_YEARS)
+    assert got["capex_series"]["values"][-1] == pytest.approx(30e9)
+    assert got["capex_series"]["values"][0] == pytest.approx(2e9)
+    # 2023 is in both: the earliest candidate wins it, so the series is continuous.
+    assert got["capex_series"]["values"][2] == pytest.approx(2e9)
+
+    # The end-to-end pin: the consumer pairs the newest OCF with the newest capex.
+    from tradingagents.strategies.ratios import sbc_adjusted_fcf
+
+    got["sbc_series"] = {"values": [1e9] * len(_YEARS), "years": list(_YEARS)}
+    fcf = sbc_adjusted_fcf(got)
+    assert fcf["reported_fcf"] == pytest.approx(90e9 - 30e9)
+    assert got["fcf_series"]["values"][-1] == pytest.approx(90e9 - 30e9)
+
+
+@pytest.mark.unit
 def test_sec_annual_series_carries_the_share_based_compensation_row(monkeypatch):
     """ValuationScore §55's input: the cash-flow add-back reaches the canonical
     ``sbc_series`` (it is what ``ratios.sbc_adjusted_fcf`` reads on the

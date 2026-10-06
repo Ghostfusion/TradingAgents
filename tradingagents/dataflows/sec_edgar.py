@@ -86,7 +86,20 @@ _TAG_MAP = {
     "Research and development": ("ResearchAndDevelopmentExpense",),
     "Gross profit": ("GrossProfit",),
     "Operating cash flow": ("NetCashProvidedByUsedInOperatingActivities",),
-    "Capex (-)": ("PaymentsToAcquirePropertyPlantAndEquipment",),
+    # Capex: filers switch the concept mid-history, exactly like revenue. AMZN
+    # filed ``PaymentsToAcquirePropertyPlantAndEquipment`` through FY2016 and
+    # ``PaymentsToAcquireProductiveAssets`` from FY2016 on (probed 2026-10-05:
+    # the first tag's newest 10-K annual fact is FY2016 = 6,737M, the second's
+    # is FY2025 = 131,819M). With only the first tag the series STOPPED at
+    # FY2016, so every consumer that read its newest value read a nine-year-old
+    # capex - and ``ratios.sbc_adjusted_fcf`` paired it with a current-year OCF,
+    # publishing FCF 132,777M for AMZN against a true 7,695M. The two tags
+    # disagree for FY2016 (6,737M vs 7,804M), so the earliest candidate keeps
+    # winning that year and the merged series stays continuous.
+    "Capex (-)": (
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+    ),
     # Share-based compensation: the ONE us-gaap tag whose definition is the
     # cash-flow statement's non-cash add-back ("aggregate amount of noncash,
     # equity-based employee remuneration ... an add back when calculating net

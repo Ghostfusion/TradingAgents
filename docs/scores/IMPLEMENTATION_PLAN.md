@@ -202,9 +202,11 @@ EBITDA, FCF** and on the 5-period bar. `sec_edgar.get_financial_history:565` is
 the only free source that clears it, and it does not feed the path.
 
 **What exists, verified at the definition site.** `sec_edgar.py`:
-`_TAG_MAP:56-65` holds **eight** labels over **eleven** candidate us-gaap tags
-(Revenue ×2, NetIncomeLoss, NetCashProvidedByUsedInOperatingActivities,
-PaymentsToAcquirePropertyPlantAndEquipment, Assets, Liabilities,
+`_TAG_MAP:56-65` holds **eight** labels over **twelve** candidate us-gaap tags
+(Revenue ×2, Capex ×2 - `PaymentsToAcquireProductiveAssets` joined
+`PaymentsToAcquirePropertyPlantAndEquipment` on 2026-10-05, when AMZN was found
+to have abandoned the first tag at FY2016 - NetIncomeLoss,
+NetCashProvidedByUsedInOperatingActivities, Assets, Liabilities,
 StockholdersEquity, CashAndCashEquivalentsAtCarryingValue);
 `_COMPANYCONCEPT_URL:66` is `.../companyconcept/CIK{cik:010d}/us-gaap/{tag}.json`,
 called **once per tag** in a nested loop (`:206-215`); the function returns a
