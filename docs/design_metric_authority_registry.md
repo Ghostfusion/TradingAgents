@@ -1,8 +1,10 @@
 # Design: The metric authority registry — one canonical producer per measured metric
 
-Status: **DESIGN — not built.** Phases P1–P4 below are unbuilt; nothing here is
-implemented yet. This doc is the *design + implementation plan* for a **manifest
-and one resolver**, not a new reconciliation engine.
+Status: **BUILT** (P1–P4 landed 2026-10-06: `strategies/metric_authority.py`,
+`tests/test_metric_authority.py`, and the `enable_metric_authority` gate — which
+ships **off**). This doc is the *design + implementation plan* for a **manifest
+and one resolver**, not a new reconciliation engine; the as-built deviations from
+the plan below are named at the end of §4.
 **Rule-4 impact:** none for P1–P3 (a manifest plus one resolver; no tool, no gate,
 no report key, no screener column). P4 names its own gate and takes the seven-point
 registration surface.
@@ -193,6 +195,27 @@ consistently across all seven registration locations; the registry coverage coun
 is updated; generated API documentation is regenerated rather than hand-edited;
 the live `.env` reflects the owner's actual runtime setting.
 
+**As built (2026-10-06).** The seed is the five numbers, each with the owner's
+basis: `price` ← `dataflows/stockstats_utils.py::load_ohlcv` (the price **value**'s
+producer — the plan's example named `price_caliber_for`, which produces the
+*caliber*, not the number, so the row names the number's producer and records the
+caliber in its `basis`); `p_e` ← `strategies/ratios.py::compute_ratios` (the
+engine's basis, owner 2026-10-05; the vendor field is a labelled `fallback`);
+`cash` ← `dataflows/statement_parsing.py::fetch_ticker` (tag
+`CashAndCashEquivalents`); `fcf` ← `dataflows/statement_parsing.py::_add_derived_series`;
+`entry_ceiling` ← `strategies/entry_ceiling.py::entry_ceiling` (§103's
+`max_entry_price`). **P3 wired two consumers, both GATED so a gate-off path is
+byte-identical:** `trade_plan.build_trade_plan` publishes its entry ceiling through
+`resolve_metric("entry_ceiling")` (the two-ceilings fix), and
+`metric_reconcile.reconcile_metrics` attaches the authority column with
+`render_reconcile` naming the canonical on a conflict. **NOT wired:
+`trade_plan.measured_inputs`** — its inputs (`technical_price` / `execution_spread`
+/ `fair_value`) are not in the seed, and because the gate refuses any metric with
+no named producer, wiring it today would suppress them. The rule that follows:
+**a consumer may be wired only once the registry covers its whole metric
+vocabulary** — the P2 expansion step (this is the §3/candidate-name mismatch the
+plan did not resolve).
+
 ---
 
 ## 5. The four defects, mapped
@@ -253,13 +276,17 @@ turns it red.
 
 ---
 
-## 9. Open owner decisions
+## 9. Owner decisions
 
-1. **`p_e` canonical basis** — the engine's 30.01 (TTM excludes the vendor's
-   partial quarter) or the vendor's 20.33 (includes it)?
-2. **`cash` canonical tag** — `CashAndCashEquivalents` (net debt 66,177M) or
-   `CashCashEquivalentsAndShortTermInvestments` (net debt 29,960M)?
-3. **`entry_ceiling` canonical producer.**
+1. **RESOLVED (owner).** `p_e` canonical basis = the **engine**
+   (`ratios.compute_ratios`, 30.01) — the repo's own reproducible TTM. The vendor
+   `trailingPE` (20.33) becomes a labelled *fallback/diagnostic*, never authoritative.
+2. **RESOLVED (owner).** `cash` canonical tag = **`CashAndCashEquivalents`**
+   (net debt 66,177M); the short-term-investments tag is a labelled fallback.
+3. **RESOLVED (owner).** `entry_ceiling` canonical producer = the **§103 card's
+   `max_entry_price`** (§100's min-of-terms; FNF 40.68), i.e.
+   `strategies/entry_ceiling.py::entry_ceiling`. The 38.17 the Trader's
+   computed-verification line cites is not the authority.
 4. **RESOLVED (owner, 2026-10-05).** P4's gate is **approved**: `enable_metric_authority`
    is a fail-closed publication gate, **off by default**, off-path byte-identical,
    on-path refusing to publish any metric that lacks a named, registered producer

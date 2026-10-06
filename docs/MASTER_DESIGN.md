@@ -123,8 +123,8 @@ enforced by something, not merely stated.
    *detected* — `strategies/metric_reconcile.py`'s tool→metric index,
    `data_quality.disagreement_flag`, and the report verifier's basis ledger —
    and the enforcement is specified in
-   `docs/design_metric_authority_registry.md` (**DESIGN, not built**; its P4
-   gate, `enable_metric_authority`, is owner-approved 2026-10-05 and ships off).
+   `docs/design_metric_authority_registry.md` (**BUILT 2026-10-06**; its P4
+   gate, `enable_metric_authority`, is owner-approved and ships off).
 
 ---
 
@@ -986,7 +986,7 @@ rediscover them.
   plus `design_metric_authority_registry.md` (the design + plan for a manifest
   naming **one canonical producer per *measured* metric** — the shape
   `strategies/forecast_registry.py` already uses for forecast keys, lifted to the
-  measured inputs; the refusal semantics of `resolve_metric`; DESIGN, not built).
+  measured inputs; the refusal semantics of `resolve_metric`; built 2026-10-06).
 - `implementation_plan_*.md` (13) and `plan_*.md`, `execution_v1_emitter_plan.md`.
 - `docs/paper_survey_26/`, `docs/research/scoring_round3/`,
   `remediation_{chatgpt,claude,gemini}.md`.

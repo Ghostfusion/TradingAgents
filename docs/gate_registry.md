@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers.** The rows below are every policy, data-surface and
-context gate: **all 115 of the 115 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+context gate: **all 116 of the 116 `enable_*` keys** in `DEFAULT_CONFIG`, plus
 the numeric limits and the always-on checks. R4 stage 2 registered the last six
 families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
 the factor-model family (§7g), the event family (§7h), the vendor and screener
@@ -414,6 +414,7 @@ research flags. None can change a rating, a size or a verdict.
 | `enable_preopen_rvol` | `TRADINGAGENTS_ENABLE_PREOPEN_RVOL` | adds the pre-open RVOL and gap advisory lines to the computed decision context | `tradingagents/graph/trading_graph.py::_compiled_decision_context` | `tradingagents/graph/trading_graph.py::_compiled_decision_context` (the gate read; the tests set it off) | wired |
 | `enable_strategy_overlays` | `TRADINGAGENTS_ENABLE_STRATEGY_OVERLAYS` | builds the regime / sizing overlay and folds it into the run state; off returns the state unchanged | `tradingagents/graph/trading_graph.py::_apply_strategy_overlays`, `tradingagents/strategies/overlays.py::build_strategy_overlays` | `test_strategies_overlays.py::test_overlay_disabled_returns_none`, `::test_overlay_builds_context` | wired |
 | `enable_topk_drop` | `TRADINGAGENTS_ENABLE_TOPK_DROP` | the top-k drop allocation path in `allocation_block` | `tradingagents/strategies/portfolio.py::allocation_block` | `test_qlib_wiring.py::test_topk_drop_flag` | wired |
+| `enable_metric_authority` | `TRADINGAGENTS_ENABLE_METRIC_AUTHORITY` | a fail-closed PUBLICATION gate — when on, a measured metric with no named, registered producer publishes `unavailable` instead of a value (never a legacy fallback); when off (the shipped default) every read is unchanged | `tradingagents/strategies/metric_authority.py`::`_metric_authority_on` (the read) → `resolve_metric`, wired at `tradingagents/strategies/trade_plan.py`::`_authoritative_ceiling` and `tradingagents/strategies/metric_reconcile.py`::`_metric_authority_enabled` | `test_metric_authority.py::test_the_gate_off_is_unchanged_and_on_fails_closed` | wired |
 | `enable_tuner` | `TRADINGAGENTS_ENABLE_TUNER` | **intended**: gate the hyper-parameter grid-search front-end (`scripts/tuner.py`) so the gate still decides — **no code reads it** | — (no read site) | `scripts/tuner.py` (its docstring names the flag; the read-site scan finds no reader) | inert |
 | `enable_value_dip` | `TRADINGAGENTS_ENABLE_VALUE_DIP` | **intended**: gate the value-dip screener / tool surface — **no code reads it** (the `--scan value-dip` mode is selected by the CLI flag, not this key) | — (no read site) | `scripts/value_screener.py` (the `value-dip` scan mode; no code reads `enable_value_dip`) | inert |
 

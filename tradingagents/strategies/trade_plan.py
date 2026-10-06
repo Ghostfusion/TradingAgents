@@ -67,6 +67,36 @@ def _num(v, nd: int = 2) -> str:
         return str(v)
 
 
+def _authoritative_ceiling(ceiling: dict, config: dict | None = None) -> dict:
+    """Publish the entry ceiling only through the metric authority registry.
+
+    With ``enable_metric_authority`` OFF (the shipped default) this is a no-op:
+    the ceiling is returned unchanged, so the card is byte-identical. With it ON,
+    ``entry_ceiling`` must resolve to an admitted producer - the §103 card's own
+    ``entry_ceiling`` - or the ceiling reads ``unavailable`` rather than a number.
+    That is the registry's fix for the two-ceilings defect (design doc §5): ONE
+    producer is named, and a stray value cannot be published as the ceiling.
+    """
+    try:
+        from tradingagents.strategies.metric_authority import resolve_metric
+
+        resolution = resolve_metric("entry_ceiling", config=config)
+    except Exception:  # noqa: BLE001 - a registry read must never break the card
+        return ceiling
+    if resolution.get("status") == "ok":
+        return ceiling
+    out = dict(ceiling)
+    out["value"] = None
+    out["status"] = "NO_SOURCE"
+    out["binding_source"] = None
+    out["reason"] = (
+        "no authoritative entry ceiling named: "
+        f"{resolution.get('status')}"
+        + (f" ({resolution.get('reason_code')})" if resolution.get("reason_code") else "")
+    )
+    return out
+
+
 def build_trade_plan(
     *,
     ticker: str,
@@ -150,6 +180,9 @@ def build_trade_plan(
         expected_return_ceiling=expected_return_ceiling,
         rr_ceiling=rr_ceiling,
     )
+    # Publish through the metric authority registry (design doc §4 P3): a no-op
+    # while `enable_metric_authority` is off, an enforced producer when on.
+    ceiling = _authoritative_ceiling(ceiling, config=config)
     coverage = f"{ceiling['coverage']}/{len(CEILING_SOURCES)}"
     if ceiling["value"] is None:
         lines.append(

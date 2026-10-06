@@ -71,6 +71,7 @@ REGISTRY: dict[str, str] = {
     "enable_jump_robust_proxies": "wired",
     "enable_mp_lower_spectrum": "wired",
     "enable_long_memory": "wired",
+    "enable_metric_authority": "wired",
     "enable_bootstrap_intervals": "wired",
     "enable_event_iv_lift": "wired",
     "enable_triadic_stress": "wired",

@@ -314,6 +314,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_JUMP_ROBUST_PROXIES": "enable_jump_robust_proxies",
     "TRADINGAGENTS_ENABLE_MP_LOWER_SPECTRUM": "enable_mp_lower_spectrum",
     "TRADINGAGENTS_ENABLE_LONG_MEMORY": "enable_long_memory",
+    # Metric authority registry (docs/design_metric_authority_registry.md 4 P4):
+    # a fail-closed PUBLICATION gate, not a feature flag - when on, a measured
+    # metric with no named, registered producer may not publish a value.
+    "TRADINGAGENTS_ENABLE_METRIC_AUTHORITY": "enable_metric_authority",
     "TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS": "enable_bootstrap_intervals",
     "TRADINGAGENTS_ENABLE_EVENT_IV_LIFT": "enable_event_iv_lift",
     "TRADINGAGENTS_ENABLE_TRIADIC_STRESS": "enable_triadic_stress",
@@ -1177,6 +1181,11 @@ SHIPPED_DEFAULTS = {
         "enable_jump_robust_proxies": False,
         "enable_mp_lower_spectrum": False,
         "enable_long_memory": False,
+        # Metric authority registry (docs/design_metric_authority_registry.md 4
+        # P4): ships OFF. OFF is byte-identical to the pre-registry path; ON makes
+        # a metric with no named, registered producer publish `unavailable`
+        # (never a legacy value).
+        "enable_metric_authority": False,
         "enable_bootstrap_intervals": False,
         "enable_event_iv_lift": False,
         "enable_triadic_stress": False,

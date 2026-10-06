@@ -136,9 +136,25 @@ def metric_for_tool(tool: str) -> str | None:
     return TOOL_METRIC_MAP.get(str(tool or "").strip())
 
 
+def _metric_authority_enabled(config: dict | None = None) -> bool:
+    """The metric-authority fail-closed switch, read from the live config.
+
+    OFF (the shipped default) leaves `reconcile_metrics` byte-identical to
+    before - the registry is inert until the switch is on (design doc §4).
+    """
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        cfg = get_config() if config is None else config
+        return bool((cfg or {}).get("enable_metric_authority", False))
+    except Exception:  # noqa: BLE001 - a config read must never break a read
+        return False
+
+
 def reconcile_metrics(
     leaves: list[dict],
     tolerance: float = MATCH_TOLERANCE,
+    config: dict | None = None,
 ) -> dict[str, dict]:
     """Group leaves by metric; mark CONFLICT when values differ > tolerance.
 
@@ -215,6 +231,13 @@ def reconcile_metrics(
             "vendors": sorted(set(bucket["vendors"])),
             "labelled": bool(bucket.get("labelled")),
         }
+    # The authority column (design doc §4 P3). Gated: with the fail-closed switch
+    # OFF this is a no-op and the returned dict is byte-identical to before.
+    if _metric_authority_enabled(config):
+        from tradingagents.strategies.metric_authority import resolve_metric
+
+        for metric, bucket in out.items():
+            bucket["authority"] = resolve_metric(metric)
     return out
 
 
@@ -253,8 +276,17 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
             if span is not None
             else "n/a"
         )
+        named = ""
+        authority = b.get("authority") or {}
+        if authority:
+            canonical = authority.get("producer_id")
+            named = (
+                f" canonical producer: {canonical}"
+                if canonical
+                else " canonical producer: none registered"
+            )
         lines.append(
-            f"- metric {metric}: VALUES CONFLICT range={shown} vendors=[{vendors}] — "
+            f"- metric {metric}: VALUES CONFLICT range={shown} vendors=[{vendors}]{named} — "
             "treat as a range / weight by vendor reliability; do NOT quote a single value"
         )
     return "\n".join(lines) if lines else ""
