@@ -6,7 +6,9 @@ import random
 import pytest
 
 from tradingagents.strategies.complexity import (
+    MIN_COMPLEXITY_BARS,
     approximate_entropy,
+    complexity_null_band,
     lz_complexity,
     permutation_entropy,
 )
@@ -109,3 +111,42 @@ def test_lz_complexity_random_high_structured_low():
 def test_approximate_entropy_sane():
     ae = approximate_entropy(_random_returns(300, seed=8), m=2)
     assert ae is not None and ae > 0  # irregular series -> positive ApEn
+
+
+# --- complexity null band + length floor (C1) ------------------------------
+
+
+def test_complexity_null_band_structured_falls_below_the_iid_band():
+    """A periodic series must sit BELOW its own i.i.d. surrogate band."""
+    periodic = [1.0 if i % 4 == 0 else -0.25 for i in range(300)]
+    band = complexity_null_band(periodic, statistic="lz")
+    assert band is not None
+    assert band["value"] < band["null_lo"]  # structure, not finite-size noise
+    assert band["n"] == 300 and band["n_surrogates"] >= 8
+
+
+def test_complexity_null_band_iid_noise_is_inside():
+    band = complexity_null_band(_random_returns(300, seed=6), statistic="lz")
+    assert band is not None
+    assert band["null_lo"] <= band["value"] <= band["null_hi"]
+
+
+def test_complexity_null_band_is_deterministic():
+    series = _random_returns(300, seed=3)
+    assert complexity_null_band(series, statistic="lz") == complexity_null_band(
+        series, statistic="lz"
+    )
+
+
+def test_complexity_null_band_refuses_below_the_floor():
+    assert MIN_COMPLEXITY_BARS == 100
+    assert complexity_null_band(_random_returns(60, seed=1)) is None
+    assert complexity_null_band(_random_returns(300), statistic="nope") is None
+
+
+def test_complexity_statistics_refuse_below_the_length_floor():
+    """Finite-size bias dominates on a short series: no number is reported."""
+    short = _random_returns(60, seed=2)
+    assert lz_complexity(short) is None
+    assert permutation_entropy(short) is None
+    assert approximate_entropy(short) is None

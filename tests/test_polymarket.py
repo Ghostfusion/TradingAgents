@@ -52,6 +52,56 @@ _SEARCH = {
 }
 
 
+# Three cumulative "by <date>" rungs of ONE event: a ladder, not a point
+# probability. Prices rise with the deadline, as a cumulative chain must.
+_LADDER = {
+    "events": [
+        {
+            "title": "Fed rate cut by...?",
+            "markets": [
+                _market("Fed rate cut by March 2027 meeting?", 0.18,
+                        volume=500_000, end_date="2027-04-08T00:00:00Z"),
+                _market("Fed rate cut by January 2027 meeting?", 0.07,
+                        volume=700_000, end_date="2027-02-08T00:00:00Z"),
+                _market("Fed rate cut by July 2027 meeting?", 0.62,
+                        volume=300_000, end_date="2027-08-08T00:00:00Z"),
+            ],
+        }
+    ]
+}
+
+# A single open market whose question is a "by <date>" contract.
+_DEADLINE = {
+    "events": [
+        {
+            "title": "single",
+            "markets": [
+                _market("Will the Fed cut by 2027-06-30?", 0.40,
+                        volume=1_000, end_date="2027-06-30T00:00:00Z"),
+            ],
+        }
+    ]
+}
+
+# A ladder whose raw quotes are non-monotone in the deadline: P(by June) sits
+# below P(by January), which a cumulative chain cannot do.
+_NON_MONOTONE = {
+    "events": [
+        {
+            "title": "non-monotone",
+            "markets": [
+                _market("Fed cut by 2027-01-01?", 0.30, volume=10,
+                        end_date="2027-01-01T00:00:00Z"),
+                _market("Fed cut by 2027-06-01?", 0.20, volume=10,
+                        end_date="2027-06-01T00:00:00Z"),
+                _market("Fed cut by 2027-12-01?", 0.60, volume=10,
+                        end_date="2027-12-01T00:00:00Z"),
+            ],
+        }
+    ]
+}
+
+
 @pytest.mark.unit
 class PolymarketFilterTests(unittest.TestCase):
     def test_closed_and_past_markets_are_excluded(self):
@@ -95,6 +145,41 @@ class PolymarketFormatTests(unittest.TestCase):
         with mock.patch.object(polymarket, "_request", return_value={"events": []}):
             out = polymarket.get_prediction_markets("obscure ticker", limit=6)
         self.assertIn("No open prediction markets", out)
+
+
+@pytest.mark.unit
+class PolymarketLadderTests(unittest.TestCase):
+    """C2: a cumulative "by <date>" ladder is a distribution, not one number."""
+
+    def test_ladder_reports_cumulative_rungs_and_median_deadline(self):
+        with mock.patch.object(polymarket, "_request", return_value=_LADDER):
+            out = polymarket.get_prediction_markets("Fed rate cut", limit=6)
+        self.assertIn("deadline ladder", out)
+        # rungs render in DATE order, each with its cumulative probability
+        self.assertIn("by 2027-02-08: 7% (cumulative 7%)", out)
+        self.assertIn("by 2027-04-08: 18% (cumulative 18%)", out)
+        self.assertIn("by 2027-08-08: 62% (cumulative 62%)", out)
+        self.assertIn("implied median deadline: 2027-08-08 (cumulative 62%)", out)
+        # no rung is presented as a bare "the probability of the topic"
+        self.assertNotIn("Yes ", out)
+
+    def test_single_deadline_contract_is_labelled(self):
+        with mock.patch.object(polymarket, "_request", return_value=_DEADLINE):
+            out = polymarket.get_prediction_markets("Fed", limit=6)
+        self.assertIn("deadline contract", out)
+        self.assertIn("P(the event occurs BY 2027-06-30)", out)
+        self.assertIn("Yes 40%", out)
+
+    def test_non_monotone_ladder_uses_the_monotone_envelope(self):
+        with mock.patch.object(polymarket, "_request", return_value=_NON_MONOTONE):
+            out = polymarket.get_prediction_markets("Fed", limit=6)
+        self.assertIn("monotone envelope", out)
+        self.assertIn("implied median deadline: 2027-12-01 (cumulative 60%)", out)
+
+    def test_multi_market_event_marks_each_rung(self):
+        with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
+            out = polymarket.get_prediction_markets("anything", limit=10)
+        self.assertIn("one of 2 open markets in this event", out)
 
 
 @pytest.mark.unit

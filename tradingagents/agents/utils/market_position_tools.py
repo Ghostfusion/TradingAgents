@@ -379,8 +379,11 @@ def get_liquidity_risk(
     Computes Amihud ILLIQ (price impact per dollar traded), float turnover
     (ADV / float shares), the free-float factor (IWF) and a composite
     LIQUID / CAUTION / ILLIQUID verdict from the vendor OHLCV + float +
-    shares. Use before any 'liquid enough to trade / thin book / slippage
-    risk' claim. Missing inputs render n/a - never fabricated.
+    shares. The spread/impact numbers are printed beside the holder
+    concentration (`ownership_hhi`), so a concentrated holder base is visible
+    next to the cost of trading it. Use before any 'liquid enough to trade /
+    thin book / slippage risk' claim. Missing inputs render n/a - never
+    fabricated.
     """
     current_date = as_of(current_date, get_run_trade_date())
     try:
@@ -443,6 +446,24 @@ def get_liquidity_risk(
                     lines.append("  spread_estimate=n/a (high-low correction negative)")
         except Exception:  # noqa: BLE001 - a spread read must never break the tool
             lines.append("  spread_estimate=n/a")
+        # C3 (Strategies/books2/FINDINGS.md): a concentrated holder base is
+        # invisible beside a spread, so the holder HHI rides with the impact
+        # numbers. Same best-effort register `get_ownership_concentration` reads
+        # (the same number on the same 0-10000 holder scale); n/a - never 0 -
+        # when no per-holder breakdown is reachable.
+        try:
+            from tradingagents.agents.utils.analysis_tools import (
+                _holder_hhi_from_institutions as _holder_hhi,
+            )
+
+            hhi = _holder_hhi(ticker)
+        except Exception:  # noqa: BLE001 - an unreadable register is n/a, not 0
+            hhi = None
+        lines.append(
+            f"  ownership_hhi={hhi:.0f} (> 2500 = concentrated holder base)"
+            if hhi is not None
+            else "  ownership_hhi=n/a (no per-holder breakdown)"
+        )
         if lv["dangers"]:
             lines.append("  dangers: " + "; ".join(lv["dangers"]))
         return "\n".join(lines)

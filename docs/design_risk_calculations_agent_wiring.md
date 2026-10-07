@@ -97,7 +97,7 @@ untooled (no `@tool` anywhere).
 | `float_turnover` | T+B (`get_liquidity_risk`) | market |
 | `amihud_illiquidity` | T+B (`get_liquidity_risk`) + C (governor gate) | market |
 | `days_to_absorb` | T+B (`get_liquidation_days`) | market |
-| `ownership_hhi` | T+B (`get_ownership_concentration`) | fundamentals |
+| `ownership_hhi` | T+B (`get_ownership_concentration`; also rendered by `get_liquidity_risk` beside the spread/impact reads) | fundamentals, market |
 | `liquidity_verdict` | T+B (`get_liquidity_risk`) + C (governor `enable_liquidity_gate`) | market, PM line |
 | `volume_share_slippage` | **-** (backtest/paper costs only) | — |
 | `market_impact_slippage` | **-** (backtest/paper costs only) | — |

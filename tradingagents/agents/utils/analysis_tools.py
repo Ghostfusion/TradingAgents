@@ -8922,6 +8922,36 @@ def get_earnings_quality(
     return chr(10).join(lines)
 
 
+def _holder_hhi_from_institutions(ticker: str) -> float | None:
+    """Per-holder HHI from the institutional-holdings payload, or None.
+
+    The payload's per-holder percentages are the only holder register the repo
+    can reach (the moomoo aggregate carries none). Best-effort and never raises -
+    an absent register is None, never a fabricated 0. Shared by
+    :func:`get_ownership_concentration` and the liquidity tool, so the holder
+    concentration printed beside a spread is the same number as the one printed
+    beside IWF.
+    """
+    try:
+        from tradingagents.dataflows.interface import route_to_vendor
+
+        payload = route_to_vendor("get_institution_holdings", ticker) or ""
+        import re
+
+        pcts = [
+            float(m)
+            for m in re.findall(r"([0-9]+(?:\.[0-9]+)?)%", payload)
+            if float(m) <= 100.0
+        ]
+        if not pcts:
+            return None
+        from tradingagents.strategies.liquidity_risk import ownership_hhi
+
+        return ownership_hhi(pcts)
+    except Exception:  # noqa: BLE001 - an unreadable holder register is not a failure
+        return None
+
+
 @tool
 def get_ownership_concentration(
     ticker: Annotated[str, "ticker symbol"],
@@ -8948,10 +8978,7 @@ def get_ownership_concentration(
     try:
         from tradingagents.dataflows.float_shares import fetch_float_shares
         from tradingagents.dataflows.statement_parsing import fetch_ticker
-        from tradingagents.strategies.liquidity_risk import (
-            free_float_factor as _iwf,
-            ownership_hhi as _hhi,
-        )
+        from tradingagents.strategies.liquidity_risk import free_float_factor as _iwf
 
         float_sh = fetch_float_shares(ticker)
         fin = fetch_ticker(ticker, current_date) or {}
@@ -8965,24 +8992,7 @@ def get_ownership_concentration(
         if iwf is not None and iwf < 0.5:
             lines.append("  note: IWF < 0.5 -> structural passive under-allocation")
         # HHI needs a per-holder breakdown; best-effort (n/a when unavailable).
-        hhi = None
-        try:
-            from tradingagents.dataflows.interface import route_to_vendor
-
-            payload = route_to_vendor("get_institution_holdings", ticker) or ""
-            # Parse per-holder percentages from the institutional-holdings
-            # payload if it carries them (moomoo aggregate has none).
-            import re
-
-            pcts = [
-                float(m)
-                for m in re.findall(r"([0-9]+(?:\.[0-9]+)?)%", payload)
-                if float(m) <= 100.0
-            ]
-            if pcts:
-                hhi = _hhi(pcts)
-        except Exception:  # noqa: BLE001 - best-effort
-            hhi = None
+        hhi = _holder_hhi_from_institutions(ticker)
         lines.append(
             f"  hhi={hhi:.0f}" if hhi is not None else "  hhi=n/a (no per-holder breakdown)"
         )
@@ -11673,14 +11683,23 @@ def get_mean_reversion_quality(
         # a selected horizon k) + complexity features (structural randomness).
         vr = variance_ratio(diffs, k=min(5, max(2, len(diffs) // 10))) if len(diffs) >= 60 else None
         ent = None
+        ent_band = None
         apen = None
         try:
             from tradingagents.strategies.complexity import (
                 approximate_entropy as _apen,
+                complexity_null_band as _band,
                 permutation_entropy as _pe,
             )
 
             ent = _pe(use)
+            # C1 (Strategies/books2/FINDINGS.md): entropy is read beside its own
+            # i.i.d. surrogate band rather than against a fixed cut; the band is
+            # calibrated at this series' length. Permutation entropy's surrogate
+            # is cheap (its O(n^2) approximate-entropy twin's would cost seconds
+            # per symbol), so approximate entropy stays a raw number below.
+            if ent is not None:
+                ent_band = _band(use, statistic="permutation")
             # Approximate entropy is the irregularity companion to permutation
             # entropy over the same closes; both reached no leaf (D3 triage,
             # 2026-10-04).
@@ -11707,12 +11726,25 @@ def get_mean_reversion_quality(
             lines.append(f"- variance ratio: VR={vr['vr']} (z={vr['z']}) "
                          f"[{'momentum' if vr['vr'] > 1 else 'mean-reversion'} vs 1 = random walk]")
         if ent is not None:
-            lines.append(f"- permutation entropy: {ent:.3f} "
-                         f"({'random-like' if ent > 0.9 else 'structured'} vs 1 = iid)")
+            if ent_band:
+                if ent < ent_band["null_lo"]:
+                    ent_verdict = "structured (below the i.i.d. band)"
+                elif ent > ent_band["null_hi"]:
+                    ent_verdict = "above the i.i.d. band"
+                else:
+                    ent_verdict = "random-like (inside the i.i.d. band)"
+                lines.append(
+                    f"- permutation entropy: {ent:.3f} vs i.i.d. null band "
+                    f"[{ent_band['null_lo']:.3f}, {ent_band['null_hi']:.3f}] "
+                    f"(null mean {ent_band['null_mean']:.3f}, n={ent_band['n']}, "
+                    f"{ent_band['n_surrogates']} surrogates) -> {ent_verdict}"
+                )
+            else:
+                lines.append(f"- permutation entropy: {ent:.3f} (null band unavailable)")
         if apen is not None:
             lines.append(f"- approximate entropy: {apen:.3f} "
-                         f"({'random-like' if apen > 1.0 else 'structured'} "
-                         "vs higher = more irregular)")
+                         "(higher = more irregular; no fixed cut - read beside "
+                         "the permutation band above)")
         if mem is not None:
             if mem.get("unavailable"):
                 lines.append(f"- long-memory profile: n/a ({mem['unavailable']})")
@@ -11801,7 +11833,11 @@ def get_shift_detection(
     Advisory.
     """
     try:
-        from tradingagents.strategies.complexity import lz_complexity
+        from tradingagents.strategies.complexity import (
+            MIN_COMPLEXITY_BARS,
+            complexity_null_band,
+            lz_complexity,
+        )
         from tradingagents.strategies.regime import cusum, ewma_control
     except Exception as exc:  # noqa: BLE001
         return f"shift detection unavailable for {ticker}: {exc}"
@@ -11826,15 +11862,43 @@ def get_shift_detection(
     cu = cusum(series)
     ew = ewma_control(series)
     lzc = lz_complexity(returns)
+    # C1 (Strategies/books2/FINDINGS.md): the LZ verdict is calibrated against
+    # this series' own i.i.d. surrogate band, computed once here. A band failure
+    # degrades to the bare number rather than breaking the read.
+    lz_band = None
+    if lzc is not None:
+        try:
+            lz_band = complexity_null_band(returns, statistic="lz")
+        except Exception:  # noqa: BLE001 - a calibration must not break the tool
+            lz_band = None
     lines = [f"## Shift Detection — {ticker} ({kind})", ""]
     lines.append(f"- CUSUM: signal={cu.get('signal') or 'none'} "
                  f"(at index {cu.get('signal_at') if cu.get('signal_at') is not None else '-'}) "
                  f"mu0={cu.get('mu0')}")
     lines.append(f"- EWMA: signal={ew.get('signal') or 'none'} "
                  f"(at index {ew.get('signal_at') if ew.get('signal_at') is not None else '-'})")
-    if lzc is not None:
-        lines.append(f"- LZ complexity (returns): {lzc:.3f} "
-                     f"({'random/inefficient' if lzc > 0.9 else 'structured'})")
+    if lzc is None:
+        # C1: a complexity statistic below the length floor is a finite-size
+        # artifact, so the read says so instead of thresholding one.
+        lines.append(
+            f"- LZ complexity (returns): n/a (needs >= {MIN_COMPLEXITY_BARS} bars; "
+            "below that the finite-size bias exceeds the structure it would report)"
+        )
+    elif lz_band:
+        if lzc < lz_band["null_lo"]:
+            lz_verdict = "structured (below the i.i.d. band)"
+        elif lzc > lz_band["null_hi"]:
+            lz_verdict = "more complex than the i.i.d. band"
+        else:
+            lz_verdict = "indistinguishable from i.i.d. (inside the band)"
+        lines.append(
+            f"- LZ complexity (returns): {lzc:.3f} vs i.i.d. null band "
+            f"[{lz_band['null_lo']:.3f}, {lz_band['null_hi']:.3f}] "
+            f"(null mean {lz_band['null_mean']:.3f}, n={lz_band['n']}, "
+            f"{lz_band['n_surrogates']} surrogates) -> {lz_verdict}"
+        )
+    else:
+        lines.append(f"- LZ complexity (returns): {lzc:.3f} (null band unavailable)")
     # Q8 (docs/implementation_plan_quant_formula_additions.md): the Bayesian
     # run-length posterior complements the frequentist CUSUM/EWMA read with a
     # CALIBRATED changepoint probability. Opt-in; a shift invalidates the

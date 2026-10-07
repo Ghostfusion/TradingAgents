@@ -91,6 +91,18 @@ class TestVerifiedSnapshot:
         snap = validator.build_verified_market_snapshot("COF", "2026-05-20")
         assert "| atr(14) |" in snap
 
+    def test_provenance_label_states_source_and_reconstruction(self, monkeypatch):
+        # C4: a "verified" row must say what KIND of value it is - the vendor,
+        # the price caliber, and that the auto-adjusted series is reconstructed
+        # off the as-traded print rather than an observed event.
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
+        snap = validator.build_verified_market_snapshot("COF", "2026-05-13")
+        assert "Label provenance:" in snap
+        assert "source=y_finance" in snap
+        assert "price caliber=adjusted" in snap
+        assert "reconstructed=the adjusted price series" in snap
+        assert "as-of=2026-05-13" in snap
+
     def test_provisional_note_when_latest_row_is_analysis_date(self, monkeypatch):
         # The AMZN 2026-09-09 adjudication: a run DURING the session must not
         # call the forming bar a settled close. When the latest row's date

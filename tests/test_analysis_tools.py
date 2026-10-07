@@ -2713,10 +2713,16 @@ def test_get_liquidity_risk_computes(monkeypatch):
         "tradingagents.dataflows.statement_parsing.fetch_ticker",
         lambda t, d, **kw: {"shares": {"current": 100e6, "prior": 100e6}},
     )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.interface.route_to_vendor",
+        lambda *a, **k: "Top holders: 40.0%, 30.0%, 30.0%",
+    )
     out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "liquidity risk AAPL" in out
     assert "verdict=" in out
     assert "illiq=" in out and "float_turnover=" in out and "iwf=" in out
+    # C3: the holder HHI rides with the impact numbers (40^2 + 30^2 + 30^2 = 3400).
+    assert "ownership_hhi=3400" in out
 
 
 def test_get_liquidity_risk_missing_data_degrades(monkeypatch):
@@ -2729,9 +2735,24 @@ def test_get_liquidity_risk_missing_data_degrades(monkeypatch):
     monkeypatch.setattr(
         "tradingagents.dataflows.statement_parsing.fetch_ticker", lambda t, d, **kw: {}
     )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.interface.route_to_vendor", lambda *a, **k: ""
+    )
     out = MPT.get_liquidity_risk.invoke({"ticker": "AAPL", "current_date": "2026-08-24"})
     assert "liquidity risk AAPL" in out
     assert "n/a" in out  # honest degrade, never fabricated
+    assert "ownership_hhi=n/a" in out  # no per-holder register -> n/a, not 0
+
+
+def test_get_shift_detection_prints_lz_null_band(monkeypatch):
+    """C1: the LZ verdict compares the statistic to a same-length i.i.d. band."""
+    closes = [100.0 + 0.5 * math.sin(i / 3.0) for i in range(320)]
+    monkeypatch.setattr(T, "_ohlcv", lambda ticker, days=320: {"closes": closes})
+    out = T.get_shift_detection.invoke({"ticker": "AAPL", "kind": "mean"})
+    assert "Shift Detection" in out
+    assert "vs i.i.d. null band" in out
+    assert "structured (below the i.i.d. band)" in out
+    assert "random/inefficient" not in out  # the hand constant is gone
 
 
 def test_get_ownership_concentration_computes(monkeypatch):

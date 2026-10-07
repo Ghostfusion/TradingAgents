@@ -57,8 +57,8 @@ remaining gap than stated, and 4 are real gaps.**
 | 13 | The spread/impact reads are printed without holder concentration | CONFIRMED gap - the reads exist; the tool prints them without `ownership_hhi` | `tradingagents/strategies/liquidity_risk.py:441,574` |
 | 14 | `book_correlated_stress` tests channels separately | PARTIAL - it aggregates the whole book via `portfolio_returns`; no common-factor overlap share is named | `tradingagents/strategies/book_risk.py:148,163` |
 | 15 | Any reported hit rate lacks its grounding verdict | REFUTED - `report_materiality_verdict` exists behind `enable_materiality_verdict` | `agents/utils/report_verifier.py:917` |
-| 16 | `get_shift_detection` labels LZ complexity with a hand constant | CONFIRMED - `lzc > 0.9` decides `random/inefficient` vs `structured` | `agents/utils/analysis_tools.py:11837` |
-| 17 | `polymarket` reports one rung of a ladder as "the" probability | CONFIRMED - `float(prices[0])` / `outcomes[0]` of one market | `tradingagents/dataflows/polymarket.py:122` |
+| 16 | `get_shift_detection` labels LZ complexity with a hand constant | CONFIRMED - `lzc > 0.9` decides `random/inefficient` vs `structured` (FIXED 2026-10-07: same-length i.i.d. band) | `agents/utils/analysis_tools.py:11837` |
+| 17 | `polymarket` reports one rung of a ladder as "the" probability | CONFIRMED - `float(prices[0])` / `outcomes[0]` of one market (FIXED 2026-10-07: ladder + implied median) | `tradingagents/dataflows/polymarket.py:122` |
 
 **What this means for using the register.** A row is a lead, not a spec. The reading
 was done from the papers, so it is strongest on *what the literature establishes* and
@@ -90,14 +90,15 @@ still has that symbol before writing anything.
 
 The smallest section, and the only one that is purely a fix list. Four rows survived
 verification as real gaps; two of them (`C1`, `C2`) are defects the corpus names
-exactly.
+exactly. **All four were FIXED on 2026-10-07** (see `CHANGELOG.md`); the `Fix`
+column below is what landed, and each row is marked `FIXED` in its `#` cell.
 
 | # | Defect | Fix | Source |
 | --- | --- | --- | --- |
-| C1 | **`get_shift_detection` labels LZ complexity with a hand constant.** `analysis_tools.py:11837` prints `random/inefficient` above `lzc > 0.9` and `structured` below. A complexity statistic is only interpretable against a null calibrated at the same series length, and `complexity.py` has no minimum-length refusal either - finite-size bias grows with smoothness (`+0.075` at `H=0.5`, `+0.323` at `H=0.9`). `[verified]` | Calibrate the cut on surrogate series of the same length and print the band beside the number; give `permutation_entropy` / `approximate_entropy` / `lz_complexity` a length floor tied to the bias table and return `None` below it. | [16], `2512.02352v3` |
-| C2 | **`polymarket` reads one rung of a ladder as the probability.** `polymarket.py:122` takes `float(prices[0])` and `outcomes[0]` of a single market. A mutually exclusive ladder is a distribution, and its implied median is tail-robust; a single rung is not the same number. `[verified]` | When a topic returns several rungs of one ladder, normalise the rungs and report the implied median; label a "will X occur by date Y" contract as a deadline contract rather than a probability of X. | [21], `2609.23969v1`, `2605.00493v2` |
-| C3 | **The liquidity reads carry no holder concentration.** `roll_spread` / `spread_estimate` / `amihud_illiquidity` exist and `ownership_hhi` exists, but the liquidity tool prints the first three without the fourth, so a concentrated holder base is invisible next to the spread. `[verified]` | Expose `ownership_hhi` beside the spread/impact read, so a concentrated-collateral name carries its concentration with its cost number. | [09], [25] |
-| C4 | **The market snapshot has no label provenance.** The validator emits as-of, latest-row and forming-bar notes but not the vendor, nor whether a column is an observed event or a reconstructed state - so a terminal label can be read as ground truth. `[verified]` | Return the label's provenance (vendor, as-of, observed-vs-reconstructed) beside the value. | [27], `2607.02823v4` |
+| C1 (FIXED 2026-10-07) | **`get_shift_detection` labels LZ complexity with a hand constant.** `analysis_tools.py:11837` prints `random/inefficient` above `lzc > 0.9` and `structured` below. A complexity statistic is only interpretable against a null calibrated at the same series length, and `complexity.py` has no minimum-length refusal either - finite-size bias grows with smoothness (`+0.075` at `H=0.5`, `+0.323` at `H=0.9`). `[verified]` | Calibrate the cut on surrogate series of the same length and print the band beside the number; give `permutation_entropy` / `approximate_entropy` / `lz_complexity` a length floor tied to the bias table and return `None` below it. | [16], `2512.02352v3` |
+| C2 (FIXED 2026-10-07) | **`polymarket` reads one rung of a ladder as the probability.** `polymarket.py:122` takes `float(prices[0])` and `outcomes[0]` of a single market. A mutually exclusive ladder is a distribution, and its implied median is tail-robust; a single rung is not the same number. `[verified]` | When a topic returns several rungs of one ladder, normalise the rungs and report the implied median; label a "will X occur by date Y" contract as a deadline contract rather than a probability of X. | [21], `2609.23969v1`, `2605.00493v2` |
+| C3 (FIXED 2026-10-07) | **The liquidity reads carry no holder concentration.** `roll_spread` / `spread_estimate` / `amihud_illiquidity` exist and `ownership_hhi` exists, but the liquidity tool prints the first three without the fourth, so a concentrated holder base is invisible next to the spread. `[verified]` | Expose `ownership_hhi` beside the spread/impact read, so a concentrated-collateral name carries its concentration with its cost number. | [09], [25] |
+| C4 (FIXED 2026-10-07) | **The market snapshot has no label provenance.** The validator emits as-of, latest-row and forming-bar notes but not the vendor, nor whether a column is an observed event or a reconstructed state - so a terminal label can be read as ground truth. `[verified]` | Return the label's provenance (vendor, as-of, observed-vs-reconstructed) beside the value. | [27], `2607.02823v4` |
 
 **Two rows that are one decision away from being defects.**
 

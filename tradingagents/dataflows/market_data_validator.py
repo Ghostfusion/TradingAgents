@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows.market_router import price_caliber_for
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
@@ -176,6 +177,17 @@ def build_verified_market_snapshot(
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",
     ]
+    # C4 (Strategies/books2/FINDINGS.md): a "verified" row must say what KIND of
+    # value it is. `load_ohlcv` serves yfinance with auto_adjust=True, so the
+    # OHLCV row is a RECONSTRUCTED (split+dividend back-adjusted) series, not the
+    # as-traded print, and every indicator below is derived state off that
+    # adjusted close - a label that must not read as an observed event.
+    lines.append(
+        f"- Label provenance: source=y_finance (via load_ohlcv, auto_adjust=True), "
+        f"price caliber={price_caliber_for('y_finance', 'US')}; observed=the dated "
+        f"bar's row, reconstructed=the adjusted price series and every derived "
+        f"indicator; as-of={latest_date}."
+    )
     if str(latest["Date"])[:10] == str(curr_date):
         lines.append(
             "- NOTE: the latest row is dated = the requested analysis date - if that "
