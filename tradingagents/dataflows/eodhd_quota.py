@@ -48,7 +48,17 @@ WARNING_THRESHOLDS = (0.95, 0.80)
 #: then the leading segment - ``historical-market-cap/AAPL.US`` is billed as the
 #: feed). A path absent here is one counted call per request, which is what a direct
 #: measurement of ``/eod`` and ``/search`` showed.
+#:
+#: Every weight was measured against the live key by reading ``/user``'s
+#: ``apiRequests`` before and after ONE request - the vendor's own counter, not a doc
+#: table. The five below are the weights on paths this module actually calls, and
+#: pricing them at 1 would understate the run this ledger exists to report: ``/news``
+#: bills 5 per request, and the bulk feeds bill 100.
 CALL_WEIGHTS: dict[str, int] = {
+    "news": 5,
+    "sentiments": 5,
+    "news-word-weights": 5,
+    "eod-bulk-last-day": 100,
     "symbol-change-history": 5,
     "calendar/trends": 10,
     "historical-market-cap": 10,
@@ -56,6 +66,13 @@ CALL_WEIGHTS: dict[str, int] = {
     "cboe/index": 10,
     "cboe/indices": 10,
 }
+
+#: The bulk live feed - ``/real-time/{EXCHANGE}`` carrying ``ex=`` - is billed 100
+#: calls, while the single-symbol quote on the same path is billed 1. The two are
+#: indistinguishable from the path alone, so this one weight keys on the parameter.
+#: Measured in one session: ``real-time/US.US?ex=US`` moved ``apiRequests`` by
+#: exactly 100, and a single ``/eod`` by exactly 1.
+_BULK_LIVE_WEIGHT = 100
 
 #: The account endpoint that is not counted. Named once, read by both the ledger and
 #: the snapshot so the free path can never drift from the guard.
@@ -79,19 +96,24 @@ def is_free_path(path: str) -> bool:
     return _clean_path(path) == _FREE_PATH
 
 
-def weight_for(path: str) -> int:
+def weight_for(path: str, params: dict | None = None) -> int:
     """Declared counted calls for one request to ``path`` (``1`` when undeclared).
 
     The full path wins over the leading segment so a weighted feed can live beside an
-    unweighted sibling under the same prefix.
+    unweighted sibling under the same prefix. ``params`` decides exactly one route:
+    the bulk live feed (``real-time/{EX}`` carrying ``ex=``) is billed 100 calls and
+    the single-symbol quote on the same path is billed 1, which the path alone cannot
+    distinguish.
     """
     clean = _clean_path(path)
+    if clean.startswith("real-time/") and (params or {}).get("ex"):
+        return _BULK_LIVE_WEIGHT
     if clean in CALL_WEIGHTS:
         return CALL_WEIGHTS[clean]
     return CALL_WEIGHTS.get(clean.split("/", 1)[0], 1)
 
 
-def note_call(path: str, *, weight: int | None = None) -> None:
+def note_call(path: str, *, weight: int | None = None, params: dict | None = None) -> None:
     """Record one request in the local ledger. Pure Python - it makes no request.
 
     This is the only accounting that does not need a snapshot: the vendor's own
@@ -99,7 +121,7 @@ def note_call(path: str, *, weight: int | None = None) -> None:
     spend", which is the question a report or a log line actually asks.
     """
     clean = _clean_path(path)
-    counted = weight_for(clean) if weight is None else max(1, int(weight))
+    counted = weight_for(clean, params) if weight is None else max(1, int(weight))
     _ledger["requests"] += 1
     _ledger["weighted_calls"] += counted
     row = _ledger["by_endpoint"].setdefault(

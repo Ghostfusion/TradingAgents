@@ -308,10 +308,41 @@ def test_declared_weights_are_the_vendors_numbers():
     assert eodhd_quota.weight_for("historical-market-cap/AAPL.US") == 10
     assert eodhd_quota.weight_for("cboe/indices") == 10
     assert eodhd_quota.weight_for("calendar/trends") == 10
+    # Measured live 2026-10-07 through /user's apiRequests, one request at a time.
+    # These five are paths this module CALLS, so pricing them at 1 understated the
+    # very spend the ledger exists to report.
+    assert eodhd_quota.weight_for("news") == 5
+    assert eodhd_quota.weight_for("sentiments") == 5
+    assert eodhd_quota.weight_for("news-word-weights") == 5
+    assert eodhd_quota.weight_for("eod-bulk-last-day/US") == 100
     # Undeclared paths are one counted call, which is what /eod and /search measured.
     assert eodhd_quota.weight_for("eod/AAPL.US") == 1
     assert eodhd_quota.weight_for("search/TSM") == 1
+    assert eodhd_quota.weight_for("div/AAPL.US") == 1
     assert eodhd_quota.weight_for("calendar/earnings") == 1
+
+
+def test_the_bulk_live_feed_is_weighted_from_its_parameter():
+    # One path, two prices: 100 calls for the exchange-wide feed, 1 for a quote.
+    assert eodhd_quota.weight_for("real-time/AAPL.US", {"fmt": "json"}) == 1
+    assert eodhd_quota.weight_for("real-time/US.US", {"ex": "US", "fmt": "json"}) == 100
+    assert eodhd_quota.weight_for("real-time/US.US") == 1, "no ex= is not the bulk feed"
+    eodhd_quota.note_call("real-time/US.US", params={"ex": "US"})
+    eodhd_quota.note_call("real-time/AAPL.US", params={"fmt": "json"})
+    spend = eodhd_quota.observed_spend()
+    assert spend["requests"] == 2
+    assert spend["weighted_calls"] == 101, "100 for the movers feed, 1 for the quote"
+
+
+def test_a_movers_get_is_billed_at_the_bulk_weight():
+    bulk = _resp(200, body=[{"code": "AAPL.US", "change_p": 1.0}])
+    single = _resp(200, body={"code": "AAPL.US", "close": 1.0})
+    with mock.patch("requests.get", side_effect=[bulk, single]):
+        eodhd._eodhd_get("real-time/US.US", {"ex": "US", "fmt": "json"})
+        eodhd._eodhd_get("real-time/AAPL.US", {"fmt": "json"})
+    spend = eodhd_quota.observed_spend()
+    assert spend["requests"] == 2
+    assert spend["weighted_calls"] == 101, "the seam must see ex= or movers read as 1"
 
 
 def test_the_ledger_counts_weighted_calls_not_requests():

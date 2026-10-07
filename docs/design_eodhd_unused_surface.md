@@ -1,8 +1,10 @@
 # Design + implementation: the unused EODHD API surface
 
-State 2026-09-19. Source: **live probing of the repo's own EODHD key** across five rounds
-(~100 URLs, including path variants), plus the endpoint catalog the owner supplied. **No code
-changed by this document.**
+State **2026-10-07**. Source: **live probing of the repo's own EODHD key** across six rounds
+(~200 URLs, including path variants), the endpoint catalog the owner supplied, and the vendor's
+own machine-readable catalog (`registry/capabilities.json` in `EodHistoricalData/eodhd-claude-skills`,
+**86 endpoints**). Every weight and every row count below is a live measurement, not a doc
+reading; where the two disagree the measurement wins and the disagreement is recorded.
 
 Companion to `docs/design_moomoo_unused_api_surface.md`,
 `docs/design_finnhub_yfinance_unused_surface.md` and `docs/design_webull_data_provider.md`
@@ -648,6 +650,10 @@ the gate. Without the 422 probe this would have been indistinguishable from a wr
 
 ## Appendix B — the reachable-and-unused inventory, in full
 
+> **Superseded 2026-10-07 by P6 below**, which swept the vendor's own 86-endpoint catalog
+> and found eight more reachable-and-unused routes (the delisted set among them). This
+> table is kept as the state at the 2026-09-19 scan; P6's is the current one.
+
 | Endpoint | Status | Rows / shape | Adopted? |
 |---|---|---|---|
 | `/eod-bulk-last-day/{EX}` | 200 | **28,256–48,502 rows, 6.6 MB**, one call | **P3 BUILT 2026-10-01** (cross-check transport) |
@@ -728,3 +734,97 @@ The P3/P4 build (2026-10-01) measured both adopted paths once more: `eod-bulk-la
 **28,256 rows** with no `date` and **48,502** with `date=2026-09-30` (so the parameter *is*
 honoured), and `news-word-weights` **100 terms** in **~40 s**. The row-count spread across the
 three measurements is the session, not the route — a session in progress reports fewer names.
+
+---
+
+## P6 — the vendor's own catalog, re-swept; the call weights corrected (2026-10-07)
+
+Run at the owner's request against the vendor's index (`https://eodhd.com/financial-apis/`)
+plus the machine-readable catalog behind the vendor's Claude-skills package
+(`github.com/EodHistoricalData/eodhd-claude-skills` → `registry/capabilities.json`). That file
+is **newer than this document** and settles what "the whole surface" is: it names **86
+endpoints**, of which **13 fall on paths this module calls and 73 it does not**. Every one of
+the 73 was then probed once against this key. (A 403 costs no quota — measured in P5.)
+
+| verdict | count | meaning |
+|---|---|---|
+| **reachable** | **8** | 200 on this key, unused by this repo |
+| **plan-gated** | **46** | 403/402 — an entitlement wall, not an absent feature |
+| authorized-but-malformed (422) | 3 | the route lives; the plan still gates the well-formed call |
+| absent | 1 | `/history` (the vendor's seconds-resolution minute-bar route) |
+| not probeable by GET | 1 | `/ws/{market}` — a websocket |
+
+### The reachable-and-unused set, and why only one of them wins
+
+| Endpoint | Measured live 2026-10-07 | Adopt? |
+|---|---|---|
+| `exchange-symbol-list/{EX}?delisted=1` | **60,415 US rows vs 51,019 plain** | **the one new capability — below** |
+| `exchange-symbol-list/{EX}?type=` | same route, filters by asset class | no consumer; a filter, not a source |
+| `exchange-symbol-list/CC` | **1,863** crypto pairs | reference only |
+| `exchange-symbol-list/FOREX` | **997** FX pairs | reference only |
+| `exchanges-list` | **70** exchanges | reference only (Appendix B) |
+| `exchanges/{EX}` | the v1 spelling of the symbol list | same route as the first row |
+| `us-quote-delayed` | 1 row/symbol; adds bid/ask, 52wk, `marketCap`, `pe`, `otcTier` | no — second producer (Appendix B) |
+| `ust/yield-rates` | **2,674** rows | no — second producer of the nominal curve |
+| `ust/long-term-rates` | **573** rows | no — same nominal curve, another taxonomy |
+| `commodities/historical/ALL_COMMODITIES` | **415** rows | no — reference, no consumer (Appendix C) |
+
+**Only the delisted set is a capability rather than a duplicate.** `exchange-symbol-list/{EX}`
+is a path this module **already calls** (`get_exchange_symbols_eodhd`), and one documented
+parameter — `delisted=1` — returns the inactive tickers beside the active ones: **+9,396 rows
+on US in a single measured call**. Everything downstream of that list today (universe
+construction, the screener's symbol sources, the P3 coverage cross-check) is therefore built
+on a **survivorship-biased** universe: a name that delisted before today cannot appear in it.
+Note the vendor's own caveat on the sibling route: `symbol-change-history` (the old→new ticker
+map, 403 on this plan) is a *separate* dataset, so a delisted row here carries no reason and no
+successor symbol — it is a union, not a history.
+
+Adopting it needs a consumer (master rule 7), which is an owner decision, not a defect: the
+read is one extra parameter on an existing call, so the marginal quota cost is **zero** (the
+plain list is already billed 1 call).
+
+### Two corrections to Appendix A
+
+- **`ticks` is 403, not 404.** Appendix A/Tier 4 recorded the tick-data route as "not found at
+  any probed path"; re-probed, the documented path is `ticks` with a single `s=` parameter and
+  it answers **`Forbidden`** — an entitlement wall. A 403 is not evidence of absence, and
+  neither was the 404 it was mistaken for.
+- **`calendar/trends` and `cboe/index` answer 422**, i.e. authorized-but-malformed
+  (`{"errors":{"symbols":["Required"]}}` and `filter.index_co...`), exactly the signature that
+  separated `/calendar/dividends` in Appendix A. The route lives; the plan gates the well-formed
+  request (403). `/mp/unicornbay/options/contracts` behaves the same way.
+
+The newly-catalogued families — SEC Filings (`sec-filings/*`), SEC Company Analytics
+(`sec-companies/*`), S&P/DJ historical constituents (`mp/unicornbay/spglobal/*`), Congressional
+Trades, OFAC Sanctions, Real Estate, Praams bank/bond risk, InvestVerte ESG, the whole
+`credit-risk/*` family, `rates/reference-rates`, `rates/policy-rates` and
+`spreads/funding-stress` — are **all 403 on this plan** and change nothing about §11.6: the
+credit family still carries *sovereign* spreads plus the NY Fed CMDI / HQM corporate curves
+(HY exists only as a CMDI *sub-index*, not as an OAS series), and the CBOE set is still the
+European/regional index families.
+
+### The call weights were understated — measured, then fixed
+
+P5 declared six weights and treated every other path as one counted call. Measured the same way
+(`/user`'s `apiRequests` read before and after **one** request — the vendor's own counter):
+
+| route this module calls | billed | was |
+|---|---|---|
+| `real-time/US.US?ex=US` (the bulk movers feed) | **100** | 1 |
+| `eod-bulk-last-day/{EX}` (P3) | **100** | 1 |
+| `news` | **5** | 1 |
+| `sentiments` | **5** | 1 |
+| `news-word-weights` (P4) | **5** | 1 |
+| `eod`, `div`, `splits`, `search`, `id-mapping`, `exchange-symbol-list`, `ust/*`, `us-quote-delayed` | 1 | 1 |
+
+`eod-bulk-last-day` and the bulk live feed are billed **100 calls per request**, so the P3
+cross-check and every `heat-proxy`/movers screen were reporting **1**. That is the one number
+`eodhd_quota` exists to report, wrong by two orders of magnitude on the paths that dominate a
+movers run. `CALL_WEIGHTS` now carries the five measured weights, and `weight_for` takes the
+request's parameters because the bulk feed is indistinguishable from a single-symbol quote by
+path alone (`real-time/{EX}` is 100 **with** `ex=`, 1 without). `note_call` and the `_quota_note`
+hook in `_eodhd_get` forward them.
+
+The lesson for this document: a table written from what the vendor *documents* is a hypothesis.
+Every weight above was read off the live counter, one request at a time, and the two sources
+disagree wherever a route has a bulk and a single-symbol form on the same path.

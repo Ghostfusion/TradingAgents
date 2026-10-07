@@ -112,19 +112,21 @@ def _body_detail(resp) -> str:
     return text.strip()[:200]
 
 
-def _quota_note(path: str) -> None:
+def _quota_note(path: str, params: dict | None = None) -> None:
     """Record one counted call in the free quota ledger; never break the read.
 
     ``/user`` is skipped: it is the one endpoint EODHD does NOT count against the
     daily limit, so recording it would make the ledger overstate the very spend it
-    exists to report.
+    exists to report. ``params`` is forwarded because one route's billed weight
+    depends on it - the bulk live feed (``real-time/{EX}`` carrying ``ex=``) costs
+    100 calls where the single-symbol quote on the same path costs 1.
     """
     try:
         from . import eodhd_quota
 
         if eodhd_quota.is_free_path(path):
             return
-        eodhd_quota.note_call(path)
+        eodhd_quota.note_call(path, params=params)
     except Exception:  # noqa: BLE001 - bookkeeping must not fail a data read
         logger.debug("EODHD quota ledger unavailable", exc_info=True)
 
@@ -216,7 +218,7 @@ def _eodhd_get(
         # envelope (EODHD uses a 200 + JSON body for most failures). The ledger is
         # pure Python - it makes NO request - and is what `eodhd_quota` reports the
         # spend from. Guarded, so bookkeeping can never fail a data read.
-        _quota_note(path)
+        _quota_note(path, params)
         try:
             data = resp.json()
         except ValueError:
