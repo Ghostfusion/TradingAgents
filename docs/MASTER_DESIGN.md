@@ -1016,7 +1016,11 @@ analyst prompt, a config gate, a score engine, a registry or the evidence
 surfaces, and a finding whose only consequence is execution records `no
 research-layer landing` rather than a fabricated path. `README.md` holds the
 harvest, the per-category counts, the method and the limits, plus the twelve
-findings that recur across independent slices. The same harvest was read
+findings that recur across independent slices; `FINDINGS.md` is the register
+that triages all 390 take-away rows - four confirmed defects, nine owner
+decisions, the eleven recorded absences, and the 47 rows the books backlog
+already landed - with every row marked `[verified]` or `[reported]`. The same
+harvest was read
 independently for `nautilus_trader` under its own `strategies/books2/`; that set
 is framed for an execution engine, and this one shares the corpus, not its
 conclusions. `Strategies/books/` remains the companion set for the wider q-fin
