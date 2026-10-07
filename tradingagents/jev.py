@@ -1,10 +1,12 @@
-"""The OpenRouter decisions API as a typed judge - one engine, three deciders.
+"""The OpenRouter decisions API as a typed judge - one engine, four deciders.
 
 The engine is model-agnostic: :data:`DECIDERS` names the judges that run over a
 finished report tree (``typesafe/jev-1.13`` first, ``perplexity/pplx-decider-v1-27b``
-second, ``respan/span-01`` third), each writing its own verdict file. The facts
-below were established by probing rather than reading, and they hold for the
-first two; the third's are its own, and they are not the same.
+second, ``respan/span-01`` third, ``openai/gpt-6-luna-decisions`` fourth), each
+writing its own verdict file. The facts below were established by probing rather
+than reading: they hold for the first, second and fourth (all three take the
+shared buy/hold/sell battery); the third's are its own, and they are not the
+same.
 
 * ``typesafe/jev-1.13`` is a **decisions** model, not a chat model. Sent to
   ``/chat/completions`` it returns HTTP 400, and the error names the endpoint
@@ -107,6 +109,19 @@ PPLX_MODEL = (
 NOUL_MODEL = (
     os.environ.get("TRADINGAGENTS_NOUL_DECIDER_MODEL")
     or "respan/span-01"
+)
+
+#: The FOURTH decider: OpenAI's ``gpt-6-luna-decisions``. Same decisions route
+#: and the **same contract** as the first two - probed 2026-10-07, it answered
+#: ``choice``, ``score`` AND ``noul`` with HTTP 200 (served as
+#: ``openai/gpt-6-luna-decisions-20261006`` by provider ``OpenAI``), so unlike
+#: Respan's it takes the shared buy/hold/sell battery and needs no recipe of its
+#: own. Overridable from `.env` (``TRADINGAGENTS_LUNA_DECIDER_MODEL``). It
+#: reports ``output_tokens: 0`` (the numbers are computed, not generated, like
+#: the other two decision models) at ~$0.000015 per call.
+LUNA_MODEL = (
+    os.environ.get("TRADINGAGENTS_LUNA_DECIDER_MODEL")
+    or "openai/gpt-6-luna-decisions"
 )
 
 #: The four analyst report stems, in the order the run produces them.
@@ -502,6 +517,7 @@ def result_lines(data: dict, questions: dict) -> list[str]:
 VERDICT_FILENAME = "jev_verdict.json"
 PPLX_VERDICT_FILENAME = "pplx_verdict.json"
 NOUL_VERDICT_FILENAME = "noul_verdict.json"
+LUNA_VERDICT_FILENAME = "luna_verdict.json"
 
 
 @dataclass(frozen=True)
@@ -525,8 +541,9 @@ class Decider:
 #: The deciders, in the order they run after a finished tree is written. The
 #: TypeSafe one first (it is what the hook was built for), Perplexity's second -
 #: same endpoint, same battery, same position neutralisation, a different model -
-#: and Respan's third, same endpoint and same neutralisation but a noul-only
-#: battery, because it refuses the shared one.
+#: Respan's third, same endpoint and same neutralisation but a noul-only
+#: battery, because it refuses the shared one - and OpenAI's fourth, same
+#: endpoint and the same shared battery as the first two.
 DECIDERS: tuple[Decider, ...] = (
     Decider(label="jev", model=DEFAULT_MODEL, filename=VERDICT_FILENAME),
     Decider(label="pplx", model=PPLX_MODEL, filename=PPLX_VERDICT_FILENAME),
@@ -536,6 +553,7 @@ DECIDERS: tuple[Decider, ...] = (
         filename=NOUL_VERDICT_FILENAME,
         recipe="noul",
     ),
+    Decider(label="luna", model=LUNA_MODEL, filename=LUNA_VERDICT_FILENAME),
 )
 
 

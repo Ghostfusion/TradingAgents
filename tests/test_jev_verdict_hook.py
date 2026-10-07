@@ -358,6 +358,7 @@ def test_judge_tree_all_runs_every_decider_in_order(tmp_path, _keyed):
     assert [d.label for d, _, _ in results] == [d.label for d in jev.DECIDERS]
     assert [p.name for _, p, _ in results] == [
         jev.VERDICT_FILENAME, jev.PPLX_VERDICT_FILENAME, jev.NOUL_VERDICT_FILENAME,
+        jev.LUNA_VERDICT_FILENAME,
     ]
     assert all(p.is_file() for _, p, _ in results)
     assert [pl["model"] for _, _, pl in results] == [d.model for d in jev.DECIDERS]
@@ -572,6 +573,147 @@ def test_the_noul_recipe_is_best_effort_too(monkeypatch, tmp_path):
     payload = json.loads((tree / jev.NOUL_VERDICT_FILENAME).read_text(encoding="utf-8"))
     assert payload["failures"] == 4
     assert payload["ratings"] == {}
+
+
+# ---------------------------------------------------------------------------
+# the fourth decider - the shared battery again, its own gate, its own file, last
+# ---------------------------------------------------------------------------
+
+
+def test_the_decider_chain_lists_the_four_judges_in_order():
+    """The chain is the registry the hooks index into, so pin it whole: adding
+    a judge is a one-line change here plus a hook, and a silent reorder would
+    move which model a `DECIDERS[n]` decorator runs."""
+    assert [d.label for d in jev.DECIDERS] == ["jev", "pplx", "noul", "luna"]
+    luna = jev.DECIDERS[3]
+    assert luna.model == jev.LUNA_MODEL
+    assert luna.filename == jev.LUNA_VERDICT_FILENAME
+    # The probe's whole conclusion: luna takes the shared battery, so it must
+    # NOT be given Respan's noul-only recipe.
+    assert luna.recipe == "rating"
+
+
+def test_the_luna_decider_gate_ships_off_by_default():
+    """A fourth judge is its own opt-in, exactly like the other three."""
+    assert _shipped_default("enable_luna_decider") is False
+
+
+def test_luna_gate_off_never_calls_the_fourth_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": False, "enable_luna_decider": False},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [], "the fourth decider ran while its gate was off"
+
+
+def test_luna_gate_on_calls_the_fourth_decider(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": False, "enable_luna_decider": True},
+    )
+    called: list = []
+    monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: called.append(d))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert called == [tmp_path]
+
+
+def test_the_luna_gate_is_independent_of_the_other_three(monkeypatch, tmp_path):
+    """Enabling the fourth judge must not drag any other on - and none of them
+    may drag it on."""
+    seen: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append("jev"))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: seen.append("noul"))
+    monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: seen.append("luna"))
+
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": False,
+         "enable_noul_decider": False, "enable_luna_decider": False},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == ["jev"]
+
+    seen.clear()
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+         "enable_noul_decider": False, "enable_luna_decider": True},
+    )
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+    assert seen == ["luna"]
+
+
+def test_the_luna_decider_runs_last(monkeypatch, tmp_path):
+    """Order is pinned: the tree log and the cost report read top-down."""
+    monkeypatch.setattr(
+        batch, "DEFAULT_CONFIG",
+        {"enable_jev_verdict": True, "enable_pplx_decider": True,
+         "enable_noul_decider": True, "enable_luna_decider": True},
+    )
+    order: list = []
+    monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
+    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: order.append("noul"))
+    monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: order.append("luna"))
+
+    batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
+
+    assert order == ["jev", "pplx", "noul", "luna"]
+
+
+def test_the_fourth_decider_writes_its_own_file(tmp_path, _keyed):
+    """Four deciders, four files - none overwrites another."""
+    tree = _tree(tmp_path)
+
+    batch._batch_luna_decider(tree)
+
+    path = tree / jev.LUNA_VERDICT_FILENAME
+    assert path.is_file(), "the fourth verdict did not travel with its report"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["model"] == jev.LUNA_MODEL
+    assert payload["origin"] == tree.name
+    assert payload["failures"] == 0
+    assert payload["ratings"]["market"]["rating"] == "hold"
+
+
+def test_the_fourth_decider_sends_the_shared_neutralised_battery(tmp_path, _keyed):
+    """The probe's conclusion, asserted at the hook: luna answers noul too, but
+    the chain asks it the SAME choice/score battery as the first two, so it needs
+    no recipe of its own."""
+    tree = _tree(tmp_path)
+
+    batch._batch_luna_decider(tree)
+
+    assert len(_keyed.calls) == 4, "one call per analyst report"
+    for payload in _keyed.calls:
+        assert payload["model"] == jev.LUNA_MODEL
+        assert set(payload["questions"]) == {"rating", "evidence", "horizon"}
+        assert jev.POSITION_MARKER in payload["state"]
+        assert "Buy" not in payload["state"], "the report's own call was sent"
+
+
+def test_the_fourth_decider_is_best_effort_too(monkeypatch, tmp_path):
+    """A vendor failure on the fourth judge must not raise, and must not remove
+    the earlier judges' files."""
+    tree = _tree(tmp_path)
+    monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
+    monkeypatch.setattr(jev, "post_json", _Recorder(status=429, body="rate limited"))
+
+    batch._batch_luna_decider(tree)   # must not raise
+
+    payload = json.loads((tree / jev.LUNA_VERDICT_FILENAME).read_text(encoding="utf-8"))
+    assert payload["failures"] == 4
+    assert all(r["status"] == 429 for r in payload["results"])
 
 
 # ---------------------------------------------------------------------------

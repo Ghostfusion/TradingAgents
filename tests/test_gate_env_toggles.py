@@ -49,6 +49,7 @@ REGISTRY: dict[str, str] = {
     "enable_jev_verdict": "wired",
     "enable_pplx_decider": "wired",
     "enable_noul_decider": "wired",
+    "enable_luna_decider": "wired",
     "enable_preopen_depth": "wired",
     "risk_audit_enabled": "wired",
     "regime_state_enable": "wired",

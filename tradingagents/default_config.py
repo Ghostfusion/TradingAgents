@@ -273,6 +273,11 @@ _ENV_OVERRIDES = {
     # after both and stored as noul_verdict.json. Its own gate, so a third judge
     # is its own opt-in just like the second.
     "TRADINGAGENTS_ENABLE_NOUL_DECIDER": "enable_noul_decider",
+    # The fourth decider (tradingagents/jev.py, DECIDERS[3]): OpenAI's
+    # gpt-6-luna-decisions on the same endpoint AND the same choice/score
+    # battery as the first two, run after the other three and stored as
+    # luna_verdict.json. Its own gate, so a fourth judge is its own opt-in.
+    "TRADINGAGENTS_ENABLE_LUNA_DECIDER": "enable_luna_decider",
     # ETF engine (docs/design_etf_fundamental_valuation.md): when on, the
     # fundamentals analyst routes fund/ETF tickers to the ETF valuation /
     # decline-driver / mechanics toolset instead of company statement tools.
@@ -1152,6 +1157,12 @@ SHIPPED_DEFAULTS = {
         # statistic that does not track the polarity it is asked for, not a
         # buy/hold/sell call (see the probe note in the module), so it is opt-in.
         "enable_noul_decider": False,
+        # The fourth decider (tradingagents/jev.py, DECIDERS[3]): OpenAI's
+        # gpt-6-luna-decisions over the same four analyst reports, run AFTER the
+        # other three and written beside them as luna_verdict.json. Unlike
+        # Respan's it takes the SAME choice/score battery as the first two
+        # (probed 2026-10-07). Off by default like the others.
+        "enable_luna_decider": False,
         # Round-2 quant formula additions (docs/design_quant_formulas_research_round2.md).
         # Every read is additive and default-off: a run's artefacts cannot change
         # unless the flag is set. Each names the tool the agent must cite.

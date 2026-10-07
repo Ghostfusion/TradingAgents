@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers.** The rows below are every policy, data-surface and
-context gate: **all 117 of the 117 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+context gate: **all 118 of the 118 `enable_*` keys** in `DEFAULT_CONFIG`, plus
 the numeric limits and the always-on checks. R4 stage 2 registered the last six
 families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
 the factor-model family (§7g), the event family (§7h), the vendor and screener
@@ -235,10 +235,12 @@ exactly the tree it produced before the gate existed.
 | `enable_security_context` | `TRADINGAGENTS_ENABLE_SECURITY_CONTEXT` | writes the deterministic classification block: the provider's sector and industry **verbatim with the source that produced them**, the canonical sector, the SPDR key, the SEC SIC when an earlier step already fetched a submissions payload, and the declared theme priority order with its matrix version. It makes **no network call of its own** and adds **zero** decision-context characters - it never enters the decision channel. The prior **cannot gate**: `candidate_themes` is a union, so every registered theme stays a candidate and a wrong cell costs a missed *earlier* check, never a missed theme | `tradingagents/reporting.py`::`_run_card_security_context` (the block), `tradingagents/strategies/security_context.py`::`build_security_context` / `::candidate_themes` / `::theme_priority_order` / `::render_security_context_basis` | `test_security_context.py` (provenance, the widening property, the validator, the gate both ways), `test_gate_env_toggles.py` (the registry) | wired |
 | `enable_pplx_decider` | `TRADINGAGENTS_ENABLE_PPLX_DECIDER` | runs a **second** decisions-API judge over the same four analyst reports, **after** `enable_jev_verdict`, and writes `pplx_verdict.json` beside `jev_verdict.json`: Perplexity's `perplexity/pplx-decider-v1-27b` on the same `/api/alpha/decisions` endpoint, the same buy/hold/sell battery and the same position neutralisation. Gated separately so enabling one paid judge cannot silently start a second; one file per decider so the two verdicts sit side by side and neither overwrites the other | `batch.py::post_save_annotations` (the dispatcher), `batch.py::_batch_pplx_decider` (the hook), `tradingagents/jev.py::judge_tree` / `judge_tree_all` (the pass - `DECIDERS[1]`) | `test_jev_verdict_hook.py` (the gate fires both ways and the second file lands beside the first), `test_jev_decide.py` (the recipe) | wired |
 | `enable_noul_decider` | `TRADINGAGENTS_ENABLE_NOUL_DECIDER` | runs a **third** decisions-API judge over the same four analyst reports, **after** both others, and writes `noul_verdict.json` beside the other two: Respan's `respan/span-01` on the same `/api/alpha/decisions` endpoint, the same position neutralisation, but a **noul-only battery** (`NOUL_QUESTIONS`) - that model refuses `choice` and `score` with a 400 naming the question and refuses a `criteria` key on a `noul` one, so the shared buy/hold/sell battery cannot be asked of it at all. The three-way is therefore **forced** rather than asked: one `noul` question per class, identical but for the class word, and the label is the argmax (`noul_summary`) with the `margin` (top minus second) recorded beside it. Its per-stem roll-up is `payload["ratings"][stem]` - the same slot the other two deciders fill - so the three verdict files read alike. Probed 2026-10-06: this orders a bullish/bearish/neutral control **3 of 3**, where a single 0-1 `rating` question did **not** (0.0179 for the bullish document against 0.0191 for the bearish one, the wrong way round, and no threshold separated the classes over 57 real reports); the answers are deterministic, report `output_tokens: 0`, and `span-01-lite` is byte-identical to `span-01`. **A third opinion, not a confirmation** - against already-fixed TypeSafe labels the argmax agreed 23 of 36 times (buy 12/12, sell 6/12, hold 5/12). Gated separately so a third judge is its own opt-in | `batch.py::post_save_annotations` (the dispatcher), `batch.py::_batch_noul_decider` (the hook), `tradingagents/jev.py::judge_tree` (the recipe dispatch), `tradingagents/jev.py::noul_verdict_for_tree` / `::noul_summary` (the pass - `DECIDERS[2]`) | `test_jev_verdict_hook.py` (the gate fires both ways, the third file lands in the tree, the noul battery carries no `criteria` and its three asks differ only in the class word, the argmax, its tie order and the no-answer refusal, and a vendor 400 is recorded rather than raised) | wired |
+| `enable_luna_decider` | `TRADINGAGENTS_ENABLE_LUNA_DECIDER` | runs a **fourth** decisions-API judge over the same four analyst reports, **after** the other three, and writes `luna_verdict.json` beside them: OpenAI's `openai/gpt-6-luna-decisions` on the same `/api/alpha/decisions` endpoint, the same buy/hold/sell battery and the same position neutralisation as the first two. Probed 2026-10-07 before wiring: it answers `choice`, `score` **and** `noul` with 200 (served as `openai/gpt-6-luna-decisions-20261006`, provider `OpenAI`), so unlike Respan's it is asked the **shared** battery and needs no recipe of its own (`recipe="rating"`). It reports `output_tokens: 0` - the numbers are computed, not generated - at ~$0.000015 per call. Gated separately so a fourth judge is its own opt-in | `batch.py::post_save_annotations` (the dispatcher), `batch.py::_batch_luna_decider` (the hook), `tradingagents/jev.py::judge_tree` (the pass - `DECIDERS[3]`) | `test_jev_verdict_hook.py` (the chain order, the gate fires both ways, the fourth file lands in the tree, the shared battery is sent, and a vendor 429 is recorded rather than raised) | wired |
 | `enable_jev_verdict` | `TRADINGAGENTS_ENABLE_JV_VERDICT` | judges the four **analyst** reports with the TypeSafe decisions model, their position language neutralised, and writes `jev_verdict.json` (buy/hold/sell per report) into the report tree | `batch.py::post_save_annotations` (the dispatcher - called by `analyze` after `save_reports`, and by `cli/main.py::save_report_to_disk` for an interactive run), `batch.py::_batch_jev_verdict` (the hook), `tradingagents/jev.py::judge_tree` (the pass) | `test_jev_verdict_hook.py` (the gate fires both ways, the JSON lands in the tree, and the interactive CLI's writer calls the same dispatcher), `test_jev_decide.py` (the recipe) | wired |
 
-`enable_jev_verdict`, `enable_pplx_decider` and `enable_noul_decider` are the
-only gates that write an artefact rather than reading a surface, which is why
+`enable_jev_verdict`, `enable_pplx_decider`, `enable_noul_decider` and
+`enable_luna_decider` are the only gates that write an artefact rather than
+reading a surface, which is why
 they are not in §6, §7 or §7b. They are also the only ones whose dependency can
 be absent without being an error: the engine does not require
 `OPENROUTER_API_KEY`, so the hook skips with a log line rather than failing, and
@@ -246,9 +248,10 @@ each is best-effort like `enable_pre_market_review` - a judge that annotates a
 finished run must never fail it. The judges' model, endpoint and per-call timeout
 are the `.env` keys `TRADINGAGENTS_JEV_MODEL` / `TRADINGAGENTS_JEV_ENDPOINT` /
 `TRADINGAGENTS_JEV_TIMEOUT` (defaults `typesafe/jev-1.13`, the alpha decisions
-endpoint, 300 s), plus `TRADINGAGENTS_PPLX_DECIDER_MODEL` for the second decider
-and `TRADINGAGENTS_NOUL_DECIDER_MODEL` for the third - not code literals. **The
-decisions route is `/api/alpha/decisions` for ALL THREE models.** The Perplexity
+endpoint, 300 s), plus `TRADINGAGENTS_PPLX_DECIDER_MODEL` for the second decider,
+`TRADINGAGENTS_NOUL_DECIDER_MODEL` for the third and
+`TRADINGAGENTS_LUNA_DECIDER_MODEL` for the fourth - not code literals. **The
+decisions route is `/api/alpha/decisions` for ALL FOUR models.** The Perplexity
 model is advertised elsewhere as living at `/api/v1/decisions`; that path is a
 **404** (probed 2026-10-05), so the second decider uses the same alpha route as
 the first and only the `model` differs. The third is on a different **contract**
@@ -258,7 +261,9 @@ only - and refuse a `criteria` key on those - so `judge_tree` routes a
 `verdict_for_tree`. Asking it the shared battery would be a 400, not a worse
 answer, and it **forces** its three-way rather than asking for one - three
 per-class asks and an argmax - because a single 0-1 rating question does not
-order the classes at all.
+order the classes at all. The fourth is back on the **same** contract as the
+first two: `openai/gpt-6-luna-decisions` answers `choice`/`score`/`noul`, so it
+takes the shared battery and only its `model` differs.
 
 **Every writer of a finished tree calls `post_save_annotations`, and there are three.**
 `batch.py::analyze` (the batch CLI and trading_web's in-process `run_batch`),

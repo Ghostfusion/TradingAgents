@@ -289,6 +289,11 @@ def post_save_annotations(symbol: str, report_dir, trade_date: str | None) -> No
     # its own gate - a third judge is its own opt-in. Writes noul_verdict.json.
     if DEFAULT_CONFIG.get("enable_noul_decider"):
         _batch_noul_decider(report_dir)
+    # The fourth decider, AFTER the other three: OpenAI's gpt-6-luna-decisions,
+    # which takes the same choice/score battery as the first two. Its own gate
+    # again - a fourth judge is its own opt-in. Writes luna_verdict.json.
+    if DEFAULT_CONFIG.get("enable_luna_decider"):
+        _batch_luna_decider(report_dir)
 
 
 def analyze(
@@ -603,7 +608,8 @@ def _batch_decider_verdict(report_dir, decider) -> None:
     accepts (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe for the
     choice/score judges, the noul-only one for Respan's, which refuses the
     shared battery). The payload lands in the tree under the decider's own
-    filename (``jev_verdict.json``, ``pplx_verdict.json``, ``noul_verdict.json``),
+    filename (``jev_verdict.json``, ``pplx_verdict.json``, ``noul_verdict.json``,
+    ``luna_verdict.json``),
     so the deciders accumulate rather than overwrite - the verdict travels with
     the report it is about, and they all travel together.
 
@@ -620,7 +626,7 @@ def _batch_decider_verdict(report_dir, decider) -> None:
             return
         path, payload = judge_tree(report_dir, key=key, decider=decider)
         # Every recipe fills ``ratings`` with a per-stem ``rating``, so one log
-        # line covers all three deciders.
+        # line covers all four deciders.
         detail = ", ".join(
             f"{stem}={v.get('rating')}" for stem, v in payload["ratings"].items()
         )
@@ -662,6 +668,20 @@ def _batch_noul_decider(report_dir) -> None:
     from tradingagents.jev import DECIDERS
 
     _batch_decider_verdict(report_dir, DECIDERS[2])
+
+
+def _batch_luna_decider(report_dir) -> None:
+    """The shared-battery decider (``DECIDERS[3]``), run after the other three.
+
+    OpenAI's ``gpt-6-luna-decisions`` is on the same endpoint and takes the SAME
+    shared buy/hold/sell battery as the first two (probed 2026-10-07: it answers
+    ``choice``, ``score`` and ``noul``), so it needs no recipe of its own and its
+    verdict lands in ``luna_verdict.json``. Its own gate again - a fourth judge
+    is its own opt-in.
+    """
+    from tradingagents.jev import DECIDERS
+
+    _batch_decider_verdict(report_dir, DECIDERS[3])
 
 
 def _batch_report_verify(symbol: str, report_dir) -> None:
