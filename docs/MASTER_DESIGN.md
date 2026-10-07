@@ -1005,6 +1005,23 @@ owner decision, the rest triaged and marked `[verified]`/`[reported]`).
 over the 309 `26xx` papers they judged** — the books cover a superset, and the
 overlap is named in `Strategies/books/README.md` §6.
 
+**The second paper library — `Strategies/books2/` (2026-10-07).** The companion
+brief set, written from a local harvest of the arXiv **`q-fin.GN` (General
+Finance)** category: **3,095 records / 3,066 PDFs, 1997-2026**, cut into **28
+topical briefs** (`networks_and_systemic_risk` through
+`overfitting_and_research_integrity`), with 292 papers read in depth from the
+PDFs and 429 distinct arXiv ids cited. This library is written for a **research
+layer**: every take-away table aims at a calculator module, an agent tool, an
+analyst prompt, a config gate, a score engine, a registry or the evidence
+surfaces, and a finding whose only consequence is execution records `no
+research-layer landing` rather than a fabricated path. `README.md` holds the
+harvest, the per-category counts, the method and the limits, plus the twelve
+findings that recur across independent slices. The same harvest was read
+independently for `nautilus_trader` under its own `strategies/books2/`; that set
+is framed for an execution engine, and this one shares the corpus, not its
+conclusions. `Strategies/books/` remains the companion set for the wider q-fin
+crawl, and the two cross-reference each other where the categories overlap.
+
 ### 19.5 The score doc set (`docs/scores/`, 20 files)
 
 `README.md` is the set's master design; `MASTER_PLAN.md` is the ordered work
