@@ -696,6 +696,15 @@ deliberate step with a vendor-suite re-run.
   `get_sec_filings` tool falls back to Massive's `get_form4_insider_massive`
   Form-4 insider-activity data, returned under an explicit label so the agent
   does not mistake it for the full 8-K/10-K set)
+- insider transactions (Form 4): `moomoo`, `yfinance`, `alpha_vantage`, `sec_edgar`
+  (the `news_data` category override), then `benzinga` — the firehose stays last,
+  because its endpoint takes no ticker filter and pages the market-wide stream.
+  `sec_edgar` is the keyless EDGAR-native open-market read
+  (`get_insider_transactions_sec_edgar`): issuer-scoped and quota-free, so it
+  outranks the untargeted firehose, though it is narrower than the top three
+  (open-market only, no ownership rollup). It needs the optional extra
+  (`pip install ".[edgar]"`); without it the vendor raises a typed no-data and
+  the chain advances. Argued in `docs/developer/12-data-providers.md`
 - short interest: `yfinance`, `moomoo`, `massive`
 - short-sale volume (Reg SHO daily) + ATS dark-pool flow: `finra` (official
   public tier, keyless, as-of dates rendered + staleness-gated)

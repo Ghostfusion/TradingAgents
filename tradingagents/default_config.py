@@ -818,8 +818,14 @@ SHIPPED_DEFAULTS = {
             # least-limited first: moomoo (local OpenD, no quota, owner/title/
             # shares/price), yfinance (keyless), alpha_vantage (25 req/day),
             # then benzinga - whose endpoint takes no ticker filter, so it pages
-            # the market-wide stream and filters locally.
-            "get_insider_transactions": "moomoo,yfinance,alpha_vantage,benzinga",
+            # the market-wide stream and filters locally. sec_edgar goes BEFORE
+            # benzinga: the keyless, issuer-scoped EDGAR Form 4 read (open-market
+            # subset) is precise and quota-free, so it outranks the untargeted
+            # firehose - which stays last, the invariant
+            # tests/test_benzinga_surface.py pins. It needs the optional edgar
+            # extra (pip install "tradingagents[edgar]"); without it the vendor
+            # raises no-data and the chain advances.
+            "get_insider_transactions": "moomoo,yfinance,alpha_vantage,sec_edgar,benzinga",
         },
         # DSA §3.4 market-classified vendor routing (opt-in). When
         # ``enable_market_routing`` is on, ``market_source_priority`` maps a

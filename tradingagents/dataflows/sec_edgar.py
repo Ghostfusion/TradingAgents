@@ -18,8 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import urllib.request
-from datetime import date
+from datetime import date, timedelta
 
+from .date_window import get_run_trade_date
 from .errors import NoMarketDataError
 from .symbol_utils import normalize_symbol
 
@@ -727,5 +728,316 @@ def get_edgar_fulltext_search(query: str, forms: str | None = None,
     lines.append("")
     lines.append("Source: SEC EDGAR Full-Text Search (efts.sec.gov, keyless; filings since 2001). "
                  "Advisory — verify context in the actual filing before quoting.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Form 4 insider transactions (the optional ``edgar`` extra)
+#
+# EDGAR is ISSUER-centric for Form 4: a ticker resolves to the issuer's CIK, so
+# ``Company(ticker).get_filings(form=4)`` is exactly "this stock's insider
+# transactions in a window". That is why Form 4 is wired here and 13F is not: a
+# 13F-HR is FILER-centric (one fund's portfolio), so "who holds this stock" would
+# need every filer's report scanned - thousands of requests per symbol - which is
+# a worse answer than the holders list moomoo/yfinance already print.
+#
+# Verified against edgartools 5.61.1 before wiring, not from memory: the identity
+# is set via ``set_identity("Name email")``, the window filter is
+# ``get_filings(form=4, date=(start, end))``, the open-market rows are
+# ``form4.market_trades``, and the 10b5-1 flag is
+# ``TransactionSummary.has_10b5_1_plan`` - the documented ``has_10b5_1`` does not
+# exist on that object in 5.61.1.
+#
+# ``edgartools`` is an OPTIONAL extra rather than a core dependency: it pulls
+# pyarrow, lxml, orjson, rapidfuzz and rank-bm25, which is a lot of install weight
+# for one vendor that sits at the end of a chain. ``pip install
+# "tradingagents[edgar]"`` enables it; without the extra the vendor raises a typed
+# ``NoMarketDataError`` naming the install, so the chain advances with a reason
+# rather than an empty read.
+# ---------------------------------------------------------------------------
+
+#: edgartools' ``set_identity`` takes "Name email" and the library builds its own
+#: SEC User-Agent from it. Same contact as ``_UA`` above - change both.
+_IDENTITY = "TradingAgentsResearch vincent_liu@msn.com"
+
+#: Labels for the Form 4 transaction codes the render prints. ``market_trades``
+#: is already filtered to the open-market pair (P/S); the map exists so a code
+#: the library adds later prints as its own letter instead of being dropped.
+_F4_CODE_LABELS = {
+    "P": "open-market purchase",
+    "S": "open-market sale",
+    "M": "option exercise",
+    "A": "grant / award",
+    "F": "tax withholding",
+    "C": "conversion",
+    "G": "gift",
+    "D": "disposition (other)",
+}
+
+#: An ImportError is remembered (below) so a chain that reaches this vendor on
+#: every symbol does not re-attempt the optional import each time.
+_EDGAR_IMPORT_ERROR: str | None = None
+_EDGAR_IDENTITY_SET = False
+
+
+def _edgar_module():
+    """The imported ``edgar`` module, or ``None`` when the extra is absent.
+
+    Memoised on the failure path only: a successful import is a ``sys.modules``
+    lookup, but a missing extra must not be re-attempted once per symbol.
+    """
+    global _EDGAR_IMPORT_ERROR
+    if _EDGAR_IMPORT_ERROR is not None:
+        return None
+    try:
+        import edgar
+    except Exception as exc:  # noqa: BLE001 - the extra is optional: absence is a reason, not an error
+        _EDGAR_IMPORT_ERROR = str(exc)
+        return None
+    return edgar
+
+
+def _edgar_ready():
+    """``(module, None)`` when ready to query, else ``(None, reason)``.
+
+    Performs the one-time ``set_identity``: the SEC rejects a request with no
+    reachable contact, and edgartools builds its own User-Agent from this
+    identity, so it must be set before the first fetch. ``_UA`` covers this
+    module's own requests; the library's requests are its own.
+    """
+    global _EDGAR_IDENTITY_SET
+    edgar = _edgar_module()
+    if edgar is None:
+        return None, (
+            f"the edgartools extra is not installed ({_EDGAR_IMPORT_ERROR}); "
+            'install it with: pip install "tradingagents[edgar]"'
+        )
+    if not _EDGAR_IDENTITY_SET:
+        try:
+            edgar.set_identity(_IDENTITY)
+        except Exception as exc:  # noqa: BLE001 - degrade to a reason, never raise
+            return None, f"edgartools could not set the SEC identity: {exc}"
+        _EDGAR_IDENTITY_SET = True
+    return edgar, None
+
+
+def _f4_num(value) -> float | None:
+    """A numeric cell as a float, or ``None`` - never a substituted zero.
+
+    A missing price is *unknown*, not free, and a NaN/inf cell is not a quantity;
+    both become ``None`` so the render can print n/a honestly.
+    """
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if out != out or out in (float("inf"), float("-inf")):  # NaN / inf
+        return None
+    return out
+
+
+def _f4_day(value) -> str | None:
+    """A date-ish cell as ``YYYY-MM-DD``, or ``None``.
+
+    The library hands back ``datetime.date``, pandas ``Timestamp`` and plain
+    strings across its own paths, so all three are accepted rather than one being
+    assumed and the others silently truncated.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value[:10] or None
+    try:
+        return value.date().isoformat()
+    except AttributeError:
+        return str(value)[:10] or None
+
+
+def _f4_endpoint(days: int) -> tuple[str, str]:
+    """``(start, end)`` ISO dates: the ``days`` up to the run trade date.
+
+    Anchored on ``get_run_trade_date()`` rather than ``date.today()`` so two runs
+    of one symbol read the same window - the reproducibility contract the score
+    panels already use.
+    """
+    end = get_run_trade_date()
+    try:
+        start = (date.fromisoformat(end) - timedelta(days=days)).isoformat()
+    except (TypeError, ValueError):
+        end = date.today().isoformat()
+        start = (date.today() - timedelta(days=days)).isoformat()
+    return start, end
+
+
+def _insider_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
+    """Form 4 **open-market** insider transactions for ``ticker``, as ROWS.
+
+    Private on purpose: the render below is the only consumer today, and a public
+    producer with no caller outside this module is what the calc-wiring gate
+    exists to reject. Promote it the moment a signal wants the rows (an insider
+    buy/sell net is the obvious one).
+
+    One dict per transaction, newest first, over ``[start_date, end_date]`` matched
+    on the **transaction** date (a filing can land days after the trade). This is
+    the open-market subset - grants, option exercises and tax withholding are
+    compensation mechanics rather than a decision - which is also the subset the
+    Massive fallback labels.
+
+    Every key but ``value`` is read straight off the filing; ``value`` is DERIVED
+    as ``shares * price`` and is ``None`` when either is missing. ``plan_10b5_1``
+    is the filing's own Rule 10b5-1 flag: a pre-scheduled sale is a weaker signal
+    than a discretionary one (``None`` = the footnotes do not say).
+
+    Raises ``NoMarketDataError`` when the extra is absent, the query fails, or no
+    Form 4 landed in the window - so the router advances the chain with a reason.
+    """
+    edgar, reason = _edgar_ready()
+    if edgar is None:
+        raise NoMarketDataError(ticker, detail=reason)
+
+    # EDGAR's Form 4 index is keyed by the issuer, so a class-suffixed symbol
+    # still queries its base ("BRK.B" -> "BRK").
+    base = normalize_symbol(ticker).split(".")[0].upper()
+    try:
+        filings = edgar.Company(base).get_filings(form=4, date=(start_date, end_date))
+    except Exception as exc:  # noqa: BLE001 - a vendor failure degrades to no-data
+        raise NoMarketDataError(ticker, detail=f"EDGAR Form 4 query failed: {exc}") from exc
+
+    rows: list[dict] = []
+    for filing in filings or []:
+        try:
+            form4 = filing.obj()
+        except Exception:  # noqa: BLE001 - one malformed filing is skipped, not fatal
+            continue
+        if form4 is None:
+            continue
+        try:
+            summary = form4.get_ownership_summary()
+            trades = form4.market_trades
+        except Exception:  # noqa: BLE001 - a filing whose tables will not parse is skipped
+            continue
+        if trades is None or len(trades) == 0:
+            continue
+        insider = getattr(summary, "insider_name", None)
+        position = getattr(summary, "position", None)
+        plan = getattr(summary, "has_10b5_1_plan", None)
+        filed = _f4_day(getattr(filing, "filing_date", None))
+        for _, trade in trades.iterrows():
+            shares = _f4_num(trade.get("Shares"))
+            price = _f4_num(trade.get("Price"))
+            rows.append({
+                "date": _f4_day(trade.get("Date")),
+                "insider": insider,
+                "position": position,
+                "code": trade.get("Code"),
+                "kind": trade.get("TransactionType"),
+                "shares": shares,
+                "price": price,
+                "value": None if (shares is None or price is None) else shares * price,
+                "remaining": _f4_num(trade.get("Remaining")),
+                "acquired_disposed": trade.get("AcquiredDisposed"),
+                "direct_indirect": trade.get("DirectIndirect"),
+                "plan_10b5_1": plan,
+                "filed": filed,
+            })
+
+    if not rows:
+        raise NoMarketDataError(
+            ticker,
+            detail=(
+                f"no open-market Form 4 transactions on EDGAR between "
+                f"{start_date} and {end_date}"
+            ),
+        )
+    # Newest first; a row with no parseable date sorts last rather than first.
+    rows.sort(key=lambda r: r["date"] or "", reverse=True)
+    return rows
+
+
+def get_insider_transactions_sec_edgar(ticker: str, days: int = 365) -> str:
+    """Open-market Form 4 insider transactions from SEC EDGAR (keyless, free).
+
+    The vendor behind ``get_insider_transactions``: the trailing ``days`` up to
+    the run trade date, one row per open-market trade, the per-insider net, and
+    the Rule 10b5-1 flag. Rendered from :func:`_insider_rows`, so the prose and
+    any future structured consumer cannot disagree about the same filing.
+
+    Raises ``NoMarketDataError`` (via the producer) when the extra is absent or
+    EDGAR has nothing in the window; the router turns that into its typed NO_DATA
+    sentinel, so a caller never sees an empty table dressed as data.
+    """
+    start, end = _f4_endpoint(days)
+    rows = _insider_rows(ticker, start, end)
+
+    lines = [
+        f"## SEC EDGAR Form 4 insider transactions — {normalize_symbol(ticker)} "
+        f"(open-market only)",
+        "",
+        f"Window: {start} to {end} (trailing {days} days to the run trade date). "
+        f"{len(rows)} open-market transaction(s) across "
+        f"{len({r['insider'] for r in rows if r['insider']})} insider(s).",
+        "",
+        "| date | insider | position | code | shares | price | value | remaining |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        code = (r["code"] or "?")
+        label = _F4_CODE_LABELS.get(code.upper(), code)
+        lines.append(
+            f"| {r['date'] or 'n/a'} | {r['insider'] or 'n/a'} | {r['position'] or 'n/a'} "
+            f"| {code} ({label}) "
+            f"| {'n/a' if r['shares'] is None else format(r['shares'], ',.0f')} "
+            f"| {'n/a' if r['price'] is None else format(r['price'], ',.2f')} "
+            f"| {'n/a' if r['value'] is None else '$' + format(r['value'], ',.0f')} "
+            f"| {'n/a' if r['remaining'] is None else format(r['remaining'], ',.0f')} |"
+        )
+
+    # Per-insider open-market net: the number the prose has to give, because a
+    # table of individual trades does not answer "was this insider buying".
+    by_insider: dict[str, dict[str, float]] = {}
+    for r in rows:
+        acc = by_insider.setdefault(
+            r["insider"] or "unknown",
+            {"bought": 0.0, "sold": 0.0, "buy_value": 0.0, "sell_value": 0.0},
+        )
+        code = (r["code"] or "").upper()
+        shares = r["shares"] or 0.0
+        value = r["value"] or 0.0
+        if code == "P":
+            acc["bought"] += shares
+            acc["buy_value"] += value
+        elif code == "S":
+            acc["sold"] += shares
+            acc["sell_value"] += value
+
+    lines.append("")
+    lines.append("**Open-market net per insider** (grants, option exercises and tax "
+                 "withholding are excluded by construction):")
+    for name, acc in sorted(
+        by_insider.items(), key=lambda kv: -(kv[1]["buy_value"] + kv[1]["sell_value"])
+    ):
+        net = acc["bought"] - acc["sold"]
+        lines.append(
+            f"- {name}: net {net:+,.0f} shares "
+            f"(bought {acc['bought']:,.0f} for ${acc['buy_value']:,.0f}; "
+            f"sold {acc['sold']:,.0f} for ${acc['sell_value']:,.0f})"
+        )
+
+    flagged = sum(1 for r in rows if r["plan_10b5_1"] is True)
+    unknown = sum(1 for r in rows if r["plan_10b5_1"] is None)
+    lines.append("")
+    lines.append(
+        f"Rule 10b5-1: {flagged} transaction(s) filed under a pre-scheduled plan "
+        f"(a weaker signal than a discretionary trade); {unknown} whose footnotes "
+        f"do not say either way."
+    )
+    lines.append("")
+    lines.append(
+        "Source: SEC EDGAR Form 4 (keyless, free) via edgartools — the OPEN-MARKET "
+        "subset only, so 'no insider buys' here does not mean 'no Form 4 was "
+        "filed'. `value` is derived (shares x price). Advisory input, not a rating."
+    )
     return "\n".join(lines)
 

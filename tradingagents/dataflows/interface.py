@@ -113,7 +113,12 @@ from .screener import (
     get_market_movers as get_market_movers_yfinance,
     screen_equities as screen_equities_yfinance,
 )
-from .sec_edgar import get_edgar_fulltext_search, get_financial_history, get_sec_filings
+from .sec_edgar import (
+    get_edgar_fulltext_search,
+    get_financial_history,
+    get_insider_transactions_sec_edgar,
+    get_sec_filings,
+)
 from .seekingalpha import get_news_seekingalpha
 from .stockdata import (
     get_news_stockdata,
@@ -542,6 +547,10 @@ VENDOR_METHODS = {
         # Backup. The endpoint ignores every ticker parameter, so this reader
         # scans the newest pages and filters locally.
         "benzinga": get_insider_transactions_benzinga,
+        # Keyless EDGAR-native Form 4 (open-market subset only). Sits before the
+        # Benzinga firehose in the default chain: issuer-scoped and quota-free,
+        # so it is the better answer than a market-wide page-and-filter.
+        "sec_edgar": get_insider_transactions_sec_edgar,
     },
     # macro_data
     "get_macro_indicators": {

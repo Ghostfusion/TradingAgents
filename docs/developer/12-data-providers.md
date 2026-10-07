@@ -38,7 +38,7 @@ VENDOR_LIST = ['alpha_vantage', 'benzinga', 'cboe', 'congress', 'eodhd',
 | 3 | **polymarket** | Polymarket | prediction markets (market-implied event probabilities) |
 | 4 | **alpha_vantage** | Alpha Vantage | stock data, indicators, fundamentals, statements, news |
 | 5 | **finnhub** | Finnhub (free tier) | company news, analyst ratings, earnings calendar, basic financials, insider activity, company peers |
-| 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G); when EDGAR fails the `get_sec_filings` tool falls back to Massive Form-4 insider activity |
+| 6 | **sec_edgar** | SEC EDGAR | SEC filings (8-K material events, 10-K/Q, S-1/S-3, 13D/G); when EDGAR fails the `get_sec_filings` tool falls back to Massive Form-4 insider activity. Also serves `get_insider_transactions` ahead of the Benzinga firehose: the keyless EDGAR-native open-market Form 4 read via the optional `edgar` extra (`pip install ".[edgar]"`) |
 | 7 | **moomoo** | Moomoo OpenAPI (via the local OpenD gateway) | US/HK/JP/SH/SZ/AU/CA/SG/MY quotes, fundamentals, earnings calendar, economic calendar, Fed watch, capital flow, corporate actions, options, short interest, top movers |
 | 8 | **massive** | Massive.com (added in this fork) | news sentiment, economy (treasury/inflation/labor), short interest/volume, Form-4 insider, ratios, snapshots/top movers, related-companies, IPOs |
 | 9 | **eodhd** | EODHD (added in this fork) | **primary OHLCV** (EOD plan $19.99/mo = 100k calls/day @ 1000/min, 30+ years) + news + splits/dividends + full US symbol list (~18k common stocks, the screener's default `--universe eodhd-us`) — replaces the moomoo K-line quota |
@@ -94,7 +94,7 @@ Benzinga-only surface: guidance_revisions, fda_calendar, offerings_calendar,
 chain. One is set by default:
 
 ```
-get_insider_transactions : moomoo,yfinance,alpha_vantage,benzinga
+get_insider_transactions : moomoo,yfinance,alpha_vantage,sec_edgar,benzinga
 ```
 
 `get_insider_transactions` lives in the `news_data` **category**, so without an
@@ -103,6 +103,22 @@ first on every lookup. The override also corrects an ordering that was against
 the criterion above: `alpha_vantage` (a 25 req/day keyed vendor) used to sit in
 front of `moomoo` (local OpenD, no quota, richest rows) and `yfinance`
 (keyless).
+
+**`sec_edgar` sits before Benzinga (2026-10-07).** EDGAR is issuer-centric for
+Form 4, so the keyless `get_insider_transactions_sec_edgar` is **scoped to the
+issuer** and costs no quota — it outranks Benzinga, whose endpoint takes no
+ticker filter and pages the market-wide stream. **Benzinga stays last**, which
+`tests/test_benzinga_surface.py` pins as the invariant ("the firehose backup must
+be last"); the richer keyed vendors keep their places ahead of both. The EDGAR
+read is narrower than the top three (open-market only — grants, option exercises
+and tax withholding are compensation mechanics — with no ownership rollup), so
+moving it further up is a config line and the owner's call. It requires the
+optional extra (`pip install "tradingagents[edgar]"`) — without it the vendor
+raises a typed no-data naming the install, so the chain advances instead of
+returning an empty table. **13F is deliberately not wired**: a 13F-HR is
+*filer*-centric (one fund's portfolio), so "who holds this stock" would need
+every filer's report scanned — thousands of requests per symbol — which is worse
+than the holders list `moomoo`/`yfinance` already give.
 
 ---
 

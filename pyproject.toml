@@ -51,6 +51,12 @@ dev = [
 bedrock = [
     "langchain-aws>=1.5.0",
 ]
+# SEC EDGAR Form 4 insider transactions via edgartools (MIT, keyless, no quota).
+# Optional so the core install stays lean - the library pulls pyarrow, lxml,
+# orjson and rapidfuzz: pip install "tradingagents[edgar]".
+edgar = [
+    "edgartools>=5.61.1",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"
