@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from tradingagents.strategies.rule_eval import evaluate_rule, forward_returns, rule_signal_rsi70
+from tradingagents.strategies.rule_eval import (
+    evaluate_rule,
+    forward_returns,
+    rule_signal_price_above_vwma,
+    rule_signal_rsi70,
+)
 from tradingagents.strategies.signal_action import (
     portfolio_action_from_gate,
     signal_action_split,
@@ -143,3 +148,26 @@ def test_evaluate_rule_predictive_on_noisy_trend():
     assert r["verdict"] in ("PREDICTIVE", "INSUFFICIENT")
     if r["verdict"] == "PREDICTIVE":
         assert "fwd5" in r["stats"] and "hit" in r["stats"]["fwd5"]
+
+
+def test_base_hit_rate_is_the_always_up_share_over_the_same_window():
+    """The baseline half of the honest-signals check, tested directly."""
+    from tradingagents.strategies.rule_eval import _base_hit_rates
+
+    # five fwd-1 windows: +, -, +, -, + -> 3/5
+    closes = [100.0, 101.0, 99.0, 102.0, 98.0, 100.0]
+    assert _base_hit_rates(closes, 0, len(closes) - 1, horizons=(1,))[1] == pytest.approx(0.6)
+
+
+def test_every_hit_rate_carries_the_base_rate_it_must_beat():
+    """A hit rate alone says nothing: each horizon carries `base_hit` and `lift`."""
+    closes = _trend_series(320, seed=3)
+    highs = [c + 1 for c in closes]
+    lows = [c - 1 for c in closes]
+    vols = [1e6 + i for i in range(len(closes))]
+    r = evaluate_rule(closes, highs, lows, vols, rule_signal_price_above_vwma, label="vwma")
+    assert r["verdict"] == "PREDICTIVE"
+    for s in r["stats"].values():
+        assert "base_hit" in s and "lift" in s
+        if s["hit"] is not None and s["base_hit"] is not None:
+            assert s["lift"] == pytest.approx(s["hit"] - s["base_hit"])

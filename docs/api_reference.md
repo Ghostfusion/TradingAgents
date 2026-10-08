@@ -1203,6 +1203,14 @@ so a tree carries its own consistency record instead of depending on the opt-in
   consumer, a **Non-Commercial** licence, and the probed finding that the
   supplied app key + secret cannot authenticate without `LONGBRIDGE_ACCESS_TOKEN`
   (`401001 token empty`).
+- `docs/design_external_research_leads.md` - lead-source register (2026-10-08): a
+  public "awesome-quant"-style list checked against this repo - the two process
+  patterns adopted (the eligibility gate and the anti-doc-sprawl rule, now
+  `docs/AGENT_ONBOARDING.md` section 0 rules 11-12, plus
+  `scripts/validate_registers.py` and the SSRF-safe `scripts/url_probe.py` behind
+  a weekly workflow), and every lead's disposition: which are already implemented
+  here, which produced a change (`rule_eval`'s baseline lift), and which are
+  blocked on an owner decision.
 - `docs/design_moomoo_unused_api_surface.md` - provider study (2026-09-18, design
   only): the **unused** moomoo OpenAPI surface enumerated - 103 unused data
   methods of `OpenQuoteContext`'s 166 public callables, every one read and ~35

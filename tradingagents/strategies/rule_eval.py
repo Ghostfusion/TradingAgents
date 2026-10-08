@@ -14,6 +14,13 @@ their forward returns. A rule with < 30 events renders INSUFFICIENT, never a
 table of noise. Conditional-vs-base rows (rule AND another rule) let the user
 answer "does adding THIS signal help?" with an incremental number.
 
+A rule's hit rate is reported beside the **always-up base rate over the same
+bars** (`base_hit`) and their difference (`lift`): a 55% hit rate means nothing
+without it, and the honest-signals finding is that a pattern's edge is its
+excess over the baseline, not its raw hit rate. The interval is deliberately
+not computed here - `strategies/calibration.excess_accuracy` carries the
+moving-block bootstrap for exactly this comparison, behind its own gate.
+
 Pure: no IO/LLM. Never gates anything; advisory output for
 ``scripts/rule_eval.py`` and the methodology-registry ethos.
 """
@@ -160,6 +167,24 @@ DEFAULT_RULES: dict[str, object] = {
 }
 
 
+def _base_hit_rates(closes: list[float], lo: int, hi: int, horizons=(1, 5, 10, 20)) -> dict:
+    """The always-up base rate per horizon over the SAME bars a rule is scored on.
+
+    ``lo``/``hi`` mirror ``evaluate_rule``'s evaluation window; the exclusion is
+    the same one (a bar with no forward return, or a non-positive price, carries
+    no direction and is dropped from both arms rather than counted as a miss).
+    """
+    out: dict[int, float | None] = {}
+    for h in horizons:
+        vals: list[float] = []
+        for i in range(lo, min(hi, len(closes) - 1)):
+            j = i + h
+            if j < len(closes) and closes[i] > 0:
+                vals.append(closes[j] / closes[i] - 1.0)
+        out[h] = (sum(1 for v in vals if v > 0) / len(vals)) if vals else None
+    return out
+
+
 def evaluate_rule(
     closes: list[float],
     highs: list[float],
@@ -176,8 +201,10 @@ def evaluate_rule(
     least one non-None forward return, and require >= MIN_EVENTS else
     ``verdict=INSUFFICIENT``. Advisory; no fabrication.
     """
+    lo = max(60, lookback)
+    base = _base_hit_rates(closes, lo, len(closes) - 1, horizons)
     events: list[dict] = []
-    for i in range(max(60, lookback), len(closes) - 1):
+    for i in range(lo, len(closes) - 1):
         window_c = closes[: i + 1]
         window_h = highs[: i + 1]
         window_l = lows[: i + 1]
@@ -199,23 +226,28 @@ def evaluate_rule(
 
     stats: dict[int, dict] = {}
     for h in horizons:
+        bh = base.get(h)
         vals = [e["forward"][h] for e in events if e["forward"][h] is not None]
         if not vals:
             stats[h] = {"n": 0, "avg": None, "median": None, "hit": None,
-                        "max_adverse": None, "max_favourable": None, "sharpe": None, "profit_factor": None}
+                        "max_adverse": None, "max_favourable": None, "sharpe": None,
+                        "profit_factor": None, "base_hit": bh, "lift": None}
             continue
         wins = sum(1 for v in vals if v > 0)
         pf_num = sum(v for v in vals if v > 0)
         pf_den = sum(-v for v in vals if v < 0)
         sd = math.sqrt(sum((v - mean(vals)) ** 2 for v in vals) / (len(vals) - 1)) if len(vals) > 1 else 0.0
+        hit = wins / len(vals)
         stats[h] = {
             "n": len(vals),
             "avg": mean(vals),
             "median": median(vals),
-            "hit": wins / len(vals),
+            "hit": hit,
             "max_adverse": min(vals),
             "max_favourable": max(vals),
             "sharpe": (mean(vals) / sd * math.sqrt(252.0)) if sd > 0 else None,
             "profit_factor": (pf_num / pf_den) if pf_den > 0 else (None if pf_num == 0 else float("inf")),
+            "base_hit": bh,
+            "lift": (hit - bh) if bh is not None else None,
         }
     return {"label": label, "verdict": "PREDICTIVE", "n_events": n, "stats": stats}

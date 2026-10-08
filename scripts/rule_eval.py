@@ -3,8 +3,10 @@
 Evaluates configured indicators (RSI>70, MACD-hist rising, Bollinger
 extension, high-vol, above-VWMA, ...) over a ticker's close series and
 prints a per-rule table of forward 1/5/10/20-day returns, hit rate, average /
-median, max-adverse/max-favourable, annualized Sharpe and profit factor. A
-rule with fewer than 30 events renders INSUFFICIENT - never a noise table
+median, max-adverse/max-favourable, annualized Sharpe and profit factor. Each
+hit rate is printed with the always-up base rate over the same bars and the
+`lift` between them - a hit rate alone says nothing. A rule with fewer than 30
+events renders INSUFFICIENT - never a noise table
 (SKHY 2026-09-09 review-loop: indicator set must be measured, not assumed).
 
 Usage:
@@ -88,8 +90,12 @@ def main() -> int:
             pf = "inf" if s["profit_factor"] == float("inf") else (
                 f"{s['profit_factor']:.2f}" if s["profit_factor"] is not None else "n/a")
             sh = f"{s['sharpe']:.2f}" if s["sharpe"] is not None else "n/a"
+            bh = s.get("base_hit")
+            lf = s.get("lift")
+            base_s = f"base={bh:.0%} lift={lf:+.0%}" if bh is not None and lf is not None else "base=n/a"
             print(
-                f"      fwd{h:<3} avg={s['avg']:+.2%} med={s['median']:+.2%} hit={s['hit']:.0%} "
+                f"      fwd{h:<3} avg={s['avg']:+.2%} med={s['median']:+.2%} "
+                f"hit={s['hit']:.0%} {base_s} "
                 f"MAE={s['max_adverse']:+.2%} MFE={s['max_favourable']:+.2%} "
                 f"sharpe={sh} PF={pf}"
             )

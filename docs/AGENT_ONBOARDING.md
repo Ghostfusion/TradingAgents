@@ -124,6 +124,24 @@ a fresh agent must follow them without being reminded:
      producer (prompt/tool/sanitizer) that let it through, so the next run cannot repeat it.
    - **Never** re-adjudicate a defect the owner already ruled on, and never re-open a
      documented-but-deferred item as though it were new.
+11. **A lead source is not a dependency - gate it before it is adopted (owner standing order, 2026-10-08)** -
+    a review, a book, a reading list, a vendor page or a subagent proposing an external library, repo or
+    service offers a LEAD, not a fact.  Before wiring anything: (a) verify the load-bearing claim from the
+    PRIMARY source - the repo, the SDK, the live server - never its description (four documented
+    refutations: an edgartools attribute name, a curated list's own row count, a vendor's credential
+    recipe, and a chain ordering a pinned test overturned); (b) the repo is substantively implemented and
+    touched within 12 months, not a thin SDK or a marketing page; (c) CHECK FOR THE PRODUCER FIRST - this
+    repo already implements most of what a lead proposes (DSR/PBO/MinTRL, purged CPCV, reverse DCF,
+    Polymarket, the PIT and survivor primitives, and a sha256 chain all exist), so re-landing one is
+    duplicate work; (d) read the licence; (e) cite the evidence in the commit and the doc that lands it.
+    **Missing evidence is unverified, not proof of eligibility** - mark `[verified]` (you read it) apart
+    from `[reported]` (someone said so) and never promote the second to the first.
+12. **No task-specific planning documents (owner standing order, 2026-10-08)** - a change lands in the
+    durable docs it invalidates (rule 9) and in the code; it does NOT also land as a new per-task plan,
+    status note or scratch document.  A plan belongs in the commit message or the task tracker, and a
+    durable design belongs in one `docs/design_*.md` stating a decision and its evidence.  If a document
+    would be obsolete the moment the task it describes finishes, it does not belong in the repo -
+    `docs/implementation_plan_*.md` are legacy, not the pattern to add to.
 
 ---
 
@@ -1122,14 +1140,14 @@ has changed before); never assume an endpoint works — the SDK's
   `TradingExecution`'s), and the CHANGELOG records renames. A blanket doc check would be an over-strict invariant failing on 28
   TRUE statements. Word-boundary anchored so `strategies/backtest_engine.py` is not read as a `test_engine.py`. Failing-first:
   restoring the stale reference turns the guard red, sha256 restore MATCH. **(2)** `.github/workflows/ci.yml:61` runs `ruff check .`
-  under a job literally named "ruff (strict, full repo)", and `AGENT_ONBOARDING.md:183-184`, `docs/developer/08-development.md:26`
+  under a job literally named "ruff (strict, full repo)", and `AGENT_ONBOARDING.md:215-216`, `docs/developer/08-development.md:26`
   and the README all state the whole repo is clean. **It was not - 4 findings:** `scripts/score_panel.py:1274` UP034,
   `:1336` C401, `:1714` B905 (the INNER `zip(train, test)` lacked `strict=`; the outer call had it), `cli/stats_handler.py:1` I001.
   All four fixed behaviour-preservingly (`set(gen) == {gen}`, `zip(a,b) == zip(a,b,strict=False)`); B905 takes `strict=False`
   NOT `True` - `strict=True` would raise on ragged pairs and a lint fix must not change behaviour. **So my initial framing
   ("widen the scope") was WRONG: the scope was already documented whole-repo in three places - the defect was that the repo
   did not meet its own stated bar and nothing caught it locally.** The real trap was the copy-pasteable quick command:
-  `AGENT_ONBOARDING.md:140` read `py -3.12 -m ruff check tradingagents/ ...`, so an agent copying it lints ONE directory and
+  `AGENT_ONBOARDING.md:163-168` read `py -3.12 -m ruff check tradingagents/ ...`, so an agent copying it lints ONE directory and
   reports clean - that is how `scripts/` and `cli/` rotted. It now reads `ruff check .`, matching the contract the same file
   states 40 lines later. **`ruff check .` passes.** Lesson: when a doc states a repo-wide bar, the fix is to MEET it, not to
   narrow the bar to what currently passes - and check the copy-pasteable command, not just the prose.
