@@ -104,9 +104,10 @@ the criterion above: `alpha_vantage` (a 25 req/day keyed vendor) used to sit in
 front of `moomoo` (local OpenD, no quota, richest rows) and `yfinance`
 (keyless).
 
-**`sec_edgar` sits before Benzinga (2026-10-07).** EDGAR is issuer-centric for
-Form 4, so the keyless `get_insider_transactions_sec_edgar` is **scoped to the
-issuer** and costs no quota — it outranks Benzinga, whose endpoint takes no
+**`sec_edgar` sits before Benzinga (2026-10-07).** EDGAR keys a company's
+Form 4 feed by the *filer*, so the keyless `get_insider_transactions_sec_edgar` is
+scoped to the issuer by a **per-filing `issuer` filter** (added 2026-10-08, after
+a live XOM probe returned a ProPetro Form 4 in XOM's own feed) and costs no quota — it outranks Benzinga, whose endpoint takes no
 ticker filter and pages the market-wide stream. **Benzinga stays last**, which
 `tests/test_benzinga_surface.py` pins as the invariant ("the firehose backup must
 be last"); the richer keyed vendors keep their places ahead of both. The EDGAR

@@ -734,12 +734,21 @@ def get_edgar_fulltext_search(query: str, forms: str | None = None,
 # ---------------------------------------------------------------------------
 # Form 4 insider transactions (the optional ``edgar`` extra)
 #
-# EDGAR is ISSUER-centric for Form 4: a ticker resolves to the issuer's CIK, so
-# ``Company(ticker).get_filings(form=4)`` is exactly "this stock's insider
-# transactions in a window". That is why Form 4 is wired here and 13F is not: a
-# 13F-HR is FILER-centric (one fund's portfolio), so "who holds this stock" would
-# need every filer's report scanned - thousands of requests per symbol - which is
-# a worse answer than the holders list moomoo/yfinance already print.
+# ``Company(ticker).get_filings(form=4)`` is NOT "this stock's insider
+# transactions" on its own. EDGAR keys a CIK's feed by the FILER, and a feed
+# carries the Form 4s that CIK filed **as a reporting owner** of another
+# company's stock alongside the filings about it - so any >10% holder sees other
+# issuers' trades in its own feed. Refuted live 2026-10-08 (the check is trap #1
+# of ``talval-research/edgar-traps``): XOM's trailing-365d feed held 42 Form 4s,
+# one of them ProPetro Holding Corp.'s (``issuerCik`` 1680247) carrying a real
+# open-market trade - a perfectly plausible number attributed to the wrong
+# issuer. The per-filing issuer filter in ``_insider_rows`` is what makes the
+# read this stock's.
+#
+# Form 4 is still wired here and 13F is not: a 13F-HR is FILER-centric (one
+# fund's portfolio), so "who holds this stock" would need every filer's report
+# scanned - thousands of requests per symbol - which is a worse answer than the
+# holders list moomoo/yfinance already print.
 #
 # Verified against edgartools 5.61.1 before wiring, not from memory: the identity
 # is set via ``set_identity("Name email")``, the window filter is
@@ -871,6 +880,19 @@ def _f4_endpoint(days: int) -> tuple[str, str]:
     return start, end
 
 
+def _f4_cik(value) -> int | None:
+    """A CIK as an ``int``, or ``None``.
+
+    EDGAR carries the same CIK zero-padded in one place and bare in another
+    (``Company.cik`` is an ``int``, a Form 4's ``issuer.cik`` is a ten-char
+    string), so the issuer comparison is on the integer, never the string.
+    """
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _insider_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     """Form 4 **open-market** insider transactions for ``ticker``, as ROWS.
 
@@ -890,6 +912,11 @@ def _insider_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     is the filing's own Rule 10b5-1 flag: a pre-scheduled sale is a weaker signal
     than a discretionary one (``None`` = the footnotes do not say).
 
+    Only filings whose **own** ``issuer`` CIK is the queried issuer are read: a
+    CIK's feed also carries the Form 4s it filed as a **reporting owner** of
+    another company's stock (see the module note), and attributing those here
+    would put a foreign insider's trade in this name.
+
     Raises ``NoMarketDataError`` when the extra is absent, the query fails, or no
     Form 4 landed in the window - so the router advances the chain with a reason.
     """
@@ -901,9 +928,15 @@ def _insider_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     # still queries its base ("BRK.B" -> "BRK").
     base = normalize_symbol(ticker).split(".")[0].upper()
     try:
-        filings = edgar.Company(base).get_filings(form=4, date=(start_date, end_date))
+        company = edgar.Company(base)
+        filings = company.get_filings(form=4, date=(start_date, end_date))
     except Exception as exc:  # noqa: BLE001 - a vendor failure degrades to no-data
         raise NoMarketDataError(ticker, detail=f"EDGAR Form 4 query failed: {exc}") from exc
+
+    # The query is NOT issuer-only (see the module note): keep a filing only when
+    # its OWN issuer is the company we asked about. An unreadable issuer drops
+    # too, so the failure mode is a missing row, never a foreign one in this name.
+    target_cik = _f4_cik(getattr(company, "cik", None))
 
     rows: list[dict] = []
     for filing in filings or []:
@@ -912,6 +945,9 @@ def _insider_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
         except Exception:  # noqa: BLE001 - one malformed filing is skipped, not fatal
             continue
         if form4 is None:
+            continue
+        issuer_cik = _f4_cik(getattr(getattr(form4, "issuer", None), "cik", None))
+        if issuer_cik is None or issuer_cik != target_cik:
             continue
         try:
             summary = form4.get_ownership_summary()

@@ -34,9 +34,14 @@ class _Summary:
 
 
 class _Form4:
-    def __init__(self, summary: _Summary, trades: pd.DataFrame) -> None:
+    def __init__(
+        self, summary: _Summary, trades: pd.DataFrame, issuer_cik: int = 320193
+    ) -> None:
         self._summary = summary
         self.market_trades = trades
+        # EDGAR pads the CIK to ten chars on the filing and leaves it bare on the
+        # company, so the fake pads too - the comparison must be on the integer.
+        self.issuer = SimpleNamespace(cik=str(issuer_cik).zfill(10))
 
     def get_ownership_summary(self) -> _Summary:
         return self._summary
@@ -54,6 +59,7 @@ class _Filing:
 class _Company:
     def __init__(self, ticker: str, filings: list, calls: list) -> None:
         self.ticker = ticker
+        self.cik = 320193  # Apple's, the queried issuer in every test below
         self._filings = filings
         self._calls = calls
 
@@ -163,3 +169,52 @@ def test_the_render_gives_the_per_insider_open_market_net(monkeypatch, _clean_st
     assert "Rule 10b5-1: 2 transaction(s)" in out
     # The subset must be stated, so "no buys" is never read as "no Form 4".
     assert "OPEN-MARKET" in out
+
+
+def test_a_reporting_owners_filing_is_not_attributed_to_the_queried_issuer(
+    monkeypatch, _clean_state
+):
+    """A CIK's Form 4 feed also carries the filings that CIK made AS A REPORTING
+    OWNER of another company's stock. Verified live 2026-10-08: XOM's trailing-365d
+    feed held 42 Form 4s, one of them ProPetro Holding Corp.'s. A row must follow
+    the filing's OWN issuer, never the query - a foreign trade in this name is a
+    fabricated decision, not a missing one."""
+    calls: list = []
+    ours = pd.DataFrame([_trade(date(2026, 9, 1), "P", 100, 10.0, 200, "Purchase")])
+    theirs = pd.DataFrame([_trade(date(2026, 9, 2), "P", 4_000, 60.0, 0, "Purchase")])
+    filings = [
+        _Filing(
+            _Form4(_Summary("Jane Doe", "Director", True), ours), date(2026, 9, 3)
+        ),
+        _Filing(
+            _Form4(_Summary("Other Person", "10% Owner", None), theirs, issuer_cik=1680247),
+            date(2026, 9, 4),
+        ),
+    ]
+    monkeypatch.setattr(sec_edgar, "_edgar_module", lambda: _fake_edgar(filings, calls))
+
+    rows = sec_edgar._insider_rows("AAPL", "2026-01-01", "2026-12-31")
+
+    assert [r["insider"] for r in rows] == ["Jane Doe"]
+    assert all(r["shares"] != 4_000 for r in rows)
+
+
+def test_a_filing_whose_issuer_cannot_be_read_is_dropped_not_guessed(
+    monkeypatch, _clean_state
+):
+    """Fail closed at the boundary: an issuer we cannot read is not this issuer's,
+    so the row is dropped (a smaller count) rather than attributed (a wrong one)."""
+    calls: list = []
+    trades = pd.DataFrame([_trade(date(2026, 9, 1), "P", 100, 10.0, 200, "Purchase")])
+    unreadable = _Form4(_Summary("Jane Doe", "Director", True), trades)
+    unreadable.issuer = None
+    monkeypatch.setattr(
+        sec_edgar,
+        "_edgar_module",
+        lambda: _fake_edgar([_Filing(unreadable, date(2026, 9, 3))], calls),
+    )
+
+    with pytest.raises(NoMarketDataError) as exc:
+        sec_edgar._insider_rows("AAPL", "2026-01-01", "2026-12-31")
+
+    assert "no open-market Form 4" in exc.value.detail
