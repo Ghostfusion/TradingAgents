@@ -9,15 +9,81 @@ ground claims in:
   order_imbalance        - buy-heavy / sell-heavy / balanced from flow nets
   premarket_liquidity    - thin-book warning from pre-market volume vs average
   post_close_confirmation- did the close confirm the plan (vs stop/target)?
+  forming_bar_progress   - the elapsed share of the regular session, so a
+                           partial bar's volume can be annualised instead of
+                           read as a light day
 
 Every function is pure and returns None on missing/invalid input (the
-no-fabrication rule). No network, no state.
+no-fabrication rule). No network, no state: ``forming_bar_progress`` reads the
+run clock the graph publishes (``dataflows.date_window``) and is 1.0 - no
+adjustment - whenever none was published, which is every offline call and every
+historical run.
 """
 
 from __future__ import annotations
 
 import math
 import statistics
+from datetime import datetime
+
+#: The regular US equity session, in exchange-time (ET) minutes: 09:30 to 16:00,
+#: i.e. 390 minutes. ``_session_progress`` is the one definition of how far into
+#: that window an instant sits.
+SESSION_OPEN_MINUTE = 9 * 60 + 30
+SESSION_MINUTES = 390
+
+#: Below this fraction of the session elapsed, a forming bar's volume carries
+#: too little of the day to annualise - the ratio is UNMEASURED (None), never a
+#: wild number. 0.10 is roughly the first 39 minutes.
+MIN_SESSION_PROGRESS = 0.10
+
+
+def _session_progress(now: datetime) -> dict:
+    """How far through the regular session ``now`` sits - the one session read.
+
+    ``now`` is the run's wall-clock instant in exchange time (a naive value is
+    read as ET; a weekend is not a session). Returns ``{fraction,
+    minutes_elapsed, open, label}`` where ``fraction`` is 0.0 before the open,
+    the elapsed share of the 390-minute session while it is open, and 1.0 from
+    the close on - so a reader that annualises a partial bar by it is a no-op
+    outside a live session.
+    """
+    if now.weekday() >= 5:
+        return {"fraction": 1.0, "minutes_elapsed": 0, "open": False, "label": "weekend"}
+    elapsed = now.hour * 60 + now.minute - SESSION_OPEN_MINUTE
+    if elapsed < 0:
+        return {"fraction": 0.0, "minutes_elapsed": 0, "open": False, "label": "pre"}
+    if elapsed >= SESSION_MINUTES:
+        return {
+            "fraction": 1.0,
+            "minutes_elapsed": SESSION_MINUTES,
+            "open": False,
+            "label": "post",
+        }
+    return {
+        "fraction": round(elapsed / SESSION_MINUTES, 4),
+        "minutes_elapsed": elapsed,
+        "open": True,
+        "label": "regular",
+    }
+
+
+def forming_bar_progress() -> float:
+    """The session fraction to annualise a FORMING bar's volume by.
+
+    Returns 1.0 - no adjustment - unless this process published a run clock
+    (:func:`tradingagents.dataflows.date_window.get_run_clock`) AND that instant
+    sits inside a live regular session. The unset default is deliberate: an
+    offline call, a test or a historical run must read exactly as it did before
+    the clock existed, never adjusted by the time of day the process ran at.
+    """
+    from tradingagents.dataflows.date_window import get_run_clock
+
+    now = get_run_clock()
+    if now is None:
+        return 1.0
+    fraction = _session_progress(now)["fraction"]
+    return fraction if 0.0 < fraction < 1.0 else 1.0
 
 
 def book_depth_read(
@@ -68,6 +134,7 @@ __all__ = [
     "book_depth_read",
     "decompose_returns",
     "decompose_returns_text",
+    "forming_bar_progress",
 ]
 
 

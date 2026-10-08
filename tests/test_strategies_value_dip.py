@@ -151,9 +151,29 @@ def test_tranche_levels_and_sizing():
     assert plan["p3"] == pytest.approx(180.0 - 9.0)
     # composite stop = P3 - 1.5*ATR
     assert plan["stop"] == pytest.approx(plan["p3"] - 1.5 * 4.5)
-    # weighted avg entry = sum(w_i * P_i)
-    avg = 0.3 * 180.0 + 0.3 * 175.5 + 0.4 * 171.0
-    assert plan["avg_entry"] == pytest.approx(avg)
+    # the NOMINAL entry is sum(w_i * P_i); the EXECUTED entry is what the whole
+    # shares actually average to. They differ by the rounding, and it is the
+    # EXECUTED pair - not the nominal - that the risk, the R and the targets come
+    # from (before 2026-10-08 the plan printed the nominal entry beside a risk
+    # figure computed from the shares, so the two disagreed).
+    nominal = 0.3 * 180.0 + 0.3 * 175.5 + 0.4 * 171.0
+    assert plan["avg_entry_nominal"] == pytest.approx(nominal)
+    assert plan["risk_per_share_nominal"] == pytest.approx(nominal - plan["stop"])
+    prices = (plan["p1"], plan["p2"], plan["p3"])
+    executed = sum(s * p for s, p in zip(plan["shares"], prices, strict=True)) / plan["total_shares"]
+    assert plan["avg_entry"] == pytest.approx(executed)
+    # whole shares cannot reproduce the weights exactly - the defect being fixed
+    assert plan["avg_entry"] != pytest.approx(nominal)
+    # the reported R is the executed risk per share, and the targets scale off it
+    assert plan["risk_per_share"] == pytest.approx(
+        plan["capital_at_risk"] / plan["total_shares"], rel=1e-3
+    )
+    assert plan["targets"]["t1"] == pytest.approx(
+        plan["avg_entry"] + 1.8 * plan["risk_per_share"], rel=1e-4
+    )
+    assert plan["targets"]["t2"] == pytest.approx(
+        plan["avg_entry"] + 3.0 * plan["risk_per_share"], rel=1e-4
+    )
     # capital at risk <= max dollar risk
     assert plan["risk_ok"]
     assert plan["capital_at_risk"] <= plan["max_dollar_risk"] + 1e-9

@@ -21,9 +21,46 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
+from .market_session import MIN_SESSION_PROGRESS
 
-def rvol(volumes: list, window: int = 50) -> float | None:
-    """Relative volume: today's volume vs the trailing window average."""
+
+def annualise_partial_ratio(
+    ratio: float | None, progress: float | None = None
+) -> float | None:
+    """Annualise a volume ratio measured over a PARTIAL session.
+
+    ``rvol`` divides a forming bar's volume by the mean of full sessions, so
+    before the close it reads LOW by roughly the share of the session elapsed
+    (INTU 2026-10-08 read 0.33 at ~90% elapsed, and the report called the day's
+    volume light). Dividing by that share recovers the full-day equivalent.
+    ``progress`` defaults to
+    :func:`tradingagents.strategies.market_session.forming_bar_progress` - 1.0
+    unless a run clock was published inside a live session - so every offline
+    and historical read is untouched. Below ``MIN_SESSION_PROGRESS`` the bar is
+    too partial to annualise and the answer is None (unmeasured), never a wild
+    number.
+    """
+    if ratio is None:
+        return None
+    if progress is None:
+        from .market_session import forming_bar_progress
+
+        progress = forming_bar_progress()
+    share = float(progress)
+    if share >= 1.0 or share <= 0.0:
+        return ratio
+    if share < MIN_SESSION_PROGRESS:
+        return None
+    return ratio / share
+
+
+def rvol(volumes: list, window: int = 50, *, progress: float | None = None) -> float | None:
+    """Relative volume: today's volume vs the trailing window average.
+
+    Session-adjusted, so a forming bar is not read as a light day: the raw ratio
+    is annualised by the elapsed share of the session (see
+    :func:`annualise_partial_ratio`). That is a no-op outside a live session.
+    """
     if not volumes or len(volumes) < 2:
         return None
     hist = volumes[-window - 1 : -1]
@@ -32,7 +69,7 @@ def rvol(volumes: list, window: int = 50) -> float | None:
     base = sum(hist) / len(hist)
     if base <= 0:
         return None
-    return volumes[-1] / base
+    return annualise_partial_ratio(volumes[-1] / base, progress)
 
 
 def ema9(closes: list) -> float | None:
@@ -370,6 +407,6 @@ def momentum_12_1(closes: list, skip: int = 21, window: int = 252) -> float | No
     return round(ref / base - 1.0, 6)
 
 
-__all__ = ["rvol", "ema9", "vwap", "pillars", "first_pullback", "session_flags",
+__all__ = ["rvol", "annualise_partial_ratio", "ema9", "vwap", "pillars", "first_pullback", "session_flags",
            "past_optimal_window", "psych_level", "intraday_pullback", "twap",
            "ts_momentum_weights", "momentum_12_1"]

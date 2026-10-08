@@ -6,14 +6,18 @@ confirmation). Pure/offline; no network.
 
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from tradingagents.dataflows import date_window  # noqa: E402
 from tradingagents.strategies import (  # noqa: E402
     market_session as ms,
+    momentum,
     technical_factors as tf,
+    value_dip,
 )
 
 pytestmark = pytest.mark.timeout(120)
@@ -358,3 +362,79 @@ def test_gap_fill_sample_empty_history_reports_no_measurement():
     assert s["bars"] == 0
     assert s["common"]["sample"] == 0
     assert s["common"]["fill_probability"] is None
+
+
+# ---------------------------------------------------------------------------
+# Partial-session volume (the run clock)
+#
+# A forming bar's volume divided by a full-day mean reads LOW by the share of
+# the session elapsed, so every RVOL read is annualised by that share. The
+# adjustment is OFF unless a run clock was published inside a live session -
+# which is why these tests publish one explicitly and clear it in a finally.
+# ---------------------------------------------------------------------------
+
+_ET = timezone(timedelta(hours=-4))
+
+
+def _et(hour, minute, day=8):
+    return datetime(2026, 10, day, hour, minute, tzinfo=_ET)
+
+
+def test_session_progress_reads_the_regular_window():
+    assert ms._session_progress(_et(9, 0))["fraction"] == 0.0  # pre-open
+    mid = ms._session_progress(_et(12, 0))
+    assert mid["label"] == "regular" and mid["open"] is True
+    assert mid["minutes_elapsed"] == 150
+    assert mid["fraction"] == pytest.approx(150 / 390, rel=1e-4)
+    post = ms._session_progress(_et(18, 0))
+    assert post["label"] == "post" and post["fraction"] == 1.0
+    sat = ms._session_progress(_et(12, 0, day=10))
+    assert sat["label"] == "weekend" and sat["fraction"] == 1.0
+
+
+def test_forming_bar_progress_is_a_no_op_without_a_published_clock():
+    date_window.set_run_clock(None)
+    assert ms.forming_bar_progress() == 1.0
+    assert momentum.rvol([1000.0] * 50 + [400.0]) == pytest.approx(0.4)
+
+
+def test_forming_bar_progress_annualises_inside_a_live_session():
+    date_window.set_run_clock(_et(15, 23))  # 353 of 390 minutes
+    try:
+        assert ms.forming_bar_progress() == pytest.approx(353 / 390, rel=1e-4)
+        # 40% of a normal day at 90% elapsed is not a light day: 0.4 / 0.9051
+        assert momentum.rvol([1000.0] * 50 + [400.0]) == pytest.approx(0.4419, rel=1e-3)
+    finally:
+        date_window.set_run_clock(None)
+
+
+def test_a_too_partial_bar_is_unmeasured_not_a_wild_number():
+    date_window.set_run_clock(_et(9, 35))  # 5 minutes in: ~77x if annualised
+    try:
+        assert momentum.rvol([1000.0] * 50 + [400.0]) is None
+    finally:
+        date_window.set_run_clock(None)
+
+
+def test_annualise_partial_ratio_honours_an_explicit_progress():
+    assert momentum.annualise_partial_ratio(0.4, 1.0) == pytest.approx(0.4)
+    assert momentum.annualise_partial_ratio(0.4, 0.5) == pytest.approx(0.8)
+    assert momentum.annualise_partial_ratio(0.4, 0.05) is None
+    assert momentum.annualise_partial_ratio(None, 0.5) is None
+
+
+def test_the_trigger_candle_reads_the_same_adjusted_ratio():
+    """The value-dip trigger and the momentum pillar must share one basis."""
+    vols = [1000.0] * 25 + [400.0]
+    closes = [100.0 + i for i in range(26)]
+    highs = [c + 1 for c in closes]
+    lows = [c - 1 for c in closes]
+    date_window.set_run_clock(None)
+    raw = value_dip.trigger_candle(closes, highs, lows, vols, window=20)["rvol"]
+    date_window.set_run_clock(_et(15, 23))
+    try:
+        adjusted = value_dip.trigger_candle(closes, highs, lows, vols, window=20)["rvol"]
+    finally:
+        date_window.set_run_clock(None)
+    assert raw is not None and adjusted is not None
+    assert adjusted == pytest.approx(raw / (353 / 390), rel=2e-2)

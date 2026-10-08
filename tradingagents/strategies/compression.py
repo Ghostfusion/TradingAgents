@@ -294,7 +294,14 @@ def base_priming_read(
     rvol = None
     if len(prior_vol) >= 2 and vols:
         base = sum(prior_vol) / len(prior_vol)
-        rvol = round(vols[-1] / base, 4) if base > 0 else None
+        # Same partial-session bias as ``momentum.rvol``: the numerator is the
+        # forming bar, the denominator full sessions, so a mid-session read is
+        # low by the share of the day elapsed.
+        if base > 0:
+            from .momentum import annualise_partial_ratio
+
+            ratio = annualise_partial_ratio(vols[-1] / base)
+            rvol = round(ratio, 4) if ratio is not None else None
     rvol_ok = bool(rvol >= rvol_min) if rvol is not None else None
     if rvol_ok is False:
         reasons.append(f"rvol {rvol}x < {rvol_min}x on the expansion bar")

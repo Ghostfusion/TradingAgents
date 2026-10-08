@@ -201,8 +201,13 @@ def tranche_plan(
       by fixed % drawdown from P1 (the "predictable rung spacing" ladder)
     * composite stop = P3 - stop_mult*ATR (default 1.5 x ATR below the final
       tranche)
-    * weighted average entry Pbar = sum(w_i * P_i) with sum(w_i) = 1
+    * nominal weighted entry Pbar = sum(w_i * P_i) with sum(w_i) = 1
     * N_total = (account * risk%) / (Pbar - stop); N_i = w_i * N_total
+    * the shares are WHOLE, so the executed entry sum(N_i*P_i)/sum(N_i) differs
+      from Pbar by the rounding; ``avg_entry`` / ``risk_per_share`` and the
+      targets are the EXECUTED pair (what the position actually averages to and
+      what one share actually risks), while ``avg_entry_nominal`` /
+      ``risk_per_share_nominal`` keep the continuous values the sizing divided by
     * capital at risk = sum(N_i * (P_i - stop)) must be <= account * risk%
       (``risk_ok``) - the sizing identity always holds by construction
     * targets: T1 = Pbar + 1.8R, T2 = Pbar + 3.0R, blended R = 0.5*R1 + 0.5*R2
@@ -233,25 +238,39 @@ def tranche_plan(
     if stop <= 0:
         return {"valid": False, "reason": "stop level is non-positive"}
     prices = (p1f, p2, p3)
-    avg_entry = sum(wi * pi for wi, pi in zip(w, prices, strict=False))
-    risk_per_share = avg_entry - stop
-    if risk_per_share <= 0:
+    # The NOMINAL entry is the continuous quantity the sizing divides by. The
+    # shares are WHOLE, so the executed entry below differs from it by the
+    # rounding - and it is the executed pair that the risk, the R and the
+    # targets must come from, or the reported risk and the reported entry
+    # disagree (INTU 2026-10-08: avg_entry 283.87 nominal vs 283.65 over the
+    # 17/17/24 split, against a capital_at_risk computed from the shares).
+    avg_entry_nominal = sum(wi * pi for wi, pi in zip(w, prices, strict=False))
+    risk_per_share_nominal = avg_entry_nominal - stop
+    if risk_per_share_nominal <= 0:
         return {"valid": False, "reason": "risk per share is non-positive"}
     max_dollar_risk = riskable_money(
         float(account), float(risk_pct), float(commission_rate)
     )
     if max_dollar_risk <= 0:
         return {"valid": False, "reason": "non-positive dollar risk budget"}
-    total_shares = int(max_dollar_risk / risk_per_share)
+    total_shares = int(max_dollar_risk / risk_per_share_nominal)
     n1 = int(total_shares * w[0])
     n2 = int(total_shares * w[1])
     n3 = total_shares - (n1 + n2)
     shares = (n1, n2, n3)
+    filled = sum(shares)
+    if filled <= 0:
+        return {"valid": False, "reason": "risk budget buys no whole share"}
     risk_usd = sum(s * (p - stop) for s, p in zip(shares, prices, strict=False))
     # Deployed capital at full scale-in: what the position actually ties up
     # near the lows. This is the measure the per-trade cap must bound - it is
     # larger than the risk budget because capital is added as price falls.
     peak_deployed = sum(s * p for s, p in zip(shares, prices, strict=False))
+    # The EXECUTED entry and R: what the whole-share split actually averages to
+    # and what one share actually risks. The split cannot reproduce the weights
+    # exactly (17/58 is not 0.30), so these are the honest pair.
+    avg_entry = sum(s * p for s, p in zip(shares, prices, strict=False)) / filled
+    risk_per_share = risk_usd / filled
     r1 = 1.8
     r2 = 3.0
     t1 = avg_entry + r1 * risk_per_share
@@ -265,6 +284,8 @@ def tranche_plan(
         "stop": round(stop, 4),
         "avg_entry": round(avg_entry, 4),
         "risk_per_share": round(risk_per_share, 4),
+        "avg_entry_nominal": round(avg_entry_nominal, 4),
+        "risk_per_share_nominal": round(risk_per_share_nominal, 4),
         "weights": [round(x, 4) for x in w],
         "shares": list(shares),
         "total_shares": total_shares,
@@ -688,7 +709,12 @@ def trigger_candle(
     # inflate RVOL into a trigger. Same rule as ``volume_dry_up``'s ratio.
     prior_vol = [v for v in volumes[-window - 1 : -1] if v is not None] if window else []
     avg = (sum(prior_vol) / len(prior_vol)) if prior_vol else 0.0
-    rvol = volumes[-1] / avg if avg > 0 else None
+    # Session-adjusted: the numerator is the FORMING bar and the denominator full
+    # sessions, so mid-session the raw ratio reads low by the share of the day
+    # elapsed (INTU 2026-10-08: 0.33 at ~90%). A no-op outside a live session.
+    from .momentum import annualise_partial_ratio
+
+    rvol = annualise_partial_ratio(volumes[-1] / avg if avg > 0 else None)
     mech = None
     if discount_mechanical and dates:
         try:
@@ -697,9 +723,13 @@ def trigger_candle(
             mech = rvol_ex_mechanical(volumes, dates, window=window)
         except Exception:  # noqa: BLE001 - the discount degrades to unmeasured
             mech = None
-    rvol_gate = rvol
-    if mech is not None and mech.get("rvol_ex_mechanical") is not None:
-        rvol_gate = mech["rvol_ex_mechanical"]
+    # The ex-mechanical variant carries the same partial-session bias - the same
+    # numerator over a different denominator - so it is annualised on the same
+    # basis, or the gate and the printed ratio would sit on two bases.
+    mech_rvol = annualise_partial_ratio(
+        mech.get("rvol_ex_mechanical") if mech is not None else None
+    )
+    rvol_gate = mech_rvol if mech_rvol is not None else rvol
     # A session that is ITSELF mechanically huge cannot confirm a breakout: its
     # volume is the options market's, not the stock's. The discount therefore
     # suppresses the trigger on such a day (reported, never silent).
@@ -720,7 +750,7 @@ def trigger_candle(
         "trigger": trig,
         "rvol": round(rvol, 3) if rvol is not None else None,
         "rvol_gate": round(rvol_gate, 3) if rvol_gate is not None else None,
-        "rvol_ex_mechanical": (mech or {}).get("rvol_ex_mechanical"),
+        "rvol_ex_mechanical": mech_rvol,
         "mechanical_excluded": (mech or {}).get("excluded"),
         "mechanical_discount_measured": bool(mech is not None and mech.get("measured")),
         "mechanical_today": mechanical_today,

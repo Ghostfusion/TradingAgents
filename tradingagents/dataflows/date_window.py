@@ -43,6 +43,38 @@ def get_run_trade_date() -> str:
     return _RUN_TRADE_DATE.get()
 
 
+# The run's wall-clock instant, published by the graph at run start beside the
+# trade date. Left UNSET by default ON PURPOSE: an unset clock means "no live
+# session known", so every offline call, test and historical run reads exactly
+# as it did before the clock existed - the same no-op defaulting as the date,
+# and the reason the volume leaves cannot be adjusted by the time of day a
+# process happens to run at.
+_RUN_CLOCK: contextvars.ContextVar[datetime | None] = contextvars.ContextVar(
+    "run_clock", default=None
+)
+
+
+def set_run_clock(now: datetime | None) -> None:
+    """Publish the run's wall-clock instant (aware) for the session leaves.
+
+    Called once per run from the graph's pre-graph setup, beside
+    :func:`set_run_trade_date`. ``None`` clears it to the no-op default, which
+    is what a historical run publishes so a backtest is never adjusted by the
+    present time of day.
+    """
+    _RUN_CLOCK.set(now)
+
+
+def get_run_clock() -> datetime | None:
+    """The run's published wall-clock instant, or ``None`` when none was published.
+
+    ``None`` is the honest answer for an offline call and for a historical run:
+    readers must treat it as "no live session known" rather than substituting
+    the real clock, which would adjust a backtest by the current time of day.
+    """
+    return _RUN_CLOCK.get()
+
+
 def _parse_date(value: str | None) -> datetime | None:
     """Parse a ``YYYY-MM-DD`` prefix; ``None`` when absent/unparseable.
 
