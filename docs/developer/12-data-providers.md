@@ -238,6 +238,7 @@ that resilience.
 
 | Provider | State | Why |
 | --- | --- | --- |
+| **Longbridge (Longport) OpenAPI** | design only ([`docs/design_longbridge_data_provider.md`](../design_longbridge_data_provider.md), 2026-10-08) | US + HK + CN, so for a **US-first** project it is a near-total overlap with the chains in force; what is unique (HK/CN quotes+depth, the CCASS broker queue, HK short positions, warrants/CBBCs, the A/H premium) has **no consumer** — the universe carries zero `.HK`/`.SS`/`.SZ` names and the A-share pipeline is a standing non-goal. **The app key + secret supplied are not a credential set**: the legacy flow needs a third value, `LONGBRIDGE_ACCESS_TOKEN` (User Center), or an OAuth `client_id` — probed 2026-10-08, `401001 token empty`. Licence is **Non-Commercial, personal use** (HK law). One additive entry: `capital_flow`/`capital_distribution` (US+HK), since `get_capital_flow` routes to **moomoo alone** today — but it needs a `capital` quote permission. |
 | **Webull OpenAPI** | design only ([`docs/design_webull_data_provider.md`](../design_webull_data_provider.md), 2026-09-16) | US-only (`US_STOCK`/`US_ETF`); real-time needs a separately-purchased Nasdaq Basic/Totalview **non-display** subscription (app/QT subscriptions do not count, one device at a time); production tokens go `INVALID` after 15 idle days. Strongest fit is `fundamental_data` (basis-tagged statements) and `capital_flow`. Its news endpoint is an LLM summary stream, not a headline feed. |
 
 Nothing here is wired: no key, no chain entry, no preset.

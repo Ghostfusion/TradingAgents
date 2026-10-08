@@ -1197,6 +1197,12 @@ so a tree carries its own consistency record instead of depending on the opt-in
   OpenAPI mapped onto `data_vendors` - a US-only bars + fundamentals vendor whose
   statements are natively basis-tagged (`fiscal_year`/`fiscal_period`/`end_date`/
   `publish_date`), the entitlement and 2FA-token constraints, and a phased plan.
+- `docs/design_longbridge_data_provider.md` - provider study (2026-10-08, design
+  only): the Longbridge (Longport) OpenAPI read against the chains in force -
+  US + HK + CN, a **near-total US overlap**, a unique HK/CN surface with no
+  consumer, a **Non-Commercial** licence, and the probed finding that the
+  supplied app key + secret cannot authenticate without `LONGBRIDGE_ACCESS_TOKEN`
+  (`401001 token empty`).
 - `docs/design_moomoo_unused_api_surface.md` - provider study (2026-09-18, design
   only): the **unused** moomoo OpenAPI surface enumerated - 103 unused data
   methods of `OpenQuoteContext`'s 166 public callables, every one read and ~35
