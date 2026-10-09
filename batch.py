@@ -430,10 +430,12 @@ def main() -> int:
         "--verify",
         action="store_true",
         help=(
-            "After each completed symbol, run the advisory LLM report "
-            "verification pass (see scripts/report_verify.py): each analyst "
-            "report is checked against tool_evidence.json (GROUNDED / "
-            "UNSUPPORTED / CONTRADICTED) and verify_flags.json is written "
+            "After each completed symbol, run the advisory report-verification "
+            "pass (see scripts/report_verify.py): each analyst report is "
+            "checked against tool_evidence.json by the LLM (GROUNDED / "
+            "UNSUPPORTED / CONTRADICTED), and the decision artifacts no stem "
+            "covers (2_research/ 3_trading/ 4_risk/ 5_portfolio/) get a "
+            "deterministic legibility check; verify_flags.json is written "
             "into the report tree. Deterministic numeric anchoring shares "
             "repro_check --evidence tolerance. Never blocks delivery."
         ),
@@ -691,7 +693,11 @@ def _batch_report_verify(symbol: str, report_dir) -> None:
     each analyst report (1_analysts/*.md) is checked against the report
     tree's tool_evidence.json leaves by the grounded verifier; the verdict
     JSON (GROUNDED / UNSUPPORTED / CONTRADICTED per claim) is written to
-    verify_flags.json next to the report. Concurrent-safe (only the batch
+    verify_flags.json next to the report. The same call adds the tree-level
+    ``prose`` block - the deterministic legibility check for the artifacts no
+    analyst stem covers (2_research/, 3_trading/, 4_risk/, 5_portfolio/,
+    including the trader's proposal and the PM's decision), which needs no
+    LLM. Concurrent-safe (only the batch
     writer touches it) and best-effort: any failure logs and never fails
     the symbol. The numeric anchor shares repro_check --evidence tolerance.
     """
@@ -706,7 +712,12 @@ def _batch_report_verify(symbol: str, report_dir) -> None:
             for e in (payload.get("verification") or {}).values()
             if e.get("overall") == "FLAG"
         )
-        print(f"[verify] {symbol}: {flagged} FLAG report(s) -> {out}")
+        # A damaged decision artifact is not a "report" in the stem count, and
+        # staying silent about it is how EHC 2026-10-09's unreadable trader
+        # proposal went unnoticed.
+        bad_prose = (payload.get("prose") or {}).get("flagged") or []
+        note = f"; unreadable: {', '.join(bad_prose)}" if bad_prose else ""
+        print(f"[verify] {symbol}: {flagged} FLAG report(s){note} -> {out}")
     except Exception as exc:  # noqa: BLE001 - never fail the batch symbol
         print(f"[verify] report-verify skipped for {symbol}: {exc}")
 

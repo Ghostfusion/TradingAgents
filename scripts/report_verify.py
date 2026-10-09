@@ -104,6 +104,19 @@ def main() -> int:
                 f"  envelope      legacy    research_decision.json {version} "
                 "(accepted as 1.0.0; no expiry/hash to check)"
             )
+    prose = payload.get("prose") or {}
+    prose_overall = prose.get("overall")
+    if prose_overall == "FLAG":
+        flags += 1
+        print(
+            "  prose         FLAG      damaged decision/debate artifact(s): "
+            + ", ".join(prose.get("flagged") or [])
+        )
+    elif prose_overall == "PASS":
+        print(
+            f"  prose         OK        {len(prose.get('reports') or {})} "
+            "decision/debate artifact(s) legible"
+        )
     verification = payload.get("verification") or {}
     for stem in REPORT_STEMS:
         entry = verification.get(stem)

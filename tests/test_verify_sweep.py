@@ -117,3 +117,48 @@ def test_sweep_cli_clean_exits_zero(tmp_path):
         cwd=Path(__file__).resolve().parents[1],
     )
     assert proc.returncode == 0
+
+
+def test_sweep_reads_the_prose_block_of_the_artifacts_no_stem_covers(tmp_path):
+    """A tree whose trader proposal is unreadable must not sweep as clean.
+
+    The decision artifacts are published under their own tree-level key
+    (``REPORT_STEMS`` is 1_analysts/ only), so a sweep that read only
+    ``verification`` would report this tree as clean - the one outcome this
+    workbench exists to prevent.
+    """
+    tree = tmp_path / "EHC_20261009_TEST"
+    tree.mkdir(parents=True, exist_ok=True)
+    (tree / "verify_flags.json").write_text(
+        json.dumps(
+            {
+                "report_dir": str(tree),
+                "model": "test",
+                "verification": {"market": {"overall": "PASS", "claims": []}},
+                "prose": {
+                    "overall": "FLAG",
+                    "flagged": ["3_trading/trader.md"],
+                    "reports": {
+                        "3_trading/trader.md": {
+                            "overall": "FLAG",
+                            "claims": [
+                                {
+                                    "claim": "digit-masked numbers in report text (29): $.",
+                                    "status": "INTERNAL_CONFLICT",
+                                    "reason": "Digits were replaced by placeholders, so the "
+                                    "figures cannot be read.",
+                                }
+                            ],
+                        },
+                        "5_portfolio/decision.md": {"overall": "PASS", "claims": []},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    r = S._sweep_tree(tree)
+
+    assert r["summary"] == {"INTERNAL_CONFLICT": 1}
+    assert [c["stem"] for c in r["confirmed"]] == ["prose:3_trading/trader.md"]

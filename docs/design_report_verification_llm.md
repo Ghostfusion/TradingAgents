@@ -308,7 +308,10 @@ claims were quoting the analyst's *system message*, which the verifier cannot
 see; the identity now rides beside the reference price, exactly the precedent
 that line set on 2026-09-15. Digit placeholders (an underscore variant in IEI,
 a dot/ellipsis variant in VTV: `+0..85`, `≈9..25/10`) are reported as
-`digit_obfuscation` and no longer yield quotable values.
+`digit_obfuscation` and no longer yield quotable values - and since 2026-10-09 a
+third shape, a currency sign left with no amount after it (`$.220.` written for
+120.085 in EHC's trader report), is recognised the same way (see the 2026-10-09
+round below).
 
 **Model-side, for the record.** This batch's provider/model
 (`openrouter/deepseek/deepseek-v4.1-flash`) degenerated repeatedly - cascades,
@@ -357,6 +360,65 @@ leaf is right, so this is an **analyst count error in a frozen report** -
 nothing in the engine produced it. Recorded, not fixed: the guard that would
 prevent the class is a prompt rule against restating counts no leaf prints
 (this one prints none), a behaviour change this round did not take.
+
+## Verification round (2026-10-09, EHC_20261009_133443 - coverage and alphabet)
+
+Re-judging EHC's tree (a fresh verdict run, not a re-report) exposed two
+independent blind spots. Both are closed; a third observation is recorded below
+as an open item.
+
+**The alphabet missed a whole placeholder shape.** `_DIGIT_MASKED_NUMBER_RE`
+covered underscores (`rsi=23._15`, IEI) and dot runs (`+0..85`, VTV) but not a
+currency sign left with no amount after it: EHC's `3_trading/trader.md` wrote
+`| Reference / spot cited | **$222.*** |` for a reference of 122.54 and
+`| Advisory entry ceiling | **$.220.*** |` for a ceiling of 120.085, and
+`_masked_numbers` returned **0** for the file. A `$` immediately followed by `.`
+or `,` is now one of the shapes - **166 hits across 8 trees** over the 2442
+report files on disk (EHC 58, PBR fundamentals 76, VZ news 10, AMKR 8, APA 6,
+NEM 4, ...), every inspected hit a stripped amount (`Total Assets $. /
+Liabilities $. / Equity $.`; `Newmont closed at $., moving -.%`). The lookbehind
+is what makes it safe: the plain `\$[.,]` also fired on AEM's `could go sub
+$130$, so caution is advised`, the `$130$` convention's trailing sign - which
+follows a DIGIT, so it is not a stripped one.
+
+**Two shapes stay unmatched, and that is a finding, not an omission.** An
+asterisk placeholder (`$222.*`, `**.222.***`) cannot be separated from markdown
+emphasis and decimal adjacency: `\.\*` hits 7289 times over the same corpus,
+`\*\.` 9067 and `\*\*\.` 9007, every hit a legitimate `**bold**.` or `3.4%`. A
+bare `%` is 4503 hits across 161 trees, because the engine's own labels carry
+their unit as `(%)` (`distance to advisory entry ceiling (%)=-2.5`, `Book CaR
+(%)=1.06`). Both are recorded on the regex instead of guessed at; an
+asterisk-based rule must not be added without a corpus measurement first.
+
+**Coverage: the decision artifacts had no verifier at all.** `REPORT_STEMS` is
+`1_analysts/` only and `_load_report` reads `1_analysts/<stem>.md`, so
+`2_research/`, `3_trading/`, `4_risk/` and `5_portfolio/` were never examined by
+any pass - including the trader's proposal and the PM's decision, the two the
+executor's `research_decision.json` is read from. EHC's trader report carried
+**29** stripped amounts, its `1_analysts/news.md` **9 more that the shipped
+detector already recognised**, and the tree had no `verify_flags.json` at all,
+because the pass is opt-in. New `_prose_integrity()` sweeps those four
+directories and publishes a tree-level `prose` block beside `debate` and
+`envelope`; `scripts/report_verify.py` prints it and counts it toward the exit
+code, and `scripts/verify_sweep.py` folds its claims into the confirmed/suspect
+tally so an unreadable trader proposal cannot sweep as clean. An empty tree is
+`UNKNOWN`, never `PASS`.
+
+**The consistency fleet does not transfer to that prose.** Running all 27
+families over the decision and debate artifacts flags **68 of 162 trees (42%)**
+on legitimate quotes: `'rvol' cited at conflicting values: 1.5180; 0.15` (the
+50-day read beside the session read), `'atr' 0.26; 0.2575` (two windows),
+`conflicting 'FINAL TRANSACTION PROPOSAL' verdicts in one report: HOLD,
+REMAINS`. Those families read the analyst reports' own label conventions
+(`[metric via Source]` rows) and are anchored by `tool_evidence.json` leaves;
+the decision prose has no evidence leaves and *derives* its figures (stops,
+ladders, tranches). The legibility subset, which asks only whether the text can
+be read, fires on **24 of 162** trees, and just 5 of those are a `trader.md`.
+
+**Open, and deliberately not wired:** the pass is opt-in (`batch.py --verify`,
+the app's checkbox), so every 2026-10-09 live tree went unverified by default.
+Whether to verify by default is a cost decision (~1 LLM call per report per
+tree), so it belongs to the owner rather than to a fix.
 
 ## Open items (state 2026-09-16)
 

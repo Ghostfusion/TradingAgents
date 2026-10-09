@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 # Analyst report stems this pass covers (1_analysts/ in each report tree).
 REPORT_STEMS = ("fundamentals", "market", "news", "sentiment")
+# Claim statuses that make an artifact FLAG rather than PASS. Shared by the
+# per-stem verdict and the legibility pass over the artifacts no stem covers.
+_FLAG_STATUSES = ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT")
 
 # Canonical figure-matching helpers, shared with scripts/repro_check.py (which
 # imports these) so the numeric anchor and the deterministic cross-check use
@@ -1185,10 +1188,7 @@ def _stem_overall(
     refuses to turn UNKNOWN into a verdict, and this only names the provenance
     of the checks that did run.
     """
-    if any(
-        c.status in ("UNSUPPORTED", "CONTRADICTED", "INTERNAL_CONFLICT")
-        for c in claims
-    ):
+    if any(c.status in _FLAG_STATUSES for c in claims):
         return "FLAG"
     if anchored.overall == "UNKNOWN":
         return "NUMERIC_ONLY" if deterministic_triples else "UNKNOWN"
@@ -1837,10 +1837,28 @@ def _table_cell_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
 # The lookbehind keeps tool names out ("close_50_sma" is not masked), and a
 # ".." between digits is only a placeholder when no ISO date sits beside it -
 # "2026-09-07..2026-09-14" is a news RANGE (JCI/IEI news stems).
+# Digit placeholders: the model drops a figure's digits and leaves the
+# punctuation behind. Three shapes are recognised. (1) Underscores -
+# "rsi=23._15" for 23.15, "pct_b=_0219", "_._91" (IEI 2026-09-16 market.md, 146
+# tokens). (2) A dot/ellipsis RUN between digits - "+0..85", "9..25/10" (VTV
+# 2026-09-16 sentiment.md). (3) A currency sign immediately followed by a
+# separator - "$.220." for 120.085, "**$," for a cash figure, "F CF ***$. ***"
+# (EHC 2026-10-09 trader.md 29x; PBR 2026-09-25 fundamentals.md 76x; and six
+# more trees). A "$" must be followed by a digit, so a separator there is
+# always a stripped one; the lookbehind spares the trailing "$" of the "$130$"
+# social-media convention ("could go sub $130$, so caution is advised").
+# NOT recognised, deliberately, and measured over 2442 report files on
+# 2026-10-09: the "*" placeholder ("$222.*", "**.222.***") - r"\.\*" hits 7289
+# times, r"\*\." 9067 and r"\*\*\." 8655, because markdown emphasis and decimal
+# adjacency are indistinguishable from that mask, so any "*"-based rule is
+# noise; and the "%" placeholder ("a $., moving -.% versus an S&P % loss", NEM
+# 2026-09-28 sentiment.md) - a bare "%" is 4503 hits across 161 trees, since
+# the engine's own labels carry their unit as "(%)" ("Book CVaR (%)=1.06").
 _DIGIT_MASKED_NUMBER_RE = re.compile(
     r"(?:\._\d|_\.\d|(?<![\w])_\d[\d.,]*(?![\w])"
     r"|[=\u2248+\-\u2212]\s*[\.\u2026]{1,3}\d"
-    r"|\d[\.\u2026]{2,3}\d)"
+    r"|\d[\.\u2026]{2,3}\d"
+    r"|(?<!\d)\$[.,])"
 )
 _ISO_DATE_RANGE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -4046,7 +4064,12 @@ def _repetition_loops(report_text: str) -> list[str]:
 
 
 def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
-    """Numbers whose digits were replaced by underscores - unreadable text.
+    """Numbers whose digits were replaced by placeholders - unreadable text.
+
+    The placeholder alphabet the model reaches for is underscores, a dot or
+    ellipsis run, or nothing at all after a currency sign ("$.220." written for
+    120.085); ``_DIGIT_MASKED_NUMBER_RE`` owns that alphabet, and its comment
+    records which shapes are deliberately NOT recognised and why.
 
     IEI 2026-09-16 market.md carried 146 of them ("rsi=23._15" for the leaf's
     rsi=23.15, "pct_b=_0219", "GARCH cond **_._**04%" for 3.04%, "boll _56 ub
@@ -4057,6 +4080,11 @@ def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
     "_.04%"). The digits are unrecoverable from the text alone, so the
     figures cannot be checked at all: that is the defect, and it is reported
     as one claim instead of as three invented conflicts.
+
+    The currency variant is the same defect: EHC 2026-10-09's trader.md wrote
+    "| Reference / spot cited | **$222.*** |" and "| Advisory entry ceiling |
+    **$.220.*** |" for a reference of 122.54 and a ceiling of 120.085 - the
+    digits are gone, so neither figure can be recovered from the text.
     """
     if not report_text:
         return []
@@ -4068,11 +4096,12 @@ def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
         claim=f"digit-masked numbers in report text ({len(hits)}): {sample}",
         status="INTERNAL_CONFLICT",
         reason=(
-            "Digits were replaced by underscores, so the figures cannot be "
+            "Digits were replaced by placeholders, so the figures cannot be "
             "read - and any value extracted from the fragment is invented "
             "(IEI 2026-09-16 market.md: 'rsi=23._15' for the leaf's 23.15, "
-            "'GARCH cond **_._**04%' for 3.04%). Emit real digits; a masked "
-            "number is neither quotable nor checkable."
+            "'GARCH cond **_._**04%' for 3.04%; EHC 2026-10-09 trader.md: "
+            "'$.220.' for 120.085, '**$,' for a cash figure). Emit real digits; "
+            "a masked number is neither quotable nor checkable."
         ),
     )]
 
@@ -5422,6 +5451,11 @@ def verify_report_dir(
         # Tree-level (no LLM): does the execution contract still satisfy the
         # envelope rules the executor enforces? Legacy 1.0.0 trees are exempt.
         "envelope": _envelope_integrity(Path(report_dir)),
+        # Tree-level (no LLM): are the DECISION artifacts readable at all? The
+        # stem loop below is 1_analysts/ only, so the trader's proposal and the
+        # PM's decision - the two the executor's contract is read from - were
+        # never examined by any pass (EHC 2026-10-09).
+        "prose": _prose_integrity(Path(report_dir)),
         "verification": outcomes,
     }
     if publish_materiality:
@@ -5430,3 +5464,84 @@ def verify_report_dir(
         # rather than being silently promoted (None when no family resolves).
         payload["family"] = _family_materiality(outcomes)
     return payload
+
+
+# The report artifacts no analyst stem covers. ``REPORT_STEMS`` is ``1_analysts/``
+# only, so the trader's proposal and the PM's decision - the two the executor's
+# contract is read from - were never examined by any pass: EHC 2026-10-09's
+# ``3_trading/trader.md`` carried 29 ``$.220.``-style stripped amounts (and the
+# same corruption sat in a decision the owner then re-judged) while the verifier
+# saw none of it. ``complete_report.md`` is deliberately NOT swept: it is a
+# concatenation of the parts below, so it would report the same corruption a
+# second time.
+_PROSE_DIRS = ("2_research", "3_trading", "4_risk", "5_portfolio")
+
+# The LEGIBILITY families - whether the text is readable at all, as opposed to
+# whether two of its figures agree. A consistency family needs the analyst
+# report's own label conventions ("[metric via Source]" rows), so running that
+# whole fleet over the decision prose flags 68 of 162 trees on legitimate
+# two-window quotes ('rvol' cited at 1.5180 and 0.15, 'atr' at 0.26 and 0.2575 -
+# measured 2026-10-09). Legibility is convention-free, so it transfers.
+_PROSE_FAMILIES = (
+    ("digit_obfuscation", _digit_obfuscation),
+    ("self_correction_artifacts", _self_correction_artifacts),
+)
+
+
+def _prose_integrity(report_dir: Path) -> dict:
+    """Deterministic legibility pass over the artifacts no stem covers.
+
+    Name for name the families are the ones that ask "can this text be read",
+    never "do two numbers agree", so a flag here means the artifact is damaged
+    - masked figures, a leaked mid-generation repair, a repetition loop - and
+    the figure it cites cannot be checked at all. No LLM, no evidence base, no
+    numeric anchoring: there is no ``tool_evidence.json`` leaf for these files,
+    and their figures are derived (stops, ladders, tranches) rather than quoted.
+
+    Returns ``{"overall", "reports": {path: {overall, claims[, metric_errors]}}[,
+    "flagged"][, "metric_errors"]}``. An empty tree yields UNKNOWN, never PASS:
+    "nothing was examined" and "everything examined was legible" are not the
+    same statement.
+    """
+    reports: dict[str, dict] = {}
+    metric_errors: list[str] = []
+    for sub in _PROSE_DIRS:
+        directory = report_dir / sub
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.md")):
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError as exc:
+                logger.warning("report_verifier: cannot read %s: %s", path, exc)
+                continue
+            if not text.strip():
+                continue
+            claims: list[VerifierClaim] = []
+            for name, family in _PROSE_FAMILIES:
+                try:
+                    claims.extend(family(text))
+                except Exception as exc:  # noqa: BLE001 - advisory: never raise
+                    detail = f"{sub}/{path.name}:{name}: {type(exc).__name__}: {exc}"
+                    metric_errors.append(detail)
+                    logger.warning(
+                        "report_verifier: prose metric %s failed on %s: %s", name, path, exc
+                    )
+            reports[f"{sub}/{path.name}"] = {
+                "overall": (
+                    "FLAG"
+                    if any(c.status in _FLAG_STATUSES for c in claims)
+                    else "PASS"
+                ),
+                "claims": [c.model_dump() for c in claims],
+            }
+    flagged = sorted(k for k, v in reports.items() if v["overall"] == "FLAG")
+    result: dict = {
+        "overall": "FLAG" if flagged else ("PASS" if reports else "UNKNOWN"),
+        "reports": reports,
+    }
+    if flagged:
+        result["flagged"] = flagged
+    if metric_errors:
+        result["metric_errors"] = metric_errors
+    return result

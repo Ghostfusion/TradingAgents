@@ -791,6 +791,26 @@ def test_digit_masked_numbers_are_reported_and_never_read_as_values():
     vtv = "labels +0..85 on n=30 maps to \u22489..25/10, AUM $16..39T, run on -026-09-15"
     assert rv._digit_obfuscation(vtv)
 
+    # The currency variant (EHC 2026-10-09 trader.md): the sign survives and the
+    # amount does not - "$.220." was written for a ceiling of 120.085.
+    ehc = (
+        "| Reference / spot cited | **$222.*** |\n"
+        "| Advisory entry ceiling | **$.220.*** |\n"
+        "| Cash flow | **$,** |\n"
+    )
+    currency = rv._digit_obfuscation(ehc)
+    assert len(currency) == 1 and currency[0].status == "INTERNAL_CONFLICT"
+    assert "$." in currency[0].claim
+
+    # Shapes a well-formed report uses are NOT masks: a real amount, a cashtag,
+    # the "$130$" convention (its trailing sign follows a digit), the engine's
+    # own "(%)" unit labels, a ratio, and an ordinary percentage.
+    clean = (
+        "Entry 120.085 at $122.54; **$122.54** ceiling; $AEM cashtag; "
+        "could go sub $130$, so caution; Book CVaR (%)=1.06; P/E 17; +0.85%"
+    )
+    assert rv._digit_obfuscation(clean) == []
+
 
 def test_the_sentiment_rescale_anchor_is_checked_deterministically():
     """The 0-10 headline score is the prompt's own rescale of computed_score
@@ -2945,3 +2965,56 @@ def test_a_sibling_labelled_template_is_not_a_repetition_loop():
     assert rv._repetition_loops(template) == []
     stuck = "Inventory series:** ``635200`. **\n" * 5
     assert rv._repetition_loops(stuck) == ["Inventory series:** ``635200`. **"]
+
+
+def test_the_legibility_pass_covers_the_artifacts_no_stem_reaches(tmp_path):
+    """EHC 2026-10-09: ``3_trading/trader.md`` carried 29 ``$.220.``-style
+    stripped amounts while no pass read it - ``REPORT_STEMS`` is ``1_analysts/``
+    only - so the trader's proposal and the PM's decision were never examined.
+    A masked figure cannot be recovered from the text: the artifact is
+    ILLEGIBLE, which is a stronger statement than unverified."""
+    d = _mk_report_dir(tmp_path, reports={"market": "RSI 55.1, close 120.085.\n"})
+    (d / "3_trading").mkdir()
+    (d / "3_trading" / "trader.md").write_text(
+        "| Reference / spot cited | **$222.*** |\n"
+        "| Advisory entry ceiling | **$.220.*** |\n"
+        "Un-held: do not initiate here.\n",
+        encoding="utf-8",
+    )
+    (d / "5_portfolio").mkdir()
+    (d / "5_portfolio" / "decision.md").write_text(
+        "For EHC, do not initiate at the cited reference price of 122.54.\n",
+        encoding="utf-8",
+    )
+
+    prose = rv._prose_integrity(d)
+    assert prose["overall"] == "FLAG"
+    assert prose["flagged"] == ["3_trading/trader.md"]
+    trader = prose["reports"]["3_trading/trader.md"]
+    assert trader["overall"] == "FLAG"
+    assert "digit-masked numbers" in trader["claims"][0]["claim"]
+    assert prose["reports"]["5_portfolio/decision.md"]["overall"] == "PASS"
+
+    # A legible tree passes; a tree with no decision artifacts is UNKNOWN, never
+    # PASS - "nothing examined" is not "everything examined was legible".
+    (d / "3_trading" / "trader.md").write_text(
+        "Entry 120.085, stop 119.9444, target 122.54.\n", encoding="utf-8"
+    )
+    assert rv._prose_integrity(d)["overall"] == "PASS"
+    empty = tmp_path / "EMPTY_20260101_000000"
+    empty.mkdir()
+    assert rv._prose_integrity(empty) == {"overall": "UNKNOWN", "reports": {}}
+
+
+def test_verify_report_dir_publishes_the_legibility_verdict(tmp_path):
+    """The tree-level block reaches the payload, so a consumer of
+    ``verify_flags.json`` - and the CLI's exit code - can see it."""
+    d = _mk_report_dir(tmp_path, reports={"market": "RSI 55.1.\n"})
+    (d / "3_trading").mkdir()
+    (d / "3_trading" / "trader.md").write_text("ceiling **$.220.***\n", encoding="utf-8")
+
+    payload = rv.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
+
+    assert payload["prose"]["overall"] == "FLAG"
+    assert payload["prose"]["flagged"] == ["3_trading/trader.md"]
+    assert payload["verification"]["market"]["overall"] in ("PASS", "UNKNOWN", "FLAG")

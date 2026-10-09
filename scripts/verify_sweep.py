@@ -65,11 +65,23 @@ def _sweep_tree(tree: Path) -> dict:
     except (ValueError, TypeError):
         return {"tree": str(tree), "present": False, "summary": {}, "confirmed": [], "suspect": []}
     verification = flags.get("verification") or {}
+    # The decision artifacts no stem covers are published under their own
+    # tree-level key (``REPORT_STEMS`` is 1_analysts/ only). A sweep that read
+    # only ``verification`` would report a tree whose trader proposal is
+    # unreadable as clean, which is the one thing this sweep must not do.
+    blocks: list[tuple[str, dict]] = [
+        (stem, v) for stem, v in verification.items() if isinstance(v, dict)
+    ]
+    prose = flags.get("prose")
+    if isinstance(prose, dict):
+        for path, v in (prose.get("reports") or {}).items():
+            if isinstance(v, dict):
+                blocks.append((f"prose:{path}", v))
     tool_names = _tool_names_in_tree(tree)
     status_counts: Counter = Counter()
     confirmed: list[dict] = []
     suspect: list[dict] = []
-    for stem, v in verification.items():
+    for stem, v in blocks:
         claims = v.get("claims") if isinstance(v, dict) else None
         if not isinstance(claims, list):
             continue
