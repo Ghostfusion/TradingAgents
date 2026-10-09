@@ -59,7 +59,13 @@ edgar = [
 ]
 
 [project.scripts]
-tradingagents = "cli.main:app"
+# NOT `cli.main:app`: `cli` is a top-level name that other distributions in a
+# shared site-packages also ship (vibe_trading_ai declares `vibe-trading =
+# cli:main`; stringzilla ships `cli/split.py`), and this repo's editable finder
+# is consulted only AFTER the path finder - so the script resolved to THEIR
+# package and every run died with `ImportError: cannot import name 'app'`.
+# `tradingagents` is uniquely ours; see tradingagents/cli_entry.py.
+tradingagents = "tradingagents.cli_entry:main"
 
 [tool.setuptools.packages.find]
 include = ["tradingagents*", "cli*"]

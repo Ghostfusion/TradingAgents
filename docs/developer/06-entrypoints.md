@@ -8,6 +8,18 @@ The typer/rich CLI steps through: ticker -> date -> language -> analysts ->
 depth -> provider -> models. Use `py -3.12 -m cli.main` if the console script
 isn't installed.
 
+Its entry point is `tradingagents.cli_entry:main`, **not** `cli.main:app`.
+`cli` is a top-level package name this project does not own: `vibe_trading_ai`
+(`vibe-trading = cli:main`) and `stringzilla` both ship a `cli/` into the same
+site-packages, and this repo's editable install maps `cli` through a setuptools
+meta-path finder that is appended to `sys.meta_path` - i.e. consulted only
+*after* the ordinary path finder. So `cli.main:app` loaded another project's
+`cli/main.py` ("Interactive CLI front door for Vibe-Trading") and every run died
+with `ImportError: cannot import name 'app'`. `tradingagents/cli_entry.py` moves
+the checkout root to the front of `sys.path` first, so `cli` is always this
+repo's package; `py -3.12 -m cli.main` from the checkout resolves the same way
+because the working directory leads the path.
+
 ## 6.2 `batch.py` — headless concurrent runner
 
 ```
