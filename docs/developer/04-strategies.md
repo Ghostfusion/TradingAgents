@@ -71,9 +71,12 @@ involved. This is the "compute, don't narrate" core.
   (ORB breakout + 2R stop/target), `gap_type` (common/breakaway/runaway/
   exhaustion + fill stats), `order_imbalance` (buy/sell-heavy from flow
   nets), `premarket_liquidity` (thin-book warning), `post_close_confirmation`
-  (stopped-out / target-hit / holding), `forming_bar_progress` (the elapsed
-  share of the regular session, from the run clock, that annualises a forming
-  bar's volume - 1.0 unless a live session published a clock).
+  (stopped-out / target-hit / holding), `to_exchange_time` (the one conversion
+  of a wall-clock instant into exchange time - the run clock is published in ET,
+  because the session read takes its wall-clock hour raw), and
+  `forming_bar_progress` (the elapsed share of the regular session, from the run
+  clock, that annualises a forming bar's volume - 1.0 unless a live session
+  published a clock).
 - `extended_indicators.py` — the standard trend/momentum/volume/structure
   group computed locally (no vendor): Ichimoku cloud, golden/death cross,
   CCI, ROC, momentum oscillator, TRIX, Force Index, A/D line, VPT, Chaikin

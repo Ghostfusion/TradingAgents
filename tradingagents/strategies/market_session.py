@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 #: The regular US equity session, in exchange-time (ET) minutes: 09:30 to 16:00,
 #: i.e. 390 minutes. ``_session_progress`` is the one definition of how far into
@@ -38,11 +38,41 @@ SESSION_MINUTES = 390
 MIN_SESSION_PROGRESS = 0.10
 
 
+def to_exchange_time(now: datetime | None = None) -> datetime:
+    """``now`` (default: the present instant) as an aware datetime in ET.
+
+    The one conversion of a wall-clock instant into *exchange* time - the run
+    clock the graph publishes
+    (:meth:`tradingagents.graph.propagation.Propagator.create_initial_state`,
+    reached from ``TradingAgentsGraph.prepare_initial_state``) and the session
+    leaves read. ``now.astimezone()`` alone is the MACHINE's
+    zone, and this module reads the wall clock it is handed as ET, so a
+    Central-time box started the day an hour late: a 12:22 ET run was published
+    as 11:22 and annualised a forming bar by 0.2872 where ET says 0.4410, which
+    read RVOL ~1.5x high. An already-ET value passes through unchanged.
+
+    ``zoneinfo`` needs the system tz database, which Windows does not ship; the
+    fallback is a fixed -05:00 - one hour late in summer - the same convention
+    ``tradingagents.execution_contract`` uses, never an ambient naive stamp.
+    """
+    if now is None:
+        now = datetime.now().astimezone()
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/New_York")
+    except Exception:  # noqa: BLE001 - optional tzdata; documented fallback
+        tz = timezone(timedelta(hours=-5))
+    return now.astimezone(tz)
+
+
 def _session_progress(now: datetime) -> dict:
     """How far through the regular session ``now`` sits - the one session read.
 
-    ``now`` is the run's wall-clock instant in exchange time (a naive value is
-    read as ET; a weekend is not a session). Returns ``{fraction,
+    ``now`` must be EXCHANGE time, hour-raw: a naive value is read as ET as-is,
+    so an aware value in any other zone must go through :func:`to_exchange_time`
+    first (the machine's own zone is not exchange time). A weekend is not a
+    session. Returns ``{fraction,
     minutes_elapsed, open, label}`` where ``fraction`` is 0.0 before the open,
     the elapsed share of the 390-minute session while it is open, and 1.0 from
     the close on - so a reader that annualises a partial bar by it is a no-op
@@ -134,6 +164,7 @@ __all__ = [
     "book_depth_read",
     "decompose_returns",
     "decompose_returns_text",
+    "to_exchange_time",
     "forming_bar_progress",
 ]
 

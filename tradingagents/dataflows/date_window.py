@@ -57,10 +57,12 @@ _RUN_CLOCK: contextvars.ContextVar[datetime | None] = contextvars.ContextVar(
 def set_run_clock(now: datetime | None) -> None:
     """Publish the run's wall-clock instant (aware) for the session leaves.
 
-    Called once per run from the graph's pre-graph setup, beside
-    :func:`set_run_trade_date`. ``None`` clears it to the no-op default, which
-    is what a historical run publishes so a backtest is never adjusted by the
-    present time of day.
+    The instant must be in EXCHANGE time (ET): the readers take its wall clock
+    as ET, so a caller that only has the machine's zone converts first
+    (``market_session.to_exchange_time``). Called once per run from the graph's
+    pre-graph setup, beside :func:`set_run_trade_date`. ``None`` clears it to the
+    no-op default, which is what a historical run publishes so a backtest is
+    never adjusted by the present time of day.
     """
     _RUN_CLOCK.set(now)
 

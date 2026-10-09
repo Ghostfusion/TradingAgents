@@ -18,9 +18,9 @@ from langchain_core.tools import tool
 def get_momentum_scan(ticker: str) -> str:
     """Momentum day-trading signal scan for a single ticker (analysis only).
 
-    Uses daily bars (Alpaca when configured, else the vendor chain) to report
-    the 5-pillar pre-filter and the first-pullback pattern with R/R, plus an
-    intraday confirmation block (1m session VWAP hold, psych levels) when
+    Uses daily bars (Alpaca when ``enable_alpaca``, else the vendor chain) to
+    report the 5-pillar pre-filter and the first-pullback pattern with R/R, plus
+    an intraday confirmation block (1m session VWAP hold, psych levels) when
     intraday bars are reachable.
 
     Args:
@@ -33,16 +33,24 @@ def get_momentum_scan(ticker: str) -> str:
     data = None
     try:
         from tradingagents.dataflows import alpaca
+        from tradingagents.dataflows.config import get_config
 
-        bars = alpaca.get_bars(ticker, timeframe="1Day", limit=120)
-        if bars:
-            data = {
-                "closes": [float(b["c"]) for b in bars],
-                "highs": [float(b["h"]) for b in bars],
-                "lows": [float(b["l"]) for b in bars],
-                "volumes": [float(b["v"]) for b in bars],
-                "opens": [float(b["o"]) for b in bars],
-            }
+        # Gated, like every other Alpaca read in the repo (trading_graph,
+        # value_screener, action_report, pre_market_review, and this module's
+        # own intraday block below). The gate ships OFF, so reading it anyway
+        # both ignored the switch and starved the scan: a limit-only 1Day
+        # request answers with the CURRENT DAY alone - one bar - which left
+        # RVOL None and every pullback flag empty.
+        if get_config().get("enable_alpaca"):
+            bars = alpaca.get_bars(ticker, timeframe="1Day", limit=120)
+            if bars:
+                data = {
+                    "closes": [float(b["c"]) for b in bars],
+                    "highs": [float(b["h"]) for b in bars],
+                    "lows": [float(b["l"]) for b in bars],
+                    "volumes": [float(b["v"]) for b in bars],
+                    "opens": [float(b["o"]) for b in bars],
+                }
     except Exception:
         data = None
     if not data or not data["closes"]:

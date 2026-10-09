@@ -223,12 +223,39 @@ def test_market_tool_reports_scan():
 
     bars = [{"t": f"d{i}", "o": 15.0 + i * 0.01, "h": 15.1, "l": 14.9,
              "c": 15.0 + i * 0.01, "v": 1_000_000} for i in range(60)]
-    with mock.patch("tradingagents.dataflows.alpaca.get_bars", return_value=bars):
+    # The daily bar read sits behind `enable_alpaca` (which ships OFF) like every
+    # other Alpaca call in the repo, so the switch has to be on for this path.
+    with mock.patch("tradingagents.dataflows.config.get_config",
+                    return_value={"enable_alpaca": True}), \
+            mock.patch("tradingagents.dataflows.alpaca.get_bars", return_value=bars):
         out = get_momentum_scan.func("AAPL")
     assert "momentum scan AAPL:" in out
     assert "pillars:" in out and "setup=" in out
     assert "float_ok=" in out  # phase 1: float pillar surfaced
     assert "volrule=" in out and "tailok=" in out  # phase 2 flags surfaced
+
+
+def test_market_tool_ignores_alpaca_unless_the_gate_is_on():
+    """`enable_alpaca` ships OFF and every other Alpaca read checks it. Reading
+    Alpaca regardless both ignored the switch and starved the scan: a
+    limit-only 1Day request answers with the CURRENT DAY alone, one bar, which
+    left RVOL None and every pullback flag empty."""
+    from unittest import mock
+
+    from tradingagents.agents.utils.momentum_tools import get_momentum_scan
+
+    closes = [15.0 + i * 0.01 for i in range(60)]
+    ohlcv = {"closes": closes, "highs": [15.1] * 60, "lows": [14.9] * 60,
+             "volumes": [1_000_000] * 60, "opens": closes}
+    with mock.patch("tradingagents.dataflows.config.get_config",
+                    return_value={"enable_alpaca": False}), \
+            mock.patch("tradingagents.dataflows.alpaca.get_bars",
+                       side_effect=AssertionError("Alpaca read with the gate off")), \
+            mock.patch("tradingagents.agents.utils.analysis_tools._ohlcv",
+                       return_value=ohlcv):
+        out = get_momentum_scan.func("AAPL")
+    assert "momentum scan AAPL:" in out
+    assert "RVOL(50d)=None" not in out  # measured off the chain, not an empty read
 
 
 def test_market_tool_falls_back_to_vendor_chain_when_alpaca_empty():

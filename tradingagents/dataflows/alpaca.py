@@ -6,16 +6,45 @@ trading are intentionally never implemented in this project.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from tradingagents.dataflows.alpaca_common import alpaca_get
+
+#: Frames that carry one bar per DAY-or-longer session. Alpaca answers a
+#: ``start``-less request with the CURRENT DAY alone, and ``limit`` cuts from
+#: the OLDEST bar of whatever window is served - so these frames have to date
+#: the window back and ask for it descending to get the NEWEST bars.
+_DAY_FRAMES = frozenset({"1Day", "1Week", "1Month"})
 
 
 def get_bars(
     symbol: str, timeframe: str = "1Day", limit: int = 200, adjustment: str = "raw"
 ) -> list | None:
-    data = alpaca_get(
-        f"stocks/{symbol}/bars", {"timeframe": timeframe, "limit": limit, "adjustment": adjustment}
-    )
-    return data.get("bars") if isinstance(data, dict) else None
+    """The most recent ``limit`` bars, OLDEST FIRST (``bars[-1]`` is the latest).
+
+    Probed live 2026-10-09: with no ``start`` Alpaca serves the CURRENT DAY
+    alone - ``1Day`` with ``limit=120`` returned exactly **1 bar** - and
+    ``limit`` truncates from the OLDEST bar of the window it does serve, so
+    ``limit=120`` over a 200-day window ended a month in the past. A day-frame
+    request therefore dates the window back far enough to hold ``limit``
+    sessions and asks ``sort=desc``, which returns the newest ones; the result
+    is reversed so every caller reads the ascending order it already assumed.
+    An intraday frame keeps Alpaca's default (today's session) - note its
+    ``limit`` truncates from the oldest bar too, so a caller that wants a whole
+    session must size ``limit`` above that session's bar count.
+    """
+    params: dict = {"timeframe": timeframe, "limit": limit, "adjustment": adjustment}
+    descending = timeframe in _DAY_FRAMES
+    if descending:
+        # Two calendar days per requested session covers weekends and holidays.
+        start = datetime.now(timezone.utc) - timedelta(days=max(limit * 2, 60))
+        params["start"] = start.strftime("%Y-%m-%d")
+        params["sort"] = "desc"
+    data = alpaca_get(f"stocks/{symbol}/bars", params)
+    bars = data.get("bars") if isinstance(data, dict) else None
+    if not isinstance(bars, list):
+        return None
+    return list(reversed(bars)) if descending else bars
 
 
 def get_bars_batch(symbols: list, timeframe: str = "1Day", limit: int = 10) -> dict | None:

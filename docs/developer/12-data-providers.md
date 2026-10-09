@@ -171,7 +171,7 @@ They are optional / key-gated or pre-fetch sources.
 
 | Provider | Module | Consumed by | Gate |
 | --- | --- | --- | --- |
-| **Alpaca** | `dataflows/alpaca.py` | `get_market_snapshot_alpaca` (market analyst); screener `_fetch_ohlcv` fallback | `enable_alpaca` |
+| **Alpaca** | `dataflows/alpaca.py` | `get_market_snapshot_alpaca` (market analyst); screener `_fetch_ohlcv` fallback; `get_momentum_scan`'s daily bars and its 1m intraday block | `enable_alpaca` |
 | **Reddit** | `dataflows/reddit.py` | `fetch_reddit_posts` -> pre-fetched into the sentiment analyst | optional |
 | **StockTwits** | `dataflows/stocktwits.py` | `fetch_stocktwits_messages` -> pre-fetched into the sentiment analyst | optional |
 | **float_shares** | `dataflows/float_shares.py` | `fetch_float_shares` -> screener `--enable-float` momentum pillar | `--enable-float` |

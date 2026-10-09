@@ -1,6 +1,7 @@
 """Alpaca data-only vendor unit tests (offline; mock the HTTP layer)."""
 
 from contextlib import ExitStack, contextmanager
+from datetime import date, timedelta
 from unittest import mock
 
 import pytest
@@ -70,6 +71,49 @@ def test_bars_parse():
         bars = alpaca.get_bars("AAPL", timeframe="1Day", limit=5)
     assert bars and bars[0]["c"] == 101.5
     assert bars[0]["v"] == 5_000_000
+
+
+def test_day_bars_ask_for_the_newest_bar_and_return_them_oldest_first():
+    """Probed live 2026-10-09: a ``start``-less ``1Day`` request answers with the
+    CURRENT DAY alone (``limit=120`` returned exactly 1 bar) and ``limit`` cuts
+    from the OLDEST bar of the window served, so ``closes[-1]`` could be a month
+    stale. The window must be dated back and asked for descending."""
+    from tradingagents.dataflows import alpaca
+
+    seen = {}
+
+    def _fake(path, params=None, base=None):
+        seen.update(params or {})
+        return {
+            "bars": [
+                {"t": "2026-10-09", "c": 3.0, "v": 3},
+                {"t": "2026-10-08", "c": 2.0, "v": 2},
+                {"t": "2026-10-07", "c": 1.0, "v": 1},
+            ]
+        }
+
+    with mock.patch("tradingagents.dataflows.alpaca.alpaca_get", side_effect=_fake):
+        bars = alpaca.get_bars("AAPL", timeframe="1Day", limit=3)
+    assert seen.get("sort") == "desc"
+    assert seen.get("start") and seen["start"] <= (date.today() - timedelta(days=55)).isoformat()
+    assert [b["c"] for b in bars] == [1.0, 2.0, 3.0]  # oldest first, latest last
+
+
+def test_intraday_bars_keep_alpacas_own_window():
+    """The 1-min caller reads TODAY's session, so the day-frame window must not
+    leak into an intraday request."""
+    from tradingagents.dataflows import alpaca
+
+    seen = {}
+
+    def _fake(path, params=None, base=None):
+        seen.update(params or {})
+        return {"bars": [{"t": "2026-10-09T13:30:00Z", "c": 1.0}]}
+
+    with mock.patch("tradingagents.dataflows.alpaca.alpaca_get", side_effect=_fake):
+        bars = alpaca.get_bars("AAPL", timeframe="1Min", limit=390)
+    assert "start" not in seen and "sort" not in seen
+    assert bars[0]["t"] == "2026-10-09T13:30:00Z"
 
 
 def test_batch_bars_map_by_symbol():

@@ -38,9 +38,8 @@ class Propagator:
         model-supplied date can never reach past the run date. Thread-scoped
         via contextvars; an empty date leaves the clamp a no-op.
         """
-        from datetime import datetime as _dt
-
         from tradingagents.dataflows.date_window import set_run_clock, set_run_trade_date
+        from tradingagents.strategies.market_session import to_exchange_time
 
         set_run_trade_date(trade_date)
         # Publish the run's wall-clock instant too, beside the date: the volume
@@ -48,7 +47,11 @@ class Propagator:
         # (``market_session.forming_bar_progress``). A live run - the run date is
         # today - gets the real instant; a historical run publishes None, which
         # clears it, so a backtest is never adjusted by the present time of day.
-        _today = _dt.now().astimezone()
+        # The reader takes the published wall clock AS ET, so the machine's own
+        # zone must be converted here: ``now().astimezone()`` alone made a
+        # Central-time box read the session 60 minutes young (0.2872 where ET
+        # says 0.4410), annualising every forming bar's volume ~1.5x high.
+        _today = to_exchange_time()
         set_run_clock(_today if str(trade_date)[:10] == _today.date().isoformat() else None)
         return {
             "messages": [("human", company_name)],

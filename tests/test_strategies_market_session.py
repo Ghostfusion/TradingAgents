@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tradingagents.dataflows import date_window  # noqa: E402
+from tradingagents.graph.propagation import Propagator  # noqa: E402
 from tradingagents.strategies import (  # noqa: E402
     market_session as ms,
     momentum,
@@ -380,6 +381,24 @@ def _et(hour, minute, day=8):
     return datetime(2026, 10, day, hour, minute, tzinfo=_ET)
 
 
+def _exchange_zone():
+    """ET, or None when no tz database is reachable.
+
+    ``zoneinfo`` needs one: Windows ships none and relies on the ``tzdata``
+    package (pandas pulls it in there), Linux/macOS have the system database.
+    Returning None here - rather than skipping inside the ``except`` - is what
+    lets the two conversion tests below SKIP on a box that has neither; the
+    code's own fallback is a fixed -05:00, an hour off, which is not what they
+    assert.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("America/New_York")
+    except Exception:  # noqa: BLE001 - optional tzdata; documented fallback
+        return None
+
+
 def test_session_progress_reads_the_regular_window():
     assert ms._session_progress(_et(9, 0))["fraction"] == 0.0  # pre-open
     mid = ms._session_progress(_et(12, 0))
@@ -412,6 +431,48 @@ def test_a_too_partial_bar_is_unmeasured_not_a_wild_number():
     date_window.set_run_clock(_et(9, 35))  # 5 minutes in: ~77x if annualised
     try:
         assert momentum.rvol([1000.0] * 50 + [400.0]) is None
+    finally:
+        date_window.set_run_clock(None)
+
+
+def test_a_machine_local_clock_is_converted_to_exchange_time():
+    """The graph publishes the MACHINE's instant; the session leaves read that
+    wall clock AS ET. A Central-time box (UTC-5, ET is UTC-4 in October) running
+    at 12:22 ET published 11:22, so the session looked 60 minutes young and
+    every forming bar was annualised by 0.3282 where ET says 0.4821: the live
+    2026-10-09 batch read TMUS RVOL 1.99 against an ET-correct ~1.35."""
+    if _exchange_zone() is None:
+        pytest.skip("no tzdata: the exchange-time conversion is unavailable")
+    central = datetime(2026, 10, 9, 11, 22, tzinfo=timezone(timedelta(hours=-5)))
+    published = ms.to_exchange_time(central)
+    assert published.utcoffset() == timedelta(hours=-4)  # EDT, not the box's -05:00
+    assert (published.hour, published.minute) == (12, 22)  # 11:22 CT is 12:22 ET
+    assert ms._session_progress(published)["minutes_elapsed"] == 172
+    # the reader stays hour-raw: a naive value is read as ET as-is (112 of 390)
+    assert ms._session_progress(datetime(2026, 10, 9, 11, 22))["minutes_elapsed"] == 112
+    date_window.set_run_clock(published)
+    try:
+        assert momentum.rvol([1000.0] * 50 + [400.0]) == pytest.approx(
+            0.4 / (172 / 390), rel=1e-3
+        )
+    finally:
+        date_window.set_run_clock(None)
+
+
+def test_the_graph_publishes_the_run_clock_in_exchange_time():
+    """``create_initial_state`` is the only publisher of the run clock, so a
+    live run must hand the leaves an ET instant rather than the box's zone."""
+    et = _exchange_zone()
+    if et is None:
+        pytest.skip("no tzdata: the exchange-time conversion is unavailable")
+    date_window.set_run_clock(None)
+    try:
+        Propagator().create_initial_state("AAPL", datetime.now(et).date().isoformat())
+        published = date_window.get_run_clock()
+        assert published is not None, "a live run publishes the clock"
+        assert published.tzinfo is not None
+        assert published.utcoffset() == datetime.now(et).utcoffset()
+        assert abs((published - datetime.now(et)).total_seconds()) < 120
     finally:
         date_window.set_run_clock(None)
 
