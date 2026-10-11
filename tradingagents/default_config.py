@@ -262,11 +262,12 @@ _ENV_OVERRIDES = {
     # TypeSafe verdict (tradingagents/jev.py): opt-in post-run judgement of the
     # four analyst reports, stored in the report tree as jev_verdict.json.
     "TRADINGAGENTS_ENABLE_JV_VERDICT": "enable_jev_verdict",
-    # The second decider (tradingagents/jev.py, DECIDERS[1]): Perplexity's
-    # decisions model on the same endpoint/battery, run after the TypeSafe one
-    # and stored beside it as pplx_verdict.json. Its own gate so enabling one
-    # judge does not start paying for two.
-    "TRADINGAGENTS_ENABLE_PPLX_DECIDER": "enable_pplx_decider",
+    # The second decider (tradingagents/jev.py, DECIDERS[1]): Microsoft's
+    # microsoft-decision-1 on the same endpoint/battery, run after the TypeSafe
+    # one and stored beside it as msdec_verdict.json. Its own gate so enabling
+    # one judge does not start paying for two. This slot held Perplexity's
+    # decider until 2026-10-11.
+    "TRADINGAGENTS_ENABLE_MSDEC_DECIDER": "enable_msdec_decider",
     # The third decider (tradingagents/jev.py, DECIDERS[2]): Respan's decisions
     # model on the same endpoint, but a different contract - it refuses the
     # choice/score battery the other two use and takes only noul questions - run
@@ -1146,11 +1147,14 @@ SHIPPED_DEFAULTS = {
         # Opt-in - off by default, so it costs nothing unless enabled, and a
         # missing OPENROUTER_API_KEY skips it rather than failing the run.
         "enable_jev_verdict": False,
-        # The second decider (tradingagents/jev.py, DECIDERS[1]): Perplexity's
-        # decisions model over the same four analyst reports, run AFTER the
-        # TypeSafe one and written beside it as pplx_verdict.json. Separately
+        # The second decider (tradingagents/jev.py, DECIDERS[1]): Microsoft's
+        # microsoft-decision-1 over the same four analyst reports, run AFTER the
+        # TypeSafe one and written beside it as msdec_verdict.json. Separately
         # gated (and off) so enabling one paid judge cannot silently enable two.
-        "enable_pplx_decider": False,
+        # Probed 2026-10-11: the doubled vendor prefix is the live slug, and it
+        # answers the shared buy/hold/sell battery. Replaces the Perplexity
+        # decider, removed from the chain on the owner's instruction.
+        "enable_msdec_decider": False,
         # The third decider (tradingagents/jev.py, DECIDERS[2]): Respan's
         # noul-only decisions model, run AFTER the other two and written beside
         # them as noul_verdict.json. Off by default like the others - and for one

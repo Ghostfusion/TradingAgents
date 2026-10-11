@@ -47,7 +47,7 @@ REGISTRY: dict[str, str] = {
     "enable_correlation_penalty": "wired",
     "enable_pre_market_review": "wired",
     "enable_jev_verdict": "wired",
-    "enable_pplx_decider": "wired",
+    "enable_msdec_decider": "wired",
     "enable_noul_decider": "wired",
     "enable_luna_decider": "wired",
     "enable_preopen_depth": "wired",

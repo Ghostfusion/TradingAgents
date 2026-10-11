@@ -232,7 +232,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_COMPUTED_CONTEXT` | `enable_computed_context` | default `true` |
 | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | `enable_pre_market_review` | default `false` |
 | `TRADINGAGENTS_ENABLE_JV_VERDICT` | `enable_jev_verdict` | default `false` |
-| `TRADINGAGENTS_ENABLE_PPLX_DECIDER` | `enable_pplx_decider` | default `false` |
+| `TRADINGAGENTS_ENABLE_MSDEC_DECIDER` | `enable_msdec_decider` | default `false` (the Microsoft `microsoft/microsoft-decision-1` judge; replaced `enable_pplx_decider` on 2026-10-11) |
 | `TRADINGAGENTS_ENABLE_NOUL_DECIDER` | `enable_noul_decider` | default `false` |
 | `TRADINGAGENTS_ENABLE_LUNA_DECIDER` | `enable_luna_decider` | default `false` |
 | `TRADINGAGENTS_FCF_YIELD_FLOOR` | `fcf_yield_floor` | default `0.06` |

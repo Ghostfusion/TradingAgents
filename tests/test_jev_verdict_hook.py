@@ -128,29 +128,29 @@ def test_gate_on_calls_the_judge(monkeypatch, tmp_path):
 
 def test_the_second_decider_gate_ships_off_by_default():
     """A second paid judge is its own opt-in, so it ships off."""
-    assert _shipped_default("enable_pplx_decider") is False
+    assert _shipped_default("enable_msdec_decider") is False
 
 
-def test_pplx_gate_off_never_calls_the_second_decider(monkeypatch, tmp_path):
+def test_msdec_gate_off_never_calls_the_second_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False},
+        {"enable_jev_verdict": False, "enable_msdec_decider": False},
     )
     called: list = []
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: called.append(d))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: called.append(d))
 
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
     assert called == [], "the second decider ran while its gate was off"
 
 
-def test_pplx_gate_on_calls_the_second_decider(monkeypatch, tmp_path):
+def test_msdec_gate_on_calls_the_second_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": True},
+        {"enable_jev_verdict": False, "enable_msdec_decider": True},
     )
     called: list = []
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: called.append(d))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: called.append(d))
 
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
@@ -161,11 +161,11 @@ def test_the_two_decider_gates_are_independent(monkeypatch, tmp_path):
     """Each judge is its own opt-in: one on must not drag the other on."""
     seen: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append(("jev", d)))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append(("pplx", d)))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: seen.append(("msdec", d)))
 
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": False},
+        {"enable_jev_verdict": True, "enable_msdec_decider": False},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
     assert seen == [("jev", tmp_path)]
@@ -173,25 +173,25 @@ def test_the_two_decider_gates_are_independent(monkeypatch, tmp_path):
     seen.clear()
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": True},
+        {"enable_jev_verdict": False, "enable_msdec_decider": True},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
-    assert seen == [("pplx", tmp_path)]
+    assert seen == [("msdec", tmp_path)]
 
 
 def test_the_second_decider_runs_after_the_first(monkeypatch, tmp_path):
     """Order is pinned: the tree log and the cost report read top-down."""
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": True},
+        {"enable_jev_verdict": True, "enable_msdec_decider": True},
     )
     order: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: order.append("msdec"))
 
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
-    assert order == ["jev", "pplx"]
+    assert order == ["jev", "msdec"]
 
 
 def test_the_two_post_save_gates_are_independent(monkeypatch, tmp_path):
@@ -325,13 +325,13 @@ def test_the_second_decider_writes_its_own_file_beside_the_first(tmp_path, _keye
     tree = _tree(tmp_path)
 
     batch._batch_jev_verdict(tree)
-    batch._batch_pplx_decider(tree)
+    batch._batch_msdec_decider(tree)
 
     assert (tree / jev.VERDICT_FILENAME).is_file()
-    pplx = tree / jev.PPLX_VERDICT_FILENAME
-    assert pplx.is_file(), "the second verdict did not travel with its report"
-    payload = json.loads(pplx.read_text(encoding="utf-8"))
-    assert payload["model"] == jev.PPLX_MODEL
+    msdec = tree / jev.MSDEC_VERDICT_FILENAME
+    assert msdec.is_file(), "the second verdict did not travel with its report"
+    payload = json.loads(msdec.read_text(encoding="utf-8"))
+    assert payload["model"] == jev.MSDEC_MODEL
     assert payload["origin"] == tree.name
     assert payload["failures"] == 0
 
@@ -340,11 +340,11 @@ def test_the_second_decider_sends_the_same_neutralised_battery(tmp_path, _keyed)
     """Same recipe as the first - only the model differs."""
     tree = _tree(tmp_path)
 
-    batch._batch_pplx_decider(tree)
+    batch._batch_msdec_decider(tree)
 
     assert len(_keyed.calls) == 4, "one call per analyst report"
     for payload in _keyed.calls:
-        assert payload["model"] == jev.PPLX_MODEL
+        assert payload["model"] == jev.MSDEC_MODEL
         assert jev.POSITION_MARKER in payload["state"]
         assert "Buy" not in payload["state"], "the report's own call was sent"
         assert set(payload["questions"]) == {"rating", "evidence", "horizon"}
@@ -357,7 +357,7 @@ def test_judge_tree_all_runs_every_decider_in_order(tmp_path, _keyed):
 
     assert [d.label for d, _, _ in results] == [d.label for d in jev.DECIDERS]
     assert [p.name for _, p, _ in results] == [
-        jev.VERDICT_FILENAME, jev.PPLX_VERDICT_FILENAME, jev.NOUL_VERDICT_FILENAME,
+        jev.VERDICT_FILENAME, jev.MSDEC_VERDICT_FILENAME, jev.NOUL_VERDICT_FILENAME,
         jev.LUNA_VERDICT_FILENAME,
     ]
     assert all(p.is_file() for _, p, _ in results)
@@ -371,9 +371,9 @@ def test_the_second_decider_is_best_effort_too(monkeypatch, tmp_path):
     monkeypatch.setattr(jev, "resolve_key", lambda *a, **k: "sk-or-v1-test")
     monkeypatch.setattr(jev, "post_json", _Recorder(status=429, body="rate limited"))
 
-    batch._batch_pplx_decider(tree)   # must not raise
+    batch._batch_msdec_decider(tree)   # must not raise
 
-    payload = json.loads((tree / jev.PPLX_VERDICT_FILENAME).read_text(encoding="utf-8"))
+    payload = json.loads((tree / jev.MSDEC_VERDICT_FILENAME).read_text(encoding="utf-8"))
     assert payload["failures"] == 4
     assert all(r["status"] == 429 for r in payload["results"])
 
@@ -413,7 +413,7 @@ def test_the_noul_decider_gate_ships_off_by_default():
 def test_noul_gate_off_never_calls_the_third_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": False},
     )
     called: list = []
@@ -427,7 +427,7 @@ def test_noul_gate_off_never_calls_the_third_decider(monkeypatch, tmp_path):
 def test_noul_gate_on_calls_the_third_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": True},
     )
     called: list = []
@@ -443,12 +443,12 @@ def test_the_noul_gate_is_independent_of_the_other_two(monkeypatch, tmp_path):
     neither of them may drag it on."""
     seen: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append("jev"))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: seen.append("msdec"))
     monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: seen.append("noul"))
 
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": False,
+        {"enable_jev_verdict": True, "enable_msdec_decider": False,
          "enable_noul_decider": False},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
@@ -457,7 +457,7 @@ def test_the_noul_gate_is_independent_of_the_other_two(monkeypatch, tmp_path):
     seen.clear()
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": True},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
@@ -468,17 +468,17 @@ def test_the_noul_decider_runs_last(monkeypatch, tmp_path):
     """Order is pinned: the tree log and the cost report read top-down."""
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": True,
+        {"enable_jev_verdict": True, "enable_msdec_decider": True,
          "enable_noul_decider": True},
     )
     order: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: order.append("msdec"))
     monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: order.append("noul"))
 
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
-    assert order == ["jev", "pplx", "noul"]
+    assert order == ["jev", "msdec", "noul"]
 
 
 def test_the_noul_decider_writes_its_own_file(tmp_path, _noul_keyed):
@@ -584,13 +584,31 @@ def test_the_decider_chain_lists_the_four_judges_in_order():
     """The chain is the registry the hooks index into, so pin it whole: adding
     a judge is a one-line change here plus a hook, and a silent reorder would
     move which model a `DECIDERS[n]` decorator runs."""
-    assert [d.label for d in jev.DECIDERS] == ["jev", "pplx", "noul", "luna"]
+    assert [d.label for d in jev.DECIDERS] == ["jev", "msdec", "noul", "luna"]
     luna = jev.DECIDERS[3]
     assert luna.model == jev.LUNA_MODEL
     assert luna.filename == jev.LUNA_VERDICT_FILENAME
     # The probe's whole conclusion: luna takes the shared battery, so it must
     # NOT be given Respan's noul-only recipe.
     assert luna.recipe == "rating"
+
+
+def test_the_second_decider_is_the_probed_double_prefix_slug():
+    """The Microsoft slug was PROBED before wiring, and the near miss is a 400.
+
+    ``microsoft/decision-1`` - the tidy-looking form - answers "Model
+    microsoft/decision-1 does not exist" on the live alpha route (probed
+    2026-10-11). A future cleanup that drops the doubled vendor prefix would
+    therefore stop judging silently, so the probed string is pinned here.
+    """
+    msdec = jev.DECIDERS[1]
+    assert msdec.label == "msdec"
+    assert jev.MSDEC_MODEL == "microsoft/microsoft-decision-1"
+    assert msdec.model == jev.MSDEC_MODEL
+    assert msdec.filename == "msdec_verdict.json"
+    # Probed on the shared battery (choice + score): a buy/hold/sell rating, so
+    # it must NOT be routed to Respan's noul-only recipe.
+    assert msdec.recipe == "rating"
 
 
 def test_the_luna_decider_gate_ships_off_by_default():
@@ -601,7 +619,7 @@ def test_the_luna_decider_gate_ships_off_by_default():
 def test_luna_gate_off_never_calls_the_fourth_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": False, "enable_luna_decider": False},
     )
     called: list = []
@@ -615,7 +633,7 @@ def test_luna_gate_off_never_calls_the_fourth_decider(monkeypatch, tmp_path):
 def test_luna_gate_on_calls_the_fourth_decider(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": False, "enable_luna_decider": True},
     )
     called: list = []
@@ -631,13 +649,13 @@ def test_the_luna_gate_is_independent_of_the_other_three(monkeypatch, tmp_path):
     may drag it on."""
     seen: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: seen.append("jev"))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: seen.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: seen.append("msdec"))
     monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: seen.append("noul"))
     monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: seen.append("luna"))
 
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": False,
+        {"enable_jev_verdict": True, "enable_msdec_decider": False,
          "enable_noul_decider": False, "enable_luna_decider": False},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
@@ -646,7 +664,7 @@ def test_the_luna_gate_is_independent_of_the_other_three(monkeypatch, tmp_path):
     seen.clear()
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": False, "enable_pplx_decider": False,
+        {"enable_jev_verdict": False, "enable_msdec_decider": False,
          "enable_noul_decider": False, "enable_luna_decider": True},
     )
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
@@ -657,18 +675,18 @@ def test_the_luna_decider_runs_last(monkeypatch, tmp_path):
     """Order is pinned: the tree log and the cost report read top-down."""
     monkeypatch.setattr(
         batch, "DEFAULT_CONFIG",
-        {"enable_jev_verdict": True, "enable_pplx_decider": True,
+        {"enable_jev_verdict": True, "enable_msdec_decider": True,
          "enable_noul_decider": True, "enable_luna_decider": True},
     )
     order: list = []
     monkeypatch.setattr(batch, "_batch_jev_verdict", lambda d: order.append("jev"))
-    monkeypatch.setattr(batch, "_batch_pplx_decider", lambda d: order.append("pplx"))
+    monkeypatch.setattr(batch, "_batch_msdec_decider", lambda d: order.append("msdec"))
     monkeypatch.setattr(batch, "_batch_noul_decider", lambda d: order.append("noul"))
     monkeypatch.setattr(batch, "_batch_luna_decider", lambda d: order.append("luna"))
 
     batch.post_save_annotations("MSFT", tmp_path, "2026-09-21")
 
-    assert order == ["jev", "pplx", "noul", "luna"]
+    assert order == ["jev", "msdec", "noul", "luna"]
 
 
 def test_the_fourth_decider_writes_its_own_file(tmp_path, _keyed):

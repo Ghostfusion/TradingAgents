@@ -278,12 +278,13 @@ def post_save_annotations(symbol: str, report_dir, trade_date: str | None) -> No
     # result in that report's own folder. Writes jev_verdict.json.
     if DEFAULT_CONFIG.get("enable_jev_verdict"):
         _batch_jev_verdict(report_dir)
-    # The second decider, AFTER the first: Perplexity's model on the same
-    # decisions endpoint and battery. Its own gate - enabling one judge must not
-    # silently start paying for two. Writes pplx_verdict.json beside
-    # jev_verdict.json, so a tree that ran both carries both.
-    if DEFAULT_CONFIG.get("enable_pplx_decider"):
-        _batch_pplx_decider(report_dir)
+    # The second decider, AFTER the first: Microsoft's microsoft-decision-1 on
+    # the same decisions endpoint and battery. Its own gate - enabling one judge
+    # must not silently start paying for two. Writes msdec_verdict.json beside
+    # jev_verdict.json, so a tree that ran both carries both. This slot held
+    # Perplexity's decider until 2026-10-11, when the owner removed it.
+    if DEFAULT_CONFIG.get("enable_msdec_decider"):
+        _batch_msdec_decider(report_dir)
     # The third decider, AFTER both: Respan's decisions model, which refuses
     # choice/score questions and is therefore asked the noul-only battery. Again
     # its own gate - a third judge is its own opt-in. Writes noul_verdict.json.
@@ -610,7 +611,7 @@ def _batch_decider_verdict(report_dir, decider) -> None:
     accepts (``tradingagents.jev.judge_tree`` - the ``--verdict`` recipe for the
     choice/score judges, the noul-only one for Respan's, which refuses the
     shared battery). The payload lands in the tree under the decider's own
-    filename (``jev_verdict.json``, ``pplx_verdict.json``, ``noul_verdict.json``,
+    filename (``jev_verdict.json``, ``msdec_verdict.json``, ``noul_verdict.json``,
     ``luna_verdict.json``),
     so the deciders accumulate rather than overwrite - the verdict travels with
     the report it is about, and they all travel together.
@@ -647,11 +648,15 @@ def _batch_jev_verdict(report_dir) -> None:
     _batch_decider_verdict(report_dir, DECIDERS[0])
 
 
-def _batch_pplx_decider(report_dir) -> None:
-    """The Perplexity decider (``DECIDERS[1]``), run after the TypeSafe one.
+def _batch_msdec_decider(report_dir) -> None:
+    """The Microsoft decider (``DECIDERS[1]``), run after the TypeSafe one.
 
     Deliberately a separate gate from the TypeSafe verdict: a second paid judge
     is its own opt-in, and a run that wants only one of the two pays for one.
+    Probed 2026-10-11 on the live endpoint before wiring: the slug is
+    ``microsoft/microsoft-decision-1`` (the doubled vendor prefix is real - the
+    ``microsoft/decision-1`` form is a 400) and it takes the shared
+    buy/hold/sell battery, so it needs no recipe of its own.
     """
     from tradingagents.jev import DECIDERS
 

@@ -1,7 +1,7 @@
 """The OpenRouter decisions API as a typed judge - one engine, four deciders.
 
 The engine is model-agnostic: :data:`DECIDERS` names the judges that run over a
-finished report tree (``typesafe/jev-1.13`` first, ``perplexity/pplx-decider-v1-27b``
+finished report tree (``typesafe/jev-1.13`` first, ``microsoft/microsoft-decision-1``
 second, ``respan/span-01`` third, ``openai/gpt-6-luna-decisions`` fourth), each
 writing its own verdict file. The facts below were established by probing rather
 than reading: they hold for the first, second and fourth (all three take the
@@ -52,18 +52,24 @@ judge        n      max = 1.0  median max   median H
 ``jev``      790    12%        0.880        0.380
 ``luna``     112    **71%**    **1.000**    **0.000**
 ``noul``     60     0%         0.231        0.783
+``msdec``**  396    0%         0.894        0.368
 ``pplx``*    46     0%         0.796        0.579
 ===========  =====  =========  ===========  ===========
 
-(``H`` = entropy in nats; a uniform three-way is max 0.333 / H 1.099. ``pplx``
-is gated off, so its 46 are historical.) Read them as three different objects,
+(``H`` = entropy in nats; a uniform three-way is max 0.333 / H 1.099. ``pplx``*
+was **removed from the chain on 2026-10-11**, so its 46 are history rather than a
+live judge; ``msdec``** is its replacement, measured the same day over **99
+report trees / 396 triples** by calling the endpoint read-only - no verdict was
+written into those trees.) Read them as three different objects,
 not one confidence scale: **luna is a hard label in probabilistic clothing**
 (71% of its verdicts are exactly 1/0/0, and ``output_tokens: 0`` says the numbers
 are computed, so a 1.0 carries no probability at all - temperature scaling has
 nothing to rescale); **noul's flat margins corroborate the probe note above**
 ("a deterministic document statistic that does not track the polarity it is asked
-for") rather than being news; only **jev is a genuine but overconfident
-distribution**. Cross-model comparison of these numbers is valid only after
+for") rather than being news; **jev is a genuine but overconfident distribution**, and
+**``msdec`` sits on jev's scale** (0% hard labels, median H 0.368) - so the slot's
+replacement is a distribution, while the judge it replaced was the flattest of
+the four (0.796 / 0.579). Cross-model comparison of these numbers is valid only after
 calibrating each to a common scale - and **nothing here aggregates them**: every
 decider writes its own file and the report viewer opens them as artefacts.
 
@@ -118,15 +124,23 @@ DEFAULT_ENDPOINT = (
 )
 DEFAULT_TIMEOUT = _env_float("TRADINGAGENTS_JEV_TIMEOUT", 300.0)
 
-#: The SECOND decider: Perplexity's decisions model. Same endpoint and the same
-#: request/response contract as the TypeSafe one - probed 2026-10-05, the alpha
-#: route answers it as ``perplexity/pplx-decider-v1-27b-20261001`` (provider
-#: ``Perplexity``) for all three question types (``choice``/``score``). Note the
-#: endpoint the vendor page advertises for it, ``/api/v1/decisions``, is a **404**
-#: - the live route is the alpha one above. Overridable from `.env` like the first.
-PPLX_MODEL = (
-    os.environ.get("TRADINGAGENTS_PPLX_DECIDER_MODEL")
-    or "perplexity/pplx-decider-v1-27b"
+#: The SECOND decider: Microsoft's ``microsoft-decision-1``. Same endpoint and the
+#: same request/response contract as the TypeSafe one - probed 2026-10-11, the
+#: alpha route answers it as ``microsoft/microsoft-decision-1-20261009`` (provider
+#: ``Azure``) for ``choice`` and ``score``, so it takes the shared buy/hold/sell
+#: battery and needs no recipe of its own. The DOUBLE vendor prefix is the live
+#: slug, not a typo: ``microsoft/decision-1`` is a 400 ("Model
+#: microsoft/decision-1 does not exist") probed the same day. It reports
+#: ``output_tokens: 3`` - the numbers are computed, not generated, like the other
+#: decisions models. Cost, measured rather than assumed: $0.0000114 for the
+#: probe's 272-token state, and $0.00070 for a real run's four analyst reports
+#: (~$0.00018 a call - a report is ~10x the probe). Overridable from `.env`
+#: (``TRADINGAGENTS_MSDEC_DECIDER_MODEL``). This slot held Perplexity's decider
+#: (``perplexity/pplx-decider-v1-27b``) until 2026-10-11, when the owner removed
+#: it from the chain.
+MSDEC_MODEL = (
+    os.environ.get("TRADINGAGENTS_MSDEC_DECIDER_MODEL")
+    or "microsoft/microsoft-decision-1"
 )
 
 #: The THIRD decider: Respan's ``span-01``. Same decisions route, but a
@@ -547,7 +561,7 @@ def result_lines(data: dict, questions: dict) -> list[str]:
 #: Where each decider's verdict lands inside a report tree. One file per
 #: decider, so a tree that ran both carries both and neither overwrites the other.
 VERDICT_FILENAME = "jev_verdict.json"
-PPLX_VERDICT_FILENAME = "pplx_verdict.json"
+MSDEC_VERDICT_FILENAME = "msdec_verdict.json"
 NOUL_VERDICT_FILENAME = "noul_verdict.json"
 LUNA_VERDICT_FILENAME = "luna_verdict.json"
 
@@ -571,14 +585,17 @@ class Decider:
 
 
 #: The deciders, in the order they run after a finished tree is written. The
-#: TypeSafe one first (it is what the hook was built for), Perplexity's second -
+#: TypeSafe one first (it is what the hook was built for), Microsoft's second -
 #: same endpoint, same battery, same position neutralisation, a different model -
 #: Respan's third, same endpoint and same neutralisation but a noul-only
 #: battery, because it refuses the shared one - and OpenAI's fourth, same
-#: endpoint and the same shared battery as the first two.
+#: endpoint and the same shared battery as the first two. Perplexity's decider
+#: held the second slot until 2026-10-11 and was removed from the chain on the
+#: owner's instruction; its 46 recorded triples stay in the scale table above as
+#: history, and no code reads them.
 DECIDERS: tuple[Decider, ...] = (
     Decider(label="jev", model=DEFAULT_MODEL, filename=VERDICT_FILENAME),
-    Decider(label="pplx", model=PPLX_MODEL, filename=PPLX_VERDICT_FILENAME),
+    Decider(label="msdec", model=MSDEC_MODEL, filename=MSDEC_VERDICT_FILENAME),
     Decider(
         label="noul",
         model=NOUL_MODEL,
