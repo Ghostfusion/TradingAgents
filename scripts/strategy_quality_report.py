@@ -116,6 +116,123 @@ def _score_eval_block(data_dir: str) -> dict:
     return score_evaluation_rows(scores_by_date, prices, holding=5)
 
 
+def _benchmark_arms(closes: list) -> dict:
+    """Simple comparator arms on the benchmark's own clock (FinRL-Meta's set).
+
+    ``buy_and_hold`` is the close-to-close series itself; ``momentum_20d`` holds
+    the benchmark only after a positive 20-session trailing return (else floored
+    at cash, 0%); ``ma_cross_50d`` holds it only while the close sits above its
+    own 50-session mean. All three come from the one fetched series - no extra
+    vendor call, no second clock.
+    """
+    bh: list = []
+    mom: list = []
+    ma: list = []
+    for i in range(1, len(closes)):
+        r = closes[i] / closes[i - 1] - 1.0
+        bh.append(r)
+        past = closes[max(0, i - 20):i]
+        mom.append(r if len(past) >= 2 and (past[-1] / past[0] - 1.0) > 0 else 0.0)
+        window = closes[max(0, i - 50):i + 1]
+        ma.append(r if len(window) >= 50 and closes[i] > sum(window) / len(window) else 0.0)
+    return {"buy_and_hold": bh, "momentum_20d": mom, "ma_cross_50d": ma}
+
+
+def _benchmark_surface_block(pm_realized, cost_bps: float) -> dict:
+    """The book's own baseline-relative row, loss-side metrics included.
+
+    ALWAYS ON (design_finrl_integration §6.4). With no baseline supplied the
+    surface is a named refusal carrying the strategy row - the design row's point
+    is that a raw single curve is never the deliverable, so the artifact says so
+    instead of printing the curve alone.
+    """
+    net = [float(v) for v in (pm_realized or []) if v is not None]
+    if not net:
+        return {"available": False, "reason": "no resolved pre-market rows to measure"}
+    try:
+        from tradingagents.strategies.benchmark_surface import benchmark_surface
+
+        surface = benchmark_surface(net, None, cost_bps=float(cost_bps))
+        surface["available"] = surface.get("unavailable") is None
+        return surface
+    except Exception as exc:  # noqa: BLE001 - report stays advisory
+        return {"available": False, "reason": f"benchmark surface unavailable: {exc}"}
+
+
+def _cross_sectional_null_block(pm_rows) -> dict:
+    """Per-name mean realized PnL -> the cross-sectional null (H3 Stage 3).
+
+    The book's realized rows grouped by ticker: is the mean across names
+    distinguishable from zero, or is one name carrying the record? A named
+    refusal when no resolved row carries a ticker - never a pass by absence.
+    """
+    per_name: dict = {}
+    for row in pm_rows or []:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        value = row.get("realized_return")
+        if not ticker or value is None:
+            continue
+        per_name.setdefault(ticker, []).append(float(value))
+    if not per_name:
+        return {"available": False, "reason": "no resolved rows carry a ticker"}
+    try:
+        from tradingagents.strategies.null_harness import cross_sectional_null
+
+        read = cross_sectional_null(per_name) or {}
+        read["available"] = read.get("verdict") != "unavailable"
+        return read
+    except Exception as exc:  # noqa: BLE001 - advisory
+        return {"available": False, "reason": f"cross-sectional null unavailable: {exc}"}
+
+
+def _run_economics_block(trees_dir: str) -> dict:
+    """The per-run quality x cost join over report trees (Dream-RSI Phase B).
+
+    Reads each tree's ``run_card.json`` beside its ``verify_flags.json`` and joins
+    the cap-bound LLM cost to the verifier's own blocks. No writer change, no
+    vendor call: both inputs already exist on disk.
+    """
+    import glob
+
+    from tradingagents.strategies.run_economics import run_economics
+
+    rows: list = []
+    for card_path in sorted(glob.glob(os.path.join(trees_dir, "*", "run_card.json"))):
+        tree = os.path.dirname(card_path)
+        try:
+            with open(card_path, encoding="utf-8") as fh:
+                card = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        verify = None
+        flags_path = os.path.join(tree, "verify_flags.json")
+        if os.path.exists(flags_path):
+            try:
+                with open(flags_path, encoding="utf-8") as fh:
+                    verify = json.load(fh)
+            except (OSError, ValueError):
+                verify = None
+        econ = run_economics(card, verify_flags=verify)
+        econ["tree"] = os.path.basename(tree)
+        rows.append(econ)
+    priced = [r for r in rows if r.get("cost_upper_usd") is not None]
+    return {
+        "available": bool(rows),
+        "trees_dir": trees_dir,
+        "n_trees": len(rows),
+        "n_priced": len(priced),
+        "n_passed": sum(1 for r in rows if r.get("quality") is not None),
+        "rows": rows,
+        "reason": None if rows else f"no run_card.json under {trees_dir}",
+        "basis": (
+            "per-tree join of run_card.json's cap-bound llm_cost_est against "
+            "verify_flags.json's own blocks (Dream-RSI Phase B); the research-depth "
+            "knob is not recorded in the run card, so the sweep answers "
+            "cost-vs-quality per run and cannot yet attribute it to a depth"
+        ),
+    }
+
+
 def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
     """Collect ledger metrics into a dict; never raises.
 
@@ -166,6 +283,10 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
         "resolved": len(pm_realized),
         "win_rate": round(wins / len(pm_realized), 3) if pm_realized else None,
         "avg_realized": round(sum(pm_realized) / len(pm_realized), 5) if pm_realized else None,
+        # The per-row series itself. The old --benchmark block read a
+        # ``realized`` key that this dict never carried, so its arm series was
+        # always empty and the whole hierarchy silently never rendered.
+        "realized": [round(float(v), 6) for v in pm_realized],
     }
 
     # 2b. C1 execution block: arrival-vs-fill slippage + fill-rate (advisory).
@@ -363,6 +484,12 @@ def build_report(data_dir: str, cost_bps: float = 10.0) -> dict:
     # report output stays unchanged.
     if _flag("enable_score_eval_rows"):
         out["score_eval"] = _score_eval_block(data_dir)
+    # 4. Baseline-relative surface (FinRL 8 / design_finrl_integration §6.4): the
+    #    loss-side four (mean / variance / CVaR / P(return >= 0)) this report
+    #    never carried, plus the named refusal when no baseline is supplied.
+    out["benchmark_surface"] = _benchmark_surface_block(pm_realized, cost_bps)
+    # 4b. The cross-sectional null over REAL per-name PnL (H3 Stage 3).
+    out["cross_sectional_null"] = _cross_sectional_null_block(pm_rows)
     return out
 
 
@@ -373,7 +500,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--illiq", action="store_true",
                         help="scale net cost up to 50bps (illiquid / impact-heavy book)")
     parser.add_argument("--benchmark", default=None,
-                        help="benchmark ticker (e.g. SPY) for the W1-6 benchmark hierarchy")
+                        help="benchmark ticker (e.g. SPY): renders the benchmark's own "
+                             "arms (buy&hold / momentum_20d / ma_cross_50d) on its own "
+                             "session clock - see the clock note, it is not aligned to "
+                             "the book's per-review series")
+    parser.add_argument("--trees", default=None,
+                        help="report-trees dir: joins each tree's run_card.json cost "
+                             "(a cap bound) to its verify_flags.json quality - the "
+                             "per-run 'was it worth it' read (Dream-RSI Phase B)")
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir or _default_data_dir()
@@ -382,28 +516,38 @@ def main(argv: list[str] | None = None) -> int:
     cost_bps = 50.0 if args.illiq else 10.0
     report = build_report(data_dir, cost_bps=cost_bps)
 
-    # W1-6 benchmark hierarchy (advisory): compare the book's net returns
-    # against a fetched benchmark series (market) + simple-strategy
-    # comparators (buy&hold, momentum, MA) derived from that same series.
+    if args.trees:
+        report["run_economics"] = _run_economics_block(args.trees)
+
+    # Benchmark context (advisory): the benchmark's OWN arms on the benchmark's own
+    # clock. Deliberately NOT mixed with the book: the book's realized series is
+    # one observation per resolved review and the benchmark's is one per session,
+    # so a "common tail" of the two would be a clock mismatch dressed up as a
+    # comparison. The ledger records each row's own trade/resolved dates, so a
+    # matched-window read is derivable later - a named gap, not a silent one.
     if args.benchmark:
         try:
             from scripts.backtest_strategy import fetch_bars
-            from tradingagents.strategies.evaluate import benchmark_table
+            from tradingagents.strategies.benchmark_surface import benchmark_rows
 
             bars = fetch_bars(args.benchmark, 500)
             closes = [b.close for b in (bars or [])]
-            bench_rets = ([closes[i] / closes[i - 1] - 1.0 for i in range(1, len(closes))]
-                          if len(closes) > 1 else [])
-            pmr = report.get("ledgers", {}).get("pre_market", {})
-            book_rets = [float(v) for v in (pmr.get("realized") or []) if v is not None]
-            if bench_rets and book_rets:
-                bbh = [0.0] * len(book_rets)  # buy & hold zero-return proxy
-                mom = bench_rets  # momentum = the benchmark itself
-                report["benchmark_hierarchy"] = benchmark_table(
-                    book_rets, bench_rets,
-                    simple={"buy&hold": bbh, "momentum": mom})
+            if len(closes) > 1:
+                arms = _benchmark_arms(closes)
+                block = benchmark_rows(
+                    arms["buy_and_hold"],
+                    {k: v for k, v in arms.items() if k != "buy_and_hold"},
+                )
+                block["ticker"] = args.benchmark.upper()
+                block["clock"] = (
+                    "the benchmark's own session clock; the book's series is one "
+                    "observation per resolved review and is not aligned to it here"
+                )
+                report["benchmark_arms"] = block
+            else:
+                report["benchmark_arms"] = {"error": f"no bars for {args.benchmark}"}
         except Exception as exc:  # noqa: BLE001 - benchmark is advisory
-            report["benchmark_hierarchy"] = {"error": str(exc)}
+            report["benchmark_arms"] = {"error": str(exc)}
 
     if args.json:
         print(json.dumps(report, indent=2, default=str))
@@ -458,6 +602,75 @@ def main(argv: list[str] | None = None) -> int:
                 + ("" if stab.get("available") else f" (unavailable: {stab.get('reason')})")
             )
             lines.append(f"- {se.get('basis')}")
+    surface = report.get("benchmark_surface")
+    if surface is not None:
+        lines.append("\n## Baseline-relative surface (FinRL 8; loss-side rows)")
+        if surface.get("available") is False:
+            lines.append(f"- unavailable: {surface.get('reason') or surface.get('unavailable')}")
+        else:
+            for row in surface.get("rows") or []:
+                if row["name"] == "strategy":
+                    # The six classic columns are already printed above; print the
+                    # four this report never carried, and no duplicate of them.
+                    lines.append(
+                        f"- strategy (loss side): mean={row['mean']} variance={row['variance']} "
+                        f"cvar={row['cvar']} P(return>=0)={row['prob_ge_threshold']} "
+                        f"(cost {row['cost_bps']:g}bps)"
+                    )
+                else:
+                    lines.append(
+                        f"- {row['name']}: n={row['n']} mean={row['mean']} variance={row['variance']} "
+                        f"cvar={row['cvar']} P(return>=0)={row['prob_ge_threshold']} "
+                        f"sharpe={row['sharpe']} maxdd={row['max_drawdown']} calmar={row['calmar']}"
+                    )
+            lines.append(f"- {surface.get('reason') or surface.get('basis')}")
+    cs = report.get("cross_sectional_null")
+    if cs is not None:
+        lines.append("\n## Cross-sectional null over per-name PnL (H3 Stage 3)")
+        if cs.get("available") is False:
+            lines.append(f"- unavailable: {cs.get('reason') or cs.get('unavailable')}")
+        else:
+            st = cs.get("sign_test") or {}
+            lines.append(
+                f"- n_names={cs.get('n_names')} mean={cs.get('mean')} sd={cs.get('sd')} "
+                f"t={cs.get('t')} df={cs.get('df')} p={cs.get('p_value')} -> {cs.get('verdict')}"
+            )
+            lines.append(
+                f"- sign test: {st.get('n_positive')} positive / {st.get('n_negative')} "
+                f"negative / {st.get('n_tied')} tied, p={st.get('p_value')}"
+            )
+            lines.append(f"- {cs.get('basis')}")
+    harms = report.get("benchmark_arms")
+    if harms is not None:
+        lines.append(f"\n## Benchmark arms ({harms.get('ticker') or args.benchmark})")
+        if harms.get("error"):
+            lines.append(f"- error: {harms['error']}")
+        else:
+            for row in harms.get("rows") or []:
+                lines.append(
+                    f"- {row['name']}: n={row['n']} total_return={row['total_return']} "
+                    f"cagr={row['cagr']} ann_vol={row['ann_vol']} sharpe={row['sharpe']} "
+                    f"maxdd={row['max_drawdown']} calmar={row['calmar']} cvar={row['cvar']} "
+                    f"P(return>=0)={row['prob_ge_threshold']}"
+                )
+            lines.append(f"- clock: {harms.get('clock')}")
+    econ = report.get("run_economics")
+    if econ is not None:
+        lines.append("\n## Run economics (cap-bound cost vs verifier quality, Phase B)")
+        if not econ.get("available"):
+            lines.append(f"- unavailable: {econ.get('reason')}")
+        else:
+            for row in econ.get("rows") or []:
+                quality = row.get("quality") or {}
+                lines.append(
+                    f"- {row.get('tree')}: {row.get('ticker')} "
+                    f"cost<={row.get('cost_upper_usd')} "
+                    f"flags={quality.get('flags_count')} {quality.get('flagged_stems')} "
+                    f"flags_per_usd={row.get('flags_per_usd')}"
+                )
+            lines.append(f"- priced trees: {econ.get('n_priced')} of {econ.get('n_trees')}, "
+                         f"with a verifier run: {econ.get('n_passed')}")
+            lines.append(f"- {econ.get('basis')}")
     print("\n".join(lines))
     return 0
 

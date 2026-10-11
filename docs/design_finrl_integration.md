@@ -219,14 +219,30 @@ recorder-style ledger rows — ownership stays shared as in the table above
   equal-weight | topk-drop | enhanced-index), default value-ratio — behavior
   unchanged.
 
-### 6.4 `strategies/benchmark_surface.py` — baseline-relative stats (FinRL 8)
-- `benchmark_rows(buy_hold_close, equal_weight_rets, mvo_rets, strategy_rets)
-  -> {cum, ann_ret, ann_vol, sharpe, maxdd, calmar}` rows for each line.
-  Mean-variance/min-variance weights from `portfolio_optimizer.min_variance_weights`
-  (existing).
-- Wire: `strategy_quality_report.py` always renders strategy **vs** baselines
-  (a raw single curve is never the deliverable); `evaluate_config_gate`
-  reports PBO/DSR baseline-relative.
+### 6.4 `strategies/benchmark_surface.py` — baseline-relative stats (FinRL 8) — **BUILT 2026-10-11**
+- `benchmark_rows(strategy_returns, {name: series}, cost_bps=..., baseline_cost_bps=...)
+  -> {name, n, total_return, cagr, ann_vol, sharpe, max_drawdown, calmar, mean,
+  variance, cvar, prob_ge_threshold}` rows, one per arm, over the arms' **common
+  tail window** and ONE stated cost schedule. The classic six come from
+  `evaluate.benchmark_table` (the engine's existing row producer); the loss-side
+  four from `book_risk.cvar` / `book_risk.prob_loss`. `benchmark_surface` adds each
+  baseline's per-metric delta against the strategy.
+  - Cost is charged to the strategy arm at `cost_bps` and to the baselines at
+    `baseline_cost_bps` (**0.0 by default** — the anti-flattering direction: a
+    cost-free baseline makes the comparison harder for the strategy).
+  - A strategy-only call is a **named refusal** carrying the strategy row
+    ("a raw single curve is not a result"), never the curve alone.
+  - Mean-variance/min-variance weights remain `portfolio_optimizer.min_variance_weights`
+    (existing) for a caller that wants an MVO arm; nothing here computes them.
+- Wire (built): `strategy_quality_report.py` always renders the loss-side surface
+  and `--benchmark TICKER` renders the benchmark's **own** arms
+  (`buy_and_hold` / `momentum_20d` / `ma_cross_50d`) on its own clock — the book's
+  series is one observation per resolved review, so a mixed-clock comparison is
+  deliberately NOT printed (a named gap, key `benchmark_arms`). `evaluate_config_gate
+  --benchmark` reports the same surface beside the verdict.
+  - The `--benchmark` path also exposed two defects, both fixed: `benchmark_table`
+    bound `periods_per_year` to `risk_free` (every row's Sharpe was `(cagr-252)/vol`),
+    and the script read a `realized` key the report never wrote.
 
 ### 6.5 runfile stages + market-environment registry (shared; extends Qlib §3.4)
 - `scripts/runfile.py` YAML gains sections: `stage` (train/test/trade date
@@ -262,10 +278,10 @@ recorder-style ledger rows — ownership stays shared as in the table above
 
 | Module | Seam | Config / flag | Web surface |
 | --- | --- | --- | --- |
-| `market_stress` | market tool `get_market_stress_read` + risk-debator bind + context line + overlay fold | `enable_market_stress` (False) + `market_stress_*` | Value Tools + Pre-Market |
+| `market_stress` | **turbulence leg BUILT (2026-10-11)**: market tool `get_turbulence_read` + prompt line, behind `enable_turbulence_read` (False). The two-layer regime + persistence legs and the `get_market_stress_read` name are NOT built | `enable_turbulence_read` (False) + `market_stress_vol_cap`; the module's own `enable_market_stress` is still unclaimed | Pre-Market (the tool is engine-internal; the Value Tools mirror waits for the overlay legs) |
 | `stop_policy` | `get_exit_overrides` / `get_ledger_risk_state` + plan card + action report | `stop_cooldown_weeks` (4) | Scripts screen row |
 | `portfolio_contract` | `scripts/value_screener.py --alloc` (→ `portfolio.allocation_block`) + `get_allocation` + `get_allocation_plan` (PM) + `action_report` | `allocation_strategy` (value-ratio default) | Pipeline alloc strategy |
-| `benchmark_surface` | `strategy_quality_report.py` + `evaluate_config_gate` | always-on pure calc | Scripts screen |
+| `benchmark_surface` | **BUILT (2026-10-11)**: `strategy_quality_report.py` (always-on loss-side block + `--benchmark` arms) + `evaluate_config_gate --benchmark` | always-on pure calc | Scripts screen (both scripts are already allowlisted) |
 | runfile stages + env registry | `batch.py`/`pipeline.py` flags front-end | `--runfile <yaml>`; registry = named presets | Jobs screen preset |
 | factor-model ensemble cadence | `factor_model_train.py` (advisory rank only) | `enable_factor_model` (False) - the **learned** model only (§6.6) | none (research) |
 

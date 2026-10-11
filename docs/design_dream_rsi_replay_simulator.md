@@ -258,6 +258,16 @@ already holds implicitly; it costs nothing and it is the prerequisite for everyt
 both the cost (`_run_card_llm_cost_est:980`) and the quality signal for the same run. No new
 measurement, no new vendor call. This makes "was the depth worth it" answerable per run.
 
+> **Built 2026-10-11, without the writer change.** `strategies/run_economics.py::run_economics(run_card,
+> verify_flags=...)` joins the two artifacts **as they already exist** (so `reporting.py` is untouched), and
+> `scripts/strategy_quality_report.py --trees <reports dir>` sweeps a tree directory into one row per run:
+> cap-bound cost, flagged stems, prose pass, `flags_per_usd` and the models per leg.
+> Two things the join states rather than hides: the cost leg is an **upper bound** (the rate row at the
+> configured `max_output` cap — per-run token counts are not tracked), and **`depth` is `None`**: the run
+> card records the models and the debate outcome, not the research-depth knob, so the sweep answers
+> cost-vs-quality per run and **cannot yet attribute the cost to a depth** — which is the remaining Phase-B
+> gap, and the P3 precondition §8.4 already named.
+
 **Phase C — the §5.1 ablation.** Extend `context_ab.py` with a guidance arm, in the same shape as
 the existing four, scored on the decision category with `mcnemar_exact`. Run it over the recorded
 trees. Report the paired transition matrix first, then grounding, then retention — the order

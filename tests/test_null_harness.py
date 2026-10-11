@@ -20,6 +20,7 @@ from tradingagents.strategies.null_harness import (
     FAMILYWISE_FALSE_POSITIVE,
     REFERENCE_CLASSES,
     candidate_matrix,
+    cross_sectional_null,
     empirical_null_band,
     falsify_workflow,
     generate_null,
@@ -175,3 +176,45 @@ def test_stage2_delta_z_is_the_difference_of_the_winners():
     diag = inflation_diagnostics(is_matrix, wf_matrix)
     assert diag["z_is_star"] is not None and diag["z_wf_star"] is not None
     assert diag["delta_z"] == pytest.approx(diag["z_is_star"] - diag["z_wf_star"])
+
+
+# --- Stage 3: the cross-sectional null on REAL per-name PnL ------------------
+
+def test_cross_sectional_null_flags_a_wide_panel_and_not_a_noisy_one():
+    wide = cross_sectional_null({f"N{i}": 0.002 * (i + 1) for i in range(10)})
+    assert wide is not None
+    assert wide["verdict"] == "distinguishable_from_zero"
+    assert wide["sign_test"]["n_positive"] == 10
+    assert wide["df"] == 9
+
+    # The same scale, scattered around zero: the t cannot separate it.
+    noisy = cross_sectional_null({f"N{i}": (0.01 if i % 2 else -0.01) for i in range(10)})
+    assert noisy is not None
+    assert noisy["verdict"] == "consistent_with_zero"
+
+
+def test_cross_sectional_null_refuses_below_the_floor_and_on_a_flat_panel():
+    few = cross_sectional_null({"A": 0.01, "B": 0.02})
+    assert few is not None
+    assert few["verdict"] == "unavailable" and "floor" in few["unavailable"]
+
+    flat = cross_sectional_null({f"N{i}": 0.0 for i in range(5)})
+    assert flat is not None
+    assert flat["verdict"] == "unavailable" and "zero-variance" in flat["unavailable"]
+    assert flat["sign_test"]["n_tied"] == 5
+
+
+def test_cross_sectional_null_takes_raw_rows_and_drops_ties_from_the_sign_test():
+    read = cross_sectional_null({
+        "A": [0.01, 0.03],
+        "B": [0.02, -0.01],
+        "C": [0.0, 0.0],
+        "D": [0.05, 0.01],
+    })
+    assert read is not None
+    assert read["n_names"] == 4
+    assert read["mean"] == pytest.approx(0.01375, abs=1e-9)
+    assert read["sign_test"]["n_positive"] == 3
+    assert read["sign_test"]["n_negative"] == 0
+    assert read["sign_test"]["n_tied"] == 1
+    assert read["sign_test"]["p_value"] == pytest.approx(0.25)

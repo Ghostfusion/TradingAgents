@@ -24,6 +24,7 @@ Outputs a verdict and a non-zero hint (still returns 0).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -52,7 +53,9 @@ def _trials_and_dispersion(trials: int, ledger_dir: str | None) -> tuple[int, fl
 def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials: int = 20,
                  ledger_dir: str | None = None, round_trip_cost: float = 0.0,
                  candidate_matrix: list | None = None,
-                 regime_returns: dict | None = None) -> dict:
+                 regime_returns: dict | None = None,
+                 benchmark: list | None = None,
+                 folds: dict | None = None) -> dict:
     """Walk-forward over the series; flag when the best-trial strategy tanks OOS.
 
     ``trials`` is only the *fallback* trial count. With ``enable_trial_ledger``
@@ -78,6 +81,20 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     reported either way, so the grossness of the test is never silent, and the
     default 0.0 is the off state: a caller that supplies no cost keeps the
     previous verdict exactly.
+
+    ``benchmark`` adds FinRL 8: the gate's own significance is measured on the
+    strategy's series alone, so when a benchmark return series is supplied the
+    verdict carries the **baseline-relative surface** beside it
+    (``strategies/benchmark_surface.benchmark_surface``) - the same metrics on the
+    same clock and cost for each arm. It does not change the verdict; a curve with
+    nothing to be relative to is what the surface refuses to render.
+
+    ``folds`` adds E4: a ``{fold: {candidate: score}}`` matrix reports the
+    walk-forward **selection turnover** (``evaluate.selection_turnover``) - how
+    often the picked candidate changes across windows. It is reported beside the
+    PBO over the SAME matrix (candidates present in every fold, an inner join -
+    a missing score is never filled with a zero), because turnover is only
+    interesting when it is not just an overfit search moving.
 
     ``candidate_matrix`` adds E1: when the full candidate x period performance
     matrix is supplied, the overfit test becomes the CSCV PBO - a probability
@@ -143,7 +160,38 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
         from tradingagents.strategies.regime_performance import regime_stability_check
 
         regime_stability = regime_stability_check(regime_returns)
+    # FinRL 8: the significance above is measured on ONE series. When a benchmark
+    # is supplied, report what the strategy is being judged against (same window,
+    # same cost schedule) - a raw single curve is not a result.
+    baseline = None
+    if benchmark:
+        from tradingagents.strategies.benchmark_surface import benchmark_surface
+
+        baseline = benchmark_surface(returns, {"benchmark": [float(v) for v in benchmark]})
+    # E4: selection turnover over the fold x candidate matrix, reported beside the
+    # PBO over the SAME matrix (an inner join: a candidate missing a fold's score
+    # drops out rather than being filled with a zero).
+    selection = None
+    if folds:
+        from tradingagents.strategies.evaluate import cscv_pbo, selection_turnover
+
+        selection = selection_turnover(folds)
+        if selection is not None:
+            order = list(folds)
+            rows = [folds[f] for f in order]
+            shared = [
+                c for c in sorted({str(k) for row in rows for k in row})
+                if all(c in {str(k) for k in row} for row in rows)
+            ]
+            blocks = max(2, min(8, len(order) - (len(order) % 2)))
+            matrix = [[float(rows[i][c]) for i in range(len(order))] for c in shared]
+            selection["pbo_same_matrix"] = (
+                cscv_pbo(matrix, S=blocks) if len(shared) >= 2 and blocks >= 2 else None
+            )
+            selection["pbo_candidates"] = shared
     return {
+        "baseline": baseline,
+        "selection": selection,
         "ok": ok,
         "reason": reason,
         "gross_edge": None if gross_edge is None else round(gross_edge, 6),
@@ -211,12 +259,41 @@ def main(argv=None) -> int:
              "verdict per rung so a conclusion that flips across plausible costs "
              "is visible as a crossing",
     )
+    parser.add_argument(
+        "--benchmark", default=None,
+        help="FinRL 8: ','-separated benchmark returns on the SAME clock/units as "
+             "--returns; the verdict then carries the baseline-relative surface "
+             "(strategy vs benchmark rows on one window and cost schedule)",
+    )
+    parser.add_argument(
+        "--folds", default=None,
+        help="E4: path to a JSON {fold: {candidate: score}} matrix; prints the "
+             "walk-forward selection turnover BESIDE the PBO over the same matrix",
+    )
     args = parser.parse_args(argv)
     try:
         returns = [float(x) for x in args.returns.split(",") if x.strip()]
     except ValueError as exc:
         print(f"bad returns list: {exc}")
         return 2
+    benchmark = None
+    if args.benchmark:
+        try:
+            benchmark = [float(x) for x in args.benchmark.split(",") if x.strip()]
+        except ValueError as exc:
+            print(f"bad benchmark list: {exc}")
+            return 2
+    folds = None
+    if args.folds:
+        try:
+            with open(args.folds, encoding="utf-8") as fh:
+                folds = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"bad folds matrix: {exc}")
+            return 2
+        if not isinstance(folds, dict):
+            print("bad folds matrix: expected {fold: {candidate: score}}")
+            return 2
     candidates = None
     if args.candidates:
         try:
@@ -229,7 +306,8 @@ def main(argv=None) -> int:
             return 2
     band = gate_verdict(returns, train_len=args.train, test_len=args.test,
                         round_trip_cost=args.round_trip_cost,
-                        candidate_matrix=candidates)
+                        candidate_matrix=candidates,
+                        benchmark=benchmark, folds=folds)
     print("verdict:", band.get("ok"))
     print("reason:", band.get("reason"))
     print("gross_edge:", band.get("gross_edge"))
@@ -245,6 +323,37 @@ def main(argv=None) -> int:
           None if mintrl is None else round(mintrl["min_track_record_years"], 3))
     print("n_trials:", band.get("n_trials"))
     print("dispersion:", band.get("dispersion"))
+    baseline = band.get("baseline")
+    if baseline is not None:
+        print("baseline_relative:")
+        for row in baseline.get("rows") or []:
+            print(
+                f"  {row['name']}: n={row['n']} total_return={row['total_return']} "
+                f"cagr={row['cagr']} ann_vol={row['ann_vol']} sharpe={row['sharpe']} "
+                f"max_drawdown={row['max_drawdown']} calmar={row['calmar']} "
+                f"cvar={row['cvar']} prob_ge_threshold={row['prob_ge_threshold']}"
+            )
+        for name, per_metric in (baseline.get("delta_vs_baseline") or {}).items():
+            print(f"  delta vs {name}: {per_metric}")
+        if baseline.get("reason"):
+            print(f"  note: {baseline['reason']}")
+    selection = band.get("selection")
+    if selection is not None:
+        print("selection_turnover:")
+        print(f"  folds={selection.get('n_folds')} candidates={selection.get('n_candidates')} "
+              f"changes={selection.get('changes')} distinct={selection.get('distinct_winners')} "
+              f"modal={selection.get('modal_candidate')} share={selection.get('modal_share')}")
+        print(f"  winners: {selection.get('winners')}")
+        if selection.get("unavailable"):
+            print(f"  note: {selection['unavailable']}")
+        pbo = selection.get("pbo_same_matrix")
+        shared = selection.get("pbo_candidates") or []
+        if pbo is None:
+            print(f"  pbo over the same matrix: unavailable "
+                  f"({len(shared)} candidate(s) present in every fold)")
+        else:
+            print(f"  pbo over the same matrix: {pbo['pbo']} "
+                  f"(S={pbo['S']}, {pbo['n_candidates']} x {pbo['n_obs']})")
     if args.cost_grid:
         try:
             costs = [float(x) for x in args.cost_grid.split(",") if x.strip()]

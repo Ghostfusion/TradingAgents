@@ -5692,6 +5692,128 @@ def _aligned_log_returns(dates, closes, bench_dates, bench_closes):
     return log_returns(nd), log_returns(nc)
 
 
+#: The turbulence panel's fallback and bounds. The configured risk basket is the
+#: book's own cross-section; the trio is the last-resort market proxy and is NAMED
+#: in the read, so a reader never takes it for the basket.
+_TURBULENCE_DEFAULT_PANEL = ("SPY", "QQQ", "IWM")
+_TURBULENCE_MAX_PANEL = 30
+_TURBULENCE_MAX_OBS = 260
+_TURBULENCE_DAYS = 420
+
+
+def _turbulence_panel(names) -> tuple[list[str], str]:
+    """The cross-section to score, plus a label naming where it came from.
+
+    A caller-supplied list of two or more names wins; otherwise the configured
+    risk basket; otherwise the index proxy. A ONE-name list falls through on
+    purpose: turbulence is a cross-sectional read and a single name has none.
+    """
+    supplied = [str(n).strip().upper() for n in (names or []) if str(n).strip()]
+    supplied = list(dict.fromkeys(supplied))[:_TURBULENCE_MAX_PANEL]
+    if len(supplied) >= 2:
+        return supplied, "caller-supplied"
+    try:
+        from tradingagents.dataflows.config import get_config
+
+        basket = (get_config() or {}).get("risk_basket_tickers") or []
+    except Exception:  # noqa: BLE001 - a config read must never break the read
+        basket = []
+    basket = list(dict.fromkeys(
+        str(x).strip().upper() for x in basket if str(x).strip()
+    ))[:_TURBULENCE_MAX_PANEL]
+    if len(basket) >= 2:
+        return basket, "configured risk basket"
+    return list(_TURBULENCE_DEFAULT_PANEL), "index proxy (no basket configured)"
+
+
+@tool
+def get_turbulence_read(
+    ticker: Annotated[str, "ticker symbol the read is anchored to (context only)"],
+    names: Annotated[
+        list[str] | None,
+        "optional cross-section to score; omit to use the configured risk basket",
+    ] = None,
+    window: Annotated[
+        int, "trailing observations the mean/covariance use (0 = every strictly-prior one)"
+    ] = 0,
+) -> str:
+    """The market's turbulence index: today's cross-section against its own history.
+
+    FinRL's risk gate on the engine's own arithmetic: the Mahalanobis distance
+    ``tau = (x - mu)^T Sigma^-1 (x - mu)`` of the latest day's cross-section of
+    asset returns from the mean of a **strictly-prior** trailing window, with
+    ``Sigma`` from ``covariance_models.ledoit_wolf_shrink`` (a raw sample
+    covariance over a few tens of correlated names is the canonical
+    ill-conditioned inverse). ``gate`` is True when the latest index sits above
+    the own-history 90th percentile.
+
+    Read it as a market-state WARNING, never as a size, a score or a rating: a
+    high index says the cross-section moved together in a way its own history does
+    not contain, which is a regime observation. It is also not a single-name risk
+    measure - a one-name panel is refused by construction - and not market
+    breadth: the panel is the basket (or the names supplied), and the printed
+    panel source says which.
+    """
+    gate = _feature_gate("enable_turbulence_read", "TRADINGAGENTS_ENABLE_TURBULENCE_READ")
+    if gate:
+        return gate
+    try:
+        from tradingagents.strategies.market_stress import turbulence_read
+    except Exception as exc:  # noqa: BLE001
+        return f"turbulence read unavailable: {exc}"
+
+    panel, source = _turbulence_panel(names)
+    returns: dict = {}
+    no_series: list = []
+    for name in panel:
+        closes = _ohlcv(name, days=_TURBULENCE_DAYS).get("closes") or []
+        rets = _daily_returns(closes)
+        if len(rets) >= 3:
+            returns[name] = rets[-_TURBULENCE_MAX_OBS:]
+        else:
+            no_series.append(name)
+    head = f"## Market Turbulence Read - {ticker} (advisory, not an engine)"
+    if len(returns) < 2:
+        return (
+            f"{head}\n\n"
+            f"unavailable: {len(returns)} name(s) with a usable daily return series "
+            f"from a {len(panel)}-name {source} panel.\n"
+            + (f"no series: {', '.join(no_series)}\n" if no_series else "")
+            + "A turbulence index is a CROSS-SECTIONAL read - one name has none. "
+            "This is a named gap, not a flat market."
+        )
+    read = turbulence_read(returns, window=int(window) or None)
+    lines = [
+        head,
+        "",
+        f"Panel: {read['n_dim']} name(s) from a {source} panel"
+        + (f" (no usable series: {', '.join(no_series)})" if no_series else ""),
+        f"Observations: {read['n_obs']} aligned daily return(s); "
+        f"{read['n_points']} cross-section(s) scored",
+    ]
+    if read["latest"] is None:
+        lines.append(f"- index: **unavailable** - {read['unavailable']}")
+    else:
+        lines.append(f"- index: {read['latest']:.6f} (Mahalanobis distance)")
+    if read["gate"] is None:
+        lines.append(f"- gate: unavailable - {read['unavailable']}")
+    else:
+        lines.append(
+            f"- gate: **{'TRUE' if read['gate'] else 'FALSE'}** - latest vs the "
+            f"own-history {read['quantile']:.2f} quantile {read['threshold']:.6f}"
+        )
+    if read["shrinkage"] is not None:
+        lines.append(f"- sigma: Ledoit-Wolf shrinkage delta={read['shrinkage']}")
+    lines.append(f"- basis: {read['basis']}")
+    lines.append("")
+    lines.append(
+        "A high index means the cross-section moved together in a way its own "
+        "history does not contain - a regime observation and a WARNING only. It "
+        "sizes nothing, enters no score, and is not a single-name risk measure."
+    )
+    return "\n".join(lines)
+
+
 @tool
 def get_cross_section_momentum(
     ticker: Annotated[str, "ticker symbol the read is anchored to"],

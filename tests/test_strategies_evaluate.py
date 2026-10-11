@@ -19,6 +19,7 @@ from tradingagents.strategies.evaluate import (
     min_track_record_length,
     net_returns,
     pbo_flag,
+    selection_turnover,
     sharpe,
     total_return,
     tracking_error,
@@ -238,3 +239,44 @@ def test_the_family_fdr_step_up_is_one_producer():
     assert benjamini_yekutieli(ps, 0.0)["cut_rank"] == 0
     assert benjamini_yekutieli([]) is None
     assert benjamini_yekutieli([0.01, None]) is None
+
+
+# --- E4: selection turnover --------------------------------------------------
+
+def test_selection_turnover_counts_the_winner_changes():
+    read = selection_turnover({
+        "f1": {"a": 1.0, "b": 0.5},
+        "f2": {"a": 0.2, "b": 0.7},
+        "f3": {"a": 0.1, "b": 0.9},
+    })
+    assert read is not None
+    assert read["winners"] == {"f1": "a", "f2": "b", "f3": "b"}
+    assert read["changes"] == 1
+    assert read["change_rate"] == pytest.approx(0.5)
+    assert read["distinct_winners"] == 2 and read["is_fixed"] is False
+    assert read["modal_candidate"] == "b"
+    assert read["modal_share"] == pytest.approx(0.6667, abs=1e-4)
+    assert read["n_candidates"] == 2
+    assert "cscv_pbo" in read["basis"]
+
+
+def test_selection_turnover_honours_a_cost_metric_and_refuses_one_fold():
+    lower = selection_turnover({"f1": {"a": 1.0}, "f2": {"a": 2.0}}, higher_is_better=False)
+    assert lower is not None and lower["is_fixed"] is True and lower["changes"] == 0
+
+    one = selection_turnover({"f1": {"a": 1.0}})
+    assert one is not None and one["unavailable"] and one["change_rate"] is None
+    assert selection_turnover({}) is None
+    assert selection_turnover("nope") is None
+
+
+def test_selection_turnover_skips_unusable_scores_without_inventing_one():
+    read = selection_turnover({
+        "f1": {"a": 1.0, "b": None},
+        "f2": {"a": "x", "b": 0.5},
+        "f3": {},
+    })
+    assert read is not None
+    assert read["n_folds"] == 2
+    assert read["winners"] == {"f1": "a", "f2": "b"}
+    assert read["n_candidates"] == 2

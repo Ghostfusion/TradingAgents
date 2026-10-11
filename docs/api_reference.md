@@ -275,6 +275,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_DRAWDOWN_ENVELOPE` | `enable_drawdown_envelope` | default `false` |
 | `TRADINGAGENTS_ENABLE_HMM_HEAVY_TAILS` | `enable_hmm_heavy_tails` | default `false` |
 | `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | `enable_tail_risk_layer` | default `false` |
+| `TRADINGAGENTS_ENABLE_TURBULENCE_READ` | `enable_turbulence_read` | default `false` |
 | `TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE` | `enable_factor_availability_gate` | default `false` |
 | `TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY` | `enable_forward_stress_probability` | default `false` |
 | `TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS` | `enable_prompt_condition_harness` | default `false` |
@@ -575,6 +576,11 @@ Applied after the graph in `graph/trading_graph.py::_apply_strategy_overlays`:
 | Topk-Drop alloc | `enable_topk_drop` (F) | `strategies/portfolio_strategy.py` | screener alloc block + `get_topk_drop_plan` — hold top-k by score, sell worst-held, equal-weight (turnover = 2·drop/topk) |
 | Enhanced-index alloc | `enable_enhanced_index` (F) | `strategies/portfolio_strategy.py` | screener alloc block + `get_enhanced_index_tilt` — convex program (long-only, Σw=1, turnover cap, b_dev, force-hold/sell masks, two-stage fallback); scipy SLSQP + pure-python fallback, cvxpy optional |
 | Signal analysis | — (always-on pure calc) | `strategies/signal_analysis.py` | rank IC/ICIR, quantile long-short, IC-decay half-life, pred-autocorrelation; `strategy_quality_report` gains the with/without-cost excess-return table |
+| Baseline surface | — (always-on pure calc) | `strategies/benchmark_surface.py` | `benchmark_rows` / `benchmark_surface` (FinRL 8): every arm on ONE shared window and ONE stated cost schedule, the classic six columns beside mean / variance / loss-side CVaR / P(return>=threshold), plus each baseline's per-metric delta; a strategy-only call is a named refusal ("a raw single curve is not a result"). Cost is charged to the strategy arm and, by default, not to the baselines |
+| Per-run economics | — (always-on pure calc) | `strategies/run_economics.py` | `run_economics(run_card, verify_flags=...)` (Dream-RSI Phase B): the run card's cap-bound `llm_cost_est` joined to the verifier's own per-stem/prose blocks, with an unpriced leg named and never zeroed; `depth` is `None` because the run card does not record the research-depth knob |
+| Cross-sectional null | — (always-on pure calc) | `null_harness.cross_sectional_null` | H3 Stage 3 over REAL per-name PnL: a one-sample t across names (`df = N-1`) plus an exact two-sided sign test (ties dropped); `distinguishable_from_zero` / `consistent_with_zero` / `unavailable`, never a pass by absence |
+| Selection turnover | — (always-on pure calc) | `evaluate.selection_turnover` | E4: per-fold winner changes over a `{fold: {candidate: score}}` matrix, with the distinct-winner count and the modal share. Reports no informativeness verdict on purpose - a caller prints it beside `cscv_pbo` over the same matrix |
+| Market stress (turbulence) | `enable_turbulence_read` (F) | `strategies/market_stress.py` + `get_turbulence_read` (market analyst) | FinRL's turbulence index: the day's cross-section vs its own **strictly-prior** window (the scored row is excluded), `Sigma` from `covariance_models.ledoit_wolf_shrink`, and an own-history quantile gate. A market-state WARNING - it sizes nothing, enters no score, and refuses a one-name panel |
 | Skill overlays | `enable_skill_overlays` (F) + `skill_dir` | `strategies/skills.py` + `strategies/skills/*.yaml` | declarative YAML strategy skills (instructions/tools/regimes/priority + bounded score adjustments), regime-from-opinion thresholds (bullish>=70 / bearish<=30 / 35-65), router precedence user->regime->priority |
 | Prediction ledger + cost | `enable_prediction_ledger` (F) + `prediction_horizon_days` | `strategies/prediction_ledger.py` + `llm_cost.py` | log every decision as a scorable prediction (rating/direction/levels/confidence/horizon); score against realized closes at N days (return, hit, MAE/MFE, stop/target); provider cost estimate for quality-per-dollar |
 | Report disclosure + invalidation | `enable_report_attribution` (F) | `strategies/report_disclosure.py` + `reporting.write_report_tree` | computed driver attribution (sum-100), consensus support/oppose, watch_conditions/next_check_time, >=1 invalidation per decision (stop/tp/data-quality/manual fallback), sources-used-vs-empty + models footers |
@@ -590,7 +596,12 @@ score + surprise velocity injected into the sentiment report). Pure
 `trailing_stop_targets`) also ships advisory: `enable_risk_manager` is OFF by
 default and it is not wired into the runtime graph yet. Strategy-eval
 scripts: `scripts/evaluate_config_gate.py`
-(G5 walk-forward/PBO), `scripts/orderflow_evaluate.py` (ledger evaluation),
+(G5 walk-forward/PBO; `--cost-grid` sweeps round-trip costs, `--benchmark` adds the
+baseline-relative surface, `--folds` adds selection turnover beside the PBO over the
+same matrix), `scripts/strategy_quality_report.py`
+(ledger metrics; the loss-side `benchmark_surface` block is always on, `--benchmark`
+renders the benchmark's own arms, `--trees` joins each tree's cap-bound cost to its
+verifier quality), `scripts/orderflow_evaluate.py` (ledger evaluation),
 `scripts/risk_report.py` (risk audit).
 
 ## 6. Vendor data contract
@@ -677,7 +688,7 @@ deliberate step with a vendor-suite re-run.
 - stock/indicators/financials/insiders: `alpha_vantage`, `yfinance`, `moomoo`, `eodhd` (OHLCV only), `tiingo`, `twelve_data` (OHLCV only), `stockdata` (OHLCV only)
 - news/global-news: `alpha_vantage`, `yfinance`, `finnhub`, `moomoo`, `massive`, `eodhd`, `stockdata`, `gdelt`, `benzinga`, `newsapi`, `seekingalpha` (GDELT keyless article list; NewsAPI 100 req/day; Benzinga free tier; seekingalpha = keyless opinion-only tail served last — GDELT/Benzinga opt-in via `news_data` chain, not default)
 - news-sentiment: `eodhd` `/sentiments` (primary, EOD plan), `alpha_vantage` `NEWS_SENTIMENT` (25 req/day), `gdelt` (refuses: its article-list response carries no per-article tone)
-- quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/YZ/EWMA/GARCH), `get_garch_volatility`, `get_covariance_read` (Ledoit-Wolf shrunk + EWMA covariance), `get_concentration_read` (active share / effective holdings / HHI / entropy), `get_tail_decomposition` (incremental/component VaR), `get_tail_extreme_var` (EVT/GPD extreme-quantile VaR/ES), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread + Kyle lambda (`get_liquidity_risk`/`get_kyle_lambda`), `get_kelly_alloc` (multi-asset fractional Kelly), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`)
+- quant calculators (tools, `strategies/*`): `get_volatility_estimators` (Parkinson/GK/YZ/EWMA/GARCH), `get_garch_volatility`, `get_covariance_read` (Ledoit-Wolf shrunk + EWMA covariance), `get_concentration_read` (active share / effective holdings / HHI / entropy), `get_tail_decomposition` (incremental/component VaR), `get_tail_extreme_var` (EVT/GPD extreme-quantile VaR/ES), `get_mean_reversion_quality` (AR(1)/OU half-life), Roll spread + Kyle lambda (`get_liquidity_risk`/`get_kyle_lambda`), `get_kelly_alloc` (multi-asset fractional Kelly), preferred YTM/duration (capital_income `--fi`), credit hazard/default-prob (`get_credit_spread_read`), variance-swap strike (`get_variance_premium`), implementation shortfall (strategy_quality `avg_is_bp`), `get_turbulence_read` (the cross-section's Mahalanobis distance from its strictly-prior history under a shrunk covariance + an own-history quantile gate — `strategies.market_stress`, `enable_turbulence_read`)
 - market snapshot fallbacks: Massive -> EODHD -> Tiingo -> Twelve Data
 - crypto prices fallbacks: Tiingo -> Twelve Data
 - macro: `fred`, `massive`, `moomoo` (optional)

@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers.** The rows below are every policy, data-surface and
-context gate: **all 118 of the 118 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+context gate: **all 119 of the 119 `enable_*` keys** in `DEFAULT_CONFIG`, plus
 the numeric limits and the always-on checks. R4 stage 2 registered the last six
 families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
 the factor-model family (§7g), the event family (§7h), the vendor and screener
@@ -330,6 +330,7 @@ a number computed over a padded one (ground rule 4).
 | `enable_drawdown_envelope` | `TRADINGAGENTS_ENABLE_DRAWDOWN_ENVELOPE` | K2: four drawdown expectations with the Hurst depth rescaling, report-only | book_risk.py drawdown_envelope, read by the strategy-evaluation row in evaluate.py | `tests/test_drawdown_envelope.py` | wired |
 | `enable_hmm_heavy_tails` | `TRADINGAGENTS_ENABLE_HMM_HEAVY_TAILS` | R2: heavy-tailed HMM emissions and a regime VaR judged by Kupiec and Christoffersen | regime.py hmm_filtered_regime emission path and regime_conditional_var, consumed by book_risk.py | `tests/test_hmm_heavy_tails.py` | wired |
 | `enable_tail_risk_layer` | `TRADINGAGENTS_ENABLE_TAIL_RISK_LAYER` | K1: a tail number carrying its data quality and estimation uncertainty, one-directional | tail_risk.py tail_risk, printed by risk_score.py | `tests/test_tail_risk_layer.py` | wired |
+| `enable_turbulence_read` | `TRADINGAGENTS_ENABLE_TURBULENCE_READ` | FinRL's turbulence gate: the cross-section's Mahalanobis distance from its own strictly-prior history under a shrunk covariance, gated on its own-history quantile - a market-state warning, never a size or a rating | `tradingagents/strategies/market_stress.py`::`turbulence_index` / `::`turbulence_read`, consumed by `agents/utils/analysis_tools.py`::`get_turbulence_read` (market analyst) | `tests/test_market_stress.py` | wired |
 | `enable_factor_availability_gate` | `TRADINGAGENTS_ENABLE_FACTOR_AVAILABILITY_GATE` | H2: registration-time rejection of a forward shift or a field unobservable at the decision date | factor_expressions.py availability_gate, called from scripts/factor_bench.py | `tests/test_factor_availability_gate.py` | wired |
 | `enable_forward_stress_probability` | `TRADINGAGENTS_ENABLE_FORWARD_STRESS_PROBABILITY` | R5: a calibrated one-month-ahead forward stress probability from the cross-section | market_breadth.py forward_stress_probability, printed by regime_score.py | `tests/test_forward_stress_probability.py` | wired |
 | `enable_prompt_condition_harness` | `TRADINGAGENTS_ENABLE_PROMPT_CONDITION_HARNESS` | N5: prompt versioning with per-condition accuracy on the decision ledger, offline by construction | agents/utils/prompt_metrics.py record_condition_run and condition_accuracy | `tests/test_prompt_condition_harness.py` | wired |

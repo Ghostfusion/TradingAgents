@@ -33,7 +33,7 @@ engages. Keyed on ticker+date+graph-shape; cleared on success.
   per-analyst hit-rates. Written through
   `strategies/reflection.py::ReflectionLedger` (the class takes an explicit
   `path`; the caller at `graph/trading_graph.py:2066` supplies the filename).
-  Read back by `scripts/strategy_quality_report.py:137` and
+  Read back by `scripts/strategy_quality_report.py:256` and
   `scripts/orderflow_evaluate.py:91`, both of which default to the same path.
   Each row is `{analyst, ticker, trade_date, delta_r, ts}`;
   the score is a recency-decayed hit-rate with a 30-day half-life.

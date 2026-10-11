@@ -1,8 +1,10 @@
 """G5 unit tests: config-gate verdict (offline deterministic)."""
 
+import json
+
 import pytest
 
-from scripts.evaluate_config_gate import gate_verdict
+from scripts.evaluate_config_gate import gate_verdict, main
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -112,3 +114,61 @@ def test_a_grid_rung_is_the_same_gate_as_the_single_rung():
         returns, costs=[0.0], train_len=4, test_len=2, candidate_matrix=fluke
     )
     assert rows[0]["reason"] == "PBO"
+
+
+def test_the_verdict_carries_the_baseline_relative_surface():
+    """FinRL 8: the gate judges one series; the surface says what it is judged against."""
+    returns = [0.002 if i % 2 else 0.001 for i in range(200)]
+    v = gate_verdict(returns, train_len=60, test_len=20, benchmark=[0.001] * 200)
+    assert v["baseline"]["rows"][0]["name"] == "strategy"
+    assert v["baseline"]["baseline_available"] is True
+    delta = v["baseline"]["delta_vs_baseline"]["benchmark"]["mean"]
+    assert delta == pytest.approx(0.0005, abs=1e-9)
+    # no benchmark -> None; the verdict itself is unchanged by the argument
+    bare = gate_verdict(returns, train_len=60, test_len=20)
+    assert bare["baseline"] is None and bare["selection"] is None
+
+
+def test_selection_turnover_rides_beside_the_same_matrix_pbo():
+    """E4 reported WITH the PBO over the same matrix - turnover alone is a description."""
+    folds = {
+        "f1": {"a": 0.01, "b": 0.02},
+        "f2": {"a": 0.02, "b": 0.01},
+        "f3": {"a": 0.01, "b": 0.03},
+        "f4": {"a": 0.03, "b": 0.01},
+    }
+    returns = [0.002 if i % 2 else 0.001 for i in range(200)]
+    v = gate_verdict(returns, train_len=60, test_len=20, folds=folds)
+    selection = v["selection"]
+    assert selection["n_folds"] == 4 and selection["changes"] == 3
+    assert selection["modal_share"] == pytest.approx(0.5)
+    assert selection["pbo_candidates"] == ["a", "b"]
+    assert selection["pbo_same_matrix"]["S"] == 4
+
+    # A candidate missing a fold's score drops out of the PBO, never zero-filled.
+    sparse = {
+        "f1": {"a": 1.0, "b": 1.0},
+        "f2": {"a": 2.0},
+        "f3": {"a": 3.0, "b": 0.5},
+        "f4": {"a": 4.0, "b": 0.1},
+    }
+    v2 = gate_verdict(returns, train_len=60, test_len=20, folds=sparse)
+    assert v2["selection"]["pbo_candidates"] == ["a"]
+    assert v2["selection"]["pbo_same_matrix"] is None
+
+
+def test_the_cli_reports_the_new_blocks(tmp_path, capsys):
+    folds_path = tmp_path / "folds.json"
+    folds_path.write_text(
+        json.dumps({"f1": {"a": 1.0, "b": 0.5}, "f2": {"a": 0.5, "b": 1.0}}),
+        encoding="utf-8",
+    )
+    rc = main([
+        "--returns", ",".join(str(0.001 if i % 2 else 0.002) for i in range(200)),
+        "--benchmark", ",".join(["0.001"] * 200),
+        "--folds", str(folds_path),
+    ])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "baseline_relative:" in out and "selection_turnover:" in out
+    assert "pbo over the same matrix:" in out

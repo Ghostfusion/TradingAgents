@@ -212,6 +212,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_tranche_plan,
     get_treasury_curve,
     get_ts_momentum_weights,
+    get_turbulence_read,
     get_unit_root,
     get_universe_membership,
     get_valuation_band,
@@ -374,6 +375,10 @@ def market_tools() -> list:
                 # P0-4: the FRED macro read was bound only to news_tools(), so the
                 # market-level regime path could not reach the VIX series it ranks.
                 get_macro_indicators,
+                # FinRL's turbulence gate: the cross-section's own Mahalanobis
+                # distance from its strictly-prior history (design_finrl §6.1/§7).
+                # A market-state read, so the market analyst owns the claim.
+                get_turbulence_read,
             ]
     return tools
 

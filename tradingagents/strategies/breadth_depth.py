@@ -771,8 +771,10 @@ def _rolling_z(series, *, window: int = 20, min_obs: int = 2) -> dict | None:
 def _mahalanobis_distance(x, mu, cov) -> dict | None:
     """Mahalanobis distance from a point to a regime centroid (REG-18, §85).
 
-    Built, tested and awaiting its consumer (``RegimeScore.md`` §8.2 group
-    4); private so the wiring gate does not require a fabricated caller.
+    Built, tested, and now consumed by ``market_stress.turbulence_index``
+    (2026-10-11) - the turbulence read's arithmetic is this one, not a second
+    copy. Kept private so the wiring gate does not require a fabricated caller
+    (``RegimeScore.md`` §8.2 group 4).
 
     ``D = sqrt((x - mu)^T Sigma^{-1} (x - mu))``. ``x`` and ``mu`` are vectors and
     ``cov`` the covariance matrix; the inverse is taken here. Returns

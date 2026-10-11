@@ -607,7 +607,12 @@ def benchmark_table(strategy_returns: list[float], benchmark_returns: list[float
             "name": name,
             "total_return": round(total_return(rets), 4),
             "cagr": round(cagr(rets, periods_per_year), 4),
-            "sharpe": round(sharpe(rets, periods_per_year), 3),
+            # KEYWORD, not positional: `sharpe(returns, risk_free, periods_per_year)`
+            # means a positional 252.0 here bound to risk_free and printed
+            # (cagr - 252) / vol - a nonsense column on every benchmark-hierarchy row
+            # (found 2026-10-11 while wiring benchmark_surface; measured -1497.9 on a
+            # series whose true Sharpe is -0.15).
+            "sharpe": round(sharpe(rets, periods_per_year=periods_per_year), 3),
             "max_drawdown": round(max_drawdown(eq), 4),
         }
         if _drawdown_envelope_gate_on():
@@ -779,6 +784,87 @@ def cscv_pbo(performance_by_candidate: list[list[float]], S: int = 8) -> dict | 
             "pbo_flag is the single-index degraded path"
         ),
     }
+
+
+def selection_turnover(scores_by_fold, *, higher_is_better: bool = True) -> dict | None:
+    """E4: how often a walk-forward SELECTION changes its winner across folds.
+
+    FinRL 9 / the RL survey's "the pick flipped 12 times in 18 quarters": a
+    candidate zoo re-selected every rebalance window can carry no information over
+    a single fixed choice while *looking* adaptive. ``scores_by_fold`` is
+    ``{fold: {candidate: in-sample score}}`` (or a list of such dicts, indexed by
+    fold). The winner per fold is that fold's argmax - ``higher_is_better=False``
+    for a cost or loss metric - and this reports the change count, the
+    distinct-winner count and the modal candidate's share.
+
+    It deliberately reports **no verdict on informativeness**: whether a turnover
+    is material is the question PBO answers over the same candidate x fold matrix
+    (``cscv_pbo``), so a caller wanting "does the selection add information" reads
+    both numbers rather than one derived one. ``None`` when no fold carries a
+    usable score; ``unavailable`` names the reason when fewer than two folds have
+    a winner (turnover is undefined on one fold).
+    """
+    rows: dict[str, dict[str, float]] = {}
+    if isinstance(scores_by_fold, dict):
+        items = list(scores_by_fold.items())
+    elif isinstance(scores_by_fold, (list, tuple)):
+        items = [(str(i), row) for i, row in enumerate(scores_by_fold)]
+    else:
+        return None
+    for label, row in items:
+        if not isinstance(row, dict):
+            continue
+        usable: dict[str, float] = {}
+        for candidate, score in row.items():
+            try:
+                value = float(score)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                usable[str(candidate)] = value
+        if usable:
+            rows[str(label)] = usable
+    if not rows:
+        return None
+    winners = {
+        label: (max if higher_is_better else min)(fold, key=fold.get)
+        for label, fold in rows.items()
+    }
+    ordered = [winners[label] for label in rows]
+    changes = sum(1 for a, b in zip(ordered, ordered[1:], strict=False) if a != b)
+    counts: dict[str, int] = {}
+    for name in ordered:
+        counts[name] = counts.get(name, 0) + 1
+    modal = max(counts, key=lambda name: counts[name])
+    out = {
+        "n_folds": len(ordered),
+        "n_candidates": len({c for fold in rows.values() for c in fold}),
+        "winners": winners,
+        "changes": changes,
+        "change_rate": (
+            round(changes / (len(ordered) - 1), 4) if len(ordered) > 1 else None
+        ),
+        "distinct_winners": len(counts),
+        "modal_candidate": modal,
+        "modal_share": round(counts[modal] / len(ordered), 4),
+        "is_fixed": len(counts) == 1,
+        "higher_is_better": bool(higher_is_better),
+        "unavailable": None,
+        "basis": (
+            f"E4 selection turnover over {len(ordered)} fold(s) x "
+            f"{len({c for fold in rows.values() for c in fold})} candidate(s): the "
+            f"per-fold {'max' if higher_is_better else 'min'} winner changed "
+            f"{changes} time(s) ({len(counts)} distinct); whether that turnover is "
+            "material is cscv_pbo's question over the same matrix, not this read's"
+        ),
+    }
+    if len(ordered) < 2:
+        out["unavailable"] = (
+            "fewer than two folds carry a winner: turnover is undefined on one fold"
+        )
+        out["changes"] = 0
+        out["change_rate"] = None
+    return out
 
 
 def _mean_var(values: list[float]) -> tuple[float, float]:
@@ -1859,6 +1945,7 @@ __all__ = [
     "z_statistic", "max_abs_z", "effective_candidates", "inflation_diagnostics",
     "pbo_flag",
     "cscv_pbo", "purged_cpcv_splits", "cpcv_overfit_mask", "oos_split",
+    "selection_turnover",
     "reality_check", "spa",
     "benchmark_table",
     "materiality_verdict", "family_materiality", "benjamini_yekutieli",

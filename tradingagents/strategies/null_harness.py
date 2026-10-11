@@ -345,6 +345,137 @@ def candidate_matrix(returns: list[float], *,
     return is_rows, wf_rows
 
 
+def _mean_of(value) -> float | None:
+    """One name's mean PnL from a scalar or from a list of per-period values."""
+    if isinstance(value, (list, tuple)):
+        vals = [float(v) for v in value if _finite(v)]
+        if not vals:
+            return None
+        return sum(vals) / len(vals)
+    return float(value) if _finite(value) else None
+
+
+def _t_two_sided_p(t: float, df: int) -> float | None:
+    """Two-sided Student-t p-value, or ``None`` when scipy cannot be imported.
+
+    scipy is a declared dependency (``strategies/statistical.py`` imports it at
+    module level), so the guard is a courtesy rather than a path: an absent scipy
+    refuses this p-value and the exact sign test below still answers.
+    """
+    try:
+        from scipy.stats import t as _t
+    except ImportError:  # pragma: no cover - scipy is a declared dependency
+        return None
+    return float(2.0 * _t.sf(abs(float(t)), int(df)))
+
+
+def _sign_test_p(n_pos: int, n: int) -> float | None:
+    """Exact two-sided sign-test p over ``n`` untied signs."""
+    if n <= 0:
+        return None
+    k = max(int(n_pos), n - int(n_pos))
+    tail = sum(math.comb(n, i) for i in range(k, n + 1))
+    return min(1.0, 2.0 * tail / (2 ** n))
+
+
+def cross_sectional_null(per_name, *, alpha: float = _DEFAULT_ALPHA,
+                         min_names: int = 3, threshold: float = 0.0) -> dict | None:
+    """Stage 3: the cross-sectional null over REAL per-name PnL.
+
+    Stage 1 asks whether a pipeline finds signal in synthetic noise; this asks the
+    mirror question on the book's own realized record - is the mean PnL across
+    ``N`` names distinguishable from ``threshold``? It is the panel form of the
+    same null and the cheap screen for "the book's edge is one name" (the H3
+    instrument is what makes the per-name series available at all).
+
+    ``per_name`` is ``{name: mean_pnl}`` or ``{name: [pnl, ...]}`` (a list is
+    reduced to its mean, so a caller can hand raw ledger rows). Two tests are
+    reported, because a book's name count is small:
+
+    * the one-sample t over the ``N`` name means (``df = N - 1``), which assumes
+      the name-level means are roughly normal, and
+    * an exact two-sided **sign test** on how many names sit above ``threshold`` -
+      the distribution-free companion, and the reason a ``None`` t p-value (no
+      scipy) does not leave the read empty.
+
+    ``verdict`` is ``distinguishable_from_zero`` only when the t's two-sided p is
+    below ``alpha``; fewer than ``min_names`` usable names, no scipy and no sign
+    test, or a zero-variance panel is ``unavailable`` with the reason - never a
+    pass, and never an inferred one from the other test.
+    """
+    vals: dict[str, float] = {}
+    for name, value in (per_name or {}).items():
+        mean = _mean_of(value)
+        if mean is not None:
+            vals[str(name)] = mean
+    n = len(vals)
+    out = {
+        "n_names": n,
+        "names": sorted(vals),
+        "mean": None,
+        "sd": None,
+        "t": None,
+        "df": None,
+        "p_value": None,
+        "sign_test": None,
+        "verdict": "unavailable",
+        "alpha": float(alpha),
+        "min_names": int(min_names),
+        "threshold": float(threshold),
+        "unavailable": None,
+        "basis": "cross-sectional null over per-name PnL (H3 Stage 3)",
+    }
+    if n < int(min_names):
+        out["unavailable"] = f"{n} usable name(s), floor is {int(min_names)}"
+        return out
+    mean = sum(vals.values()) / n
+    sd = (math.sqrt(sum((v - mean) ** 2 for v in vals.values()) / (n - 1))
+          if n > 1 else None)
+    t_stat = (mean / (sd / math.sqrt(n))) if sd else None
+    p_value = _t_two_sided_p(t_stat, n - 1) if t_stat is not None else None
+    n_pos = sum(1 for v in vals.values() if v > float(threshold))
+    n_neg = sum(1 for v in vals.values() if v < float(threshold))
+    tied = n - n_pos - n_neg
+    sign_p = _sign_test_p(n_pos, n_pos + n_neg)
+    out.update({
+        "mean": round(mean, 8),
+        "sd": None if sd is None else round(sd, 8),
+        "t": None if t_stat is None else round(float(t_stat), 6),
+        "df": n - 1,
+        "p_value": p_value,
+        "sign_test": {
+            "n_positive": n_pos,
+            "n_negative": n_neg,
+            "n_tied": tied,
+            "p_value": sign_p,
+        },
+    })
+    if t_stat is None or p_value is None:
+        out["unavailable"] = (
+            "a zero-variance name panel has no t statistic"
+            if t_stat is None
+            else "no scipy for the t p-value (the sign test is reported)"
+        )
+    else:
+        out["verdict"] = (
+            "distinguishable_from_zero" if p_value < float(alpha)
+            else "consistent_with_zero"
+        )
+    out["basis"] = (
+        f"H3 (2604.15531) Stage 3 cross-sectional null: one-sample t over {n} name "
+        f"mean(s) (df={n - 1}, t={None if t_stat is None else round(float(t_stat), 4)}, "
+        f"p={None if p_value is None else round(p_value, 6)}) plus the exact sign test "
+        f"({n_pos} positive / {n_neg} negative / {tied} tied, "
+        f"p={None if sign_p is None else round(sign_p, 6)}); "
+        + (
+            "the familywise rate of a search is 5.3% at K=1 and 92.3% at K=50 - this "
+            "is a necessary-condition screen, not a certification, and N in the tens "
+            "cannot see a small edge"
+        )
+    )
+    return out
+
+
 __all__ = [
     "REFERENCE_CLASSES",
     "FAMILYWISE_FALSE_POSITIVE",
@@ -355,4 +486,5 @@ __all__ = [
     "reference_pipeline",
     "leaky_pipeline",
     "candidate_matrix",
+    "cross_sectional_null",
 ]
