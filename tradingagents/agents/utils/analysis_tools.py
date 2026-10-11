@@ -8069,7 +8069,12 @@ def get_news_novelty(
 
     The article set is the Alpha Vantage NEWS_SENTIMENT feed (the same feed the
     engine's novelty leg reads), so an empty window is 'unavailable', never a
-    zero.
+    zero. NOTE (verified 2026-10-10): `NEWS_SENTIMENT` is premium on the current
+    Alpha Vantage plan, so that feed returns nothing and this read reports
+    `unavailable` - the engine's own `novelty` / `relevance_materiality`
+    components are `withheld` for the same reason (`docs/scores/NewsScore.md`
+    §3.7). Which feed supplies the article set is the owner's source decision, so
+    the condition is reported, not swapped for an unlabelled second feed.
     """
     from datetime import date, timedelta
 
