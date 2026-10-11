@@ -1,6 +1,7 @@
 # Design: Honest Evaluation Gates for the Engine's Own Claims
 
-**Status:** DESIGN - not built
+**Status:** DESIGN; **ten of the twelve items are now BUILT** (H1-H4, H6, H7, H9-H12) and two are not
+(H5, H8) - the build status is stated with its evidence at the end of §6.
 **Version:** 1.0
 **Date:** 2026-09-23
 **Scope:** The engine produces claims: a rating, a score, a report, a signal. This doc specifies the
@@ -570,9 +571,21 @@ Cheapest-and-highest-value first, each independently landable behind a config ga
 7. **H2**, **H5**, **H8**, **H9**, **H3** - in that order; H3 last because it is offline and
    expensive and depends on H1's ledger existing.
 
-**Built since this list was written:** H10 (`strategies/coverage_window.py`) and **H12**
-(`strategies/knowledge_cutoff.py`, plus the `knowledge_cutoff` block every verdict file now carries,
-2026-10-10).
+**Build status, verified against the tree 2026-10-10.** **Ten of the twelve items are BUILT:** H1
+`strategies/trial_ledger.py`; H2 `strategies/factor_expressions.availability_gate`; H3
+`strategies/null_harness.py` + `evaluate.inflation_diagnostics` (first caller `scripts/null_harness.py`);
+H4 `strategies/alpha_eval.ceiling_ratio` (gate `enable_accuracy_ceiling`); H6
+`evaluate.materiality_verdict`, consumed by `report_verifier` for the REFUTED / SUPPORTED / INCONCLUSIVE
+stem verdict (gate `enable_materiality_verdict`); H7 `strategies/refusal_ledger.py` plus
+`scripts/refusal_scorecard.py` (gate `enable_refusal_ledger`); H9 `strategies/report_attribution.py`
+(gate `enable_report_influence`); H10 `strategies/coverage_window.py`; H11
+`conformal.block_bootstrap_interval` / `information_gap`; H12 `strategies/knowledge_cutoff.py` plus the
+`knowledge_cutoff` block every verdict file now carries (2026-10-10).
+**Two are not.** H5's next-bar convention exists (`backtest_engine.MatchingEngine.run(fill_on_next_bar=...)`,
+documented there as the same-bar-lookahead guard) but its five-gate conjunction, permutation test and
+positive controls are not in `rule_eval` - `rule_eval` still evaluates per-horizon stats with an
+always-up base rate. **H8 is blocked on the owner's per-field publication-lag decision**, which
+`strategies/factor_schema.py` states as a refusal with its reason rather than a silent default.
 
 **Decision requested:** which subset to build, and whether H10 + H1 + H7 land together as a first
 pass.
