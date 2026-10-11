@@ -85,3 +85,30 @@ def test_the_verdict_carries_the_minimum_track_record():
     assert mintrl["n"] == 200 and mintrl["benchmark_sharpe"] == 0.0
     assert mintrl["min_track_record"] > 0
     assert mintrl["min_track_record_years"] == pytest.approx(mintrl["min_track_record"] / 252.0)
+
+
+def test_the_cost_grid_reports_the_crossing():
+    """E5's grid form: the same series is judged at each rung, so a conclusion
+    that flips across plausible costs reads as a crossing."""
+    from scripts.evaluate_config_gate import cost_grid_verdicts
+
+    returns = [0.002 if i % 2 else 0.001 for i in range(200)]  # mean 0.0015
+    rows = cost_grid_verdicts(returns, costs=[0.0, 0.001, 0.002], train_len=60, test_len=20)
+    assert [r["round_trip_cost"] for r in rows] == [0.0, 0.001, 0.002]
+    assert [r["ok"] for r in rows] == [True, True, None]
+    assert rows[2]["reason"] == "gross edge below round-trip cost"
+    assert rows[2]["bps"] == pytest.approx(20.0)
+    assert rows[0]["gross_edge"] == pytest.approx(0.0015, abs=1e-6)
+
+
+def test_a_grid_rung_is_the_same_gate_as_the_single_rung():
+    """The kwargs pass through, so the grid cannot test a different gate: the
+    PBO refusal rides along with the cost sweep."""
+    from scripts.evaluate_config_gate import cost_grid_verdicts
+
+    returns = [0.002 if i % 2 else 0.001 for i in range(20)]
+    fluke = [[1.0] * 10 + [-1.0] * 10, [0.0] * 20]
+    rows = cost_grid_verdicts(
+        returns, costs=[0.0], train_len=4, test_len=2, candidate_matrix=fluke
+    )
+    assert rows[0]["reason"] == "PBO"

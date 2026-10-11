@@ -174,7 +174,6 @@ ADVISORY_CALCULATORS = {
     "dataflows/fmp.py:get_key_metrics_ttm": "reference",
     "dataflows/interface.py:route_to_vendor_typed": "reference",
     "dataflows/moomoo.py:get_kl_quota_moomoo": "reference",
-    "dataflows/pit_registry.py:read_all": "reference",
     "dataflows/registry.py:all_coverage": "reference",
     "dataflows/registry.py:command_map": "reference",
     "dataflows/registry.py:filter_params": "reference",

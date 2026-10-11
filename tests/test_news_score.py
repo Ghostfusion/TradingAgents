@@ -888,3 +888,53 @@ def test_news_horizon_read_drives_the_regression_producer(monkeypatch) -> None:
     assert "1d: elasticity=0.4" in out
     assert "horizon weights: 1d=" in out
     assert "IC term structure: unavailable" in out
+
+
+def _rendered_number(text: str, label: str) -> float:
+    return float(text.split(f"{label}: ")[1].split()[0])
+
+
+def test_news_novelty_leaf_renders_the_product_over_the_feed(monkeypatch) -> None:
+    """NEWS-9 at the analyst's own surface: the novelty screen runs over the
+    name's article set and renders the product beside the count form, so a
+    window of rewrites cannot pass for fresh news."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    # NEAR-duplicates with distinct keys - the case the count form cannot see:
+    # every headline is first-seen, so only the similarity term can move the
+    # product below the raw share. (Distinct filler keeps the IDF non-degenerate;
+    # with three identical documents TF-IDF has nothing to discriminate on.)
+    arts = [
+        {"title": "Acme wins the defence contract for radar systems"},
+        {"title": "Acme wins a defence contract for radar systems"},
+        {"title": "Analyst raises the Acme price target"},
+        {"title": "Acme chief financial officer to depart next quarter"},
+        {"title": "Acme opens a new plant in Ohio"},
+    ]
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: arts)
+    out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "2026-03-04"})
+    assert "basis:" in out and "advisory" in out
+    weighted = _rendered_number(out, "weighted_novelty")
+    first_seen = _rendered_number(out, "first_seen_share")
+    assert first_seen == pytest.approx(1.0, abs=5e-4)  # every headline is new
+    # the product is the count form diminished by similarity, never above it
+    assert weighted < first_seen
+
+
+def test_an_empty_news_window_is_unavailable_never_zero(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "2026-03-04"})
+    assert "unavailable" in out and "not zero" in out
+    assert "weighted_novelty: 0" not in out
+
+
+def test_a_bad_date_degrades_without_raising(monkeypatch) -> None:
+    from tradingagents.agents.utils import analysis_tools as at
+
+    called: list = []
+    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: called.append(a) or [])
+    out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "not-a-date"})
+    assert "unavailable" in out
+    assert called == [], "the feed must not be queried with an unusable window"

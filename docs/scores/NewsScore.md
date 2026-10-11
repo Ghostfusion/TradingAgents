@@ -162,6 +162,7 @@ Status vocabulary: SCORABLE / PARTIAL / ABSENT / UNWIRED.
 | `news_data_tools.get_gdelt_sentiment:198` | news_tools :351 | GDELT read: **UNAVAILABLE** - its article-list response carries no per-article tone (2026-09-27) | Yes |
 | `analysis_tools.get_news_sentiment_series:10173` | news_tools :352 (also market_tools :279) | score/-1..1 + SMA + innovation + article count | Yes |
 | `analysis_tools.get_earnings_event_read:699` | news_tools :371 | surprise% + side + print-day move/vol + PEAD verdict | Yes |
+| `analysis_tools.get_news_novelty:8052` | news_tools :399 | NEWS-9 weighted novelty (first-seen share x `W_dup = 1 - max TF-IDF cosine to an earlier headline`) beside the raw first-seen share, the mean `W_dup` and the most-similar pair, over the Alpha Vantage NEWS_SENTIMENT feed | Yes (ungated, like `get_news_relevance_read`; an empty window is `unavailable`, never 0) |
 | `analysis_tools.get_earnings_surprise:1710` | fundamentals_company_tools :392 | last surprise% + side + date | Yes |
 | `analysis_tools.get_analyst_verdict:1619` | fundamentals_company_tools :391 | value/trap/distress screens (EY, F, M, Altman Z, Ohlson O, Zmijewski) | Yes |
 | `market_position_tools.get_sec_filings:141` | news_tools :360 | recent filings by form type (8-K/10-K/10-Q/S-1/13D) | Yes [CORRECTED 2026-09-26: the module was wrong — the tool lives in `agents/utils/market_position_tools.py:141` and routes to `dataflows/sec_edgar.py::get_sec_filings:488` via `route_to_vendor`; `analysis_tools` never defined it.] |

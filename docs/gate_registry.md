@@ -265,6 +265,30 @@ order the classes at all. The fourth is back on the **same** contract as the
 first two: `openai/gpt-6-luna-decisions` answers `choice`/`score`/`noul`, so it
 takes the shared battery and only its `model` differs.
 
+**The four judges do not share a probability scale (measured 2026-10-10).** Over
+**134 verdict files / 100 report trees / 1,008 buy/hold/sell triples** the
+`probabilities` records read: `jev` **12%** of its verdicts at exactly `1.0`
+(median max-prob 0.880, median entropy 0.380 nats), **`luna` 71%** (median max
+1.000, entropy **0.000**), `noul` 0% (median max 0.231, entropy 0.783), `pplx` 0%
+(0.796 - gated off). A uniform three-way reads max 0.333 / entropy 1.099. Read them
+as three different objects, not one confidence scale: `luna` reports
+`output_tokens: 0` (its numbers are computed, not generated), so a `1.0` is a
+**hard label** the endpoint emits and temperature scaling has nothing to rescale;
+`noul`'s flat margins are the statistic its own docstring records ("does not track
+the polarity it is asked for"); only `jev` is a genuine but overconfident
+distribution. Comparing the numbers across judges is valid only after calibrating
+each to a common scale - and **nothing in the repo aggregates them**: every decider
+writes its own file and the report viewer opens them as artefacts.
+
+**Every verdict also carries a `knowledge_cutoff` block (H12).** It answers whether
+the tree's analysis date falls inside the input models' training knowledge - the
+one look-ahead class no data-layer guard can see. Declared cutoffs
+(`TRADINGAGENTS_MODEL_KNOWLEDGE_CUTOFFS`) win over the **derived** freeze date of a
+dated served snapshot (`openai/gpt-6-luna-decisions-20261006` -> `2026-10-06`), and
+an unresolved model makes the block `UNKNOWN`, never `CLEAN`. See
+`strategies/knowledge_cutoff.py` and H12 in
+`docs/paper_survey_26/design_research_honesty_gates.md`.
+
 **Every writer of a finished tree calls `post_save_annotations`, and there are three.**
 `batch.py::analyze` (the batch CLI and trading_web's in-process `run_batch`),
 `cli/main.py::save_report_to_disk` (the interactive CLI) and `pipeline.py` (which

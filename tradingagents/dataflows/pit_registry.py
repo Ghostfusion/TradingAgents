@@ -9,6 +9,12 @@ as-of; ``read_as_of`` masks anything dated after the as-of (reuses
 - ``put_moments`` / ``get_moments`` — the learn/infer fitted normalization
   stats (mean/std/winsorize bounds) stored per snapshot so a later run
   reuses the same train-fitted moments (Qlib ``DataHandlerLP`` split).
+- ``universe_exit_marks`` — the exit return for the names that had LEFT the
+  universe by an as-of date, read off the same registry row
+  (``delisting_return`` / ``dlret``). ``universe_membership`` says *that* a name
+  delisted; a bar series cannot show what the exit was (cash, M&A, zero), so a
+  panel that ends the series at the last observed price silently marks a
+  wiped-out name as flat. An UNKNOWN exit is absent, never ``0.0``.
 - ``markup_label`` — the Alpha158/360 label convention:
   ``Ref($close,-2)/Ref($close,-1) - 1``, the next-execution-day return with a
   one-day buffer (features at t, label = return realized AFTER the close the
@@ -74,6 +80,89 @@ def universe_membership(symbols: list[str], as_of: str,
             out[sym] = "delisted"
         else:
             out[sym] = "listed"
+    return out
+
+
+#: The registry-row keys an exit return may be declared under, in precedence
+#: order. ``dlret`` is the CRSP/Alpha158 spelling; ``delisting_return`` the long
+#: form.
+_EXIT_RETURN_KEYS = ("delisting_return", "dlret")
+
+
+def _delisting_return(row: dict | None) -> float | None:
+    """The declared return to apply at a name's exit, or ``None``.
+
+    A delisted name's panel return is not the last observed price back to
+    itself: the exit is cash, an M&A consideration or zero, and it is a return
+    the bar series cannot show. Reads the first numeric value under
+    :data:`_EXIT_RETURN_KEYS` (a numeric string parses). ``None`` when the row
+    declares none - an UNKNOWN exit is never read as ``0.0``, which would mark a
+    wiped-out name as flat.
+    """
+    for key in _EXIT_RETURN_KEYS:
+        raw = (row or {}).get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def membership_registry(symbols: list[str], as_of: str | None = None,
+                        root: str | None = None) -> dict[str, dict]:
+    """Assemble a ``universe_membership`` registry from the STORED rows.
+
+    A membership row is a payload stored under ``kind: "membership"`` carrying
+    ``first_active`` / ``last_active`` and, when known, the exit return
+    (``delisting_return`` / ``dlret``) - the shape :func:`universe_membership`
+    and :func:`universe_exit_marks` read. This is the READER that lets those two
+    work off the PIT store instead of only off a caller-built dict; the writer is
+    the existing :func:`store_snapshot`, so any vendor's delisted-symbol list
+    lands here without a second store.
+
+    The read is masked: with an ``as_of``, only rows visible at that date are
+    considered (:func:`read_all`'s rule), so a later correction cannot rewrite
+    the past. A symbol with no stored membership row is ABSENT - the status read
+    then reports ``"unknown"``, exactly as it did before.
+    """
+    out: dict[str, dict] = {}
+    for sym in symbols or []:
+        key = str(sym).upper()
+        for row in reversed(read_all(key, as_of, root)):
+            payload = row.get("payload") or {}
+            if payload.get("kind") == "membership":
+                out[key] = payload
+                break
+    return out
+
+
+def universe_exit_marks(symbols: list[str], as_of: str,
+                        registry: dict | None = None) -> dict[str, float]:
+    """The declared exit return for each of ``symbols`` delisted by ``as_of``.
+
+    ``universe_membership`` answers *that* a name left the universe;
+    :func:`_delisting_return` answers what the exit was worth. This joins the
+    two: ``{SYMBOL: return}`` for the delisted names only, from the same registry
+    row :func:`universe_membership` reads its ``first_active``/``last_active``
+    from. A name that is listed, not yet listed or unmeasured is ABSENT, never
+    ``0.0`` - the absent key is the "unknown exit" signal a panel must handle.
+
+    The registry field is where a delisted-symbol feed lands. Whether to buy that
+    feed (EODHD's ``exchange-symbol-list/{EX}?delisted=1``) is the owner's open
+    decision, so this is the arithmetic and the seam, not the fetch.
+    """
+    status = universe_membership(symbols, as_of, registry)
+    rows = {str(k).upper(): v for k, v in (registry or {}).items()}
+    out: dict[str, float] = {}
+    for sym in symbols or []:
+        key = str(sym).upper()
+        if status.get(key) != "delisted":
+            continue
+        value = _delisting_return(rows.get(key))
+        if value is not None:
+            out[key] = value
     return out
 
 
@@ -189,4 +278,6 @@ __all__ = [
     "put_moments",
     "get_moments",
     "markup_label",
+    "membership_registry",
+    "universe_exit_marks",
 ]

@@ -8048,6 +8048,78 @@ def get_news_horizon_read(
     return "\n".join(lines)
 
 
+@tool
+def get_news_novelty(
+    ticker: Annotated[str, "ticker symbol"],
+    current_date: Annotated[
+        str | None, "current date you are trading at, yyyy-mm-dd"
+    ] = None,
+    days: Annotated[int, "look-back window in days (default 30)"] = 30,
+) -> str:
+    """NewsScore's novelty screen over the name's own article set (NEWS-9,
+    library §8): the weighted novelty (first-seen share diminished by the TF-IDF
+    cosine similarity to earlier headlines) beside the raw first-seen share, the
+    mean duplicate-suppression weight `W_dup`, and the most-similar pair.
+
+    Use it before any 'this is a new story / a fresh catalyst / the news is
+    piling up' claim - eight rewrites of one wire story and eight distinct
+    stories read the same to a headline count, and the weighted number is the
+    one that separates them. Advisory only: it never sets a rating, a size or a
+    gate.
+
+    The article set is the Alpha Vantage NEWS_SENTIMENT feed (the same feed the
+    engine's novelty leg reads), so an empty window is 'unavailable', never a
+    zero.
+    """
+    from datetime import date, timedelta
+
+    current_date = as_of(current_date, get_run_trade_date())
+    end = str(current_date or date.today().isoformat())[:10]
+    try:
+        start = (date.fromisoformat(end) - timedelta(days=int(days))).isoformat()
+    except (TypeError, ValueError):
+        return f"news novelty unavailable for {ticker}: unusable date {end!r}"
+    try:
+        from tradingagents.strategies.news_score import news_novelty, weighted_novelty
+
+        articles = _av_news_articles(ticker, start, end) or []
+        if not articles:
+            return (
+                f"news novelty unavailable for {ticker.upper()}: the feed returned no "
+                f"article for {start}..{end} (Alpha Vantage NEWS_SENTIMENT) - "
+                "unavailable, not zero"
+            )
+        weighted = weighted_novelty(articles, window=int(days))
+        counted = news_novelty(articles, window=int(days))
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"news novelty unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    if weighted.get("weighted_novelty") is None and counted.get("novelty") is None:
+        reason = weighted.get("reason") or counted.get("reason") or "no usable headline"
+        return f"news novelty unavailable for {ticker.upper()}: {reason}"
+    sims = [s for s in (weighted.get("similarity") or []) if s is not None]
+    lines = [
+        f"## News novelty - {ticker.upper()} (advisory; {start}..{end}, "
+        f"{weighted.get('n')} article(s))",
+        "",
+        f"- weighted_novelty: {_txt(weighted.get('weighted_novelty'))} "
+        "(first-seen share diminished by similarity; library §8)",
+        f"- first_seen_share: {_txt(weighted.get('first_seen_share'))} "
+        "(the count form `news_novelty` reports)",
+        f"- mean W_dup: {_txt(weighted.get('w_dup'))} "
+        "(1 - mean max TF-IDF cosine to an earlier headline)",
+        f"- most similar pair: cos={_txt(max(sims)) if sims else 'n/a'}",
+    ]
+    if weighted.get("capped"):
+        lines.append(
+            f"- note: capped at the last {weighted.get('max_articles')} articles "
+            "(the pairwise pass is O(n^2))"
+        )
+    lines.append(f"- basis: {weighted.get('basis')}")
+    lines.append("")
+    lines.append("computed, advisory - never a gate, never a size")
+    return "\n".join(lines)
+
+
 def _news_components(
     ticker: str,
     current_date: str | None,
@@ -14029,12 +14101,37 @@ def get_universe_membership(
     date (registry first_active <= as_of <= last_active). Unmeasured symbols
     return 'unknown' - never assumed present. Advisory for the analyst: use
     before claiming a name was in the tradable universe at a past date.
+
+    For a name that had DELISTED by the date, the declared exit return is
+    reported beside the status (`universe_exit_marks`) - a delisted name's last
+    observed price is not its exit, so a panel that ends the series there
+    silently reads a wiped-out name as flat. An undeclared exit is absent, never
+    `0.0`.
     """
     try:
-        from tradingagents.dataflows.pit_registry import universe_membership
+        from tradingagents.dataflows.pit_registry import (
+            membership_registry,
+            universe_exit_marks,
+            universe_membership,
+        )
 
-        out = universe_membership(symbols or [], as_of or "")
-        return "universe membership: " + str(out)
+        syms = symbols or []
+        as_of = as_of or ""
+        # No caller ever supplied the registry this guard needs, so the tool read
+        # an empty one and answered "unknown" for every symbol. It is now
+        # assembled from the stored `kind: "membership"` rows (masked by the
+        # as-of), so the guard works off the PIT store; an empty store still
+        # degrades to "unknown", never to an assumed-present name.
+        registry = membership_registry(syms, as_of or None) or None
+        out = universe_membership(syms, as_of, registry)
+        text = "universe membership: " + str(out)
+        try:
+            marks = universe_exit_marks(syms, as_of, registry)
+        except Exception:  # noqa: BLE001 - the status read already succeeded
+            marks = {}
+        if marks:
+            text += "\nexit marks (delisted; declared return): " + str(marks)
+        return text
     except Exception as exc:  # noqa: BLE001 - advisory read degrades
         return f"universe membership unavailable: {exc}"
 

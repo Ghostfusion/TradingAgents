@@ -41,6 +41,38 @@ So this is not a summariser: it is a typed judge over a document.
 The CLI is ``scripts/jev_decide.py``; this module is the part the report
 pipeline also uses. :func:`judge_tree` is the entry point for that - the
 ``--verdict`` recipe, written into the report tree that produced it.
+
+**The four judges do not share a probability scale (measured 2026-10-10).** Over
+**134 verdict files / 100 report trees / 1,008 buy/hold/sell triples** the
+``probabilities`` records read:
+
+===========  =====  =========  ===========  ===========
+judge        n      max = 1.0  median max   median H
+===========  =====  =========  ===========  ===========
+``jev``      790    12%        0.880        0.380
+``luna``     112    **71%**    **1.000**    **0.000**
+``noul``     60     0%         0.231        0.783
+``pplx``*    46     0%         0.796        0.579
+===========  =====  =========  ===========  ===========
+
+(``H`` = entropy in nats; a uniform three-way is max 0.333 / H 1.099. ``pplx``
+is gated off, so its 46 are historical.) Read them as three different objects,
+not one confidence scale: **luna is a hard label in probabilistic clothing**
+(71% of its verdicts are exactly 1/0/0, and ``output_tokens: 0`` says the numbers
+are computed, so a 1.0 carries no probability at all - temperature scaling has
+nothing to rescale); **noul's flat margins corroborate the probe note above**
+("a deterministic document statistic that does not track the polarity it is asked
+for") rather than being news; only **jev is a genuine but overconfident
+distribution**. Cross-model comparison of these numbers is valid only after
+calibrating each to a common scale - and **nothing here aggregates them**: every
+decider writes its own file and the report viewer opens them as artefacts.
+
+**Every verdict also carries its own window check** (``knowledge_cutoff``):
+whether the tree's analysis date falls inside the input model's training
+knowledge, from ``strategies/knowledge_cutoff.contamination_verdict`` - a
+declared cutoff table plus each served snapshot's own freeze date, failing closed
+to ``UNKNOWN`` when neither resolves. See H12 in
+``docs/paper_survey_26/design_research_honesty_gates.md``.
 """
 
 from __future__ import annotations
@@ -721,6 +753,58 @@ def write_verdict(
     return path
 
 
+def _tree_as_of(tree: pathlib.Path | str) -> tuple[str | None, str]:
+    """The tree's own analysis date, and where it came from.
+
+    Three sources, in order, because a silently substituted date would make the
+    window check unfalsifiable: ``research_decision.json``'s ``effective_date``
+    is the authoritative as-of; then the run clock
+    (``date_window.get_run_trade_date``) for a live run; then the tree
+    directory's own ``YYYYMMDD`` stamp. ``(None, "unavailable")`` when none of
+    them yields a date - the check then reports ``UNKNOWN``, never ``CLEAN``.
+    """
+    tree = pathlib.Path(tree)
+    try:
+        data = json.loads((tree / "research_decision.json").read_text(encoding="utf-8"))
+        effective = str((data or {}).get("effective_date") or "").strip()
+        if effective:
+            return effective, "research_decision.effective_date"
+    except Exception:  # noqa: BLE001 - a missing artefact is not a failure
+        pass
+    try:
+        from tradingagents.dataflows.date_window import get_run_trade_date
+
+        clock = str(get_run_trade_date() or "").strip()
+        if clock:
+            return clock, "run clock"
+    except Exception:  # noqa: BLE001 - no clock outside a run
+        pass
+    m = re.search(r"(\d{4})(\d{2})(\d{2})", tree.name)
+    if m:
+        year, month, day = m.groups()
+        return f"{year}-{month}-{day}", "tree name stamp"
+    return None, "unavailable"
+
+
+def _knowledge_cutoff_block(tree: pathlib.Path | str, payload: dict) -> dict:
+    """H12: was this tree's window inside the input models' training knowledge?
+
+    The models are the SERVED snapshot ids the endpoint reported
+    (``results[].response.model``) - the resolved model, not the configured one -
+    falling back to the configured name when no response came back.
+    """
+    from tradingagents.strategies.knowledge_cutoff import contamination_verdict
+
+    as_of, source = _tree_as_of(tree)
+    served = sorted({
+        str((r.get("response") or {}).get("model") or "").strip()
+        for r in (payload.get("results") or [])
+        if isinstance(r, dict)
+    } - {""})
+    models = served or [str(payload.get("model") or "").strip()]
+    return contamination_verdict(as_of=as_of, models=models, date_source=source)
+
+
 def judge_tree(
     tree: pathlib.Path | str,
     *,
@@ -740,10 +824,18 @@ def judge_tree(
     :data:`NOUL_QUESTIONS` through :func:`noul_verdict_for_tree` because its model
     refuses the shared battery, and every other decider gets
     :func:`verdict_for_tree`.
+
+    Every payload also gains a ``knowledge_cutoff`` block (:func:`_knowledge_cutoff_block`,
+    H12): whether the tree's analysis date falls inside the input models'
+    training knowledge. It is an annotation, not a gate - it never changes a
+    rating, and a vendor failure still writes the file.
     """
     options = {"model": decider.model, **kwargs}
     recipe = noul_verdict_for_tree if decider.recipe == "noul" else verdict_for_tree
     payload = recipe(tree, key=key, **options)
+    # H12: the window check travels with the verdict - the served snapshot ids
+    # are already in the payload, and the tree's as-of is one file read.
+    payload["knowledge_cutoff"] = _knowledge_cutoff_block(tree, payload)
     return write_verdict(tree, payload, name=decider.filename), payload
 
 

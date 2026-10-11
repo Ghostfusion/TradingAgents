@@ -82,6 +82,12 @@ Further per-tree files are written by opt-in hooks, each behind its own gate:
 (`alpha_ledger_enable`), and `pre_market_review_<date>.md`
 (`enable_pre_market_review`).
 
+Each `*_verdict.json` also carries a `knowledge_cutoff` block (H12,
+`strategies/knowledge_cutoff.py`): whether the tree's analysis date falls inside the input models'
+training knowledge, from a declared cutoff table plus each served snapshot's own freeze date, failing
+closed to `UNKNOWN` when neither resolves. It is an annotation on a diagnostic artifact - it never
+changes a rating, and a vendor failure still writes the file.
+
 The TOC auto-links every team/role heading. `5_portfolio/decision.md` carries
 the `Risk Gate (computed)` verdict when the governor is on (plus, with the
 tranche fold enabled, `Tranche peak-deployed` / `Tranche capital-at-risk` lines

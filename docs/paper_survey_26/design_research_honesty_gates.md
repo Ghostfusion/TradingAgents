@@ -477,6 +477,52 @@ diagnostic, not a test.
 
 ---
 
+### H12 - The model's own knowledge window
+
+**Finding.** Every look-ahead guard this repo has is a **data** guard, and all of them work: `load_ohlcv`
+cuts at the run date, `date_window` masks a window, the per-vendor date guards refuse a stale read,
+FRED's `observation_end` pins the vintage, the news bucket moves a post-16:00-ET story to the next
+day. None of them keeps the model from **knowing** the future. A replay that asks a 2026-10 model
+snapshot about a 2024 date hands the model a period it may already have memorised - and no date
+filter in a data layer can see that leak, because it is not in the data. H2 covers the *field*
+version of this (a field that was not observable at the decision date); H12 is the *model* version.
+
+**Paper.** MFAST (2609.23703) is the direct evidence that this dominates in practice: for a model
+shipped April 2024 it discards everything through **31 Dec 2023** - 17 months of headroom - and
+starts the test 1 Jun 2024, and its own public replication still shrank from accuracy 0.787 /
+Sharpe 2.85 to 0.612 / 0.92. A window chosen casually is a window the model has seen.
+
+**What to compute.** `knowledge_cutoff.contamination_verdict(as_of, models)` - `CONTAMINATED` when
+any input model's cutoff is strictly after the analysis date, `CLEAN` only when every model resolved
+one, `UNKNOWN` otherwise (an unmeasured window is never reported clean). Two sources, and no
+invented number: a **declared** `prefix -> YYYY-MM-DD` table (the env key
+`TRADINGAGENTS_MODEL_KNOWLEDGE_CUTOFFS`; ships empty because this repo's configured models are
+self-hosted or synthetic, so a written-down cutoff would be a fabricated fact) and the **derived**
+freeze date of a dated served snapshot (`openai/gpt-6-luna-decisions-20261006` -> `2026-10-06`,
+`typesafe/jev-1.13-20260917` -> `2026-09-17`) - a conservative bound, since a real training cutoff
+sits months earlier.
+
+**Inputs.** The served snapshot id, which the decisions API already returns and `jev.py` already
+records per response, plus the tree's own as-of.
+
+**PIT.** This *is* the PIT check for the model layer, and it is stamped on the artifact by
+construction.
+
+**Cost.** String comparison. One small JSON read per tree.
+
+**Owner.** `strategies/knowledge_cutoff.py` (the read), `tradingagents/jev.py` (the annotation).
+
+**Built (2026-10-10).** `jev.judge_tree` writes a `knowledge_cutoff` block into every verdict file
+beside the ratings, with the date's source recorded (`research_decision.effective_date`, else the run
+clock, else the tree-name stamp). Live: `reports/EHC_20261009_162722` (as-of 2026-10-09, snapshots
+09-17/09-25/10-06) reads **CLEAN**; the same snapshots against a 2024-06-01 window read
+**CONTAMINATED** on all three. Tests: `tests/test_knowledge_cutoff.py` (14).
+
+**Caveat.** The conservative derivation flags *more* than the true cutoff would - it cannot clear a
+window it is unsure about, and a run whose as-of precedes a model's release date is the case it is
+built for. It says nothing about whether the analysis is *good*, only about whether the model could
+already have known the answer: a gate is not evidence of an edge (§5.1).
+
 ## 4. Owners, in one table
 
 | # | Produces | Owner | New module? |
@@ -492,6 +538,7 @@ diagnostic, not a test.
 | H9 | report attribution + factor novelty | new | yes |
 | H10 | coverage window + survivor labelling | new (`coverage_window.py`) | yes |
 | H11 | autocorrelation-aware intervals + information gap | `strategies/conformal.py` | no |
+| H12 | model-knowledge cutoff check on each verdict | `strategies/knowledge_cutoff.py` + `jev.py` | yes (built 2026-10-10) |
 
 ## 5. Honest limits
 
@@ -522,6 +569,10 @@ Cheapest-and-highest-value first, each independently landable behind a config ga
 6. **H11** (intervals) - upgrades every published statistic at once.
 7. **H2**, **H5**, **H8**, **H9**, **H3** - in that order; H3 last because it is offline and
    expensive and depends on H1's ledger existing.
+
+**Built since this list was written:** H10 (`strategies/coverage_window.py`) and **H12**
+(`strategies/knowledge_cutoff.py`, plus the `knowledge_cutoff` block every verdict file now carries,
+2026-10-10).
 
 **Decision requested:** which subset to build, and whether H10 + H1 + H7 land together as a first
 pass.

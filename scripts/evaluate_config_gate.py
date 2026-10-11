@@ -13,6 +13,11 @@ number.
 Usage:
     python scripts/evaluate_config_gate.py --returns 0.01,-0.02,...
 
+    # E5's grid form: one verdict per round-trip cost, so a conclusion that
+    # flips across plausible costs is visible as a crossing (per-period units)
+    python scripts/evaluate_config_gate.py --returns 0.01,-0.02,... \
+        --cost-grid 0,0.0005,0.001,0.002
+
 Outputs a verdict and a non-zero hint (still returns 0).
 """
 
@@ -155,6 +160,33 @@ def gate_verdict(returns: list, train_len: int = 60, test_len: int = 20, trials:
     }
 
 
+def cost_grid_verdicts(returns: list, *, costs, **kwargs) -> list[dict]:
+    """E5's grid form: one gate verdict per round-trip cost rung.
+
+    A single cost answers "does the edge survive THIS cost". A grid answers the
+    question the corpus survey's failure mode names - whether the conclusion
+    FLIPS across plausible costs - so a strategy that passes at 0 bps and fails
+    at 5 bps reads as a crossing rather than as a verdict. Every rung is the same
+    :func:`gate_verdict` (one implementation of the gate math); this only sweeps
+    it. ``kwargs`` (``train_len``, ``test_len``, ``candidate_matrix``, ...) pass
+    through unchanged, so the grid cannot test a different gate than the one the
+    single rung does.
+    """
+    out: list[dict] = []
+    for cost in costs or []:
+        c = float(cost)
+        v = gate_verdict(returns, round_trip_cost=c, **kwargs)
+        out.append({
+            "round_trip_cost": c,
+            "bps": round(c * 10000.0, 4),
+            "ok": v.get("ok"),
+            "reason": v.get("reason"),
+            "gross_edge": v.get("gross_edge"),
+            "deflated_sharpe": v.get("deflated_sharpe"),
+        })
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -171,6 +203,13 @@ def main(argv=None) -> int:
         "--candidates", default=None,
         help="E1: ';'-separated candidate return series (each ','-separated); "
              "enables the CSCV PBO probability over the candidate x period matrix",
+    )
+    parser.add_argument(
+        "--cost-grid", default=None,
+        help="E5's grid form: ','-separated round-trip costs in the SAME "
+             "per-period units as --round-trip-cost (0.0005 = 5 bps); prints one "
+             "verdict per rung so a conclusion that flips across plausible costs "
+             "is visible as a crossing",
     )
     args = parser.parse_args(argv)
     try:
@@ -206,6 +245,22 @@ def main(argv=None) -> int:
           None if mintrl is None else round(mintrl["min_track_record_years"], 3))
     print("n_trials:", band.get("n_trials"))
     print("dispersion:", band.get("dispersion"))
+    if args.cost_grid:
+        try:
+            costs = [float(x) for x in args.cost_grid.split(",") if x.strip()]
+        except ValueError as exc:
+            print(f"bad cost grid: {exc}")
+            return 2
+        rows = cost_grid_verdicts(
+            returns, costs=costs, train_len=args.train, test_len=args.test,
+            candidate_matrix=candidates,
+        )
+        print("cost_grid:")
+        for row in rows:
+            print(
+                f"  cost={row['round_trip_cost']:.6f} ({row['bps']:.1f} bps) "
+                f"verdict={row['ok']} reason={row['reason']}"
+            )
     return 0
 
 
