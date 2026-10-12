@@ -444,17 +444,19 @@ def _txt_round(v, nd: int = 4) -> str:
 
 
 def _daily_returns(closes) -> list:
-    """Period-over-period simple returns from a close series (None gaps skipped)."""
-    rets: list = []
-    prev = None
-    for c in closes:
-        if c is None:
-            prev = None
-            continue
-        if prev:
-            rets.append(c / prev - 1.0)
-        prev = c
-    return rets
+    """Period-over-period simple returns (None gaps break the chain).
+
+    A VIEW of the one producer, ``strategies.contract._simple_returns``, so the
+    simple-return convention cannot drift between this module's tail tools and
+    the book mix (rule 8; owner review 2026-10-12). It keeps its module-local
+    name because ~40 tools in this file read it, and its behaviour is unchanged
+    on real inputs: a ``None`` breaks the chain in both, and a non-positive
+    previous close now yields NO return instead of a fabricated one (both forms
+    make the ragged case identical, which they did not before).
+    """
+    from tradingagents.strategies.contract import _simple_returns
+
+    return _simple_returns(closes)
 
 
 # ---------------------------------------------------------------------------

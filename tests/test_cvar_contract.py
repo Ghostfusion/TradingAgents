@@ -66,6 +66,29 @@ def test_the_confidence_level_and_the_tail_probability_are_one_calculation():
     assert break_even["scaling_valid"] is False
 
 
+def test_the_simple_return_convention_has_one_implementation():
+    """The market-analyst tools' ``_daily_returns`` is a VIEW of
+    ``contract._simple_returns`` (rule 8), so the convention cannot drift.
+
+    The two used to carry their own copies and disagreed on ragged input: a
+    ``None`` broke the chain in one and raised in the other, and a negative
+    previous close made one fabricate a nonsense return (``106 / -1 - 1``).
+    """
+    from tradingagents.agents.utils.analysis_tools import _daily_returns
+    from tradingagents.strategies.contract import _simple_returns
+
+    clean = [100.0, 101.0, 99.0, 103.5]
+    assert _daily_returns(clean) == _simple_returns(clean)
+    assert _simple_returns(clean) == pytest.approx(
+        [101.0 / 100.0 - 1.0, 99.0 / 101.0 - 1.0, 103.5 / 99.0 - 1.0]
+    )
+    ragged = [100.0, None, 102.0, 0.0, 105.0, -1.0, 106.0]
+    assert _daily_returns(ragged) == _simple_returns(ragged)
+    # No return across a gap; a zero previous close yields none; a NEGATIVE one
+    # yields none either (the old copy returned 106 / -1 - 1 = -107.0 here).
+    assert _simple_returns(ragged) == pytest.approx([0.0 / 102.0 - 1.0, -1.0 / 105.0 - 1.0])
+
+
 def test_portfolio_cvar_is_not_the_weighted_sum_of_member_cvars():
     """Diversification, pinned structurally.
 

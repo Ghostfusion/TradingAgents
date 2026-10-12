@@ -89,11 +89,23 @@ def _simple_returns(closes) -> list:
     weighted-log mix read -1.0394% against the simple mix's -1.0162%). A single
     name's own statistics keep the log convention - the two are different
     objects and each caller names which it uses.
+
+    A ``None`` (an unavailable close) **breaks** the chain rather than being
+    stepped over, so no return is fabricated ACROSS a gap; a non-positive
+    previous close is treated the same way, because a zero or negative price is
+    a data error and not a -100% (or worse) move. That is the semantics the
+    market-analyst tools' own ``_daily_returns`` had, and it now delegates here -
+    one producer for the simple-return convention (rule 8).
     """
-    rets = []
-    for i in range(1, len(closes)):
-        if closes[i - 1] > 0:
-            rets.append(closes[i] / closes[i - 1] - 1.0)
+    rets: list = []
+    prev = None
+    for c in closes:
+        if c is None:
+            prev = None
+            continue
+        if prev is not None and prev > 0:
+            rets.append(c / prev - 1.0)
+        prev = c
     return rets
 
 

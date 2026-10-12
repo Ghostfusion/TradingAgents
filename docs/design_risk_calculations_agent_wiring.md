@@ -76,6 +76,19 @@ path scales by √T. The sizing LP (`book_risk.min_cvar_weights`) takes
 `tail_probability`, not the budget, and reports `tail_count` (the scenarios the
 tail holds).
 
+**The two readings also differ in SOURCE, measured 2026-10-12.** The name leg
+fetches through `_try_fetch_closes` (the raw vendor chain, 320 calendar days, log
+returns), while the market analyst's tail tools fetch through `_ohlcv` — the
+look-ahead-filtered `load_ohlcv` the verified market snapshot itself uses, the
+last 320 bars, simple returns. On the four batch names: SMCI 14.6849 % vs
+12.4172 %, EHC 3.2199 % vs 3.7452 %, AMKR 11.9460 % vs 9.8812 %, BMY 3.5290 % vs
+3.5975 %. **No 3 % comparison flips, but the magnitudes move by up to 2.3 pp** —
+and `_ohlcv` is the *more* protected source (it is the one the INTU/MSTR
+stale-scale incidents produced). Unifying them therefore means moving the
+DECISION leg onto that source, which is a metric-version change on a gate input:
+**owner approval required, nothing moved.** Until then the two are separate metric
+ids in the registry and both state their own basis.
+
 **The book mix is aligned by DATE, or refused.** `graph/trading_graph.py::_
 try_fetch_closes_dated` is the one producer of the vendor bars and keeps the
 date; `_basket_series` compares the basket names' session sets and returns `{}`

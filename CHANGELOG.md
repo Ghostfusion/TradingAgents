@@ -12,6 +12,22 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Changed
+**One producer for the simple-return convention - and the decision leg's source question now has measured evidence (2026-10-12).** `analysis_tools._daily_returns` — read by ~40 market-analyst tools — is now a **view** of `strategies/contract._simple_returns` instead of a second copy of the same arithmetic. The two disagreed on ragged input: a `None` broke the chain in one and raised in the other, and a previous close of `-1` made the copy fabricate `106 / -1 - 1 = -107.0`. Behaviour on real inputs is unchanged (a `None` breaks the chain in both; a non-positive previous close now yields **no** return in both, which is the fail-closed direction). `tests/test_cvar_contract.py` +1 pins the delegation and the ragged case the old copy failed.
+
+**Measured, not asserted - the input to an open decision.** The decision-binding `risk_context.single_cvar` and the market analyst's `get_tail_risk` read the same nominal quantity off **two different sources**: the name leg uses `_try_fetch_closes` (the raw vendor chain, 320 **calendar** days, **log** returns) while the tail tools use `_ohlcv` (the look-ahead-filtered `load_ohlcv` the verified market snapshot itself uses, the last 320 **bars**, **simple** returns). On the four 2026-10-12 batch names:
+
+| symbol | name leg (log, 320 calendar days) | `_ohlcv` path (PIT-filtered, simple, 320 bars) | 3 % comparison flips? |
+| --- | --- | --- | --- |
+| SMCI | **14.6849 %** (n=217) | 12.4172 % (n=319) | no |
+| EHC | **3.2199 %** (n=217) | 3.7452 % (n=319) | no |
+| AMKR | **11.9460 %** (n=217) | 9.8812 % (n=319) | no |
+| BMY | **3.5290 %** (n=217) | 3.5975 % (n=319) | no |
+
+**No binding flip on this sample**, but the magnitudes move by up to 2.3 pp — and the `_ohlcv` path is the *more* protected source (it is the one the INTU/MSTR stale-scale incidents produced). Moving the decision leg onto it is therefore a metric-version change to a gate input and is left for the owner (the review's own Phase 6: explicit approval before replacing a decision-producing rule). Nothing was moved; both readings are now labelled, and the registry carries them as separate metric ids.
+
+**Web impact**: none — an engine-internal converter, and a measurement.
+
 ### Added
 **The three CVaR readings are registered in the metric-authority registry — three metric ids, three bases, one canonical producer each (2026-10-12, the review's provenance item made declarative).** `strategies/metric_authority.py::METRIC_REGISTRY` previously carried **zero** `cvar` rows, so two numbers under one "CVaR" label had nothing to object but a post-hoc verifier. It now declares `analyzed_name_cvar` (canonical `risk_context.single_cvar`, produced by `graph/trading_graph.py::_precompute_risk_context`), `book_cvar` (`graph/trading_graph.py::_basket_cvar`) and `tail_read_cvar` (`agents/utils/analysis_tools.py::get_tail_risk`), each recording its horizon, confidence, return convention, window and scope in `definition`/`basis`. `resolve_metric(metric, values=...)` therefore reports the SMCI 14.68 %-vs-12.42 % pair as a named `conflict` with the canonical value still published and the spread visible — never averaged, never silently picked. Declaration only: the registry computes nothing, the gate ships off, and no number in any run moves.
 
