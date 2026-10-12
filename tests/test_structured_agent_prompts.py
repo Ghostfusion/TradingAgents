@@ -365,25 +365,39 @@ def test_portfolio_manager_prompt_injects_computed_cvar():
         "investment_plan": "plan",
         "trader_investment_plan": "trader plan",
         # Computed risk context is injected by the graph post-overlay.
-        "risk_context": {"single_cvar": 0.0123, "book_cvar": 0.0325},
+        "risk_context": {
+            "single_cvar": 0.0123,
+            "book_cvar": 0.0325,
+            "candidate_cvar": 0.0410,
+            "candidate_cvar_n": 217,
+            "candidate_weight_pct": 0.10,
+            "candidate_delta_cvar": 0.0085,
+        },
     })
     text = _prompt_text(captured["prompt"])
     assert "Computed daily-tail CVaR" in text
     assert "analyzed-name daily CVaR 1.23%" in text
-    assert "portfolio (book) daily CVaR 3.25%" in text
-    assert "portfolio (book) daily CVaR 3.25% — fed the gate" in text
+    # The candidate-inclusive book fed the gate; the configured reference is
+    # named as exactly that (owner decision 2026-10-12).
+    assert (
+        "candidate portfolio daily CVaR 4.10% at a 10.0% candidate weight, "
+        "Δ +0.85% vs the same book without it (1-day 95% historical, simple returns, "
+        "217 obs) — fed the gate" in text
+    )
+    assert "configured reference book daily CVaR 3.25%" in text
+    assert "the configured reference, not the candidate" in text
 
 
 @pytest.mark.unit
 def test_portfolio_manager_prompt_names_each_cvar_basis_when_the_window_is_recorded():
     """Each CVaR carries its own basis once the producer records the window.
 
-    The name leg is a 1-day 95% historical CVaR over **log** returns of one
-    series; the book leg is the same measure over the **simple**-return weighted
-    basket - and the market analyst's tail tool prints a third reading (320 bars,
-    simple returns) that is neither. With no recorded window the line stays as
-    it was, so the basis is never asserted on an unmeasured number (owner review
-    2026-10-12).
+    The name leg is a 1-day 95% historical CVaR over **simple** returns of one
+    series - the same series and convention the market analyst's tail tool reads
+    since the 2026-10-12 source decision, so the two must agree - and the book
+    leg is the same measure over the **simple**-return weighted basket. With no
+    recorded window the line stays as it was, so the basis is never asserted on
+    an unmeasured number (owner review 2026-10-12).
     """
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
 
@@ -415,10 +429,12 @@ def test_portfolio_manager_prompt_names_each_cvar_basis_when_the_window_is_recor
         },
     })
     text = _prompt_text(captured["prompt"])
-    assert "analyzed-name daily CVaR 14.68% (1-day 95% historical, log returns, 217 obs)" in text
     assert (
-        "portfolio (book) daily CVaR 1.04% (1-day 95% historical, simple returns, 217 obs) "
-        "— fed the gate" in text
+        "analyzed-name daily CVaR 14.68% (1-day 95% historical, simple returns, 217 obs)" in text
+    )
+    assert (
+        "configured reference book daily CVaR 1.04% (1-day 95% historical, simple returns, "
+        "217 obs) — fed the gate" in text
     )
 
 
