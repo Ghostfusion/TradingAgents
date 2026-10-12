@@ -336,3 +336,59 @@ def test_integrity_retry_rebuilds_a_cut_mandatory_field():
     assert structured.invoke.call_count == 1, "a cut mandatory field must trigger the rebuild"
     assert complete_text[:60] in out
     assert "so\n\nFINAL TRANSACTION PROPOSAL" not in out
+
+
+class _MessagesPlaceholderChain:
+    """A ``prompt | llm`` chain shaped like the analyst chains.
+
+    ``market_analyst`` / ``fundamentals_analyst`` build their prompt with
+    ``MessagesPlaceholder(variable_name="messages")``, so LangChain binds
+    ``invoke(input)`` to that one variable and rejects anything that is not a
+    list of base messages ("variable messages should be a list of base
+    messages, got … of type <class 'str'>"). The fake reproduces that contract
+    instead of accepting any input, so a bare-string continuation fails the
+    test exactly as it failed the run.
+    """
+
+    def __init__(self, continuation: str) -> None:
+        self.continuation = continuation
+        self.calls: list = []
+
+    def invoke(self, payload, **kwargs):
+        self.calls.append(payload)
+        if isinstance(payload, str) or not isinstance(payload, list):
+            raise ValueError(
+                "variable messages should be a list of base messages, got "
+                f"{payload} of type {type(payload)}"
+            )
+        return mock.MagicMock(content=self.continuation)
+
+
+def test_retry_if_truncated_sends_a_message_list_to_a_chain():
+    """Regression (EHC/AMKR market legs, 2026-10-12).
+
+    ``finalize_messages`` runs its truncation repair on a tool-bound CHAIN, but
+    the helper sent the continuation as a bare string: every continuation
+    raised "variable messages should be a list of base messages", the repair
+    broke out, and a cut report stayed cut (or degraded to the unavailable
+    notice). The helper must send a message list.
+    """
+    from langchain_core.messages import HumanMessage
+
+    chain = _MessagesPlaceholderChain(" and the setup is confirmed. End.")
+    out = structured._retry_if_truncated(chain, "prompt", _truncated_text())
+    assert "and the setup is confirmed. End." in out
+    assert structured._looks_truncated(out) is False
+    sent = chain.calls[0]
+    assert isinstance(sent, list) and isinstance(sent[0], HumanMessage)
+    assert "cut off at the output limit" in sent[0].content
+
+
+def test_retry_if_stub_sends_a_message_list_to_a_chain():
+    """The stub repair carries the same shape contract as the truncation one."""
+    chain = _MessagesPlaceholderChain("**Decision**: HOLD - repaired body, enough words here.")
+    out = structured._retry_if_stub(
+        mock.MagicMock(), "prompt", "**Decision", "Market Analyst", backup_llm=chain
+    )
+    assert "repaired body" in out
+    assert isinstance(chain.calls[0], list)

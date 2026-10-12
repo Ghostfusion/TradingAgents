@@ -176,7 +176,17 @@ def _retry_if_truncated(plain_llm: Any, prompt: Any, response_text: str,
                 _model_name(backup_llm) or backup_llm,
             )
         try:
-            cont = retry_llm.invoke(_continuation_prompt(full))
+            # A MESSAGE LIST, never a bare string: ``finalize_messages`` hands
+            # this helper a tool-bound CHAIN whose prompt carries
+            # ``MessagesPlaceholder("messages")``, and a string binds to that
+            # variable ("variable messages should be a list of base messages")
+            # so the repair silently did nothing (measured 2026-10-12,
+            # EHC/AMKR market legs). A bare chat model coerces a string into
+            # exactly this one-HumanMessage list, so the shape is the same for
+            # either call target.
+            from langchain_core.messages import HumanMessage
+
+            cont = retry_llm.invoke([HumanMessage(content=_continuation_prompt(full))])
             cont_text = content_to_text(getattr(cont, "content", cont))
         except Exception as exc:  # noqa: BLE001 - a failed continuation degrades
             logger.warning("truncation continuation failed: %s", exc)
@@ -574,7 +584,14 @@ def _retry_if_monologue(plain_llm: Any, prompt: Any, response_text: str,
                 "%s: drafting monologue with no final draft; retrying on %r",
                 agent_name, _model_name(retry_llm) or retry_llm,
             )
-            resp = retry_llm.invoke(_monologue_completion_prompt(prompt))
+            # A message list, not a string (see ``_retry_if_truncated``): the
+            # caller may hand over a chain whose prompt has a ``messages``
+            # placeholder, which a string cannot satisfy.
+            from langchain_core.messages import HumanMessage
+
+            resp = retry_llm.invoke(
+                [HumanMessage(content=_monologue_completion_prompt(prompt))]
+            )
             nxt = content_to_text(getattr(resp, "content", resp))
         except Exception as exc:  # noqa: BLE001 - a failed retry degrades
             logger.warning("%s: monologue retry failed: %s", agent_name, exc)
@@ -654,7 +671,12 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
                 "%s: stub after structured fail - retrying on fallback model %r",
                 agent_name, _model_name(fallback_llm) or fallback_llm,
             )
-            resp = fallback_llm.invoke(_stub_completion_prompt(prompt))
+            # A message list, not a string (see ``_retry_if_truncated``).
+            from langchain_core.messages import HumanMessage
+
+            resp = fallback_llm.invoke(
+                [HumanMessage(content=_stub_completion_prompt(prompt))]
+            )
             nxt = content_to_text(getattr(resp, "content", resp))
             attempts += 1
             if nxt and nxt.strip() and not _looks_stub(nxt):
@@ -675,7 +697,12 @@ def _retry_if_stub(plain_llm: Any, prompt: Any, response_text: str, agent_name: 
                 "%s: stub retry on backup model %r",
                 agent_name, _model_name(retry_llm) or retry_llm,
             )
-            resp = retry_llm.invoke(_stub_completion_prompt(prompt))
+            # A message list, not a string (see ``_retry_if_truncated``).
+            from langchain_core.messages import HumanMessage
+
+            resp = retry_llm.invoke(
+                [HumanMessage(content=_stub_completion_prompt(prompt))]
+            )
             nxt = content_to_text(getattr(resp, "content", resp))
         except Exception as exc:  # noqa: BLE001 - a failed retry degrades
             logger.warning("%s: backup stub-completion retry failed: %s", agent_name, exc)
