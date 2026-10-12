@@ -20,7 +20,8 @@ from .refusal_ledger import log_refusal
 LIMITS_KEYS = (
     "max_position_pct",  # per-trade size cap
     "max_book_position_pct",  # total book cap
-    "risk_daily_cvar_budget_pct",  # daily tail-loss budget (% of book)
+    "risk_standalone_cvar_limit_pct",  # the analyzed NAME's own daily tail limit
+    "risk_portfolio_cvar_budget_pct",  # the PORTFOLIO's daily tail budget
     "risk_max_drawdown_pct",  # realized drawdown stop for new risk
     "sector_cap_limit",  # single-sector cap
 )
@@ -31,7 +32,12 @@ def default_limits(cfg: dict | None = None) -> dict:
     return {
         "max_position_pct": float(cfg.get("max_position_pct", 0.30)),
         "max_book_position_pct": float(cfg.get("risk_max_position_pct", 0.45)),
-        "risk_daily_cvar_budget_pct": float(cfg.get("risk_daily_cvar_budget_pct", 0.03)),
+        "risk_standalone_cvar_limit_pct": float(
+            cfg.get("risk_standalone_cvar_limit_pct", 0.03)
+        ),
+        "risk_portfolio_cvar_budget_pct": float(
+            cfg.get("risk_portfolio_cvar_budget_pct", 0.03)
+        ),
         "risk_max_drawdown_pct": float(cfg.get("risk_max_drawdown_pct", 0.10)),
         "safety_cap_pct": float(cfg.get("sector_cap_limit", 0.35)),
     }
@@ -43,6 +49,7 @@ def govern(
     *,
     book_total_pct: float | None = None,
     cvar_pct: float | None = None,
+    name_cvar_pct: float | None = None,
     drawdown_pct: float | None = None,
     daily_loss_pct: float | None = None,
     hwm_drawdown_pct: float | None = None,
@@ -61,6 +68,16 @@ def govern(
 
     size_pct: the computed position fraction (0..1). Use None for limits that
     have no data - unknown limits never fail the gate.
+
+    ``cvar_pct`` / ``name_cvar_pct`` (both keyword-only, optional) are the TWO
+    tail legs and each is compared against ITS OWN limit: ``cvar_pct`` is the
+    PORTFOLIO leg (the book including this candidate) against
+    ``risk_portfolio_cvar_budget_pct``, and ``name_cvar_pct`` the analyzed NAME's
+    own tail against ``risk_standalone_cvar_limit_pct``. Either may be omitted -
+    an unmeasured leg never fails the gate. Until 2026-10-12 one key served both
+    legs, which is how one artifact could publish ``risk_gate: PASS`` off the
+    book's 1.04 % while its ``binding_reason`` cited the name's 14.68 % against
+    the same ``budget 3.00%``.
 
     ``capital_at_risk_pct`` / ``risk_cap_pct`` (both keyword-only, optional)
     add a tranche-scaling control: the worst-case capital exposed at the hard
@@ -113,12 +130,25 @@ def govern(
         if book_total_pct + size_pct > max_book:
             reasons.append(f"book {book_total_pct + size_pct:.1%} > {max_book:.1%}")
 
+    # Two tail limits, one per measured leg (owner decision 2026-10-12): the
+    # PORTFOLIO leg (what the book including this candidate would lose) is
+    # compared against the portfolio budget, and the analyzed NAME's own tail
+    # against its standalone limit. One key used to serve both, so a PASS on the
+    # book and an over-budget name could be published from the same number.
+    # Both limits ship at 0.03, so today's verdicts are unchanged.
     if cvar_pct is not None:
-        budget = limits["risk_daily_cvar_budget_pct"]
+        budget = limits["risk_portfolio_cvar_budget_pct"]
         if cvar_pct > budget:
-            reasons.append(f"cvar {cvar_pct:.2%} > budget {budget:.2%}")
+            reasons.append(f"portfolio cvar {cvar_pct:.2%} > budget {budget:.2%}")
         elif cvar_pct >= 0.7 * budget:
-            touches.append(f"cvar {cvar_pct:.2%} near budget {budget:.2%}")
+            touches.append(f"portfolio cvar {cvar_pct:.2%} near budget {budget:.2%}")
+
+    if name_cvar_pct is not None:
+        name_limit = limits["risk_standalone_cvar_limit_pct"]
+        if name_cvar_pct > name_limit:
+            reasons.append(f"name cvar {name_cvar_pct:.2%} > limit {name_limit:.2%}")
+        elif name_cvar_pct >= 0.7 * name_limit:
+            touches.append(f"name cvar {name_cvar_pct:.2%} near limit {name_limit:.2%}")
 
     if capital_at_risk_pct is not None and risk_cap_pct is not None:
         if capital_at_risk_pct > float(risk_cap_pct):

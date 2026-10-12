@@ -59,7 +59,9 @@ ADVISORY_RISK_KEYS = (
     "drawdown_limit",
     "single_cvar",
     "book_cvar",
-    "cvar_budget_pct",
+    "standalone_cvar_limit_pct",
+    "portfolio_cvar_budget_pct",
+    "cvar_gate_basis",
     "liquidity",
     "regime",
 )

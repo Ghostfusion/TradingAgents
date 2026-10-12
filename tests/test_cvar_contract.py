@@ -3,8 +3,9 @@
 The tests that already existed pin `c <= v` and the cash-sleeve dilution ratio;
 these pin the properties a SECOND producer of "the CVaR" must not break: what
 the estimator means, that it is scale-invariant, that the two public conventions
-(confidence LEVEL vs tail PROBABILITY) are the same calculation, and that a
-portfolio's tail is not the weighted sum of its members' tails.
+(confidence LEVEL vs tail PROBABILITY) are the same calculation, that a
+portfolio's tail is not the weighted sum of its members' tails, and that the two
+gate legs are bounded by SEPARATE limits.
 
 Every assertion here is hand-calculable from the sample in the test, so a change
 that breaks one is a change to the *definition*, not to a fixture.
@@ -105,3 +106,44 @@ def test_portfolio_cvar_is_not_the_weighted_sum_of_member_cvars():
     assert mix is not None and a_cvar is not None and b_cvar is not None
     assert mix == pytest.approx(-0.045)  # 0.5 * (-0.10) + 0.5 * 0.01
     assert abs(mix) < 0.5 * abs(a_cvar) + 0.5 * abs(b_cvar)
+
+
+def test_the_two_tail_legs_are_bounded_by_their_own_limits():
+    """One key used to bound two policies at once: the analyzed name's own tail
+    and the portfolio's.
+
+    A 3 % portfolio budget against a 5 % standalone limit REJECTs on the book
+    while the name leg stays silent, and the reverse configuration REJECTs on
+    the name while the portfolio leg stays silent. That is the 2026-10-12
+    artifact's defect - ``risk_gate: PASS`` (book 1.04 %) published beside
+    ``binding_reason: analyzed-name CVaR 14.68% > budget 3.00%``: one key, two
+    objects, opposite readings.
+    """
+    from tradingagents.strategies.risk_governor import govern
+
+    name_slack = {
+        "risk_portfolio_cvar_budget_pct": 0.03,
+        "risk_standalone_cvar_limit_pct": 0.05,
+    }
+    v = govern(0.10, name_slack, cvar_pct=0.04, name_cvar_pct=0.04)
+    assert v["verdict"] == "REJECT"
+    assert any("portfolio cvar 4.00% > budget 3.00%" in r for r in v["reasons"])
+    assert not any("name cvar" in r for r in v["reasons"])
+
+    book_slack = {
+        "risk_portfolio_cvar_budget_pct": 0.05,
+        "risk_standalone_cvar_limit_pct": 0.03,
+    }
+    v2 = govern(0.10, book_slack, cvar_pct=0.04, name_cvar_pct=0.04)
+    assert v2["verdict"] == "REJECT"
+    assert any("name cvar 4.00% > limit 3.00%" in r for r in v2["reasons"])
+    assert not any("portfolio cvar" in r for r in v2["reasons"])
+
+    # Each leg is independently omittable and keeps its own limit: the same 4 %
+    # tail is a WARN against the 5 % budget and a REJECT against the 3 % name
+    # limit when the other leg was not measured.
+    near_book = govern(0.10, book_slack, cvar_pct=0.04)
+    assert near_book["verdict"] == "WARN"
+    assert not near_book["reasons"]
+    over_name = govern(0.10, book_slack, name_cvar_pct=0.04)
+    assert over_name["verdict"] == "REJECT"

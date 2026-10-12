@@ -215,15 +215,23 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
                 bits.append(f"drawdown limit {limit:.2%} (book drawdown unmeasured)")
             if ctx.get("max_position_pct") is not None:
                 bits.append(f"per-trade size cap {ctx['max_position_pct']:.1%}")
-            if ctx.get("cvar_budget_pct") is not None:
-                bits.append(f"daily CVaR budget {ctx['cvar_budget_pct']:.2%}")
+            # Two limits, one per leg (owner decision 2026-10-12): the name's own
+            # standalone limit and the portfolio's budget. One key used to be
+            # compared against both numbers.
+            if ctx.get("standalone_cvar_limit_pct") is not None:
+                bits.append(
+                    f"standalone (per-name) CVaR limit "
+                    f"{ctx['standalone_cvar_limit_pct']:.2%}"
+                )
+            if ctx.get("portfolio_cvar_budget_pct") is not None:
+                bits.append(f"portfolio CVaR budget {ctx['portfolio_cvar_budget_pct']:.2%}")
             if bits:
                 limits_line = (
                     "**Computed pre-decision limits** (deterministic): "
                     + "; ".join(bits)
-                    + ". Size `position_size` within the per-trade cap and the "
-                    "daily CVaR budget; a book drawdown over its limit blocks "
-                    "new risk.\n\n"
+                    + ". Size `position_size` within the per-trade cap, the "
+                    "standalone CVaR limit and the portfolio CVaR budget; a "
+                    "book drawdown over its limit blocks new risk.\n\n"
                 )
         except Exception:  # noqa: BLE001 - degrade to no line
             limits_line = ""

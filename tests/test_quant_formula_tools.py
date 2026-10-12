@@ -34,7 +34,7 @@ def _cfg(monkeypatch, **flags):
         "conformal_min_pairs": 3,
         "conformal_window": 250,
         "max_position_pct": 0.5,
-        "risk_daily_cvar_budget_pct": 0.03,
+        "risk_portfolio_cvar_budget_pct": 0.03,
         "book_risk_sizing_min_scenarios": 60,
         "book_risk_sizing_max_delta": 0.05,
         "risk_basket_tickers": ["AAA", "BBB"],
@@ -192,14 +192,14 @@ def test_book_risk_budget_names_its_tail_not_the_budget(monkeypatch):
     """P0 (owner review 2026-10-12): the rendered line names the tail the LP
     solved at - the CVaR family's own 95% - and never the BUDGET.
 
-    The caller used to read ``risk_daily_cvar_budget_pct`` (0.03) into the
+    The caller used to read the CVaR *budget* key (0.03) into the
     solver's tail slot, which solved a 97%-confidence CVaR and printed it as
     ``alpha=3.00% daily``: a budget fraction wearing a tail probability's
     label. ``_cfg`` ships the 0.03 budget, so this is the exact configuration
     the defect needed.
     """
     cfg = _cfg(monkeypatch, enable_book_risk_sizing=True)
-    assert cfg["risk_daily_cvar_budget_pct"] == 0.03  # the shape the defect needs
+    assert cfg["risk_portfolio_cvar_budget_pct"] == 0.03  # the shape the defect needs
     series = {
         name: [0.001 if i % 9 else -0.04 for i in range(140)] for name in ("AAA", "BBB")
     }

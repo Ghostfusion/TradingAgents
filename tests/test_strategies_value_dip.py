@@ -406,7 +406,8 @@ def _graph_config(**overrides):
         "risk_max_position_pct": 0.45,
         # CVaR budget high so the tranche peak-deployed / capital-at-risk is
         # the decision point in these tests (the synthetic series is volatile).
-        "risk_daily_cvar_budget_pct": 0.10,
+        "risk_standalone_cvar_limit_pct": 0.10,
+        "risk_portfolio_cvar_budget_pct": 0.10,
         "risk_max_drawdown_pct": 0.50,
         "risk_basket_tickers": [],
         "risk_basket_weights": {},

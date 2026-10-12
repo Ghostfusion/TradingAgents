@@ -52,8 +52,8 @@ fourth from appearing silently.
 
 | where it prints | producer | horizon | confidence | convention | window | scope | authority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` | **1 day** | **95 %** (`alpha=0.05`) | **log** returns (`contract._log_returns`) | 320 **calendar** days by default (`_try_fetch_closes`) → ~217 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_daily_cvar_budget_pct` (default 3 %), and the report/card label it `analyzed_name_cvar` |
-| `risk_context.book_cvar` → the report's `Portfolio (book) CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker and **not** a candidate portfolio | the risk governor's budget comparison consumes it (preferring it over `single_cvar` when it resolves) |
+| `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` | **1 day** | **95 %** (`alpha=0.05`) | **log** returns (`contract._log_returns`) | 320 **calendar** days by default (`_try_fetch_closes`) → ~217 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_standalone_cvar_limit_pct` (default 3 %) by the governor's NAME leg, and the report/card label it `analyzed_name_cvar` |
+| `risk_context.book_cvar` → the report's `Portfolio (book) CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker and **not** a candidate portfolio | the risk governor's PORTFOLIO leg consumes it against `risk_portfolio_cvar_budget_pct` (falling back to `single_cvar` only when no book resolves, and `risk_context["cvar_gate_basis"]` records which leg the test read) |
 | the market analyst's `tail risk <T>: cvar=` line | `book_risk.cvar` via `agents/utils/analysis_tools.py::get_tail_risk` | **1 day** | **95 %** | **simple** returns | the last 320 **bars** (`_ohlcv`) → ~319 obs | one name | **none** — printed context for the analyst, never a gate |
 
 Consequences a reader must not skip, all verified on the 2026-10-12 SMCI tree:
@@ -61,11 +61,20 @@ Consequences a reader must not skip, all verified on the 2026-10-12 SMCI tree:
 *different* calculations of the same nominal quantity under the same label; and
 1.04 % (`book_cvar`) is the basket's own tail — identical across every tree in a
 batch, because `_basket_cvar` never reads the analyzed ticker — so it cannot
-establish anything about the candidate. One config key currently serves both the
+establish anything about the candidate. One config key used to serve both the
 named comparison and the book comparison (`risk_daily_cvar_budget_pct`), which is
-why one 2026-10-12 artifact carries `risk_gate: PASS` (book 1.04 % vs 3 %) beside
-`binding_reason: analyzed-name CVaR 14.68% > budget 3.00%`; separating the two keys
-is an **owner decision**, not a refactor (see the queued work below).
+why one 2026-10-12 artifact carried `risk_gate: PASS` (book 1.04 % vs 3 %) beside
+`binding_reason: analyzed-name CVaR 14.68% > budget 3.00%`.
+
+**Resolved 2026-10-12 (owner decision).** That key is split into
+`risk_standalone_cvar_limit_pct` (the analyzed name's own limit) and
+`risk_portfolio_cvar_budget_pct` (the portfolio's), both shipping at 0.03 so a
+default run's verdicts are unchanged. `risk_governor.govern` now takes TWO legs -
+`cvar_pct` (the portfolio leg) and `name_cvar_pct` (the analyzed name) - each
+compared against its own limit, and the graph's pick is explicit and RECORDED in
+`risk_context["cvar_gate_basis"]` instead of being the implicit
+`book_cvar or single_cvar`. Every renderer names the limit its own leg was
+compared against.
 
 Also settled here: the multi-day instrument is `book_risk.var_cvar_horizon(
 returns, horizon_days, confidence_level=<LEVEL>)` — the argument is a LEVEL

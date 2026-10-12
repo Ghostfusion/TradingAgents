@@ -48,7 +48,8 @@ def _config(**over) -> dict:
         "risk_audit_enabled": False,
         "risk_max_drawdown_pct": 0.10,
         "max_position_pct": 0.30,
-        "risk_daily_cvar_budget_pct": 0.03,
+        "risk_standalone_cvar_limit_pct": 0.03,
+        "risk_portfolio_cvar_budget_pct": 0.03,
         "target_vol": 0.15,
         "position_odds": 1.0,
         "kelly_fraction": 0.25,
@@ -98,7 +99,11 @@ def test_pre_graph_context_is_the_only_producer(monkeypatch):
     assert ctx["book_drawdown"] == pytest.approx(0.042)
     assert ctx["drawdown_limit"] == pytest.approx(0.10)
     assert ctx["max_position_pct"] == pytest.approx(0.30)
-    assert ctx["cvar_budget_pct"] == pytest.approx(0.03)
+    # TWO limits, one per leg (owner decision 2026-10-12): the name's own
+    # standalone limit and the portfolio budget, both shipped at 0.03 so a
+    # default run's verdicts are unchanged.
+    assert ctx["standalone_cvar_limit_pct"] == pytest.approx(0.03)
+    assert ctx["portfolio_cvar_budget_pct"] == pytest.approx(0.03)
     # Each CVaR states the window it was measured over (owner review
     # 2026-10-12): the name leg is one series, the book leg the basket matrix -
     # both one observation shorter than the closes they came from.
@@ -130,6 +135,13 @@ def test_pre_graph_context_is_the_only_producer(monkeypatch):
     # Consumed, not recomputed: the pre-graph read is the only drawdown call.
     assert calls["drawdown"] == 1
     assert seen["drawdown_pct"] == pytest.approx(0.042)
+    # BOTH tail legs reach the gate, each with its own number, and which one the
+    # portfolio test read is RECORDED rather than inferred (owner decision
+    # 2026-10-12: `book_cvar or single_cvar` against one key used to let a PASS
+    # on one number sit beside a breach of "the same" limit on the other).
+    assert seen["cvar_pct"] == pytest.approx(ctx["book_cvar"])
+    assert seen["name_cvar_pct"] == pytest.approx(ctx["single_cvar"])
+    assert out["risk_context"]["cvar_gate_basis"] == "configured_reference_book"
     assert seen["liquidity_verdict"] == "illiquid"
     assert seen["liquidity_dangers"] == ctx["liquidity"]["dangers"]
     assert out["risk_context"]["book_drawdown"] == pytest.approx(0.042)
@@ -230,7 +242,7 @@ def test_the_plan_consumes_the_pre_graph_risk_context(monkeypatch):
     """The plan's risk half reads the SAME snapshot the governor gates on.
 
     Guards the producer<->consumer seam: ``_precompute_risk_context`` writes
-    ``single_cvar`` / ``cvar_budget_pct`` / ``liquidity.verdict`` and
+    ``single_cvar`` / ``standalone_cvar_limit_pct`` / ``liquidity.verdict`` and
     ``_compiled_decision_context`` hands exactly those to the plan. A rename on
     either side would silently put the entry block back to
     ``cvar_status: NO_SOURCE`` while the report's decision basis still cites a

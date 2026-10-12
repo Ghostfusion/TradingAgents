@@ -1288,9 +1288,25 @@ class TradingAgentsGraph:
                     risk_ctx = final_state.setdefault("risk_context", {})
                     if not risk_ctx:
                         risk_ctx.update(self._precompute_risk_context(ticker))
+                    # Two legs, two limits, and the pick is EXPLICIT (owner
+                    # decision 2026-10-12). The PORTFOLIO leg is the measured
+                    # book tail - the configured reference basket here, the
+                    # candidate-inclusive book once a measured size exists -
+                    # and falls back to the analyzed name ONLY when no book
+                    # resolves; the NAME leg is always the analyzed name's own
+                    # tail. Which leg the portfolio test read is recorded, so
+                    # the report never has to infer it from prose (one artifact
+                    # used to carry `risk_gate: PASS` beside a `binding_reason`
+                    # citing the other number against the same 3.00%).
+                    name_cvar_pct = risk_ctx.get("single_cvar")
                     cvar_pct = risk_ctx.get("book_cvar")
+                    risk_ctx["cvar_gate_basis"] = (
+                        "configured_reference_book"
+                        if cvar_pct is not None
+                        else ("analyzed_name" if name_cvar_pct is not None else None)
+                    )
                     if cvar_pct is None:
-                        cvar_pct = risk_ctx.get("single_cvar")
+                        cvar_pct = name_cvar_pct
                     # Book-level correlated stress (item 2): shock the whole
                     # basket together, not just single names. Surfaces in the
                     # risk snapshot and the report's risk-gate block.
@@ -1309,6 +1325,7 @@ class TradingAgentsGraph:
                         govern_size,
                         self.config,
                         cvar_pct=cvar_pct,
+                        name_cvar_pct=name_cvar_pct,
                         # measured book drawdown, not the config limit - a
                         # realized >limit drawdown must actually block new risk
                         # (previously the limit was passed to itself: the
@@ -1741,7 +1758,7 @@ class TradingAgentsGraph:
                 config=self.config,
                 capture=capture,
                 name_cvar=rctx.get("single_cvar"),
-                cvar_budget=rctx.get("cvar_budget_pct"),
+                cvar_budget=rctx.get("standalone_cvar_limit_pct"),
                 liquidity_status=(rctx.get("liquidity") or {}).get("verdict"),
                 **measured_inputs(
                     closes, self.config, bars=bars, fair_value=fair_value
@@ -1791,7 +1808,8 @@ class TradingAgentsGraph:
                     "Computed limits registry (advisory): "
                     f"max_position={lim['max_position_pct']:.0%} "
                     f"book_cap={lim['max_book_position_pct']:.0%} "
-                    f"cvar_budget={lim['risk_daily_cvar_budget_pct']:.1%} "
+                    f"name_cvar_limit={lim['risk_standalone_cvar_limit_pct']:.1%} "
+                    f"portfolio_cvar_budget={lim['risk_portfolio_cvar_budget_pct']:.1%} "
                     f"drawdown_limit={lim['risk_max_drawdown_pct']:.0%} "
                     f"sector_cap={self.config.get('sector_cap_limit', 0.35):.0%}"
                 )
@@ -2000,7 +2018,11 @@ class TradingAgentsGraph:
             limits = default_limits(self.config)
             out["drawdown_limit"] = limits["risk_max_drawdown_pct"]
             out["max_position_pct"] = limits["max_position_pct"]
-            out["cvar_budget_pct"] = limits["risk_daily_cvar_budget_pct"]
+            # BOTH tail limits, each named after the leg it bounds (owner
+            # decision 2026-10-12): the name leg's own limit and the portfolio
+            # budget are different policies that happened to share one key.
+            out["standalone_cvar_limit_pct"] = limits["risk_standalone_cvar_limit_pct"]
+            out["portfolio_cvar_budget_pct"] = limits["risk_portfolio_cvar_budget_pct"]
             liquidity = self._liquidity_context(ticker, closes)
             if liquidity is not None:
                 out["liquidity"] = liquidity

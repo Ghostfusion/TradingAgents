@@ -168,7 +168,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MIN_DOLLAR_VOLUME": "min_dollar_volume",
     "TRADINGAGENTS_MAX_SPREAD_BPS": "max_spread_bps",
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
-    "TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT": "risk_daily_cvar_budget_pct",
+    "TRADINGAGENTS_RISK_STANDALONE_CVAR_LIMIT_PCT": "risk_standalone_cvar_limit_pct",
+    "TRADINGAGENTS_RISK_PORTFOLIO_CVAR_BUDGET_PCT": "risk_portfolio_cvar_budget_pct",
     "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
     "TRADINGAGENTS_RISK_BASKET_WEIGHTS": "risk_basket_weights",
     "TRADINGAGENTS_HOLDINGS_TICKERS": "holdings_tickers",
@@ -1066,7 +1067,15 @@ SHIPPED_DEFAULTS = {
         "enable_computed_context": True,
         "enable_decision_audit": False,  # item 6: PM claim-vs-computed audit note
         "risk_max_position_pct": 0.45,  # R0: book cap
-        "risk_daily_cvar_budget_pct": 0.03,  # R0/R2: daily tail budget
+        # TWO CVaR limits, one per leg (owner decision 2026-10-12). They used to be ONE key
+        # (`risk_daily_cvar_budget_pct`) compared against two different numbers - the analyzed
+        # name's own tail and the book's - so one 2026-10-12 artifact carried
+        # `risk_gate: PASS` (book 1.04 % vs 3 %) beside `binding_reason: analyzed-name CVaR
+        # 14.68% > budget 3.00%`: one key, two risk objects, opposite readings. Both ship at
+        # 0.03, so a default run's verdicts and reasons are unchanged; the keys exist so the
+        # owner can calibrate the two apart.
+        "risk_standalone_cvar_limit_pct": 0.03,  # the analyzed NAME's own daily tail limit
+        "risk_portfolio_cvar_budget_pct": 0.03,  # the PORTFOLIO (book) daily tail budget
         "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop
         "risk_stress_shock_pct_1": -10.0,  # RESERVED (not yet wired): R2 scenario shock 1 (%)
         "risk_stress_shock_pct_2": -30.0,  # RESERVED (not yet wired): R2 scenario shock 2 (%)
@@ -1480,7 +1489,8 @@ def validate_config(config: dict) -> list[str]:
         "catalyst_macro_scale",
         "catalyst_fed_scale",
         "catalyst_miss_scale",
-        "risk_daily_cvar_budget_pct",
+        "risk_standalone_cvar_limit_pct",
+        "risk_portfolio_cvar_budget_pct",
         "risk_max_drawdown_pct",
         "risk_daily_loss_budget_pct",
         "risk_hwm_soft_pct",

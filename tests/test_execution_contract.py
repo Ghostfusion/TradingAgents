@@ -376,7 +376,9 @@ def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
             "book_drawdown": 0.0724,
             "drawdown_limit": 0.10,
             "single_cvar": 0.0483,
-            "cvar_budget_pct": 0.03,
+            "standalone_cvar_limit_pct": 0.03,
+            "portfolio_cvar_budget_pct": 0.03,
+            "cvar_gate_basis": "configured_reference_book",
             "internal_notes": "must not be published",
             "broker_key": "must not be published",
         },
@@ -387,7 +389,9 @@ def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
         "book_drawdown",
         "drawdown_limit",
         "single_cvar",
-        "cvar_budget_pct",
+        "standalone_cvar_limit_pct",
+        "portfolio_cvar_budget_pct",
+        "cvar_gate_basis",
         "risk_gate",
     }
 

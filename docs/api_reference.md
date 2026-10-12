@@ -181,7 +181,8 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_MIN_DOLLAR_VOLUME` | `min_dollar_volume` | default `None` |
 | `TRADINGAGENTS_MAX_SPREAD_BPS` | `max_spread_bps` | default `None` |
 | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` | default `0.1` |
-| `TRADINGAGENTS_RISK_DAILY_CVAR_BUDGET_PCT` | `risk_daily_cvar_budget_pct` | default `0.03` |
+| `TRADINGAGENTS_RISK_STANDALONE_CVAR_LIMIT_PCT` | `risk_standalone_cvar_limit_pct` | the analyzed name's own daily-tail CVaR limit; default `0.03` |
+| `TRADINGAGENTS_RISK_PORTFOLIO_CVAR_BUDGET_PCT` | `risk_portfolio_cvar_budget_pct` | the portfolio (book) daily-tail CVaR budget; default `0.03` |
 | `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` | default `[]` |
 | `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` | default `{}` |
 | `TRADINGAGENTS_HOLDINGS_TICKERS` | `holdings_tickers` | Option B: actual-book tickers for the PM holdings read; empty = the risk basket is used (Option A) |
@@ -393,7 +394,8 @@ report). Only `enable_events` (B1 catalyst gate), `enable_reflection`,
 the dev machine enables most via the gitignored `.env`). Sizing: `position_sizing='kelly'`, `target_vol=0.15`,
 `kelly_fraction=0.25`, `position_odds=1.0`, `breakeven_atr=1.0`,
 `target_atr=4.0`, `sector_cap_limit=0.35`, `risk_max_drawdown_pct=0.10`,
-`risk_daily_cvar_budget_pct=0.03`, `risk_max_position_pct=0.45`,
+`risk_standalone_cvar_limit_pct=0.03`, `risk_portfolio_cvar_budget_pct=0.03`,
+`risk_max_position_pct=0.45`,
 `enable_tranche_risk` (default **False**) + `tranche_weights` (0.3,0.3,0.4),
 `tranche_stop_mult` (1.5), `tranche_risk_pct` (0.015), `tranche_account` (100000)
 — the deterministic tranche-scaling risk fold (`Value_Dip_swing_Continue.md`):

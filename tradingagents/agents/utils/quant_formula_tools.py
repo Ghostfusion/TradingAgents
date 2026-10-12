@@ -515,7 +515,9 @@ def _fetch_filing_text(ticker: str, current_date: str | None) -> str:
 
 #: The tail probability the sizing LP minimizes at (0.05 -> a 95%-confidence
 #: CVaR). A named level, deliberately NOT the CVaR *budget*: the budget
-#: (``risk_daily_cvar_budget_pct``) is a maximum permitted loss fraction, and
+#: (``risk_portfolio_cvar_budget_pct`` - the solved object is the BOOK, so the
+#: portfolio leg's budget is the one this line compares against) is a maximum
+#: permitted loss fraction, and
 #: reading it into this slot solved a 97%-confidence CVaR by accident (owner
 #: review 2026-10-12). It also keeps this leg equal to the rest of the CVaR
 #: family's own default.
@@ -567,7 +569,7 @@ def get_book_risk_budget(
         # the tail slot solved a 97%-confidence CVaR by accident (owner review
         # 2026-10-12). The level is now the family's own 95%, and the budget is
         # compared in the rendered line instead of being smuggled into `alpha`.
-        budget = float(cfg.get("risk_daily_cvar_budget_pct", 0.03))
+        budget = float(cfg.get("risk_portfolio_cvar_budget_pct", 0.03))
         min_n = int(cfg.get("book_risk_sizing_min_scenarios", 60))
         max_delta = float(cfg.get("book_risk_sizing_max_delta", 0.05))
         scenarios = copula_scenarios(returns_by_name) or None

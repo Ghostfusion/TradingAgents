@@ -115,7 +115,7 @@ def test_the_sizing_tail_is_a_probability_not_a_budget():
 
     ``tail_probability`` is the mass in the worst tail (0.05 -> a
     95%-confidence CVaR). It is NOT the CVaR *budget* - a budget is a maximum
-    permitted LOSS fraction with its own key (``risk_daily_cvar_budget_pct``).
+    permitted LOSS fraction with its own key (``risk_portfolio_cvar_budget_pct``).
     A budget-shaped 0.03 in this slot is therefore a different read of the same
     book (a 97%-confidence CVaR), which is exactly how the caller used to
     publish a 97% number under a 3% label.
@@ -171,8 +171,8 @@ def test_governor_halt_and_budget_verdicts_unchanged_by_sizing():
     sizing = {"weights": {}, "cvar": 0.02}
     assert govern(0.05, halted=True)["verdict"] == "REJECT"
     assert govern(0.05, halted=True, sizing=sizing)["verdict"] == "REJECT"
-    base = govern(0.05, {"risk_daily_cvar_budget_pct": 0.03}, cvar_pct=0.05)
-    sized = govern(0.05, {"risk_daily_cvar_budget_pct": 0.03}, cvar_pct=0.05, sizing=sizing)
+    base = govern(0.05, {"risk_portfolio_cvar_budget_pct": 0.03}, cvar_pct=0.05)
+    sized = govern(0.05, {"risk_portfolio_cvar_budget_pct": 0.03}, cvar_pct=0.05, sizing=sizing)
     assert base["reasons"] == sized["reasons"]
 
 

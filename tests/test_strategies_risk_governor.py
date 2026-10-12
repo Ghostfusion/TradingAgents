@@ -40,7 +40,7 @@ def test_unknown_size_passes():
 
 
 def test_cvar_budget_gate():
-    v = govern(0.05, {"risk_daily_cvar_budget_pct": 0.03}, cvar_pct=0.05)
+    v = govern(0.05, {"risk_portfolio_cvar_budget_pct": 0.03}, cvar_pct=0.05)
     assert v["verdict"] == "REJECT" or v["verdict"] == "WARN"
 
 

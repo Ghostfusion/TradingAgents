@@ -42,7 +42,8 @@ def _state(**risk_context) -> dict:
         "book_drawdown": 0.042,
         "drawdown_limit": 0.10,
         "max_position_pct": 0.30,
-        "cvar_budget_pct": 0.03,
+        "standalone_cvar_limit_pct": 0.03,
+        "portfolio_cvar_budget_pct": 0.03,
         "liquidity": {
             "verdict": "illiquid",
             "illiq": 2.5e-7,
@@ -83,7 +84,8 @@ def test_pm_prompt_renders_liquidity_drawdown_and_limit():
     assert "verdict=ILLIQUID" in prompt
     assert "book drawdown 4.20% vs limit 10.00%" in prompt
     assert "per-trade size cap 30.0%" in prompt
-    assert "daily CVaR budget 3.00%" in prompt
+    assert "standalone (per-name) CVaR limit 3.00%" in prompt
+    assert "portfolio CVaR budget 3.00%" in prompt
     assert out["final_trade_decision"]
 
 

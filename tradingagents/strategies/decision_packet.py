@@ -214,7 +214,8 @@ def _risk_constraints_rows(state: dict, cfg: dict, *, closes=None) -> list[str]:
                 [
                     f"max_position={_pct(lim.get('max_position_pct'))}",
                     f"book_cap={_pct(lim.get('max_book_position_pct'))}",
-                    f"cvar_budget={_pct(lim.get('risk_daily_cvar_budget_pct'))}",
+                    f"name_cvar_limit={_pct(lim.get('risk_standalone_cvar_limit_pct'))}",
+                    f"portfolio_cvar_budget={_pct(lim.get('risk_portfolio_cvar_budget_pct'))}",
                     f"drawdown_limit={_pct(lim.get('risk_max_drawdown_pct'))}",
                     f"sector_cap={_pct(lim.get('safety_cap_pct'))}",
                 ],

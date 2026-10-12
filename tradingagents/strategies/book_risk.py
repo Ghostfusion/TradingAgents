@@ -792,7 +792,7 @@ def min_cvar_weights(
 
     ``tail_probability`` is the **probability mass in the worst tail** (0.05 =
     a 95%-confidence CVaR) - it is NOT the CVaR *budget*. A budget is a maximum
-    permitted loss fraction with its own key (``risk_daily_cvar_budget_pct``);
+    permitted loss fraction with its own key (``risk_portfolio_cvar_budget_pct``);
     the two are different quantities and must not share a slot. Passing the
     3% budget here solved a **97%**-confidence CVaR by accident (owner review
     2026-10-12), which is why the parameter and its returned key are named

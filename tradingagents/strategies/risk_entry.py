@@ -18,7 +18,8 @@ run (name CVaR 9.00% vs a 3.00% budget), and a price would misrepresent it.
 **Contract rule** (owner decision 2026-10-02): the CVaR priced against here is
 the risk snapshot's own measurement (``risk_context.single_cvar`` - the value
 the risk governor also consumes, so one quantity keeps one producer), and the
-budget is the same configured limit that governor gates against. The status is
+limit is the standalone per-name CVaR limit (``risk_standalone_cvar_limit_pct``)
+that governor gates THIS leg against. The status is
 informational: an ``OVER_BUDGET`` name must surface as a risk rejection and
 must NEVER be answered with a smaller or less-attractive entry price, which
 would silently override the governor's authoritative PASS/FAIL.
@@ -63,7 +64,8 @@ def risk_adjusted_entry(
         max_stop_fraction: the largest per-share risk, as a fraction of the
             entry, that the rule will still size.
         name_cvar: the name's measured CVaR, as a positive loss fraction.
-        cvar_budget: the book's CVaR budget for one name.
+        cvar_budget: the standalone per-name CVaR limit
+            (``risk_standalone_cvar_limit_pct``) - not the portfolio budget.
 
     Returns:
         ``value`` (= ``stop / (1 - max_stop_fraction)``), ``stop_fraction``,

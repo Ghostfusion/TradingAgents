@@ -404,19 +404,25 @@ def _risk_gate_block(final_state: dict) -> str:
     # CVaR was the one blocking new risk (GOOG 2026-09-11 decision.md - the PM
     # had to resolve the contradiction in prose).
     ctx = final_state.get("risk_context") or {}
-    budget = ctx.get("cvar_budget_pct")
+    # Each leg is compared against ITS OWN limit (owner decision 2026-10-12):
+    # the analyzed name against the standalone per-name limit, the portfolio leg
+    # against the portfolio budget. One shared key used to be compared against
+    # both numbers, so this block could print the book's 1.04 % beside the
+    # name's 14.68 % and call both comparisons "budget 3.00%".
+    name_limit = ctx.get("standalone_cvar_limit_pct")
+    book_budget = ctx.get("portfolio_cvar_budget_pct")
     if ctx.get("single_cvar") is not None:
         line = f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}"
-        if budget is not None:
-            line += f" (budget {budget:.2%})"
-            if ctx["single_cvar"] > budget:
-                line += " — over budget: blocks NEW risk in this name"
+        if name_limit is not None:
+            line += f" (standalone limit {name_limit:.2%})"
+            if ctx["single_cvar"] > name_limit:
+                line += " — over the limit: blocks NEW risk in this name"
         parts.append(line)
     if ctx.get("book_cvar") is not None:
         line = f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%}"
-        if budget is not None:
-            line += f" (budget {budget:.2%})"
-            if ctx["book_cvar"] > budget:
+        if book_budget is not None:
+            line += f" (portfolio budget {book_budget:.2%})"
+            if ctx["book_cvar"] > book_budget:
                 line += " — funds the portfolio gate"
         parts.append(line)
     # Decision-gate auditability (IREN 2026-09-10 decision.md review): the
@@ -566,12 +572,16 @@ def _binding_constraint(final_state: dict) -> tuple[str | None, str, str]:
             "risk_reduction",
             f"book drawdown {float(dd):.2%} > limit {float(lim):.2%}",
         )
-    cvar, budget = ctx.get("single_cvar"), ctx.get("cvar_budget_pct")
-    if cvar is not None and budget is not None and float(cvar) > float(budget):
+    # The NAME leg's own limit, not the portfolio budget: `binding_constraint`
+    # labels THIS candidate's tail, and since 2026-10-12 the two limits are
+    # separate keys, so the reason names the one it breached.
+    cvar, name_limit = ctx.get("single_cvar"), ctx.get("standalone_cvar_limit_pct")
+    if cvar is not None and name_limit is not None and float(cvar) > float(name_limit):
         return (
             "analyzed_name_cvar",
             "risk_reduction",
-            f"analyzed-name CVaR {float(cvar):.2%} > budget {float(budget):.2%}",
+            f"analyzed-name CVaR {float(cvar):.2%} > "
+            f"standalone limit {float(name_limit):.2%}",
         )
     gate = final_state.get("risk_gate") or {}
     if str(gate.get("verdict") or "").upper() == "REJECT":

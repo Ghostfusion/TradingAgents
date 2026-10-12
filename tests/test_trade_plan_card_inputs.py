@@ -269,7 +269,7 @@ def test_the_plan_reads_the_measured_risk_snapshot_off_state(monkeypatch):
         {
             "risk_context": {
                 "single_cvar": 0.09,
-                "cvar_budget_pct": 0.03,
+                "standalone_cvar_limit_pct": 0.03,
                 "liquidity": {"verdict": "caution"},
             }
         },

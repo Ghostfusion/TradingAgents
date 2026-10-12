@@ -169,7 +169,9 @@ $$\min_{w,\zeta}\;\zeta+\frac{1}{(1-p)T}\sum_{t=1}^{T}\max\!\big(L_t(w)-\zeta,0\
 
 Here `p` is the **tail probability** (0.05 -> a 95 %-confidence CVaR), which is
 NOT the CVaR *budget*: a budget is a maximum permitted loss fraction with its own
-key (`risk_daily_cvar_budget_pct`). **As-built correction (2026-10-12):** the
+key (`risk_portfolio_cvar_budget_pct`; the name leg has its own
+`risk_standalone_cvar_limit_pct` since the 2026-10-12 split).
+**As-built correction (2026-10-12):** the
 caller originally read that 3 % budget into this slot, so the LP minimized a
 **97 %**-confidence CVaR and the render presented `3.00%` as the tail; the level
 is now the CVaR family's own 95 % (`quant_formula_tools.BOOK_SIZING_TAIL_PROBABILITY`),

@@ -88,26 +88,42 @@ def test_risk_gate_renders_both_cvars(tmp_path):
 def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
     """GOOG 2026-09-11: name CVaR 4.12% over a 3.00% budget while the book CVaR
     was 1.21% - the block must attribute the block to the name leg (and carry
-    both budgets), never tag the book leg as what fed the gate."""
+    each leg's OWN limit), never tag the book leg as what fed the gate."""
     state = _state(
         verdict="PASS",
         reasons=[],
-        risk_ctx={"single_cvar": 0.0412, "book_cvar": 0.0121, "cvar_budget_pct": 0.03},
+        risk_ctx={
+            "single_cvar": 0.0412,
+            "book_cvar": 0.0121,
+            "standalone_cvar_limit_pct": 0.03,
+            "portfolio_cvar_budget_pct": 0.03,
+        },
     )
     write_report_tree(state, "TST", tmp_path)
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
-    assert "Analyzed-name CVaR: 4.12% (budget 3.00%) — over budget: blocks NEW risk in this name" in decision
-    assert "Portfolio (book) CVaR: 1.21% (budget 3.00%)" in decision
+    assert (
+        "Analyzed-name CVaR: 4.12% (standalone limit 3.00%) — over the limit: "
+        "blocks NEW risk in this name" in decision
+    )
+    assert "Portfolio (book) CVaR: 1.21% (portfolio budget 3.00%)" in decision
     assert "fed the gate" not in decision
 
     state2 = _state(
         verdict="REJECT",
         reasons=["book cvar over budget"],
-        risk_ctx={"single_cvar": 0.0100, "book_cvar": 0.0500, "cvar_budget_pct": 0.03},
+        risk_ctx={
+            "single_cvar": 0.0100,
+            "book_cvar": 0.0500,
+            "standalone_cvar_limit_pct": 0.03,
+            "portfolio_cvar_budget_pct": 0.03,
+        },
     )
     write_report_tree(state2, "TST2", tmp_path)
     decision2 = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
-    assert "Portfolio (book) CVaR: 5.00% (budget 3.00%) — funds the portfolio gate" in decision2
+    assert (
+        "Portfolio (book) CVaR: 5.00% (portfolio budget 3.00%) — funds the portfolio gate"
+        in decision2
+    )
     assert "blocks NEW risk in this name" not in decision2
 
 
@@ -943,7 +959,7 @@ def _decision(tmp_path):
 def test_decision_derives_quality_and_sources_from_the_tool_evidence(tmp_path):
     """data_quality / sources_used / sources_empty must come from the evidence
     that actually ran, not from placeholders or a regex over the prose."""
-    state = _state(risk_ctx={"single_cvar": 0.01, "cvar_budget_pct": 0.03})
+    state = _state(risk_ctx={"single_cvar": 0.01, "standalone_cvar_limit_pct": 0.03})
     state["pm_decision"] = {
         "rating": "Underweight",
         "investment_thesis": "thesis",
@@ -974,7 +990,7 @@ def test_decision_records_the_pm_declared_quality_over_the_evidence(tmp_path):
 def test_decision_labels_a_risk_driven_action(tmp_path):
     """A trim bound by the risk budget must say so, so it does not read as a
     setup call (the structure tools said hold on NVDA 2026-09-12)."""
-    state = _state(risk_ctx={"single_cvar": 0.0483, "cvar_budget_pct": 0.03})
+    state = _state(risk_ctx={"single_cvar": 0.0483, "standalone_cvar_limit_pct": 0.03})
     state["pm_decision"] = {"rating": "Underweight"}
     write_report_tree(state, "NVDA", tmp_path)
     doc = _decision(tmp_path)
@@ -996,7 +1012,7 @@ def test_decision_marks_a_book_drawdown_block(tmp_path):
 
 
 def test_decision_has_no_binding_constraint_for_a_setup_driven_action(tmp_path):
-    state = _state(risk_ctx={"single_cvar": 0.01, "cvar_budget_pct": 0.03})
+    state = _state(risk_ctx={"single_cvar": 0.01, "standalone_cvar_limit_pct": 0.03})
     state["pm_decision"] = {"rating": "Buy"}
     write_report_tree(state, "TST", tmp_path)
     doc = _decision(tmp_path)
