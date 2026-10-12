@@ -513,6 +513,15 @@ def _fetch_filing_text(ticker: str, current_date: str | None) -> str:
         return ""
 
 
+#: The tail probability the sizing LP minimizes at (0.05 -> a 95%-confidence
+#: CVaR). A named level, deliberately NOT the CVaR *budget*: the budget
+#: (``risk_daily_cvar_budget_pct``) is a maximum permitted loss fraction, and
+#: reading it into this slot solved a 97%-confidence CVaR by accident (owner
+#: review 2026-10-12). It also keeps this leg equal to the rest of the CVaR
+#: family's own default.
+BOOK_SIZING_TAIL_PROBABILITY = 0.05
+
+
 @tool
 def get_book_risk_budget(
     current_date: Annotated[str | None, "current date you are trading at, yyyy-mm-dd"] = None,
@@ -520,10 +529,13 @@ def get_book_risk_budget(
     """Book sizing under the CVaR budget: minimum-CVaR weights (Q2).
 
     The gate today MEASURES book CVaR/CDaR and blocks; this solves for weights
-    under the same budget (Rockafellar-Uryasev sample-average LP) using the
-    configured risk basket, with joint-tail copula scenarios in place of the
-    single fixed -10% shock. Advisory sizing only - never an order. Use before
-    any 'size the book down / the book is over its budget' claim.
+    at the family's own 95% tail (Rockafellar-Uryasev sample-average LP) over
+    the configured risk basket, with joint-tail copula scenarios in place of
+    the single fixed -10% shock, and reports the solved book CVaR beside the
+    configured budget. The budget is a comparison here, not a constraint - the
+    LP's binding constraint is the position cap or the move limit. Advisory
+    sizing only - never an order. Use before any 'size the book down / the
+    book is over its budget' claim.
     """
     current_date = as_of(current_date, get_run_trade_date())
     if not _flag("enable_book_risk_sizing"):
@@ -549,13 +561,19 @@ def get_book_risk_budget(
                 "return observations)"
             )
         cap = float(cfg.get("max_position_pct", 0.30))
-        alpha = float(cfg.get("risk_daily_cvar_budget_pct", 0.03))
+        # Two different quantities, two slots. The solver's tail level is a
+        # TAIL PROBABILITY (5% = a 95%-confidence CVaR); the config key is a
+        # BUDGET - a maximum permitted loss fraction. Reading the budget into
+        # the tail slot solved a 97%-confidence CVaR by accident (owner review
+        # 2026-10-12). The level is now the family's own 95%, and the budget is
+        # compared in the rendered line instead of being smuggled into `alpha`.
+        budget = float(cfg.get("risk_daily_cvar_budget_pct", 0.03))
         min_n = int(cfg.get("book_risk_sizing_min_scenarios", 60))
         max_delta = float(cfg.get("book_risk_sizing_max_delta", 0.05))
         scenarios = copula_scenarios(returns_by_name) or None
         solve = min_cvar_weights(
             returns_by_name,
-            alpha=alpha,
+            tail_probability=BOOK_SIZING_TAIL_PROBABILITY,
             cap=cap,
             max_delta=max_delta,
             current=weights,
@@ -566,14 +584,23 @@ def get_book_risk_budget(
                 f"book risk budget: unavailable - below the {min_n}-scenario floor "
                 "or fewer than 2 measurable names (no fabricated weights)"
             )
+        p = float(solve["tail_probability"])
         cur = ", ".join(f"{k}={v:.1%}" for k, v in sorted(weights.items()))
         tgt = ", ".join(f"{k}={v:.1%}" for k, v in sorted(solve["weights"].items()))
+        # The two rows are NOT the same basis: ``current`` is the configured
+        # book (Σw may be well below 1, with the rest in cash) while the LP's
+        # target is fully invested by construction (Σw = 1). Printed unlabelled
+        # they read as an exposure change, which they are not - so each row
+        # states its own sum.
+        cur_sum = sum(float(v) for v in weights.values())
+        tgt_sum = sum(float(v) for v in solve["weights"].values())
         lines = [
-            f"book risk budget (alpha={solve['alpha']:.2%} daily, n={solve['n']}, "
-            f"binding={solve['binding']}):",
-            f"  current: {cur or 'n/a'}",
-            f"  target:  {tgt}",
+            f"book risk budget (1-day CVaR at {1.0 - p:.0%} confidence "
+            f"[tail {p:.2%}], n={solve['n']}, binding={solve['binding']}):",
+            f"  current: {cur or 'n/a'} (Σw {cur_sum:.1%}; the remainder is cash)",
+            f"  target:  {tgt} (Σw {tgt_sum:.1%}; the LP is fully invested by construction)",
             f"  book CVaR {solve['cvar']:.4%}" + (f" | CDaR {solve['cdar']:.4%}" if solve.get("cdar") is not None else ""),
+            f"  budget: {budget:.2%} (the comparison, not a solver constraint)",
             f"  scenarios: {'t-copula joint tail' if scenarios else 'historical only'}",
             "Interpretation: advisory sizing under the existing budget - the "
             "governor still owns PASS/WARN/REJECT; nothing here is an order.",

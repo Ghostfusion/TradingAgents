@@ -89,16 +89,21 @@ renders `spread_bps` and still returns its previous verdict for names with quote
 
 ### Q2 - Minimum-CVaR/CDaR sizing under the budget (N5 + C4)
 
-**Target.** `strategies/book_risk.py`: `min_cvar_weights(returns_by_name, alpha,
-cap, max_delta)` (Rockafellar-Uryasev, sample-average LP) and
+**Target.** `strategies/book_risk.py`: `min_cvar_weights(returns_by_name,
+tail_probability, cap, max_delta)` (Rockafellar-Uryasev, sample-average LP) and
 `copula_scenarios(returns_by_name, n, nu, family)` (t / Clayton lower-tail joint
 scenarios). `strategies/risk_governor.py`: a `sizing` remedy beside PASS/WARN/REJECT.
+(The parameter was `alpha` in this plan; as built on 2026-10-12 it is
+`tail_probability` — a **tail probability**, not the CVaR budget, which is a
+separate quantity and not a solver constraint.)
 
 **Behaviour.**
-- Objective: minimise `zeta + 1/((1-alpha)T) * sum(max(L_t(w) - zeta, 0))`; weights
+- Objective: minimise `zeta + 1/((1-p)T) * sum(max(L_t(w) - zeta, 0))` with
+`p = tail_probability`; weights
 bounded by the existing per-name cap and by `max_delta` against the current book.
 - Output: target weights, the resulting book CVaR and CDaR, the binding constraint,
-and the sample/scenario count. Never an order - advisory numbers only, like every
+the tail probability and the **`tail_count`** (the scenarios that tail holds), and
+the sample/scenario count. Never an order - advisory numbers only, like every
 other sizing read.
 - Degradation: below `min_scenarios` (default 60) the optimiser returns
 `unavailable` and the governor keeps today's verdict-only behaviour.

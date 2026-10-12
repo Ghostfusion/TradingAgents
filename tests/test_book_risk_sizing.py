@@ -13,7 +13,7 @@ from tradingagents.strategies.book_risk import (
 )
 from tradingagents.strategies.risk_governor import build_risk_snapshot, govern
 
-ALPHA = 0.05
+TAIL_PROBABILITY = 0.05
 
 
 def _fingerprint(scenarios: list) -> str:
@@ -49,11 +49,11 @@ def _dependent_fat_tail_book() -> dict:
 def test_min_cvar_lowers_cvar_against_equal_weight():
     series = _asymmetric_book()
     current = {"safe": 0.4, "mid": 0.3, "risky": 0.3}
-    res = min_cvar_weights(series, alpha=ALPHA, cap=0.5, max_delta=0.15, current=current)
+    res = min_cvar_weights(series, tail_probability=TAIL_PROBABILITY, cap=0.5, max_delta=0.15, current=current)
     assert res is not None
 
     equal = dict.fromkeys(series, 1.0 / 3)
-    equal_cvar = cvar(portfolio_returns(equal, series), ALPHA)
+    equal_cvar = cvar(portfolio_returns(equal, series), TAIL_PROBABILITY)
     assert equal_cvar is not None
     # cvar is reported as a positive loss fraction, so the optimum is a
     # *smaller* number than the equal-weight loss.
@@ -64,14 +64,14 @@ def test_min_cvar_lowers_cvar_against_equal_weight():
         assert 0.0 <= w <= 0.5 + 1e-6
         assert abs(w - current[name]) <= 0.15 + 1e-6
     assert res["n"] == 200
-    assert res["alpha"] == ALPHA
+    assert res["tail_probability"] == TAIL_PROBABILITY
     assert res["basis"]
 
 
 def test_min_cvar_respects_the_move_limit():
     series = _asymmetric_book()
     current = {"safe": 0.4, "mid": 0.3, "risky": 0.3}
-    res = min_cvar_weights(series, alpha=ALPHA, cap=0.9, max_delta=0.05, current=current)
+    res = min_cvar_weights(series, tail_probability=TAIL_PROBABILITY, cap=0.9, max_delta=0.05, current=current)
     assert res is not None
     for name, w in res["weights"].items():
         assert abs(w - current[name]) <= 0.05 + 1e-6
@@ -81,10 +81,10 @@ def test_min_cvar_respects_the_move_limit():
 
 def test_min_cvar_none_below_scenario_floor():
     series = {name: s[:10] for name, s in _asymmetric_book().items()}
-    assert min_cvar_weights(series, alpha=ALPHA, cap=0.5) is None
+    assert min_cvar_weights(series, tail_probability=TAIL_PROBABILITY, cap=0.5) is None
     # The floor is the cause, not the data: the same sample solves with a
     # lower floor and reports the true sample count.
-    res = min_cvar_weights(series, alpha=ALPHA, cap=0.5, min_scenarios=5)
+    res = min_cvar_weights(series, tail_probability=TAIL_PROBABILITY, cap=0.5, min_scenarios=5)
     assert res is not None
     assert res["n"] == 10
 
@@ -93,8 +93,8 @@ def test_min_cvar_none_on_degenerate_inputs():
     series = _asymmetric_book()
     assert min_cvar_weights({"safe": series["safe"]}) is None
     assert min_cvar_weights(series, cap=0.0) is None
-    assert min_cvar_weights(series, alpha=0.0) is None
-    assert min_cvar_weights(series, alpha=1.0) is None
+    assert min_cvar_weights(series, tail_probability=0.0) is None
+    assert min_cvar_weights(series, tail_probability=1.0) is None
     assert min_cvar_weights(series, cap=float("nan")) is None
     assert min_cvar_weights(series, max_delta=float("inf")) is None
 
@@ -108,6 +108,40 @@ def test_min_cvar_ragged_non_finite_input_does_not_raise():
     res = min_cvar_weights(series, cap=0.6, min_scenarios=30)
     assert res is not None
     assert res["n"] == 39  # aligned to the shortest usable series, no raise
+
+
+def test_the_sizing_tail_is_a_probability_not_a_budget():
+    """The 2026-10-12 review's P0, at the producer.
+
+    ``tail_probability`` is the mass in the worst tail (0.05 -> a
+    95%-confidence CVaR). It is NOT the CVaR *budget* - a budget is a maximum
+    permitted LOSS fraction with its own key (``risk_daily_cvar_budget_pct``).
+    A budget-shaped 0.03 in this slot is therefore a different read of the same
+    book (a 97%-confidence CVaR), which is exactly how the caller used to
+    publish a 97% number under a 3% label.
+    """
+    series = _asymmetric_book()
+    at_95 = min_cvar_weights(series, tail_probability=0.05, cap=0.6)
+    at_97 = min_cvar_weights(series, tail_probability=0.03, cap=0.6)
+    assert at_95 is not None and at_97 is not None
+    assert at_95["tail_probability"] == 0.05
+    assert at_97["tail_probability"] == 0.03
+    assert "95%-confidence CVaR" in at_95["basis"]
+    assert "97%-confidence CVaR" in at_97["basis"]
+    # Two reads of one book, not one metric with two names: the tail a 200-day
+    # sample holds is 10 scenarios at 0.05 and 6 at 0.03. The rounded ``cvar``
+    # can coincide on a small book (it does here), which is exactly why the
+    # LEVEL has to be named - the number alone cannot say which tail it is.
+    assert at_95["tail_count"] == 10
+    assert at_97["tail_count"] == 6
+
+
+def test_the_sizing_tail_defaults_to_the_family_level():
+    """The default is the family's own 95%, so a caller that says nothing still
+    gets the same tail every other CVaR leg reports."""
+    res = min_cvar_weights(_asymmetric_book(), cap=0.6)
+    assert res is not None
+    assert res["tail_probability"] == 0.05
 
 
 # ---------------------------------------------------------------------------

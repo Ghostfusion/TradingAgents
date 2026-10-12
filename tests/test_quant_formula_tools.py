@@ -188,6 +188,65 @@ def test_book_risk_budget_solves_under_the_budget(monkeypatch):
     assert "nothing here is an order" in out
 
 
+def test_book_risk_budget_names_its_tail_not_the_budget(monkeypatch):
+    """P0 (owner review 2026-10-12): the rendered line names the tail the LP
+    solved at - the CVaR family's own 95% - and never the BUDGET.
+
+    The caller used to read ``risk_daily_cvar_budget_pct`` (0.03) into the
+    solver's tail slot, which solved a 97%-confidence CVaR and printed it as
+    ``alpha=3.00% daily``: a budget fraction wearing a tail probability's
+    label. ``_cfg`` ships the 0.03 budget, so this is the exact configuration
+    the defect needed.
+    """
+    cfg = _cfg(monkeypatch, enable_book_risk_sizing=True)
+    assert cfg["risk_daily_cvar_budget_pct"] == 0.03  # the shape the defect needs
+    series = {
+        name: [0.001 if i % 9 else -0.04 for i in range(140)] for name in ("AAA", "BBB")
+    }
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._ohlcv",
+        lambda t, days=320: {"closes": [100.0 + c for c in series.get(t, [])]},
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._daily_returns",
+        lambda closes: list(closes),
+    )
+    out = qft.get_book_risk_budget.invoke({})
+    assert "95% confidence" in out and "[tail 5.00%]" in out
+    assert "budget: 3.00%" in out  # the budget is compared, not solved at
+    assert "alpha=3.00%" not in out
+
+
+def test_book_risk_budget_labels_the_two_weight_bases(monkeypatch):
+    """``current`` and ``target`` are not on one scale.
+
+    The configured book can be half in cash while the LP's target is fully
+    invested by construction (``Σw = 1``), so printed unlabelled the pair reads
+    as an exposure change - which it is not. Each row states its own ``Σw``.
+    """
+    _cfg(
+        monkeypatch,
+        enable_book_risk_sizing=True,
+        risk_basket_weights={"AAA": 0.3, "BBB": 0.2},
+        # A half-invested book needs room in the move limit to reach Σw = 1.
+        book_risk_sizing_max_delta=0.6,
+    )
+    series = {
+        name: [0.001 if i % 9 else -0.04 for i in range(140)] for name in ("AAA", "BBB")
+    }
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._ohlcv",
+        lambda t, days=320: {"closes": [100.0 + c for c in series.get(t, [])]},
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.analysis_tools._daily_returns",
+        lambda closes: list(closes),
+    )
+    out = qft.get_book_risk_budget.invoke({})
+    assert "current:" in out and "Σw 50.0%" in out
+    assert "target:" in out and "Σw 100.0%" in out
+
+
 def test_book_risk_budget_says_unavailable_with_fewer_than_two_usable_names(monkeypatch):
     _cfg(monkeypatch, enable_book_risk_sizing=True, risk_basket_tickers=["AAA"], risk_basket_weights={"AAA": 1.0})
     monkeypatch.setattr(

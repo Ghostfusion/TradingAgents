@@ -163,9 +163,20 @@ $$\text{NOA}=\frac{\text{Operating assets}-\text{Operating liabilities}}{\text{T
 - **Data:** two consecutive balance sheets. **Failure mode:** operating-vs-financial
   split is ambiguous for hybrids — label the classification used.
 
-### N5 — Minimum-CVaR / minimum-CDaR sizing under the existing budget (§C4 folded in)
+### N5 — Minimum-CVaR / minimum-CDaR sizing at a stated tail (§C4 folded in)
 
-$$\min_{w,\zeta}\;\zeta+\frac{1}{(1-\alpha)T}\sum_{t=1}^{T}\max\!\big(L_t(w)-\zeta,0\big)$$
+$$\min_{w,\zeta}\;\zeta+\frac{1}{(1-p)T}\sum_{t=1}^{T}\max\!\big(L_t(w)-\zeta,0\big)$$
+
+Here `p` is the **tail probability** (0.05 -> a 95 %-confidence CVaR), which is
+NOT the CVaR *budget*: a budget is a maximum permitted loss fraction with its own
+key (`risk_daily_cvar_budget_pct`). **As-built correction (2026-10-12):** the
+caller originally read that 3 % budget into this slot, so the LP minimized a
+**97 %**-confidence CVaR and the render presented `3.00%` as the tail; the level
+is now the CVaR family's own 95 % (`quant_formula_tools.BOOK_SIZING_TAIL_PROBABILITY`),
+the parameter and the returned key are `tail_probability`, and the result carries
+`tail_count` (the scenarios the tail actually holds - 10 at `T=200, p=0.05`). The
+budget is **reported beside** the solved CVaR; it is not a solver constraint, and
+the LP binds on `cap`/`max_delta`/`sum_i w_i = 1` instead.
 
 - **Provenance:** Rockafellar & Uryasev, *Optimization of Conditional Value-at-Risk*,
   Journal of Risk 2(3), 2000

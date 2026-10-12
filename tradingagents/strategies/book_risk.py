@@ -769,7 +769,7 @@ def _solve_min_cvar(y: list[list[float]], alpha: float, lo: list[float],
 
 def min_cvar_weights(
     returns_by_name: dict,
-    alpha: float = 0.05,
+    tail_probability: float = 0.05,
     cap: float = 0.30,
     max_delta: float = 0.05,
     current: dict | None = None,
@@ -777,24 +777,41 @@ def min_cvar_weights(
 ) -> dict | None:
     """Minimum-CVaR long-only sizing (Rockafellar-Uryasev sample-average LP).
 
-    Solves ``min_{w,zeta} zeta + 1/((1-alpha)T) * sum_t max(L_t(w) - zeta, 0)``
-    with ``L_t(w) = -sum_i w_i r_it``, fully invested (``sum_i w_i = 1``),
-    long-only (``0 <= w_i <= cap``) and, when ``current`` is supplied, within
-    ``max_delta`` of the current book.
+    Solves ``min_{w,zeta} zeta + 1/((1-p)T) * sum_t max(L_t(w) - zeta, 0)``
+    with ``p`` = ``tail_probability`` and ``L_t(w) = -sum_i w_i r_it``, fully
+    invested (``sum_i w_i = 1``), long-only (``0 <= w_i <= cap``) and, when
+    ``current`` is supplied, within ``max_delta`` of the current book.
 
-    Returns ``{"weights", "cvar", "cdar", "binding", "n", "alpha", "basis"}``
-    with ``cvar`` the resulting book CVaR as a **positive loss fraction** and
-    ``binding`` naming the active constraint (``'cap'`` / ``'max_delta'`` /
-    ``'unconstrained'`` / ``'min_cvar'``). Returns None - never fabricated
-    weights - below the ``min_scenarios`` floor, with fewer than two usable
-    series, when ``sum_i w_i = 1`` is infeasible under ``cap``/``max_delta``,
-    or for ``cap <= 0`` / ``alpha`` outside (0, 1) / non-finite parameters.
+    ``tail_probability`` is the **probability mass in the worst tail** (0.05 =
+    a 95%-confidence CVaR) - it is NOT the CVaR *budget*. A budget is a maximum
+    permitted loss fraction with its own key (``risk_daily_cvar_budget_pct``);
+    the two are different quantities and must not share a slot. Passing the
+    3% budget here solved a **97%**-confidence CVaR by accident (owner review
+    2026-10-12), which is why the parameter and its returned key are named
+    after the quantity they actually are.
+
+    The budget is deliberately **not** a constraint here: the LP minimizes the
+    tail subject to ``cap``/``max_delta``/``sum_i w_i = 1``, and ``binding``
+    names which of those is active. Whether the solved ``cvar`` lands inside
+    the budget is a comparison the CALLER reports, never a rule the solver
+    enforces.
+
+    Returns ``{"weights", "cvar", "cdar", "binding", "n", "tail_probability",
+    "tail_count", "basis"}`` with ``cvar`` the resulting book CVaR as a
+    **positive loss fraction** and ``tail_count`` the scenarios that tail
+    actually holds (the quantity a sufficiency floor is expressed in; reported,
+    not enforced here). Returns None - never fabricated weights - below the
+    ``min_scenarios`` floor, with fewer than two usable series, when
+    ``sum_i w_i = 1`` is infeasible under ``cap``/``max_delta``, or for
+    ``cap <= 0`` / ``tail_probability`` outside (0, 1) / non-finite parameters.
 
     **Advisory sizing only**: these are numbers to reason about, never an
     order, ticket or trade instruction.
     """
     try:
-        alpha = float(alpha)
+        # The private solvers' own name for the same quantity (a tail
+        # probability); kept internal so only the public API is renamed.
+        alpha = float(tail_probability)
         cap = float(cap)
         max_delta = float(max_delta)
         min_scenarios = int(min_scenarios)
@@ -856,9 +873,17 @@ def min_cvar_weights(
         "cdar": round(dd["cdar"], 6) if dd else None,
         "binding": binding,
         "n": t,
-        "alpha": alpha,
+        "tail_probability": alpha,
+        # The number of scenarios the tail actually holds at this level - the
+        # quantity a sample-sufficiency floor has to be expressed in (T=200 at
+        # 0.05 is 10 tail scenarios, at 0.03 it is 6). Reported, never enforced
+        # here: the floor policy is its own decision.
+        "tail_count": max(1, int(alpha * t)),
         "basis": (f"sample-average min-CVaR LP ({method}); T={t} aligned daily "
-                  f"returns, alpha={alpha}, cap={cap}, max_delta={max_delta}"),
+                  f"returns, tail_probability={alpha} "
+                  f"({1.0 - alpha:.0%}-confidence CVaR), cap={cap}, "
+                  f"max_delta={max_delta}; the CVaR budget is a separate "
+                  f"quantity and is not a solver constraint"),
     }
 
 
