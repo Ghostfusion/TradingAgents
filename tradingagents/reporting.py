@@ -637,6 +637,17 @@ def write_research_decision(
         if m4:
             anchor_entry = float(m4.group(1))
 
+    # The published allocation is the run's own measured book size, expressed in the contract's
+    # declared 0..100 percent domain (the producer's own debate schema declares
+    # `recommended_allocation_pct` as ge=0, le=100). `size_pct` above is a book *fraction* on both
+    # paths (the string path divides the parsed percentage by 100), so this is a unit change, not an
+    # inference about what the number means. An unmeasured size, or one outside 0..1, publishes
+    # nothing: the executor fails closed on a value it cannot validate, and a mis-scaled allocation
+    # is worse than a null one. A measured zero is published as zero, which is a real answer.
+    recommended_allocation_pct = (
+        round(size_pct * 100.0, 6) if size_pct is not None and 0.0 <= size_pct <= 1.0 else None
+    )
+
     # §103's ENTRY/EXIT price object - the run's captured trade-plan block,
     # already rendered into the report and the two decision outputs. It travels
     # here structurally so a consumer reads the measured level, not a regex over
@@ -706,7 +717,7 @@ def write_research_decision(
         "direction": None,  # derived by the executor from rating
         "thesis": pm.get("investment_thesis") if isinstance(pm, dict) else None,
         "rationale": pm.get("executive_summary") if isinstance(pm, dict) else None,
-        "recommended_allocation_pct": None,  # PM position_size is prose; never parsed
+        "recommended_allocation_pct": recommended_allocation_pct,
         "position": {
             "target_notional": None,
             # §100's final entry price (advisory). The executor derives its own

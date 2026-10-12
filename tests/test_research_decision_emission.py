@@ -53,7 +53,9 @@ def test_emits_hash_pinned_contract(tmp_path):
 
 
 def test_unproducible_fields_are_null(tmp_path):
-    write_research_decision(_final_state(), "avgo", tmp_path)
+    # The contract carries no size, so the allocation is unmeasurable and stays null.
+    fs = _final_state(position_contract={"stop_loss": 429.0, "target": 460.0})
+    write_research_decision(fs, "avgo", tmp_path)
     doc = _read(tmp_path)
     assert doc["direction"] is None
     assert doc["recommended_allocation_pct"] is None
@@ -62,6 +64,25 @@ def test_unproducible_fields_are_null(tmp_path):
     # construction: stop breach / degraded data quality / manual reassessment),
     # never left as an empty placeholder.
     assert doc["invalidations"] and any("stop_loss" in s for s in doc["invalidations"])
+
+
+def test_allocation_is_published_in_the_declared_percent_domain(tmp_path):
+    """The run's measured book size reaches the artifact in the contract's declared 0..100
+    domain. An out-of-domain size publishes nothing: the executor fails closed, and a
+    mis-scaled allocation is worse than a null one. A measured zero is a real answer."""
+    write_research_decision(_final_state(), "avgo", tmp_path)
+    doc = _read(tmp_path)
+    assert doc["recommended_allocation_pct"] == pytest.approx(2.42)
+    assert doc["position"]["size_pct_book"] == pytest.approx(0.0242)
+
+    for size_pct, expected in ((0.0, 0.0), (1.0, 100.0), (1.5, None), (-0.1, None)):
+        contract = {"stop_loss": 429.0, "target": 460.0, "size_pct": size_pct}
+        write_research_decision(_final_state(position_contract=contract), "avgo", tmp_path)
+        got = _read(tmp_path)["recommended_allocation_pct"]
+        if expected is None:
+            assert got is None
+        else:
+            assert got == pytest.approx(expected)
 
 
 def test_evidence_fields_come_from_the_forced_tool_leaves(tmp_path):
