@@ -428,6 +428,9 @@ def _mk_graph(monkeypatch, closes, **cfg_over):
     graph = object.__new__(tg.TradingAgentsGraph)
     graph.config = _graph_config(**cfg_over)
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    # The decision-binding NAME leg reads the PIT-filtered source (its own seam),
+    # so the vendor-chain stub above does not feed `single_cvar`.
+    monkeypatch.setattr(graph, "_pit_closes", lambda *a, **k: closes)
     monkeypatch.setattr(graph, "_basket_cvar", lambda *a, **k: None)
     return graph
 

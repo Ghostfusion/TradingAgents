@@ -265,26 +265,32 @@ METRIC_REGISTRY: tuple[MetricRow, ...] = (
         definition=(
             "the analyzed name's own 1-day historical CVaR at 95% as a fraction of "
             "the reference exposure - the tail the decision gate labels "
-            "`analyzed_name_cvar`"
+            "`analyzed_name_cvar`. Since the 2026-10-12 source unification it is "
+            "the SAME measurement as `tail_read_cvar`, reached through the engine's "
+            "own entry point"
         ),
-        definition_version="cvar_1d95.v1",
+        definition_version="cvar_1d95.v2",
         unit="loss_fraction_of_equity",
         status="ok",
         producer_id="risk_context.single_cvar",
         implementation_ref="strategies/book_risk.py::cvar",
         basis=(
             "the ESTIMATOR is `book_risk.cvar`, applied by the engine's producer of "
-            "record `graph/trading_graph.py::_precompute_risk_context` (which fixes "
-            "the window and the convention): 1-day, 95% historical (alpha=0.05 is a "
-            "TAIL PROBABILITY), LOG returns (`contract._log_returns`) over the last "
-            "320 CALENDAR days (~217 observations; the measured count rides with "
-            "the value as `single_cvar_n`). ONE name, not an aggregation - which is "
-            "why log is the right convention here and SIMPLE is right for "
-            "`book_cvar`. "
-            "The market analyst's `get_tail_risk` prints a DIFFERENT reading of the "
-            "same nominal quantity (320 BARS, simple returns: 12.42% vs this leg's "
-            "14.68% on SMCI 2026-10-12) - pass both values to `resolve_metric` and "
-            "the spread is visible, never averaged"
+            "record `graph/trading_graph.py::_precompute_risk_context`: 1-day, 95% "
+            "historical (alpha=0.05 is a TAIL PROBABILITY) over the last 320 BARS "
+            "of `graph/trading_graph.py::_pit_closes` (-> `analysis_tools._ohlcv` "
+            "-> `dataflows/stockstats_utils.load_ohlcv`, the date-aware, "
+            "look-ahead-filtered source the verified market snapshot uses), "
+            "converted with `contract._simple_returns`. ONE name, not an "
+            "aggregation; `single_cvar_n` carries the window it was measured over. "
+            "**v2 (owner decision 2026-10-12):** v1 read `_try_fetch_closes` - the "
+            "RAW vendor chain, 320 CALENDAR days, LOG returns - so this leg and "
+            "`tail_read_cvar` measured different numbers under one label (14.6849% "
+            "vs 12.4172% on SMCI 2026-10-12, n=217 vs n=319). This leg now reads "
+            "the same series and the same convention as the tail tool, so the two "
+            "AGREEING is the expected result and a spread is a DEFECT, never a "
+            "footnote; a name whose PIT series is unavailable publishes NO "
+            "`single_cvar` (never a silent fall back to the other source)"
         ),
     ),
     MetricRow(
@@ -314,20 +320,23 @@ METRIC_REGISTRY: tuple[MetricRow, ...] = (
     MetricRow(
         metric="tail_read_cvar",
         definition=(
-            "the market analyst's trailing tail read - the same nominal measure over "
-            "a different window and convention, printed as context"
+            "the market analyst's trailing tail read - the analyst-facing entry "
+            "point of the SAME measurement `analyzed_name_cvar` publishes, printed "
+            "as context"
         ),
-        definition_version="cvar_1d95.v1",
+        definition_version="cvar_1d95.v2",
         unit="loss_fraction_of_equity",
         status="ok",
         producer_id="tool.tail_risk.cvar",
         implementation_ref="agents/utils/analysis_tools.py::get_tail_risk",
         basis=(
             "1-day, 95% historical over SIMPLE returns of the last 320 BARS "
-            "(`_ohlcv`, ~319 observations) - a THIRD reading beside "
-            "`analyzed_name_cvar` (log, 320 calendar days) and `book_cvar` (the "
-            "basket). Printed for the analyst and gates nothing; its own line states "
-            "the basis, so it cannot be read as either other number"
+            "(`_ohlcv` -> `dataflows/stockstats_utils.load_ohlcv`, the "
+            "look-ahead-filtered source; ~319 observations). Since the 2026-10-12 "
+            "source unification this is the same series, window and convention as "
+            "`analyzed_name_cvar` (`_pit_closes` + `contract._simple_returns`), so "
+            "the two MUST agree - a spread is a defect. Printed for the analyst and "
+            "gates nothing; its own line states the window"
         ),
     ),
 )

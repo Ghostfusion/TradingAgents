@@ -1507,6 +1507,43 @@ class TradingAgentsGraph:
             "tradingagents.strategies.contract", fromlist=["_log_returns"]
         )._log_returns(closes)
 
+    def _simple_returns_from_closes(self, closes) -> list:
+        """Daily SIMPLE-return series from closes - ONE producer.
+
+        ``strategies/contract._simple_returns`` is the same converter the basket
+        mix and every market-analyst tool go through, so the decision-binding
+        name leg and the analyst's tail tool cannot drift apart again: they read
+        one series with one convention (owner decision 2026-10-12).
+        """
+        from tradingagents.strategies.contract import _simple_returns
+
+        return _simple_returns(closes)
+
+    def _pit_closes(self, ticker: str, days: int = 320) -> list[float]:
+        """The look-ahead-filtered daily closes for one name - ONE producer.
+
+        The SAME series the verified market snapshot and every OHLCV-based tool
+        read: ``agents/utils/analysis_tools._ohlcv``, which loads through
+        ``dataflows/stockstats_utils.load_ohlcv`` - date-aware, PIT-filtered,
+        ascending, and cached per ``(ticker, days)`` for the run, so the
+        decision leg and the market analyst's ``get_tail_risk`` share ONE fetch
+        as well as one convention.
+
+        It is deliberately NOT ``_try_fetch_closes``: that one is the raw vendor
+        chain, which in the INTU/MSTR incidents lagged a session or returned a
+        ~2x-scale series (``$285`` vs the verified ``136.68``). Moving a
+        decision-binding leg onto the more protected source is a
+        metric-version change, made here on the owner's decision of
+        2026-10-12; the raw chain still feeds the liquidity and book-drawdown
+        legs, so this moves the CVaR leg only.
+
+        Empty when the source has nothing (never a fallback to the other seam:
+        two sources under one number is the defect this closes).
+        """
+        from tradingagents.agents.utils.analysis_tools import _ohlcv
+
+        return [float(c) for c in ((_ohlcv(ticker, days) or {}).get("closes") or [])]
+
     def _tranche_risk_read(self, closes) -> dict | None:
         """Deterministic tranche worst-case read for the risk fold, or None.
 
@@ -1989,19 +2026,21 @@ class TradingAgentsGraph:
         out: dict = {}
         try:
             closes = self._try_fetch_closes(ticker)
-            rets = self._log_returns_from_closes(closes)
+            # The NAME leg reads the PIT-filtered series over SIMPLE returns
+            # (owner decision 2026-10-12). It used to read the raw vendor chain
+            # over LOG returns, which made `risk_context.single_cvar` and the
+            # market analyst's printed `get_tail_risk` cvar two DIFFERENT
+            # measurements of the same label (14.6849% vs 12.4172% on SMCI, n=217
+            # vs n=319). Both now read `_pit_closes` + `_simple_returns`, so they
+            # are one number over one window - and `single_cvar_n` is stated so a
+            # reader can still check the window it came from.
+            rets = self._simple_returns_from_closes(self._pit_closes(ticker))
             if len(rets) >= 5:
                 from tradingagents.strategies.book_risk import cvar as _cvar
 
                 cv = _cvar(rets, alpha=0.05)
                 if cv is not None:
                     out["single_cvar"] = abs(cv)
-                    # Provenance (owner review 2026-10-12): the name leg is a
-                    # 1-day, 95% historical CVaR over LOG returns; the window is
-                    # measured, not assumed, so a reader can tell it from the
-                    # 320-BAR simple-return read the market analyst's tail tool
-                    # prints. Two lines with the same label are never silently
-                    # two different calculations.
                     out["single_cvar_n"] = len(rets)
             basket = self._basket_cvar(ticker)
             if basket is not None:

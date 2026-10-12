@@ -550,6 +550,8 @@ def test_graph_overlay_wiring_hard_block_rejects(monkeypatch):
     }
     closes = [100.0 + 0.2 * i for i in range(300)]
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    # The decision-binding NAME leg reads the PIT-filtered source (its own seam).
+    monkeypatch.setattr(graph, "_pit_closes", lambda *a, **k: closes)
 
     snapshot = {
         "verdict": "earnings-hard-block",
@@ -589,6 +591,8 @@ def test_graph_overlay_wiring_no_hard_block_passes(monkeypatch):
     }
     closes = [100.0 + 0.2 * i for i in range(300)]
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    # The decision-binding NAME leg reads the PIT-filtered source (its own seam).
+    monkeypatch.setattr(graph, "_pit_closes", lambda *a, **k: closes)
 
     snapshot = {"verdict": "no-imminent-catalyst", "scale": 1.0, "hard_block": None}
     monkeypatch.setattr(cat_mod, "fetch_catalyst_data", lambda *a, **k: {"ok": True})

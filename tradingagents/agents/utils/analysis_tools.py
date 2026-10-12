@@ -8733,11 +8733,13 @@ def get_tail_risk(
         f"tail risk {ticker}: cvar={abs(c):.2%} "
         f"var={f'{abs(var):.2%}' if var is not None else 'n/a'}"
         f"{mvar_line}{dd_line} stress_-10pct={stress:.2%} "
-        # Provenance (owner review 2026-10-12): this leg mixes nothing, but it
-        # is NOT the risk context's number - it reads the last 320 BARS with
-        # SIMPLE returns while `risk_context.single_cvar` reads 320 CALENDAR
-        # days with LOG returns, and the two differ (12.42% vs 14.68% on SMCI).
-        # The rendered line says which, so the two cannot be read as one.
+        # Provenance (owner decision 2026-10-12): this is the SAME measurement
+        # `risk_context.single_cvar` publishes - one series (`_ohlcv` and the
+        # graph's `_pit_closes` both load through `load_ohlcv`) and one
+        # convention (SIMPLE returns) - so the two must AGREE; they used to
+        # differ under one label (12.42% vs 14.68% on SMCI, 320 bars vs 320
+        # calendar days, simple vs log). The rendered line still states the
+        # window, so a pair that disagrees is visible rather than silent.
         f"1-day {1.0 - float(alpha):.0%} historical, simple returns, "
         f"n={len(returns)}"
         f"{extra}"

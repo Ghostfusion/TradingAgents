@@ -196,6 +196,8 @@ def test_apply_overlays_noops_on_short_closes(monkeypatch, mock_llm_client):
     )
     ta = TradingAgentsGraph(debug=False, config=cfg)
     ta._try_fetch_closes = lambda ticker: [100.0] * 37  # short series
+    # The decision-binding NAME leg reads the PIT-filtered source (its own seam).
+    ta._pit_closes = lambda ticker, days=320: [100.0] * 37  # noqa: ARG005
     monkeypatch.setattr(
         "tradingagents.strategies.orderflow.fetch_flow", lambda ticker: None
     )

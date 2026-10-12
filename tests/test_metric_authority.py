@@ -150,11 +150,11 @@ def test_a_conflicting_secondary_is_visible_and_the_canonical_is_still_named():
 def test_the_three_cvar_readings_are_distinguishable_by_name():
     """The 2026-10-12 review's "one metric, two values" defect, at the registry.
 
-    The decision-binding name CVaR and the market analyst's tail read are the same
-    nominal quantity over different windows and conventions: passing both under
-    one metric id makes the spread VISIBLE and still names the canonical
-    producer, and each row's basis states which calculation it is. The book leg is
-    its own metric id, so it can never be read as the candidate's risk.
+    The decision-binding name CVaR and the market analyst's tail read became the
+    SAME calculation on 2026-10-12 (one series, one convention), so passing two
+    values under one metric id still names the canonical producer and now shows a
+    spread as a DEFECT rather than as two bases to disclose. The book leg is its
+    own metric id, so it can never be read as the candidate's risk.
     """
     out = ma.resolve_metric(
         "analyzed_name_cvar",
@@ -172,6 +172,13 @@ def test_the_three_cvar_readings_are_distinguishable_by_name():
     # The tail read carries its own id and its own window in the basis.
     tail = ma.resolve_metric("tail_read_cvar", values={"tool.tail_risk.cvar": 0.1242})
     assert tail["status"] == "ok" and "BARS" in (tail["basis"] or "")
+    # v2 of both rows, and each says the two must agree (they are one
+    # measurement now, so a spread is a defect and not a basis).
+    name_row = next(r for r in ma.METRIC_REGISTRY if r.metric == "analyzed_name_cvar")
+    assert name_row.definition_version == "cvar_1d95.v2"
+    assert "AGREE" in (name_row.basis or "").upper()
+    assert "_pit_closes" in (name_row.basis or "")
+    assert tail["definition_version"] == "cvar_1d95.v2"
 
 
 def test_the_published_value_is_the_canonical_producer_never_the_other():

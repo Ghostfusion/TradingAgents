@@ -73,6 +73,9 @@ def _graph(monkeypatch, closes, **cfg_over):
     # views of the one vendor call are stubbed; every name gets the same
     # sessions here, which is the live case.
     monkeypatch.setattr(graph, "_try_fetch_closes_dated", lambda *a, **k: _dated(closes))
+    # The decision-binding NAME leg reads the PIT-filtered source (its OWN
+    # seam, `_pit_closes`), so the vendor-chain stub above does not feed it.
+    monkeypatch.setattr(graph, "_pit_closes", lambda *a, **k: closes)
     return graph
 
 

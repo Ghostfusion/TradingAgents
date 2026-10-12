@@ -147,3 +147,44 @@ def test_the_two_tail_legs_are_bounded_by_their_own_limits():
     assert not near_book["reasons"]
     over_name = govern(0.10, book_slack, name_cvar_pct=0.04)
     assert over_name["verdict"] == "REJECT"
+
+
+def test_the_decision_leg_and_the_tail_tool_are_one_measurement(monkeypatch):
+    """One series, one convention - pinned across BOTH entry points.
+
+    Before the owner's 2026-10-12 source decision these were two readings of one
+    label: the decision leg read `_try_fetch_closes` (the raw vendor chain, 320
+    CALENDAR days, LOG returns) while the market analyst's tool read `_ohlcv`
+    (the PIT-filtered `load_ohlcv`, 320 BARS, SIMPLE returns) - 14.6849 % vs
+    12.4172 % on SMCI, n=217 vs n=319. Both now go through the graph's
+    `_pit_closes` and `contract._simple_returns`, so a difference between them is
+    a defect rather than a basis to disclose.
+    """
+    import math
+
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.contract import _simple_returns
+
+    closes = [100.0 + 3.0 * math.sin(i / 5.0) - 0.02 * i for i in range(320)]
+    frame = {"dates": [], "closes": closes, "highs": [], "lows": [], "volumes": [], "opens": []}
+    monkeypatch.setattr(at, "_ohlcv", lambda ticker, days=320: frame)
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "risk_standalone_cvar_limit_pct": 0.03,
+        "risk_portfolio_cvar_budget_pct": 0.03,
+    }
+    monkeypatch.setattr(graph, "_pit_closes", lambda ticker, days=320: closes)
+    monkeypatch.setattr(graph, "_basket_cvar", lambda ticker, alpha=0.05: None)
+
+    ctx = graph._precompute_risk_context("SMCI")
+    expected = abs(cvar(_simple_returns(closes), alpha=0.05))
+    assert ctx["single_cvar"] == pytest.approx(expected)
+    assert ctx["single_cvar_n"] == len(_simple_returns(closes))
+
+    # The analyst-facing tool reads the same stubbed source, and its line
+    # carries the same value and the same window.
+    printed = at.get_tail_risk.invoke({"ticker": "SMCI"})
+    assert f"cvar={ctx['single_cvar']:.2%}" in printed
+    assert f"n={ctx['single_cvar_n']}" in printed

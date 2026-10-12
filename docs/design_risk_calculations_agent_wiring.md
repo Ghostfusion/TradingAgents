@@ -52,13 +52,14 @@ fourth from appearing silently.
 
 | where it prints | producer | horizon | confidence | convention | window | scope | authority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` | **1 day** | **95 %** (`alpha=0.05`) | **log** returns (`contract._log_returns`) | 320 **calendar** days by default (`_try_fetch_closes`) → ~217 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_standalone_cvar_limit_pct` (default 3 %) by the governor's NAME leg, and the report/card label it `analyzed_name_cvar` |
+| `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` over **`_pit_closes`** | **1 day** | **95 %** (`alpha=0.05`) | **simple** returns (`contract._simple_returns`) | the last 320 **bars** (`_pit_closes` → `_ohlcv` → `load_ohlcv`, PIT-filtered) → ~319 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_standalone_cvar_limit_pct` (default 3 %) by the governor's NAME leg, and the report/card label it `analyzed_name_cvar` |
 | `risk_context.book_cvar` → the report's `Portfolio (book) CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker and **not** a candidate portfolio | the risk governor's PORTFOLIO leg consumes it against `risk_portfolio_cvar_budget_pct` (falling back to `single_cvar` only when no book resolves, and `risk_context["cvar_gate_basis"]` records which leg the test read) |
-| the market analyst's `tail risk <T>: cvar=` line | `book_risk.cvar` via `agents/utils/analysis_tools.py::get_tail_risk` | **1 day** | **95 %** | **simple** returns | the last 320 **bars** (`_ohlcv`) → ~319 obs | one name | **none** — printed context for the analyst, never a gate |
+| the market analyst's `tail risk <T>: cvar=` line | `book_risk.cvar` via `agents/utils/analysis_tools.py::get_tail_risk` | **1 day** | **95 %** | **simple** returns | the last 320 **bars** (`_ohlcv`) → ~319 obs | one name | **none** — printed context for the analyst, never a gate. The **SAME measurement** as `risk_context.single_cvar` since the 2026-10-12 source unification (one series, one convention), so the two must agree |
 
 Consequences a reader must not skip, all verified on the 2026-10-12 SMCI tree:
-14.68 % (`single_cvar`, log/217) and 12.42 % (the tail tool, simple/319) are two
-*different* calculations of the same nominal quantity under the same label; and
+the name leg and the tail tool now **agree by construction** (one series, one
+convention — see the source note below), so a spread between them is a defect
+rather than a basis; and
 1.04 % (`book_cvar`) is the basket's own tail — identical across every tree in a
 batch, because `_basket_cvar` never reads the analyzed ticker — so it cannot
 establish anything about the candidate. One config key used to serve both the
@@ -85,18 +86,22 @@ path scales by √T. The sizing LP (`book_risk.min_cvar_weights`) takes
 `tail_probability`, not the budget, and reports `tail_count` (the scenarios the
 tail holds).
 
-**The two readings also differ in SOURCE, measured 2026-10-12.** The name leg
-fetches through `_try_fetch_closes` (the raw vendor chain, 320 calendar days, log
-returns), while the market analyst's tail tools fetch through `_ohlcv` — the
-look-ahead-filtered `load_ohlcv` the verified market snapshot itself uses, the
-last 320 bars, simple returns. On the four batch names: SMCI 14.6849 % vs
-12.4172 %, EHC 3.2199 % vs 3.7452 %, AMKR 11.9460 % vs 9.8812 %, BMY 3.5290 % vs
-3.5975 %. **No 3 % comparison flips, but the magnitudes move by up to 2.3 pp** —
-and `_ohlcv` is the *more* protected source (it is the one the INTU/MSTR
-stale-scale incidents produced). Unifying them therefore means moving the
-DECISION leg onto that source, which is a metric-version change on a gate input:
-**owner approval required, nothing moved.** Until then the two are separate metric
-ids in the registry and both state their own basis.
+**The two readings shared a LABEL but not a SOURCE — resolved 2026-10-12 (owner
+decision).** The name leg used to fetch through `_try_fetch_closes` (the raw
+vendor chain, 320 calendar days, log returns) while the market analyst's tail
+tool fetched through `_ohlcv` — the look-ahead-filtered `load_ohlcv` the verified
+market snapshot itself uses, the last 320 bars, simple returns. Measured on the
+four batch names: SMCI 14.6849 % vs 12.4172 % (n=217 vs n=319), EHC 3.2199 % vs
+3.7452 %, AMKR 11.9460 % vs 9.8812 %, BMY 3.5290 % vs 3.5975 % — no 3 % comparison
+flipped, but up to 2.3 pp moved, and `_ohlcv` is the *more* protected source (it
+is the one the INTU/MSTR stale-scale incidents produced). The **decision leg**
+now reads that source: `graph/trading_graph.py::_pit_closes` is the graph's one
+PIT close producer (the same `_ohlcv` call, so the two share one fetch) and the
+leg converts with `contract._simple_returns`. `analyzed_name_cvar` and
+`tail_read_cvar` are therefore `cvar_1d95.v2`, and the two **must agree** — a
+spread is a defect. The raw vendor chain still feeds the liquidity and
+book-drawdown legs; this moved the CVaR leg only, and a name whose PIT series is
+unavailable publishes no `single_cvar` (never a fall back to the other source).
 
 **The book mix is aligned by DATE, or refused.** `graph/trading_graph.py::_
 try_fetch_closes_dated` is the one producer of the vendor bars and keeps the
