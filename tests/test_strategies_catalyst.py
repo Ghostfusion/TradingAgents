@@ -676,7 +676,14 @@ def test_basket_cvar_mixes_simple_returns_and_reports_its_window(monkeypatch):
 
     graph = object.__new__(tg.TradingAgentsGraph)
     weights = {"AAA": 0.6, "BBB": 0.4}
-    graph.config = {"risk_basket_tickers": ["AAA", "BBB"], "risk_basket_weights": weights}
+    # The fixture series is 8 closes (7 returns), so it declares the floor it
+    # actually clears; the DEFAULT floor (250) is pinned in
+    # test_risk_context_hoist.
+    graph.config = {
+        "risk_basket_tickers": ["AAA", "BBB"],
+        "risk_basket_weights": weights,
+        "risk_cvar_min_observations": 5,
+    }
     closes = {
         "AAA": [100.0, 101.0, 96.0, 103.0, 90.0, 99.0, 94.0, 105.0],
         "BBB": [50.0, 48.0, 52.0, 47.0, 55.0, 51.0, 46.0, 54.0],
@@ -725,6 +732,9 @@ def test_basket_series_refuses_a_session_mismatch(monkeypatch, caplog):
     graph.config = {
         "risk_basket_tickers": ["AAA", "BBB"],
         "risk_basket_weights": {"AAA": 0.5, "BBB": 0.5},
+        # A floor the 60-close fixture clears, so `_basket_cvar` below answers
+        # None because of the REFUSAL rather than because of the floor.
+        "risk_cvar_min_observations": 5,
     }
     base = _dated([100.0 + i for i in range(60)])
     cases = {

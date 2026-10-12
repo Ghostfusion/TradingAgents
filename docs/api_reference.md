@@ -183,6 +183,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT` | `risk_max_drawdown_pct` | default `0.1` |
 | `TRADINGAGENTS_RISK_STANDALONE_CVAR_LIMIT_PCT` | `risk_standalone_cvar_limit_pct` | the analyzed name's own daily-tail CVaR limit; default `0.03` |
 | `TRADINGAGENTS_RISK_PORTFOLIO_CVAR_BUDGET_PCT` | `risk_portfolio_cvar_budget_pct` | the portfolio (book) daily-tail CVaR budget; default `0.03` |
+| `TRADINGAGENTS_RISK_CVAR_MIN_OBSERVATIONS` | `risk_cvar_min_observations` | the observation floor a CVaR leg must clear before it publishes; default `250` |
 | `TRADINGAGENTS_RISK_BASKET_TICKERS` | `risk_basket_tickers` | default `[]` |
 | `TRADINGAGENTS_RISK_BASKET_WEIGHTS` | `risk_basket_weights` | default `{}` |
 | `TRADINGAGENTS_HOLDINGS_TICKERS` | `holdings_tickers` | Option B: actual-book tickers for the PM holdings read; empty = the risk basket is used (Option A) |

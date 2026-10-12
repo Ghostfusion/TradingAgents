@@ -103,6 +103,27 @@ spread is a defect. The raw vendor chain still feeds the liquidity and
 book-drawdown legs; this moved the CVaR leg only, and a name whose PIT series is
 unavailable publishes no `single_cvar` (never a fall back to the other source).
 
+**The NAME leg clears an observation floor, or it publishes nothing.**
+`risk_cvar_min_observations` (default **250**) is the sample that tail mean must
+rest on. Below it the name leg publishes no `single_cvar` and records
+`single_cvar_reason` (`unavailable: N observation(s), below the 250-observation
+floor for a tail mean`), rendered by the report block and the PM prompt. This is
+what stops the governor's name-CVaR reason from firing on a handful of days — at
+`n = 5` the estimator's own floor makes the "95 % CVaR" ONE observation. 250 is
+Basel's sample floor for tail calibration (MAR32.9's backtesting zones; MAR32.18's
+desk backtesting on at least one year), and the same idea the sizing path's
+`tail_count` states per solve. The reason string stays engine-internal: it is NOT
+in the executor's advisory allow-list.
+
+**The book leg is deliberately NOT floored, and that asymmetry is the decision.**
+Its window is the basket names' common VENDOR window — 320 calendar days, ~217
+sessions live — so a 250-observation floor there would not harden the portfolio
+test, it would *disable* it (silently handing the portfolio verdict to the name
+leg, since `cvar_pct` falls back). It keeps `_basket_series`' own
+`min_returns` guard and reports `book_cvar_n`, so a thin book is visible; flooring
+it belongs with moving the basket onto the same bar-based window, which is a
+separate metric-version decision the owner has not made.
+
 **The book mix is aligned by DATE, or refused.** `graph/trading_graph.py::_
 try_fetch_closes_dated` is the one producer of the vendor bars and keeps the
 date; `_basket_series` compares the basket names' session sets and returns `{}`

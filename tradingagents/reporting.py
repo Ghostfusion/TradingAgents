@@ -418,6 +418,10 @@ def _risk_gate_block(final_state: dict) -> str:
             if ctx["single_cvar"] > name_limit:
                 line += " — over the limit: blocks NEW risk in this name"
         parts.append(line)
+    elif ctx.get("single_cvar_reason"):
+        # A named refusal, never silence: an unmeasured tail must not read as an
+        # absent risk (owner decision 2026-10-12).
+        parts.append(f"Analyzed-name CVaR: {ctx['single_cvar_reason']}")
     if ctx.get("book_cvar") is not None:
         line = f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%}"
         if book_budget is not None:

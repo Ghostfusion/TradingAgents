@@ -36,7 +36,7 @@ trading RL (2503.04662), coherent risk measures (math/0605062).
 
 Config keys (default in code False; .env true): enable_risk_governor,
 risk_max_drawdown_pct 0.10, risk_standalone_cvar_limit_pct 0.03,
-risk_portfolio_cvar_budget_pct 0.03,
+risk_portfolio_cvar_budget_pct 0.03, risk_cvar_min_observations 250,
 risk_stress_shock_pct_1 -10, risk_stress_shock_pct_2 -30,
 risk_max_position_pct 0.45 (book cap), risk_audit_enabled true.
 

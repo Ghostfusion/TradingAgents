@@ -170,6 +170,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_RISK_MAX_DRAWDOWN_PCT": "risk_max_drawdown_pct",
     "TRADINGAGENTS_RISK_STANDALONE_CVAR_LIMIT_PCT": "risk_standalone_cvar_limit_pct",
     "TRADINGAGENTS_RISK_PORTFOLIO_CVAR_BUDGET_PCT": "risk_portfolio_cvar_budget_pct",
+    "TRADINGAGENTS_RISK_CVAR_MIN_OBSERVATIONS": "risk_cvar_min_observations",
     "TRADINGAGENTS_RISK_BASKET_TICKERS": "risk_basket_tickers",
     "TRADINGAGENTS_RISK_BASKET_WEIGHTS": "risk_basket_weights",
     "TRADINGAGENTS_HOLDINGS_TICKERS": "holdings_tickers",
@@ -1076,6 +1077,16 @@ SHIPPED_DEFAULTS = {
         # owner can calibrate the two apart.
         "risk_standalone_cvar_limit_pct": 0.03,  # the analyzed NAME's own daily tail limit
         "risk_portfolio_cvar_budget_pct": 0.03,  # the PORTFOLIO (book) daily tail budget
+        # The tail-observation floor BOTH gate legs must clear (owner decision
+        # 2026-10-12). A CVaR is a mean over a tail the estimator FLOORS
+        # (`k = max(1, int(alpha * n))`), so `len(rets) >= 5` could publish a
+        # "95% CVaR" that is ONE observation. Below this floor a leg publishes
+        # nothing and says why (`single_cvar_reason`), which is what makes the
+        # governor's CVaR reason stop firing on noise instead of pricing it.
+        # 250 is Basel's own sample floor for tail calibration - MAR32.9's
+        # backtesting zones and MAR32.18's desk backtesting on at least one year
+        # - and the sizing path's `tail_count` states the same idea per solve.
+        "risk_cvar_min_observations": 250,
         "risk_max_drawdown_pct": 0.10,  # R0/R2: realized drawdown stop
         "risk_stress_shock_pct_1": -10.0,  # RESERVED (not yet wired): R2 scenario shock 1 (%)
         "risk_stress_shock_pct_2": -30.0,  # RESERVED (not yet wired): R2 scenario shock 2 (%)
@@ -1548,6 +1559,9 @@ def validate_config(config: dict) -> list[str]:
         positive(key, allow_zero=True)
     # Gatherer concurrency must be >= 1 (0 would execute no tools).
     positive("analyst_forced_tools_max_parallel")
+    # The CVaR tail-observation floor must be >= 1: 0 (or a negative) would let
+    # every series through the floor it exists to enforce.
+    positive("risk_cvar_min_observations")
     # Monotonic HWM tiers: soft cannot exceed hard.
     soft = config.get("risk_hwm_soft_pct")
     hard = config.get("risk_hwm_hard_pct")

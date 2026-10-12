@@ -155,8 +155,12 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
             # basis rather than an assumed one.
             if ctx.get("single_cvar") is not None:
                 n = ctx.get("single_cvar_n")
-                basis = f" (1-day 95% historical, log returns, {n} obs)" if n else ""
+                basis = f" (1-day 95% historical, simple returns, {n} obs)" if n else ""
                 bits.append(f"analyzed-name daily CVaR {ctx['single_cvar']:.2%}{basis}")
+            elif ctx.get("single_cvar_reason"):
+                # Fail-closed reads are NAMED, never silent: a thin series must
+                # not look like a calm one (owner decision 2026-10-12).
+                bits.append(f"analyzed-name daily CVaR {ctx['single_cvar_reason']}")
             if ctx.get("book_cvar") is not None:
                 n = ctx.get("book_cvar_n")
                 basis = f" (1-day 95% historical, simple returns, {n} obs)" if n else ""

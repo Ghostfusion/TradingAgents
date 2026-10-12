@@ -159,6 +159,7 @@ REGISTRY: dict[str, str] = {
     "risk_max_drawdown_pct": "wired",
     "risk_standalone_cvar_limit_pct": "wired",
     "risk_portfolio_cvar_budget_pct": "wired",
+    "risk_cvar_min_observations": "wired",
     "risk_daily_loss_budget_pct": "wired",
     "risk_hwm_soft_pct": "wired",
     "risk_hwm_hard_pct": "wired",

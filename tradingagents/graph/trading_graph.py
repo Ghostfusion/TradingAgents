@@ -1519,6 +1519,27 @@ class TradingAgentsGraph:
 
         return _simple_returns(closes)
 
+    def _cvar_min_observations(self) -> int:
+        """The observation floor BOTH gate legs must clear - 250 by default.
+
+        A CVaR is a mean over a tail, and the estimator FLOORS that tail
+        (``k = max(1, int(alpha * n))``): at ``n = 5`` the "95 % CVaR" is ONE
+        observation - a statement about a single day, not about a tail. Basel's
+        own sample floor for tail calibration is 250 observations / one year
+        (MAR32.9's backtesting zones; MAR32.18's desk backtesting on at least
+        one year), and the advisory sizing path's ``tail_count`` states the same
+        idea per solve.
+
+        Below it a leg publishes NOTHING and says why, so the governor's CVaR
+        reason stops firing rather than pricing noise - fail closed, never
+        substitute (owner decision 2026-10-12). 250 clears the live 320-bar
+        window (319 returns) and refuses a series that merely exists.
+        """
+        try:
+            return max(1, int(self.config.get("risk_cvar_min_observations", 250)))
+        except (TypeError, ValueError):
+            return 250
+
     def _pit_closes(self, ticker: str, days: int = 320) -> list[float]:
         """The look-ahead-filtered daily closes for one name - ONE producer.
 
@@ -2035,13 +2056,25 @@ class TradingAgentsGraph:
             # are one number over one window - and `single_cvar_n` is stated so a
             # reader can still check the window it came from.
             rets = self._simple_returns_from_closes(self._pit_closes(ticker))
-            if len(rets) >= 5:
+            floor = self._cvar_min_observations()
+            if len(rets) >= floor:
                 from tradingagents.strategies.book_risk import cvar as _cvar
 
                 cv = _cvar(rets, alpha=0.05)
                 if cv is not None:
                     out["single_cvar"] = abs(cv)
                     out["single_cvar_n"] = len(rets)
+            elif rets:
+                # Fail CLOSED with a named reason (owner decision 2026-10-12):
+                # no `single_cvar` means the governor's name-CVaR reason cannot
+                # fire, which is the point - a tail mean over a handful of
+                # observations is not a measurement.
+                out["single_cvar_reason"] = (
+                    f"unavailable: {len(rets)} observation(s), below the "
+                    f"{floor}-observation floor for a tail mean"
+                )
+            else:
+                out["single_cvar_reason"] = "unavailable: no usable price series"
             basket = self._basket_cvar(ticker)
             if basket is not None:
                 out["book_cvar"] = basket["cvar"]
@@ -2145,8 +2178,9 @@ class TradingAgentsGraph:
         not give the book's return series; the two book legs below used to mix
         log returns and read 2.3 bp of equity apart from the simple mix on the
         live 15-name basket (owner review 2026-10-12). The analyzed-name leg is a
-        single series and keeps the engine's log convention - the two objects
-        each name their own basis.
+        single series - it reads the same SIMPLE convention through the
+        PIT-filtered source since the 2026-10-12 source decision - and each
+        object names its own window.
 
         Returns ``{name: returns}`` for the names that resolve with at least
         ``min_returns`` observations, or ``{}`` when the basket is unconfigured
@@ -2209,6 +2243,16 @@ class TradingAgentsGraph:
         configured basket, never the analyzed name (which is why this value is
         identical across the trees of one batch).
         """
+        # NOT floored at ``_cvar_min_observations`` (owner-scoped decision
+        # 2026-10-12: the floor is the NAME leg's). This leg's window is the
+        # basket names' common VENDOR window - 320 calendar days, ~217 sessions
+        # live - so a 250-observation floor here would not harden the book test,
+        # it would DISABLE it (and silently hand the portfolio verdict to the
+        # name leg). The producer's own ``min_returns`` guard still applies, and
+        # the measured window rides with the value as ``book_cvar_n`` so a thin
+        # book is visible rather than silent. Flooring this leg belongs with
+        # moving the basket onto the same bar-based window, which is a separate
+        # metric-version change the owner has not made.
         series = self._basket_series()
         if len(series) < 2:
             return None

@@ -50,6 +50,10 @@ def _config(**over) -> dict:
         "max_position_pct": 0.30,
         "risk_standalone_cvar_limit_pct": 0.03,
         "risk_portfolio_cvar_budget_pct": 0.03,
+        # These fixtures are 200 bars (199 returns), so they declare a floor the
+        # series actually clears; the DEFAULT floor (250) and the refusal it
+        # produces are pinned by their own test below.
+        "risk_cvar_min_observations": 20,
         "target_vol": 0.15,
         "position_odds": 1.0,
         "kelly_fraction": 0.25,
@@ -149,6 +153,41 @@ def test_pre_graph_context_is_the_only_producer(monkeypatch):
     assert seen["liquidity_dangers"] == ctx["liquidity"]["dangers"]
     assert out["risk_context"]["book_drawdown"] == pytest.approx(0.042)
     assert out["risk_context"]["liquidity"]["verdict"] == "illiquid"
+
+
+def test_a_thin_series_publishes_no_cvar_and_names_the_refusal(monkeypatch):
+    """The observation floor fails CLOSED, on BOTH gate legs.
+
+    A CVaR is a mean over a tail the estimator floors (`k = max(1, int(alpha*n))`),
+    so `len(rets) >= 5` used to publish a "95 % CVaR" that was ONE observation -
+    a statement about a single day wearing a tail measure's name. Below the floor
+    the leg publishes nothing and says why, so the governor's CVaR reason stops
+    firing instead of pricing noise (owner decision 2026-10-12).
+    """
+    thin = _graph(monkeypatch, _closes(200), risk_cvar_min_observations=250)
+    ctx = thin._precompute_risk_context("NVDA")
+    assert "single_cvar" not in ctx
+    assert "below the 250-observation floor" in ctx["single_cvar_reason"]
+    # The floor is the NAME leg's, deliberately: the book leg's window is the
+    # basket names' common VENDOR window (~217 sessions live), where a
+    # 250-observation floor would disable the portfolio test rather than harden
+    # it. It keeps its own producer guard, and `book_cvar_n` makes a thin book
+    # visible.
+    assert ctx["book_cvar"] is not None
+    assert ctx["book_cvar_n"] == len(_closes(200)) - 1
+
+    # At the floor the leg publishes, and the window rides with the value.
+    at_floor = _graph(monkeypatch, _closes(251), risk_cvar_min_observations=250)
+    ctx2 = at_floor._precompute_risk_context("NVDA")
+    assert ctx2["single_cvar"] is not None
+    assert ctx2["single_cvar_n"] == 250
+    assert "single_cvar_reason" not in ctx2
+
+    # And a source that returns nothing is a named absence too, never a zero.
+    empty = _graph(monkeypatch, [], risk_cvar_min_observations=250)
+    assert empty._precompute_risk_context("NVDA")["single_cvar_reason"] == (
+        "unavailable: no usable price series"
+    )
 
 
 def test_insufficient_liquidity_guard_reads_risk_context(monkeypatch):
