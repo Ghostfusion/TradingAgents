@@ -147,6 +147,33 @@ def test_a_conflicting_secondary_is_visible_and_the_canonical_is_still_named():
     assert same["status"] == "ok" and same["conflicts"] == []
 
 
+def test_the_three_cvar_readings_are_distinguishable_by_name():
+    """The 2026-10-12 review's "one metric, two values" defect, at the registry.
+
+    The decision-binding name CVaR and the market analyst's tail read are the same
+    nominal quantity over different windows and conventions: passing both under
+    one metric id makes the spread VISIBLE and still names the canonical
+    producer, and each row's basis states which calculation it is. The book leg is
+    its own metric id, so it can never be read as the candidate's risk.
+    """
+    out = ma.resolve_metric(
+        "analyzed_name_cvar",
+        values={"risk_context.single_cvar": 0.1468, "tool.tail_risk.cvar": 0.1242},
+    )
+    assert out["status"] == "conflict"
+    assert out["value"] == 0.1468  # the gate's producer, not the analyst's read
+    assert out["producer_id"] == "risk_context.single_cvar"
+    assert [c["source"] for c in out["conflicts"]] == ["tool.tail_risk.cvar"]
+    assert out["spread_pct"] > ma.METRIC_TOLERANCE_PCT
+
+    book = ma.resolve_metric("book_cvar", values={"risk_context.book_cvar": 0.0102})
+    assert book["status"] == "ok" and book["value"] == 0.0102
+    assert "basket" in (book["basis"] or "")
+    # The tail read carries its own id and its own window in the basis.
+    tail = ma.resolve_metric("tail_read_cvar", values={"tool.tail_risk.cvar": 0.1242})
+    assert tail["status"] == "ok" and "BARS" in (tail["basis"] or "")
+
+
 def test_the_published_value_is_the_canonical_producer_never_the_other():
     """The two-P/Es defect, pinned: the flattering value is never the one published."""
     out = ma.resolve_metric(

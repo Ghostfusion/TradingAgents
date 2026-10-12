@@ -87,6 +87,37 @@ precisely for the day one vendor stops returning a session. What it still cannot
 see: two series with identical dates but a *different* price adjustment (split/
 dividend treatment), which no date check can catch.
 
+## 0b. What the 2026-10-12 review proposed that ALREADY exists (recorded, not re-proposed)
+
+An owner architecture review of the CVaR pipeline made six recommendations. Three
+were real (the budget-in-a-tail-slot defect, the log-mixed book, the unguarded
+index alignment) and are fixed — see §0a and the CHANGELOG. Four were already
+built here, and are recorded so a future review does not spend a cycle
+re-proposing them:
+
+- **"introduce a structured risk-estimate object"** — `strategies/tail_risk.py::tail_risk`
+  already returns the structured read: `status ∈ {ok, widened, unavailable}`, the
+  `quality` input, the `window`, a `basis`, a conformal `band`, a `breach_rate` and
+  a Kupiec/Christoffersen `coverage` test — refusing below its observation floor.
+  Gated by `enable_tail_risk_layer` (off by default).
+- **"keep policy independent of the metric"** — `Strategies/scores/risk_score.md`
+  §65 already states it in the owner's own words: "**RiskScore ≠ RiskGate.** A score
+  measures risk. A gate controls whether the risk is acceptable."
+- **"add a provenance / decision-authority layer"** — `strategies/metric_authority.py`
+  (BUILT 2026-10-06, gate off) *is* that layer, and since 2026-10-12 it carries the
+  three CVaR rows (`analyzed_name_cvar`, `book_cvar`, `tail_read_cvar`).
+- **"√T is an approximation; prefer joint scenarios"** — `var_cvar_horizon` already
+  reports `scaling_valid` from an autocorrelation gate (refusing a thin or
+  persistent sample), offers the stable `T^(1/tail_index)` alternative, and
+  `copula_scenarios` already builds the joint-scenario input the review asks for.
+  No reported CVaR line scales by √T.
+
+Two numbers in the review are corrected here: its "roughly 11 and 16 tail
+observations" is off by one, because the estimator **floors** the tail
+(`k = max(1, int(alpha * n))`) — those samples hold **10** and **15**. And its
+"verify that all assets use the same scenario dates" was verified *equal* on the
+day (15 names, one 218-session set) but genuinely unguarded; it is guarded now.
+
 ---
 
 ## 1. Audit scope & method

@@ -260,6 +260,76 @@ METRIC_REGISTRY: tuple[MetricRow, ...] = (
             "the canonical entry ceiling, not the value a prose line may cite"
         ),
     ),
+    MetricRow(
+        metric="analyzed_name_cvar",
+        definition=(
+            "the analyzed name's own 1-day historical CVaR at 95% as a fraction of "
+            "the reference exposure - the tail the decision gate labels "
+            "`analyzed_name_cvar`"
+        ),
+        definition_version="cvar_1d95.v1",
+        unit="loss_fraction_of_equity",
+        status="ok",
+        producer_id="risk_context.single_cvar",
+        implementation_ref="strategies/book_risk.py::cvar",
+        basis=(
+            "the ESTIMATOR is `book_risk.cvar`, applied by the engine's producer of "
+            "record `graph/trading_graph.py::_precompute_risk_context` (which fixes "
+            "the window and the convention): 1-day, 95% historical (alpha=0.05 is a "
+            "TAIL PROBABILITY), LOG returns (`contract._log_returns`) over the last "
+            "320 CALENDAR days (~217 observations; the measured count rides with "
+            "the value as `single_cvar_n`). ONE name, not an aggregation - which is "
+            "why log is the right convention here and SIMPLE is right for "
+            "`book_cvar`. "
+            "The market analyst's `get_tail_risk` prints a DIFFERENT reading of the "
+            "same nominal quantity (320 BARS, simple returns: 12.42% vs this leg's "
+            "14.68% on SMCI 2026-10-12) - pass both values to `resolve_metric` and "
+            "the spread is visible, never averaged"
+        ),
+    ),
+    MetricRow(
+        metric="book_cvar",
+        definition=(
+            "the configured reference basket's 1-day historical CVaR at 95%, "
+            "cash-diluted when the configured weights sum below 1"
+        ),
+        definition_version="cvar_1d95.v1",
+        unit="loss_fraction_of_equity",
+        status="ok",
+        producer_id="risk_context.book_cvar",
+        implementation_ref="strategies/book_risk.py::portfolio_cvar",
+        basis=(
+            "the ESTIMATOR is `book_risk.portfolio_cvar`, called by "
+            "`graph/trading_graph.py::_basket_cvar` over `_basket_series` (the one "
+            "producer of the basket's return matrix): "
+            "1-day, 95% historical over SIMPLE returns (`contract._simple_returns`: a "
+            "weighted sum of log returns is not a portfolio return) of the names in "
+            "the configured risk basket, mixed only when every name's session SET "
+            "matches - otherwise refused (`basket CVaR refused`) and the governor "
+            "falls back to the analyzed name. NOT the analyzed ticker and NOT a "
+            "candidate portfolio: identical across the trees of one batch, which is "
+            "why it cannot establish anything about a candidate"
+        ),
+    ),
+    MetricRow(
+        metric="tail_read_cvar",
+        definition=(
+            "the market analyst's trailing tail read - the same nominal measure over "
+            "a different window and convention, printed as context"
+        ),
+        definition_version="cvar_1d95.v1",
+        unit="loss_fraction_of_equity",
+        status="ok",
+        producer_id="tool.tail_risk.cvar",
+        implementation_ref="agents/utils/analysis_tools.py::get_tail_risk",
+        basis=(
+            "1-day, 95% historical over SIMPLE returns of the last 320 BARS "
+            "(`_ohlcv`, ~319 observations) - a THIRD reading beside "
+            "`analyzed_name_cvar` (log, 320 calendar days) and `book_cvar` (the "
+            "basket). Printed for the analyst and gates nothing; its own line states "
+            "the basis, so it cannot be read as either other number"
+        ),
+    ),
 )
 
 
