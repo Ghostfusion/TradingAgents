@@ -42,6 +42,41 @@ risk governor overlay).
 
 ---
 
+## 0a. The CVaR contract, as built (added 2026-10-12 after an owner review)
+
+Three CVaR readings reach a report and they are **not** the same number. Each one
+is named here with its horizon, confidence, return convention, window and scope,
+so a reader (or an agent) can tell them apart; nothing in the engine aggregates
+them, and the registry's "one producer per measured metric" rule is what keeps a
+fourth from appearing silently.
+
+| where it prints | producer | horizon | confidence | convention | window | scope | authority |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` | **1 day** | **95 %** (`alpha=0.05`) | **log** returns (`contract._log_returns`) | 320 **calendar** days by default (`_try_fetch_closes`) → ~217 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_daily_cvar_budget_pct` (default 3 %), and the report/card label it `analyzed_name_cvar` |
+| `risk_context.book_cvar` → the report's `Portfolio (book) CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker and **not** a candidate portfolio | the risk governor's budget comparison consumes it (preferring it over `single_cvar` when it resolves) |
+| the market analyst's `tail risk <T>: cvar=` line | `book_risk.cvar` via `agents/utils/analysis_tools.py::get_tail_risk` | **1 day** | **95 %** | **simple** returns | the last 320 **bars** (`_ohlcv`) → ~319 obs | one name | **none** — printed context for the analyst, never a gate |
+
+Consequences a reader must not skip, all verified on the 2026-10-12 SMCI tree:
+14.68 % (`single_cvar`, log/217) and 12.42 % (the tail tool, simple/319) are two
+*different* calculations of the same nominal quantity under the same label; and
+1.04 % (`book_cvar`) is the basket's own tail — identical across every tree in a
+batch, because `_basket_cvar` never reads the analyzed ticker — so it cannot
+establish anything about the candidate. One config key currently serves both the
+named comparison and the book comparison (`risk_daily_cvar_budget_pct`), which is
+why one 2026-10-12 artifact carries `risk_gate: PASS` (book 1.04 % vs 3 %) beside
+`binding_reason: analyzed-name CVaR 14.68% > budget 3.00%`; separating the two keys
+is an **owner decision**, not a refactor (see the queued work below).
+
+Also settled here: the multi-day instrument is `book_risk.var_cvar_horizon(
+returns, horizon_days, alpha=<confidence LEVEL>)` — note the argument is a LEVEL
+(0.95), the opposite convention from `cvar`'s tail probability (0.05) — surfaced by
+`get_horizon_var`, and **no** reported CVaR line uses it: nothing in the report
+path scales by √T. The sizing LP (`book_risk.min_cvar_weights`) takes
+`tail_probability`, not the budget, and reports `tail_count` (the scenarios the
+tail holds).
+
+---
+
 ## 1. Audit scope & method
 
 - **Risk surface inventory:** every public function in `tradingagents/strategies/`

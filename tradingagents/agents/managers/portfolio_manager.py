@@ -145,10 +145,22 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
         try:
             ctx = state.get("risk_context") or {}
             bits = []
+            # Each number carries its OWN basis when the producer recorded the
+            # window (`single_cvar_n` / `book_cvar_n`): the name leg is a 1-day
+            # 95% historical CVaR over LOG returns of one series, the book leg
+            # the same measure over the SIMPLE-return weighted basket - and the
+            # market analyst's tail tool prints a THIRD reading (320 bars, simple
+            # returns) that is not either of these numbers (owner review
+            # 2026-10-12: 14.68% vs 12.42% on SMCI). An absent window prints no
+            # basis rather than an assumed one.
             if ctx.get("single_cvar") is not None:
-                bits.append(f"analyzed-name daily CVaR {ctx['single_cvar']:.2%}")
+                n = ctx.get("single_cvar_n")
+                basis = f" (1-day 95% historical, log returns, {n} obs)" if n else ""
+                bits.append(f"analyzed-name daily CVaR {ctx['single_cvar']:.2%}{basis}")
             if ctx.get("book_cvar") is not None:
-                bits.append(f"portfolio (book) daily CVaR {ctx['book_cvar']:.2%} — fed the gate")
+                n = ctx.get("book_cvar_n")
+                basis = f" (1-day 95% historical, simple returns, {n} obs)" if n else ""
+                bits.append(f"portfolio (book) daily CVaR {ctx['book_cvar']:.2%}{basis} — fed the gate")
             if bits:
                 cvar_line = (
                     "**Computed daily-tail CVaR** (deterministic): "

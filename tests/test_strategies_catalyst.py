@@ -647,3 +647,45 @@ def test_risk_governor_basket_cvar_overrides_single_name(monkeypatch):
 
     # Direct: the helper must return a value with the basket configured.
     assert graph._basket_cvar("AAPL") is not None
+
+
+def test_basket_cvar_mixes_simple_returns_and_reports_its_window(monkeypatch):
+    """The book mix is built from SIMPLE returns and states its observation count.
+
+    ``sum_i w_i r_i`` is a portfolio's one-period return only over **simple**
+    returns, so weighting log returns is a different quantity (measured 2.3 bp
+    of equity apart on the live 15-name basket, owner review 2026-10-12).
+    Fails-before: the leg returned a bare float and mixed LOG returns, so
+    ``read["cvar"]`` raised and the value was the log mix.
+    """
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies.book_risk import portfolio_cvar
+    from tradingagents.strategies.contract import _log_returns, _simple_returns
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    weights = {"AAA": 0.6, "BBB": 0.4}
+    graph.config = {"risk_basket_tickers": ["AAA", "BBB"], "risk_basket_weights": weights}
+    closes = {
+        "AAA": [100.0, 101.0, 96.0, 103.0, 90.0, 99.0, 94.0, 105.0],
+        "BBB": [50.0, 48.0, 52.0, 47.0, 55.0, 51.0, 46.0, 54.0],
+    }
+    monkeypatch.setattr(graph, "_try_fetch_closes", lambda t, days=320: closes[str(t).upper()])
+
+    read = graph._basket_cvar("AAPL")
+    assert read is not None
+    simple_mix = abs(
+        portfolio_cvar(
+            {k: _simple_returns(v) for k, v in closes.items()}, weights=weights, alpha=0.05
+        )
+    )
+    log_mix = abs(
+        portfolio_cvar(
+            {k: _log_returns(v) for k, v in closes.items()}, weights=weights, alpha=0.05
+        )
+    )
+    assert read["cvar"] == pytest.approx(simple_mix, rel=1e-12)
+    assert read["cvar"] != pytest.approx(log_mix)
+    # The window is the matrix's (the shortest series), and it says how many
+    # names went into it - the book is ticker-independent by construction.
+    assert read["n"] == 7
+    assert read["names"] == 2

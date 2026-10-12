@@ -1966,9 +1966,17 @@ class TradingAgentsGraph:
                 cv = _cvar(rets, alpha=0.05)
                 if cv is not None:
                     out["single_cvar"] = abs(cv)
+                    # Provenance (owner review 2026-10-12): the name leg is a
+                    # 1-day, 95% historical CVaR over LOG returns; the window is
+                    # measured, not assumed, so a reader can tell it from the
+                    # 320-BAR simple-return read the market analyst's tail tool
+                    # prints. Two lines with the same label are never silently
+                    # two different calculations.
+                    out["single_cvar_n"] = len(rets)
             basket = self._basket_cvar(ticker)
             if basket is not None:
-                out["book_cvar"] = basket
+                out["book_cvar"] = basket["cvar"]
+                out["book_cvar_n"] = basket["n"]
             drawdown = self._basket_drawdown(ticker)
             if drawdown is not None:
                 out["book_drawdown"] = drawdown
@@ -2056,71 +2064,97 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001 - gate must never crash
             return None
 
-    def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> float | None:
-        """True portfolio CVaR for the configured risk basket, or None.
+    def _basket_series(self, *, min_returns: int = 5) -> dict[str, list]:
+        """The configured basket's per-name return series - ONE producer.
 
-        Reads ``risk_basket_tickers`` (list) + optional ``risk_basket_weights``
-        (dict) from config. When at least two basket names resolve aligned daily
-        return series via the vendor chain (``_try_fetch_closes``), returns the
-        abs() of the weighted basket's historical CVaR (``book_risk.portfolio_cvar``)
-        so the risk governor budgets against the basket tail, not the single
-        name. Returns None when the basket is unconfigured, cannot be resolved,
-        or fewer than two names have usable series - the governor falls back
-        to the analyzed name's own series.
+        **SIMPLE returns, deliberately.** A portfolio's one-period return is
+        ``sum_i w_i r_i`` over simple returns, so weighting *log* returns does
+        not give the book's return series; the two book legs below used to mix
+        log returns and read 2.3 bp of equity apart from the simple mix on the
+        live 15-name basket (owner review 2026-10-12). The analyzed-name leg is a
+        single series and keeps the engine's log convention - the two objects
+        each name their own basis.
+
+        Returns ``{name: returns}`` for the names that resolve with at least
+        ``min_returns`` observations, or ``{}`` when the basket is unconfigured
+        or cannot be resolved. ``ticker`` is deliberately NOT a parameter: the
+        book is the configured basket, never the analyzed name.
         """
         tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
         if len(tickers) < 2:
-            return None
-        weights = self.config.get("risk_basket_weights") or {}
-        returns_by_name: dict[str, list] = {}
+            return {}
+        from tradingagents.strategies.contract import _simple_returns
+
+        out: dict[str, list] = {}
         for name in tickers:
             try:
                 closes = self._try_fetch_closes(str(name))
-                rets = self._log_returns_from_closes(closes)
-                if len(rets) >= 5:
-                    returns_by_name[str(name)] = rets
+                rets = _simple_returns(closes)
+                if len(rets) >= min_returns:
+                    out[str(name)] = rets
             except Exception:  # noqa: BLE001 - a missing name just drops out
                 continue
-        if len(returns_by_name) < 2:
+        return out
+
+    def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> dict | None:
+        """True portfolio CVaR for the configured risk basket, or None.
+
+        Reads ``risk_basket_tickers`` (list) + optional ``risk_basket_weights``
+        (dict) from config and mixes the basket's per-name series through
+        :meth:`_basket_series` (ONE producer, simple returns). When at least two
+        names resolve, returns ``{"cvar", "n", "names"}``: the **positive**
+        magnitude of the weighted basket's 1-day historical CVaR
+        (``book_risk.portfolio_cvar``), the aligned observation count the mix
+        actually used, and how many names went into it - so the governor and the
+        report can budget against the basket tail *and* state the window it was
+        measured over. Returns None when the basket is unconfigured, cannot be
+        resolved, or fewer than two names have usable series - the governor
+        falls back to the analyzed name's own series.
+
+        ``ticker`` is accepted for call-site symmetry only: the live book is the
+        configured basket, never the analyzed name (which is why this value is
+        identical across the trees of one batch).
+        """
+        series = self._basket_series()
+        if len(series) < 2:
             return None
+        weights = self.config.get("risk_basket_weights") or {}
         try:
             from tradingagents.strategies.book_risk import portfolio_cvar
 
-            cv = portfolio_cvar(returns_by_name, weights=weights, alpha=alpha)
-            return abs(cv) if cv is not None else None
+            cv = portfolio_cvar(series, weights=weights, alpha=alpha)
         except Exception:  # noqa: BLE001 - fall back to single-name
             return None
+        if cv is None:
+            return None
+        # ``portfolio_returns`` aligns by index and truncates to the shortest
+        # series, so the window is the MATRIX's - the minimum, not one name's.
+        return {
+            "cvar": abs(cv),
+            "n": min(len(s) for s in series.values()),
+            "names": len(series),
+        }
 
     def _basket_stress(self, ticker: str, shock: float = -0.10) -> float | None:
         """Book-level correlated stress loss for the configured basket, or None.
 
-        Shares the basket-resolution logic with ``_basket_cvar``: fetches each
-        basket name's daily returns, mixes them with the config weights, and
-        measures the historical tail loss under a simultaneous ``shock``
+        Shares the basket-resolution with ``_basket_cvar`` through
+        :meth:`_basket_series` (ONE producer, simple returns): mixes each basket
+        name's daily returns with the config weights, and measures the
+        historical tail loss under a simultaneous ``shock``
         (``book_risk.book_correlated_stress``). Firms stress the whole book
         together (not single names), so this surfaces in the risk snapshot as
         "if the basket drops with correlated moves, the book loses X%".
         Returns None when the basket can't be resolved.
         """
-        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
-        if len(tickers) < 2:
+        series = self._basket_series()
+        if len(series) < 2:
             return None
         weights = self.config.get("risk_basket_weights") or {}
-        returns_by_name: dict[str, list] = {}
-        for name in tickers:
-            try:
-                closes = self._try_fetch_closes(str(name))
-                rets = self._log_returns_from_closes(closes)
-                if len(rets) >= 5:
-                    returns_by_name[str(name)] = rets
-            except Exception:  # noqa: BLE001 - a missing name just drops out
-                continue
-        if len(returns_by_name) < 2:
-            return None
         try:
             from tradingagents.strategies.book_risk import book_correlated_stress
 
-            return book_correlated_stress(returns_by_name, weights=weights, shock=shock)
+            return book_correlated_stress(series, weights=weights, shock=shock)
         except Exception:  # noqa: BLE001 - fall back gracefully
             return None
 

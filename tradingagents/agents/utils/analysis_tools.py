@@ -8724,7 +8724,14 @@ def get_tail_risk(
     return (
         f"tail risk {ticker}: cvar={abs(c):.2%} "
         f"var={f'{abs(var):.2%}' if var is not None else 'n/a'}"
-        f"{mvar_line}{dd_line} stress_-10pct={stress:.2%} alpha={alpha:.0%}"
+        f"{mvar_line}{dd_line} stress_-10pct={stress:.2%} "
+        # Provenance (owner review 2026-10-12): this leg mixes nothing, but it
+        # is NOT the risk context's number - it reads the last 320 BARS with
+        # SIMPLE returns while `risk_context.single_cvar` reads 320 CALENDAR
+        # days with LOG returns, and the two differ (12.42% vs 14.68% on SMCI).
+        # The rendered line says which, so the two cannot be read as one.
+        f"1-day {1.0 - float(alpha):.0%} historical, simple returns, "
+        f"n={len(returns)}"
         f"{extra}"
     )
 

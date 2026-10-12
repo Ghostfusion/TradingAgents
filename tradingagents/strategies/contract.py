@@ -80,6 +80,23 @@ def _log_returns(closes) -> list:
     return rets
 
 
+def _simple_returns(closes) -> list:
+    """Period-over-period SIMPLE returns - the PORTFOLIO-aggregation convention.
+
+    ``sum_i w_i r_i`` is a portfolio's one-period return only over simple
+    returns, so a weighted book must be mixed from these and never from
+    :func:`_log_returns` (owner review 2026-10-12; on the live 15-name basket the
+    weighted-log mix read -1.0394% against the simple mix's -1.0162%). A single
+    name's own statistics keep the log convention - the two are different
+    objects and each caller names which it uses.
+    """
+    rets = []
+    for i in range(1, len(closes)):
+        if closes[i - 1] > 0:
+            rets.append(closes[i] / closes[i - 1] - 1.0)
+    return rets
+
+
 def atr_with_source(closes, high, low, window: int = 14) -> tuple[float, str]:
     """ATR plus the basis it came from: ``"h/l"`` (true range) or ``"proxy"``.
 

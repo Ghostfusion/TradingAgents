@@ -1469,6 +1469,10 @@ def test_tail_risk_computes_cvar(monkeypatch):
     out = T.get_tail_risk.invoke({"ticker": "AAPL", "alpha": 0.05})
     assert "tail risk AAPL" in out
     assert "cvar=" in out and "stress_-10pct=" in out
+    # The read states its own basis: it is NOT the risk context's CVaR (320
+    # bars, simple returns here vs 320 calendar days, log returns there).
+    assert "1-day 95% historical, simple returns" in out
+    assert f"n={n - 1}" in out
 
 
 def test_tail_risk_too_short_degrades(monkeypatch):

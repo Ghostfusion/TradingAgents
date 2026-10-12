@@ -90,6 +90,11 @@ def test_pre_graph_context_is_the_only_producer(monkeypatch):
     assert ctx["drawdown_limit"] == pytest.approx(0.10)
     assert ctx["max_position_pct"] == pytest.approx(0.30)
     assert ctx["cvar_budget_pct"] == pytest.approx(0.03)
+    # Each CVaR states the window it was measured over (owner review
+    # 2026-10-12): the name leg is one series, the book leg the basket matrix -
+    # both one observation shorter than the closes they came from.
+    assert ctx["single_cvar_n"] == len(_closes()) - 1
+    assert ctx["book_cvar_n"] == len(_closes()) - 1
     # IWF = float / total = 0.20 < 0.50 -> the composite verdict is ILLIQUID.
     assert ctx["liquidity"]["verdict"] == "illiquid"
     assert ctx["liquidity"]["iwf"] == pytest.approx(0.20)
