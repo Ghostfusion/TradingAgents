@@ -59,10 +59,19 @@ def _config(**over) -> dict:
     return cfg
 
 
+def _dated(closes: list[float]) -> list[tuple[str, float]]:
+    """Unique ascending ISO dates for a close series (28-day months)."""
+    return [(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", c) for i, c in enumerate(closes)]
+
+
 def _graph(monkeypatch, closes, **cfg_over):
     graph = object.__new__(tg.TradingAgentsGraph)
     graph.config = _config(**cfg_over)
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda *a, **k: closes)
+    # The basket mixes the DATED fetch (it refuses a session mismatch), so both
+    # views of the one vendor call are stubbed; every name gets the same
+    # sessions here, which is the live case.
+    monkeypatch.setattr(graph, "_try_fetch_closes_dated", lambda *a, **k: _dated(closes))
     return graph
 
 

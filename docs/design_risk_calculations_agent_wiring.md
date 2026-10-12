@@ -68,12 +68,24 @@ why one 2026-10-12 artifact carries `risk_gate: PASS` (book 1.04 % vs 3 %) besid
 is an **owner decision**, not a refactor (see the queued work below).
 
 Also settled here: the multi-day instrument is `book_risk.var_cvar_horizon(
-returns, horizon_days, alpha=<confidence LEVEL>)` — note the argument is a LEVEL
-(0.95), the opposite convention from `cvar`'s tail probability (0.05) — surfaced by
+returns, horizon_days, confidence_level=<LEVEL>)` — the argument is a LEVEL
+(0.95), the opposite convention from `cvar`'s tail probability (0.05), and it is
+named `confidence_level` as of 2026-10-12 rather than `alpha` — surfaced by
 `get_horizon_var`, and **no** reported CVaR line uses it: nothing in the report
 path scales by √T. The sizing LP (`book_risk.min_cvar_weights`) takes
 `tail_probability`, not the budget, and reports `tail_count` (the scenarios the
 tail holds).
+
+**The book mix is aligned by DATE, or refused.** `graph/trading_graph.py::_
+try_fetch_closes_dated` is the one producer of the vendor bars and keeps the
+date; `_basket_series` compares the basket names' session sets and returns `{}`
+(with a `basket CVaR refused` warning) when they differ from the common set, so
+`book_cvar` is simply absent and the governor falls back to the name leg. Index
+alignment with no guard was the latent hazard: all 15 configured names shared one
+218-session set when this landed, so nothing observable changed — the guard exists
+precisely for the day one vendor stops returning a session. What it still cannot
+see: two series with identical dates but a *different* price adjustment (split/
+dividend treatment), which no date check can catch.
 
 ---
 

@@ -383,10 +383,18 @@ def return_autocorrelation(returns: list, max_lag: int = 5) -> dict:
             "is_iidish": is_iidish}
 
 
-def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
+def var_cvar_horizon(returns: list, horizon_days: int,
+                     confidence_level: float = 0.95,
                      method: str = "empirical",
                      tail_index: float | None = None) -> dict:
     """Value-at-Risk / CVaR at a multi-day horizon (QuantLib Q1).
+
+    ``confidence_level`` is a **level** (0.95) - the opposite convention from
+    :func:`cvar`'s ``alpha``, which is the tail **probability** (0.05). They are
+    one calculation seen from either end (``tail = 1 - level``), and this
+    parameter is named after the quantity it holds because a shared ``alpha``
+    across both APIs is what let a 3 % *budget* fraction be read as a 97 % tail
+    (owner review 2026-10-12). ``alpha=`` is gone rather than aliased.
 
     - ``empirical``: scale the historical daily VaR/CVaR quantile by sqrt(T)
       (variance-additive under i.i.d.).
@@ -404,8 +412,8 @@ def var_cvar_horizon(returns: list, horizon_days: int, alpha: float = 0.95,
     n = len(vals)
     if n < 2:
         return out
-    alpha = float(alpha)
-    q = 1.0 - alpha  # left-tail probability
+    level = float(confidence_level)
+    q = 1.0 - level  # left-tail probability (the complement of a LEVEL)
     asc = sorted(vals)
     k = max(1, int(q * n))
     daily_var = asc[k - 1]                      # negative (loss)

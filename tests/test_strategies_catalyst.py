@@ -644,6 +644,13 @@ def test_risk_governor_basket_cvar_overrides_single_name(monkeypatch):
         return calm
 
     monkeypatch.setattr(graph, "_try_fetch_closes", fake_closes)
+    # The basket path reads the DATED fetch (so it can refuse a session
+    # mismatch); the closes view stays patched for the analyzed-name leg.
+    monkeypatch.setattr(
+        graph,
+        "_try_fetch_closes_dated",
+        lambda ticker, days=320: _dated(fake_closes(ticker, days)),
+    )
 
     # Direct: the helper must return a value with the basket configured.
     assert graph._basket_cvar("AAPL") is not None
@@ -670,6 +677,9 @@ def test_basket_cvar_mixes_simple_returns_and_reports_its_window(monkeypatch):
         "BBB": [50.0, 48.0, 52.0, 47.0, 55.0, 51.0, 46.0, 54.0],
     }
     monkeypatch.setattr(graph, "_try_fetch_closes", lambda t, days=320: closes[str(t).upper()])
+    monkeypatch.setattr(
+        graph, "_try_fetch_closes_dated", lambda t, days=320: _dated(closes[str(t).upper()])
+    )
 
     read = graph._basket_cvar("AAPL")
     assert read is not None
@@ -689,3 +699,47 @@ def test_basket_cvar_mixes_simple_returns_and_reports_its_window(monkeypatch):
     # names went into it - the book is ticker-independent by construction.
     assert read["n"] == 7
     assert read["names"] == 2
+
+
+def _dated(closes: list[float]) -> list[tuple[str, float]]:
+    """Unique ascending ISO dates for a close series (28-day months)."""
+    return [(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", c) for i, c in enumerate(closes)]
+
+
+def test_basket_series_refuses_a_session_mismatch(monkeypatch, caplog):
+    """Fail closed on a date mismatch - the case index alignment cannot see.
+
+    Two series of the SAME length whose dates differ would be paired day-for-day
+    by ``portfolio_returns`` with nothing to object; the guard compares the date
+    SETS, so a short series and a shifted one are both refused - and the refusal
+    is announced, never silent (owner review 2026-10-12).
+    """
+    import tradingagents.graph.trading_graph as tg
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "risk_basket_tickers": ["AAA", "BBB"],
+        "risk_basket_weights": {"AAA": 0.5, "BBB": 0.5},
+    }
+    base = _dated([100.0 + i for i in range(60)])
+    cases = {
+        "one session short": base[:-1],
+        # Same LENGTH, every date different: the silent-shift case.
+        "shifted dates": [(d + "x", c) for d, c in base],
+    }
+    with caplog.at_level("WARNING", logger="tradingagents.graph.trading_graph"):
+        for label, other in cases.items():
+            monkeypatch.setattr(
+                graph,
+                "_try_fetch_closes_dated",
+                lambda t, days=320, other=other: base if str(t).upper() == "AAA" else other,
+            )
+            assert graph._basket_series() == {}, label
+            assert graph._basket_cvar("AAA") is None, label
+    assert "basket CVaR refused" in caplog.text
+
+    # Control: identical sessions resolve, and the window is the matrix's.
+    monkeypatch.setattr(graph, "_try_fetch_closes_dated", lambda t, days=320: base)
+    series = graph._basket_series()
+    assert set(series) == {"AAA", "BBB"}
+    assert all(len(v) == 59 for v in series.values())  # 60 closes -> 59 returns

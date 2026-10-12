@@ -5009,13 +5009,19 @@ def get_downside_read(
 def get_horizon_var(
     ticker: Annotated[str, "ticker symbol"],
     horizon_days: Annotated[int, "risk horizon in days"] = 5,
-    alpha: Annotated[float, "confidence level, default 0.95"] = 0.95,
+    confidence_level: Annotated[float, "confidence level, default 0.95"] = 0.95,
 ) -> str:
     """Horizon VaR/CVaR (QuantLib Q1) gated on autocorrelation.
 
     Reports empirical + parametric VaR/CVaR at a multi-day horizon and whether
     the sqrt(T) scaling is valid (i.i.d. gate). Use when the risk-governor /
     book-tails need a horizon-correct number instead of '~3x daily'.
+
+    ``confidence_level`` is a LEVEL (0.95); the daily-tail `cvar` reads report
+    the same quantity from the other end as a tail probability (0.05). This read
+    is NOT the risk context's CVaR: it scales a historical daily tail by sqrt(T)
+    and reports ``scaling_valid`` so a thin or autocorrelated sample cannot pass
+    for a multi-day number.
     """
     try:
         from tradingagents.strategies.book_risk import var_cvar_horizon
@@ -5025,7 +5031,7 @@ def get_horizon_var(
     if len(closes) < 60:
         return f"horizon var unavailable for {ticker}: need >=60 bars."
     returns = _daily_returns(closes)
-    r = var_cvar_horizon(returns, int(horizon_days), float(alpha))
+    r = var_cvar_horizon(returns, int(horizon_days), float(confidence_level))
     if r["n"] < 2:
         return f"horizon var unavailable for {ticker}: no returns."
     valid = "valid" if r["scaling_valid"] else "NOT-iid"

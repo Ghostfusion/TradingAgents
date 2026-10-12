@@ -1447,7 +1447,15 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001 - advisory; the rows stay absent
             return None, None
 
-    def _try_fetch_closes(self, ticker, days=320):
+    def _try_fetch_closes_dated(self, ticker, days=320) -> list[tuple[str, float]]:
+        """``(date, close)`` rows for one ticker, ascending by date - ONE producer.
+
+        The DATE is kept, not discarded: a caller that mixes two tickers must be
+        able to prove they cover the same sessions before pairing them by index
+        (``_basket_series`` refuses when they do not), and
+        :meth:`_try_fetch_closes` is the closes-only view of this same fetch so
+        there is one vendor call shape, not two.
+        """
         from tradingagents.dataflows.interface import route_to_vendor
 
         end = datetime.now().strftime("%Y-%m-%d")
@@ -1470,7 +1478,11 @@ class TradingAgentsGraph:
         # OLDEST row). ISO dates sort lexicographically.
         if len(rows) > 1:
             rows.sort(key=lambda r: r[0])
-        return [close for _, close in rows]
+        return rows
+
+    def _try_fetch_closes(self, ticker, days=320):
+        """Closes only, ascending by date (``_try_fetch_closes_dated``)."""
+        return [close for _, close in self._try_fetch_closes_dated(ticker, days)]
 
     def _log_returns_from_closes(self, closes) -> list:
         """Daily log-return series from closes (skips non-positive steps)."""
@@ -2085,16 +2097,37 @@ class TradingAgentsGraph:
             return {}
         from tradingagents.strategies.contract import _simple_returns
 
-        out: dict[str, list] = {}
+        rows: dict[str, list[tuple[str, float]]] = {}
         for name in tickers:
             try:
-                closes = self._try_fetch_closes(str(name))
-                rets = _simple_returns(closes)
-                if len(rets) >= min_returns:
-                    out[str(name)] = rets
+                fetched = self._try_fetch_closes_dated(str(name))
             except Exception:  # noqa: BLE001 - a missing name just drops out
                 continue
-        return out
+            if len(fetched) >= min_returns + 1:  # n closes -> n-1 returns
+                rows[str(name)] = fetched
+        if len(rows) < 2:
+            return {}
+        # FAIL CLOSED on a session mismatch. Mixing two series by index pairs
+        # different DAYS the moment one name misses a session (a halt, a vendor
+        # gap, a later listing), and nothing downstream can see the shift - so
+        # the check is on the date SETS, which refuses the equal-length case too.
+        # All 15 configured names shared one 218-session set when this landed
+        # (2026-10-12), so the guard is inert until a vendor stops cooperating.
+        sessions = {name: {d for d, _ in fetched} for name, fetched in rows.items()}
+        common = set.intersection(*sessions.values())
+        if any(len(dates) != len(common) for dates in sessions.values()):
+            logger.warning(
+                "basket CVaR refused: the configured basket names do not share one "
+                "session set (%s; %d common session(s)) - an index-aligned mix would "
+                "pair different dates",
+                ", ".join(f"{n}={len(d)}" for n, d in sorted(sessions.items())),
+                len(common),
+            )
+            return {}
+        return {
+            name: _simple_returns([close for _, close in fetched])
+            for name, fetched in rows.items()
+        }
 
     def _basket_cvar(self, ticker: str, alpha: float = 0.05) -> dict | None:
         """True portfolio CVaR for the configured risk basket, or None.
