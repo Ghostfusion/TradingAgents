@@ -102,10 +102,13 @@ def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
     write_report_tree(state, "TST", tmp_path)
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     assert (
-        "Analyzed-name CVaR: 4.12% (standalone limit 3.00%) — over the limit: "
-        "blocks NEW risk in this name" in decision
+        "Analyzed-name CVaR: 4.12% (1-day 95% historical, simple returns; "
+        "standalone limit 3.00%) — over the limit: blocks NEW risk in this name" in decision
     )
-    assert "Configured reference book CVaR: 1.21% (portfolio budget 3.00%)" in decision
+    assert (
+        "Configured reference book CVaR: 1.21% (1-day 95% historical, simple returns, "
+        "window unrecorded) (portfolio budget 3.00%)" in decision
+    )
     assert "fed the gate" not in decision
 
     state2 = _state(
@@ -122,7 +125,10 @@ def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
     decision2 = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     # Without a candidate the reference book IS the portfolio leg, so it carries
     # the budget comparison; it never claims the gate when a candidate exists.
-    assert "Configured reference book CVaR: 5.00% (portfolio budget 3.00%)" in decision2
+    assert (
+        "Configured reference book CVaR: 5.00% (1-day 95% historical, simple returns, "
+        "window unrecorded) (portfolio budget 3.00%) — funds the portfolio gate" in decision2
+    )
     assert "blocks NEW risk in this name" not in decision2
 
 
@@ -136,8 +142,11 @@ def test_risk_gate_renders_the_candidate_book_and_names_the_reference(tmp_path):
         reasons=["portfolio cvar 4.10% > budget 3.00%"],
         risk_ctx={
             "single_cvar": 0.0412,
+            "single_cvar_n": 319,
             "book_cvar": 0.0121,
+            "book_cvar_n": 217,
             "candidate_cvar": 0.0410,
+            "candidate_cvar_n": 217,
             "candidate_weight_pct": 0.10,
             "candidate_delta_cvar": 0.0299,
             "standalone_cvar_limit_pct": 0.03,
@@ -146,11 +155,21 @@ def test_risk_gate_renders_the_candidate_book_and_names_the_reference(tmp_path):
     )
     write_report_tree(state, "TST", tmp_path)
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
-    assert "Candidate portfolio CVaR: 4.10%" in decision
-    assert "candidate weight 10.0%" in decision
-    assert "Δ +2.99% vs the same book without it" in decision
-    assert "— funds the portfolio gate" in decision
-    assert "Configured reference book CVaR: 1.21%" in decision
+    # Each line carries its OWN window, so two lines with different windows can
+    # never be read as one number (owner decision 2026-10-12).
+    assert (
+        "Analyzed-name CVaR: 4.12% (1-day 95% historical, simple returns, 319 obs; "
+        "standalone limit 3.00%)" in decision
+    )
+    assert (
+        "Candidate portfolio CVaR: 4.10% (candidate weight 10.0%; "
+        "Δ +2.99% vs the same book without it; 217 obs) (portfolio budget 3.00%) "
+        "— funds the portfolio gate" in decision
+    )
+    assert (
+        "Configured reference book CVaR: 1.21% (1-day 95% historical, simple returns, "
+        "217 obs) (portfolio budget 3.00%)" in decision
+    )
 
 
 def test_risk_gate_renders_book_drawdown_and_mismatch(tmp_path):

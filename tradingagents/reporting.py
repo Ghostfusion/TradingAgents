@@ -411,12 +411,22 @@ def _risk_gate_block(final_state: dict) -> str:
     # name's 14.68 % and call both comparisons "budget 3.00%".
     name_limit = ctx.get("standalone_cvar_limit_pct")
     book_budget = ctx.get("portfolio_cvar_budget_pct")
+    # Each line states the basis it was measured on - horizon, confidence,
+    # convention and the WINDOW (`single_cvar_n` / `book_cvar_n` /
+    # `candidate_cvar_n`) - so two CVaR lines with different windows can never be
+    # read as one number, and the limit each leg was compared against rides in
+    # the same parenthesis (owner decisions 2026-10-12).
     if ctx.get("single_cvar") is not None:
+        n = ctx.get("single_cvar_n")
+        basis = f", {n} obs" if n else ""
         line = f"Analyzed-name CVaR: {ctx['single_cvar']:.2%}"
+        line += f" (1-day 95% historical, simple returns{basis}"
         if name_limit is not None:
-            line += f" (standalone limit {name_limit:.2%})"
+            line += f"; standalone limit {name_limit:.2%})"
             if ctx["single_cvar"] > name_limit:
                 line += " — over the limit: blocks NEW risk in this name"
+        else:
+            line += ")"
         parts.append(line)
     elif ctx.get("single_cvar_reason"):
         # A named refusal, never silence: an unmeasured tail must not read as an
@@ -428,18 +438,27 @@ def _risk_gate_block(final_state: dict) -> str:
     # speak to this candidate (owner decision 2026-10-12).
     if ctx.get("candidate_cvar") is not None:
         line = f"Candidate portfolio CVaR: {ctx['candidate_cvar']:.2%}"
+        bits = []
         if ctx.get("candidate_weight_pct") is not None:
-            line += f" (candidate weight {ctx['candidate_weight_pct']:.1%}"
+            bits.append(f"candidate weight {ctx['candidate_weight_pct']:.1%}")
             if ctx.get("candidate_delta_cvar") is not None:
-                line += f", Δ {ctx['candidate_delta_cvar']:+.2%} vs the same book without it"
-            line += ")"
+                bits.append(f"Δ {ctx['candidate_delta_cvar']:+.2%} vs the same book without it")
+        n = ctx.get("candidate_cvar_n")
+        bits.append(f"{n} obs" if n else "window unrecorded")
+        line += " (" + "; ".join(bits) + ")"
         if book_budget is not None:
             line += f" (portfolio budget {book_budget:.2%})"
             if ctx["candidate_cvar"] > book_budget:
                 line += " — funds the portfolio gate"
         parts.append(line)
     if ctx.get("book_cvar") is not None:
+        n = ctx.get("book_cvar_n")
         line = f"Configured reference book CVaR: {ctx['book_cvar']:.2%}"
+        line += (
+            f" (1-day 95% historical, simple returns, {n} obs)"
+            if n
+            else " (1-day 95% historical, simple returns, window unrecorded)"
+        )
         if book_budget is not None:
             line += f" (portfolio budget {book_budget:.2%})"
             # The reference IS the portfolio leg whenever no candidate mix

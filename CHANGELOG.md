@@ -13,6 +13,19 @@ what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tes
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
 ### Changed
+**The report's CVaR block states its own window on every line (2026-10-12, the last of the review's five owner decisions).** `5_portfolio/decision.md` rendered `Analyzed-name CVaR: 4.12% (standalone limit 3.00%)` and `Portfolio (book) CVaR: …` with **no** window, while the producers of those numbers recorded `single_cvar_n` / `book_cvar_n` — so a reader (or an agent) comparing the report against the PM prompt, the trade-plan card or the analyst's tail tool could not tell which window either number came from. Each line now carries its horizon, confidence, convention and observation count, and the candidate line carries its assumed weight and its delta:
+
+```
+Analyzed-name CVaR: 4.12% (1-day 95% historical, simple returns, 319 obs; standalone limit 3.00%) — over the limit: blocks NEW risk in this name
+Candidate portfolio CVaR: 4.10% (candidate weight 10.0%; Δ +2.99% vs the same book without it; 217 obs) (portfolio budget 3.00%) — funds the portfolio gate
+Configured reference book CVaR: 1.21% (1-day 95% historical, simple returns, 217 obs) (portfolio budget 3.00%)
+```
+
+A context that carries no window says `window unrecorded` rather than implying one. Pinned by `tests/test_reporting.py::test_risk_gate_renders_the_candidate_book_and_names_the_reference`.
+
+**Web impact**: none. Report prose only — no route, gate key, flag, JSON artefact shape or script signature moves.
+
+### Changed
 **The portfolio test now measures the book WITH the candidate, and the configured reference keeps its own name (2026-10-12, the owner's decision on the review's candidate-portfolio item).** `risk_context.book_cvar` is identical across every tree of a batch — `_basket_cvar` never reads the analyzed ticker — so on its own it cannot speak to the candidate in front of it, and yet it was the leg the governor's budget comparison read. `graph/trading_graph.py::_candidate_cvar` now mixes the **same** matrix (`_basket_series(extra=<ticker>)`, so the analyzed name is inside the one session guard) with the candidate added at the size the run actually measured — the position contract's size, or the tranche fold's peak-deployed fraction — and measures the reference on that same matrix with the candidate at weight 0. Both are magnitudes, so a **positive** `candidate_delta_cvar` means the candidate deepens the book's tail.
 
 The pick stays explicit and recorded: `risk_context["cvar_gate_basis"]` is `candidate_book` when the candidate mix resolved, else `configured_reference_book`, else `analyzed_name`. The candidate is **absent** whenever no size was measured, the candidate's sessions do not match the basket's, or fewer than three names resolve — and then the configured reference is the portfolio leg, saying so. The printed metric is renamed accordingly: the report renders `Candidate portfolio CVaR: … (candidate weight 10.0%, Δ +1.10% vs the same book without it) (portfolio budget 3.00%)` beside `Configured reference book CVaR: …`; the PM prompt separates `candidate portfolio daily CVaR … — fed the gate` from `configured reference book daily CVaR … — the configured reference, not the candidate`; the decision packet labels which leg it printed; and the registry carries the new leg as its own metric id (`candidate_book_cvar`, producer `risk_context.candidate_cvar`, so "one metric, two values" stays checkable).
