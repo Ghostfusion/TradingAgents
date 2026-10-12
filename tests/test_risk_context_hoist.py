@@ -190,6 +190,58 @@ def test_a_thin_series_publishes_no_cvar_and_names_the_refusal(monkeypatch):
     )
 
 
+def test_the_gate_reads_the_candidate_book_when_a_size_is_measured(monkeypatch):
+    """The portfolio test measures the book WITH this candidate (owner decision
+    2026-10-12): the configured reference basket is identical across every tree of
+    a batch, so on its own it cannot speak to the candidate in front of it.
+
+    The size is the one the run itself put on the table - here the position
+    contract's own size - and the candidate then becomes the leg the governor
+    reads, with `cvar_gate_basis` recording that it did. With no size measured the
+    reference book stands instead, and says so.
+    """
+    graph = _graph(monkeypatch, _closes(260))
+    import tradingagents.dataflows.float_shares as float_shares
+    import tradingagents.dataflows.statement_parsing as statement_parsing
+
+    monkeypatch.setattr(float_shares, "fetch_float_shares", lambda _t: 4_000_000.0)
+    monkeypatch.setattr(
+        statement_parsing, "fetch_ticker", lambda _t, _d: {"shares": {"current": 20_000_000.0}}
+    )
+
+    import tradingagents.strategies.risk_governor as rg
+
+    seen: dict = {}
+
+    def _govern(size, cfg, **kw):
+        seen.update(kw)
+        return {"verdict": "PASS", "reasons": [], "numbers": "captured"}
+
+    monkeypatch.setattr(rg, "govern", _govern)
+    state = {
+        "trade_date": "2026-08-19",
+        "final_trade_decision": "Buy",
+        "position_contract": "size 10.0%, stop 90.0 (from entry 100.00)",
+    }
+    out = graph._apply_strategy_overlays(state, "NVDA")
+    ctx = out["risk_context"]
+    assert ctx["cvar_gate_basis"] == "candidate_book"
+    assert ctx["candidate_weight_pct"] == pytest.approx(0.10)
+    assert ctx["candidate_cvar"] is not None
+    assert ctx["candidate_cvar_n"] == len(_closes(260)) - 1
+    assert ctx["candidate_delta_cvar"] is not None
+    assert seen["cvar_pct"] == pytest.approx(ctx["candidate_cvar"])
+    assert seen["name_cvar_pct"] == pytest.approx(ctx["single_cvar"])
+
+    # No measured size -> the configured reference book is the portfolio leg.
+    out2 = graph._apply_strategy_overlays(
+        {"trade_date": "2026-08-19", "final_trade_decision": "Hold"}, "NVDA"
+    )
+    ctx2 = out2["risk_context"]
+    assert ctx2["cvar_gate_basis"] == "configured_reference_book"
+    assert "candidate_cvar" not in ctx2
+
+
 def test_insufficient_liquidity_guard_reads_risk_context(monkeypatch):
     """ILLIQUID read -> hard guard; anything else (liquid / unknown) stays silent.
 

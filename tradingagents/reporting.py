@@ -422,11 +422,29 @@ def _risk_gate_block(final_state: dict) -> str:
         # A named refusal, never silence: an unmeasured tail must not read as an
         # absent risk (owner decision 2026-10-12).
         parts.append(f"Analyzed-name CVaR: {ctx['single_cvar_reason']}")
-    if ctx.get("book_cvar") is not None:
-        line = f"Portfolio (book) CVaR: {ctx['book_cvar']:.2%}"
+    # The CANDIDATE-inclusive book is what the portfolio gate read whenever the
+    # run measured a size; the configured reference basket keeps its own line
+    # under its own name, because it is identical across a batch and cannot
+    # speak to this candidate (owner decision 2026-10-12).
+    if ctx.get("candidate_cvar") is not None:
+        line = f"Candidate portfolio CVaR: {ctx['candidate_cvar']:.2%}"
+        if ctx.get("candidate_weight_pct") is not None:
+            line += f" (candidate weight {ctx['candidate_weight_pct']:.1%}"
+            if ctx.get("candidate_delta_cvar") is not None:
+                line += f", Δ {ctx['candidate_delta_cvar']:+.2%} vs the same book without it"
+            line += ")"
         if book_budget is not None:
             line += f" (portfolio budget {book_budget:.2%})"
-            if ctx["book_cvar"] > book_budget:
+            if ctx["candidate_cvar"] > book_budget:
+                line += " — funds the portfolio gate"
+        parts.append(line)
+    if ctx.get("book_cvar") is not None:
+        line = f"Configured reference book CVaR: {ctx['book_cvar']:.2%}"
+        if book_budget is not None:
+            line += f" (portfolio budget {book_budget:.2%})"
+            # The reference IS the portfolio leg whenever no candidate mix
+            # resolved, so only then does it claim to have funded the gate.
+            if ctx.get("candidate_cvar") is None and ctx["book_cvar"] > book_budget:
                 line += " — funds the portfolio gate"
         parts.append(line)
     # Decision-gate auditability (IREN 2026-09-10 decision.md review): the

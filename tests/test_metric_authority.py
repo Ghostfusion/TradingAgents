@@ -179,6 +179,17 @@ def test_the_three_cvar_readings_are_distinguishable_by_name():
     assert "AGREE" in (name_row.basis or "").upper()
     assert "_pit_closes" in (name_row.basis or "")
     assert tail["definition_version"] == "cvar_1d95.v2"
+    # The candidate-inclusive book is its OWN id: it is the leg the governor
+    # reads whenever a size was measured, and the configured reference can never
+    # be mistaken for it.
+    cand = ma.resolve_metric(
+        "candidate_book_cvar", values={"risk_context.candidate_cvar": 0.0410}
+    )
+    assert cand["status"] == "ok" and cand["value"] == 0.0410
+    assert cand["producer_id"] == "risk_context.candidate_cvar"
+    assert "weight 0" in (cand["basis"] or "")
+    book_row = next(r for r in ma.METRIC_REGISTRY if r.metric == "book_cvar")
+    assert "candidate_book_cvar" in (book_row.basis or "")
 
 
 def test_the_published_value_is_the_canonical_producer_never_the_other():

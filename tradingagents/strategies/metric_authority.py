@@ -314,7 +314,40 @@ METRIC_REGISTRY: tuple[MetricRow, ...] = (
             "matches - otherwise refused (`basket CVaR refused`) and the governor "
             "falls back to the analyzed name. NOT the analyzed ticker and NOT a "
             "candidate portfolio: identical across the trees of one batch, which is "
-            "why it cannot establish anything about a candidate"
+            "why it cannot establish anything about a candidate - the "
+            "candidate-inclusive variant is its OWN metric id "
+            "(`candidate_book_cvar`), and it is the leg the governor reads whenever "
+            "a size was measured"
+        ),
+    ),
+    MetricRow(
+        metric="candidate_book_cvar",
+        definition=(
+            "the book's 1-day historical CVaR at 95% with the analyzed candidate "
+            "added at the size this run measured - the PORTFOLIO leg the risk "
+            "governor gates whenever a size exists"
+        ),
+        definition_version="cvar_1d95.v1",
+        unit="loss_fraction_of_equity",
+        status="ok",
+        producer_id="risk_context.candidate_cvar",
+        implementation_ref="strategies/book_risk.py::portfolio_cvar",
+        basis=(
+            "the ESTIMATOR is `book_risk.portfolio_cvar` over the SAME matrix "
+            "`book_cvar` reads (`graph/trading_graph.py::_basket_series` with "
+            "`extra=<the analyzed ticker>`, one session set, SIMPLE returns), so "
+            "the candidate is measured on ONE window rather than against another "
+            "book: the weights are `normalize_book_weights`' view of the "
+            "configured basket plus the candidate at its measured proposed size "
+            "(the position contract's size, or the tranche fold's peak-deployed "
+            "fraction), and `candidate_delta_cvar` is that same mix with the "
+            "candidate at weight 0. Both are magnitudes, so a POSITIVE delta means "
+            "the candidate DEEPENS the book's tail. `candidate_cvar_n` and "
+            "`candidate_weight_pct` carry the window and the size it assumed. "
+            "ABSENT when the run measured no size, when the candidate's series "
+            "does not share the basket's session set, or when fewer than three "
+            "names resolve - and `risk_context['cvar_gate_basis']` then names "
+            "which leg the portfolio test read instead"
         ),
     ),
     MetricRow(

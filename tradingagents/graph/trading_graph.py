@@ -1300,11 +1300,34 @@ class TradingAgentsGraph:
                     # citing the other number against the same 3.00%).
                     name_cvar_pct = risk_ctx.get("single_cvar")
                     cvar_pct = risk_ctx.get("book_cvar")
-                    risk_ctx["cvar_gate_basis"] = (
-                        "configured_reference_book"
-                        if cvar_pct is not None
-                        else ("analyzed_name" if name_cvar_pct is not None else None)
-                    )
+                    # The CANDIDATE-inclusive book is the authoritative
+                    # portfolio test whenever the run measured a size (owner
+                    # decision 2026-10-12): the configured reference basket is
+                    # identical across the trees of one batch, because
+                    # `_basket_cvar` never reads the analyzed ticker - so it
+                    # cannot speak to THIS candidate. The candidate mix adds the
+                    # name at the size the fold actually proposed.
+                    candidate = None
+                    try:
+                        if govern_size and float(govern_size) > 0.0:
+                            candidate = self._candidate_cvar(ticker, float(govern_size))
+                    except Exception:  # noqa: BLE001 - the reference book still stands
+                        candidate = None
+                    if candidate is not None:
+                        risk_ctx["candidate_cvar"] = candidate["cvar"]
+                        risk_ctx["candidate_cvar_n"] = candidate["n"]
+                        risk_ctx["candidate_weight_pct"] = candidate["weight"]
+                        risk_ctx["candidate_delta_cvar"] = candidate["delta_cvar"]
+                        risk_ctx["candidate_cvar_basis"] = candidate["basis"]
+                        cvar_pct = candidate["cvar"]
+                        basis = "candidate_book"
+                    elif cvar_pct is not None:
+                        basis = "configured_reference_book"
+                    elif name_cvar_pct is not None:
+                        basis = "analyzed_name"
+                    else:
+                        basis = None
+                    risk_ctx["cvar_gate_basis"] = basis
                     if cvar_pct is None:
                         cvar_pct = name_cvar_pct
                     # Book-level correlated stress (item 2): shock the whole
@@ -2170,7 +2193,9 @@ class TradingAgentsGraph:
         except Exception:  # noqa: BLE001 - gate must never crash
             return None
 
-    def _basket_series(self, *, min_returns: int = 5) -> dict[str, list]:
+    def _basket_series(
+        self, *, min_returns: int = 5, extra: str | None = None
+    ) -> dict[str, list]:
         """The configured basket's per-name return series - ONE producer.
 
         **SIMPLE returns, deliberately.** A portfolio's one-period return is
@@ -2184,22 +2209,31 @@ class TradingAgentsGraph:
 
         Returns ``{name: returns}`` for the names that resolve with at least
         ``min_returns`` observations, or ``{}`` when the basket is unconfigured
-        or cannot be resolved. ``ticker`` is deliberately NOT a parameter: the
-        book is the configured basket, never the analyzed name.
+        or cannot be resolved. The CONFIGURED basket is the only default source
+        of names - that is what keeps ``book_cvar`` identical across the trees of
+        one batch - and the analyzed ticker is deliberately not implicit.
+        ``extra`` adds ONE further name to the same matrix under the same session
+        guard, which is how the candidate read (``_candidate_cvar``) measures a
+        candidate mix and its reference on ONE window instead of two.
         """
-        tickers = [t for t in (self.config.get("risk_basket_tickers") or []) if t]
+        tickers = [str(t) for t in (self.config.get("risk_basket_tickers") or []) if t]
         if len(tickers) < 2:
             return {}
+        names = list(dict.fromkeys(tickers))
+        if extra:
+            extra_name = str(extra)
+            if extra_name.upper() not in {n.upper() for n in names}:
+                names.append(extra_name)
         from tradingagents.strategies.contract import _simple_returns
 
         rows: dict[str, list[tuple[str, float]]] = {}
-        for name in tickers:
+        for name in names:
             try:
-                fetched = self._try_fetch_closes_dated(str(name))
+                fetched = self._try_fetch_closes_dated(name)
             except Exception:  # noqa: BLE001 - a missing name just drops out
                 continue
             if len(fetched) >= min_returns + 1:  # n closes -> n-1 returns
-                rows[str(name)] = fetched
+                rows[name] = fetched
         if len(rows) < 2:
             return {}
         # FAIL CLOSED on a session mismatch. Mixing two series by index pairs
@@ -2212,9 +2246,9 @@ class TradingAgentsGraph:
         common = set.intersection(*sessions.values())
         if any(len(dates) != len(common) for dates in sessions.values()):
             logger.warning(
-                "basket CVaR refused: the configured basket names do not share one "
-                "session set (%s; %d common session(s)) - an index-aligned mix would "
-                "pair different dates",
+                "basket CVaR refused: the names do not share one session set "
+                "(%s; %d common session(s)) - an index-aligned mix would pair "
+                "different dates",
                 ", ".join(f"{n}={len(d)}" for n, d in sorted(sessions.items())),
                 len(common),
             )
@@ -2271,6 +2305,69 @@ class TradingAgentsGraph:
             "cvar": abs(cv),
             "n": min(len(s) for s in series.values()),
             "names": len(series),
+        }
+
+    def _candidate_cvar(
+        self, ticker: str, weight: float, alpha: float = 0.05
+    ) -> dict | None:
+        """The PORTFOLIO tail of the book WITH this candidate - or None.
+
+        The configured reference book (``_basket_cvar``) never reads the analyzed
+        ticker, which is why it is identical across the trees of one batch and
+        why it cannot say anything about a candidate. This mixes the SAME matrix
+        with the analyzed name added at the size the run actually measured
+        (``govern_size``: the position contract's size, or the tranche fold's
+        peak-deployed fraction), and measures the reference on that same matrix
+        with the name's weight ZEROED - so ``delta_cvar`` is the candidate's own
+        contribution over one window, one session set and one convention rather
+        than a difference between two differently-built books.
+
+        Returns ``{"cvar", "reference_cvar", "delta_cvar", "n", "names",
+        "weight", "basis"}`` as positive magnitudes, so a POSITIVE ``delta_cvar``
+        means the candidate DEEPENS the book's tail. None when the basket or the
+        candidate's series cannot be resolved onto one session set (the session
+        guard in ``_basket_series`` covers the candidate too) - in which case the
+        caller keeps the configured reference book and says so through
+        ``cvar_gate_basis``.
+        """
+        try:
+            size = float(weight)
+        except (TypeError, ValueError):
+            return None
+        if not size > 0.0:
+            return None
+        series = self._basket_series(extra=ticker)
+        key = next((n for n in series if n.upper() == str(ticker).upper()), None)
+        if key is None or len(series) < 3:
+            return None
+        from tradingagents.strategies.book_risk import (
+            normalize_book_weights,
+            portfolio_cvar,
+        )
+
+        reference = normalize_book_weights(
+            series, self.config.get("risk_basket_weights") or {}
+        )
+        if reference is None:
+            return None
+        cand = portfolio_cvar(series, weights={**reference, key: size}, alpha=alpha)
+        ref = portfolio_cvar(series, weights={**reference, key: 0.0}, alpha=alpha)
+        if cand is None or ref is None:
+            return None
+        n = min(len(s) for s in series.values())
+        return {
+            "cvar": abs(cand),
+            "reference_cvar": abs(ref),
+            "delta_cvar": abs(cand) - abs(ref),
+            "n": n,
+            "names": len(series),
+            "weight": size,
+            "basis": (
+                f"the configured reference basket plus {key} at its measured "
+                f"proposed size {size:.1%}, mixed on ONE matrix and one session set "
+                f"({n} obs, {len(series)} names); the reference is that same matrix "
+                f"with {key} at weight 0"
+            ),
         }
 
     def _basket_stress(self, ticker: str, shock: float = -0.10) -> float | None:

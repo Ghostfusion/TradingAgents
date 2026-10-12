@@ -718,6 +718,71 @@ def _dated(closes: list[float]) -> list[tuple[str, float]]:
     return [(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", c) for i, c in enumerate(closes)]
 
 
+def test_the_candidate_book_adds_the_name_at_its_measured_size(monkeypatch):
+    """The candidate leg: the reference book PLUS the analyzed name, on ONE matrix.
+
+    The configured reference basket cannot answer "what does THIS candidate do to
+    the book's tail" - `_basket_cvar` never reads the analyzed ticker, which is
+    exactly why it is identical across the trees of a batch. This mixes the same
+    matrix with the name at the size the run measured, and measures the reference
+    on that same matrix with the name at weight 0, so the delta is the
+    candidate's own contribution over one window and one convention (owner
+    decision 2026-10-12).
+    """
+    import tradingagents.graph.trading_graph as tg
+    from tradingagents.strategies.book_risk import portfolio_cvar
+    from tradingagents.strategies.contract import _simple_returns
+
+    graph = object.__new__(tg.TradingAgentsGraph)
+    graph.config = {
+        "risk_basket_tickers": ["AAA", "BBB"],
+        "risk_basket_weights": {"AAA": 0.5, "BBB": 0.5},
+        "risk_cvar_min_observations": 5,
+    }
+    calm = [100.0 + 0.1 * i for i in range(60)]
+    crash = [100.0 + 0.1 * i for i in range(59)] + [70.0]  # the candidate's own tail
+    series = {"AAA": calm, "BBB": calm, "ZZZ": crash}
+    monkeypatch.setattr(
+        graph, "_try_fetch_closes_dated", lambda t, days=320: _dated(series[str(t).upper()])
+    )
+
+    read = graph._candidate_cvar("ZZZ", 0.30)
+    assert read is not None
+    assert read["n"] == 59
+    assert read["names"] == 3
+    assert read["weight"] == pytest.approx(0.30)
+    # The candidate's crash day lands where the basket is up, so the
+    # candidate-inclusive mix has the deeper tail and the delta is POSITIVE.
+    assert read["delta_cvar"] == pytest.approx(read["cvar"] - read["reference_cvar"])
+    assert read["delta_cvar"] > 0
+    # The reference is that SAME matrix with the candidate zeroed - one window,
+    # one convention, so the difference is the candidate's contribution and not
+    # a difference between two differently-built books.
+    assert read["reference_cvar"] == pytest.approx(
+        abs(
+            portfolio_cvar(
+                {k: _simple_returns(v) for k, v in series.items()},
+                weights={"AAA": 0.5, "BBB": 0.5, "ZZZ": 0.0},
+                alpha=0.05,
+            )
+        )
+    )
+
+    # A candidate whose sessions do not match the basket's refuses the WHOLE
+    # matrix through the one session guard, so the caller keeps the reference
+    # book rather than mixing two calendars.
+    shifted = _dated(crash)[:-1]
+
+    def _shifted_dates(ticker, days=320):
+        key = str(ticker).upper()
+        return shifted if key == "ZZZ" else _dated(series[key])
+
+    monkeypatch.setattr(graph, "_try_fetch_closes_dated", _shifted_dates)
+    assert graph._candidate_cvar("ZZZ", 0.30) is None
+    # And no measured size is no candidate: the reference book stands.
+    assert graph._candidate_cvar("ZZZ", 0.0) is None
+
+
 def test_basket_series_refuses_a_session_mismatch(monkeypatch, caplog):
     """Fail closed on a date mismatch - the case index alignment cannot see.
 

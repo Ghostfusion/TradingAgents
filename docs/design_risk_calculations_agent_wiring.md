@@ -53,7 +53,8 @@ fourth from appearing silently.
 | where it prints | producer | horizon | confidence | convention | window | scope | authority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `risk_context.single_cvar` → the report's `Analyzed-name CVaR`, `entry_exit.entry.cvar_status`, the card's `binding_reason` | `book_risk.cvar` via `graph/trading_graph.py::_precompute_risk_context` over **`_pit_closes`** | **1 day** | **95 %** (`alpha=0.05`) | **simple** returns (`contract._simple_returns`) | the last 320 **bars** (`_pit_closes` → `_ohlcv` → `load_ohlcv`, PIT-filtered) → ~319 obs; the count is recorded as `single_cvar_n` | one name, 100 % of a reference exposure | **decision-binding**: compared against `risk_standalone_cvar_limit_pct` (default 3 %) by the governor's NAME leg, and the report/card label it `analyzed_name_cvar` |
-| `risk_context.book_cvar` → the report's `Portfolio (book) CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker and **not** a candidate portfolio | the risk governor's PORTFOLIO leg consumes it against `risk_portfolio_cvar_budget_pct` (falling back to `single_cvar` only when no book resolves, and `risk_context["cvar_gate_basis"]` records which leg the test read) |
+| `risk_context.book_cvar` → the report's `Configured reference book CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_basket_cvar` ← **`_basket_series`** | **1 day** | **95 %** | **simple** returns (the aggregation convention — a weighted sum of log returns is not a portfolio return) | 320 calendar days per name, mixed on the index-aligned matrix; `book_cvar_n` = the shortest series | the **configured reference basket**, cash-diluted when Σw < 1 (the rest earns zero). **Not** the analyzed ticker — identical across a batch by construction | the risk governor's PORTFOLIO leg consumes it against `risk_portfolio_cvar_budget_pct` **only when no candidate mix resolved**; `risk_context["cvar_gate_basis"]` records which leg the test read |
+| `risk_context.candidate_cvar` → the report's `Candidate portfolio CVaR` | `book_risk.portfolio_cvar` via `graph/trading_graph.py::_candidate_cvar` ← **`_basket_series(extra=<ticker>)`** | **1 day** | **95 %** | **simple** returns | the same matrix as the reference **plus the analyzed name** (so one session set governs both), mixed over `candidate_cvar_n` observations | the configured book **with this candidate added** at the size the run measured (the position contract's size, or the tranche fold's peak-deployed fraction); `candidate_delta_cvar` = the same matrix with the candidate at weight 0 | **the portfolio leg the governor reads whenever a size was measured** (`cvar_gate_basis = candidate_book`) |
 | the market analyst's `tail risk <T>: cvar=` line | `book_risk.cvar` via `agents/utils/analysis_tools.py::get_tail_risk` | **1 day** | **95 %** | **simple** returns | the last 320 **bars** (`_ohlcv`) → ~319 obs | one name | **none** — printed context for the analyst, never a gate. The **SAME measurement** as `risk_context.single_cvar` since the 2026-10-12 source unification (one series, one convention), so the two must agree |
 
 Consequences a reader must not skip, all verified on the 2026-10-12 SMCI tree:
@@ -62,7 +63,9 @@ convention — see the source note below), so a spread between them is a defect
 rather than a basis; and
 1.04 % (`book_cvar`) is the basket's own tail — identical across every tree in a
 batch, because `_basket_cvar` never reads the analyzed ticker — so it cannot
-establish anything about the candidate. One config key used to serve both the
+establish anything about the candidate; that is exactly why the **candidate**
+leg exists (below), and why the reference is now printed under its own name
+rather than under the gate's. One config key used to serve both the
 named comparison and the book comparison (`risk_daily_cvar_budget_pct`), which is
 why one 2026-10-12 artifact carried `risk_gate: PASS` (book 1.04 % vs 3 %) beside
 `binding_reason: analyzed-name CVaR 14.68% > budget 3.00%`.
@@ -102,6 +105,19 @@ leg converts with `contract._simple_returns`. `analyzed_name_cvar` and
 spread is a defect. The raw vendor chain still feeds the liquidity and
 book-drawdown legs; this moved the CVaR leg only, and a name whose PIT series is
 unavailable publishes no `single_cvar` (never a fall back to the other source).
+
+**The portfolio test measures the book WITH the candidate (2026-10-12).**
+`graph/trading_graph.py::_candidate_cvar` mixes the SAME matrix
+(`_basket_series(extra=<ticker>)`, so the candidate is inside the one session
+guard) with the analyzed name added at the size the run actually put on the table
+— the position contract's size, or the tranche fold's peak-deployed fraction —
+and measures the reference on that same matrix with the candidate at weight 0.
+Both are magnitudes, so a POSITIVE `candidate_delta_cvar` means the candidate
+DEEPENS the book's tail. Absent when no size was measured, when the candidate's
+sessions do not match the basket's, or when fewer than three names resolve; then
+the configured reference book is the portfolio leg and `cvar_gate_basis` says so.
+The reference is printed under its own name (`Configured reference book CVaR`)
+because it cannot speak to a candidate.
 
 **The NAME leg clears an observation floor, or it publishes nothing.**
 `risk_cvar_min_observations` (default **250**) is the sample that tail mean must

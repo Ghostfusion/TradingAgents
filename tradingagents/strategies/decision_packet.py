@@ -227,11 +227,19 @@ def _risk_constraints_rows(state: dict, cfg: dict, *, closes=None) -> list[str]:
     # The measured book state. Every number is computed or a named gap.
     rctx = state.get("risk_context") or {}
     book_pairs: list[str] = []
-    cvar = rctx.get("book_cvar")
+    # The gate's own pick, in authority order: the candidate-inclusive book when
+    # this run measured a size, else the configured reference basket, else the
+    # analyzed name's own tail.
+    cvar = rctx.get("candidate_cvar")
+    cvar_label = "candidate cvar"
+    if cvar is None:
+        cvar = rctx.get("book_cvar")
+        cvar_label = "reference book cvar"
     if cvar is None:
         cvar = rctx.get("single_cvar")
+        cvar_label = "analyzed-name cvar"
     if cvar is not None:
-        book_pairs.append(f"cvar={_pct(cvar)}")
+        book_pairs.append(f"{cvar_label}={_pct(cvar)}")
     if rctx.get("book_stress") is not None:
         book_pairs.append(f"stress={_pct(rctx['book_stress'])}")
     dd = rctx.get("book_drawdown")

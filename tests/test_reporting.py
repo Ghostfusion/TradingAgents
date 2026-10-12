@@ -74,7 +74,7 @@ def test_risk_gate_renders_both_cvars(tmp_path):
     path = write_report_tree(state, "TST", tmp_path)
     decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
     assert "Analyzed-name CVaR: 1.23%" in decision
-    assert "Portfolio (book) CVaR: 3.25%" in decision
+    assert "Configured reference book CVaR: 3.25%" in decision
     # No budget in the context -> NEITHER leg claims to have funded the gate
     # (the old text tagged the book CVaR unconditionally, which read as the
     # operative constraint even when the name level was blocking - GOOG
@@ -105,7 +105,7 @@ def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
         "Analyzed-name CVaR: 4.12% (standalone limit 3.00%) — over the limit: "
         "blocks NEW risk in this name" in decision
     )
-    assert "Portfolio (book) CVaR: 1.21% (portfolio budget 3.00%)" in decision
+    assert "Configured reference book CVaR: 1.21% (portfolio budget 3.00%)" in decision
     assert "fed the gate" not in decision
 
     state2 = _state(
@@ -120,11 +120,37 @@ def test_risk_gate_names_the_leg_that_breaches_its_budget(tmp_path):
     )
     write_report_tree(state2, "TST2", tmp_path)
     decision2 = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
-    assert (
-        "Portfolio (book) CVaR: 5.00% (portfolio budget 3.00%) — funds the portfolio gate"
-        in decision2
-    )
+    # Without a candidate the reference book IS the portfolio leg, so it carries
+    # the budget comparison; it never claims the gate when a candidate exists.
+    assert "Configured reference book CVaR: 5.00% (portfolio budget 3.00%)" in decision2
     assert "blocks NEW risk in this name" not in decision2
+
+
+def test_risk_gate_renders_the_candidate_book_and_names_the_reference(tmp_path):
+    """The gate's portfolio leg is the candidate-inclusive book when a size was
+    measured; the configured reference basket keeps its own line under its own
+    name (owner decision 2026-10-12) - identical across a batch, it cannot speak
+    to this candidate."""
+    state = _state(
+        verdict="REJECT",
+        reasons=["portfolio cvar 4.10% > budget 3.00%"],
+        risk_ctx={
+            "single_cvar": 0.0412,
+            "book_cvar": 0.0121,
+            "candidate_cvar": 0.0410,
+            "candidate_weight_pct": 0.10,
+            "candidate_delta_cvar": 0.0299,
+            "standalone_cvar_limit_pct": 0.03,
+            "portfolio_cvar_budget_pct": 0.03,
+        },
+    )
+    write_report_tree(state, "TST", tmp_path)
+    decision = (tmp_path / "5_portfolio" / "decision.md").read_text(encoding="utf-8")
+    assert "Candidate portfolio CVaR: 4.10%" in decision
+    assert "candidate weight 10.0%" in decision
+    assert "Δ +2.99% vs the same book without it" in decision
+    assert "— funds the portfolio gate" in decision
+    assert "Configured reference book CVaR: 1.21%" in decision
 
 
 def test_risk_gate_renders_book_drawdown_and_mismatch(tmp_path):

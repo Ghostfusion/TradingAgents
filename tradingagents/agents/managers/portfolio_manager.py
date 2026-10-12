@@ -161,10 +161,35 @@ def create_portfolio_manager(llm, fallback_llm=None, backup_llm=None):
                 # Fail-closed reads are NAMED, never silent: a thin series must
                 # not look like a calm one (owner decision 2026-10-12).
                 bits.append(f"analyzed-name daily CVaR {ctx['single_cvar_reason']}")
+            # The gate's portfolio leg, in order of authority: the
+            # candidate-inclusive book (measured when this run has a size), else
+            # the configured reference basket. The reference keeps its own name,
+            # because it is identical across a batch (owner decision 2026-10-12).
+            if ctx.get("candidate_cvar") is not None:
+                n = ctx.get("candidate_cvar_n")
+                basis = f" (1-day 95% historical, simple returns, {n} obs)" if n else ""
+                delta = ctx.get("candidate_delta_cvar")
+                weight = ctx.get("candidate_weight_pct")
+                detail = ""
+                if weight is not None:
+                    detail = f" at a {weight:.1%} candidate weight"
+                    if delta is not None:
+                        detail += f", Δ {delta:+.2%} vs the same book without it"
+                bits.append(
+                    f"candidate portfolio daily CVaR {ctx['candidate_cvar']:.2%}"
+                    f"{detail}{basis} — fed the gate"
+                )
             if ctx.get("book_cvar") is not None:
                 n = ctx.get("book_cvar_n")
                 basis = f" (1-day 95% historical, simple returns, {n} obs)" if n else ""
-                bits.append(f"portfolio (book) daily CVaR {ctx['book_cvar']:.2%}{basis} — fed the gate")
+                tag = (
+                    " — fed the gate"
+                    if ctx.get("candidate_cvar") is None
+                    else " — the configured reference, not the candidate"
+                )
+                bits.append(
+                    f"configured reference book daily CVaR {ctx['book_cvar']:.2%}{basis}{tag}"
+                )
             if bits:
                 cvar_line = (
                     "**Computed daily-tail CVaR** (deterministic): "
