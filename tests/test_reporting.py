@@ -1056,6 +1056,52 @@ def test_decision_marks_a_book_drawdown_block(tmp_path):
     assert doc["action_basis"] == "risk_reduction"
 
 
+def test_decision_labels_a_measured_breach_even_when_the_run_is_rejected(tmp_path):
+    """A REJECT sets `risk_halt`, and the NAME leg feeds that same gate.
+
+    So the flag alone must not claim the halt label: the measured constraint
+    that actually bound the action stays the label (live SMCI/EHC/INTU/NFLX
+    2026-10-13 published `halt` / "risk halt active" beside a gate reason naming
+    the name CVaR).
+    """
+    state = _state(
+        verdict="REJECT",
+        reasons=["name cvar 12.42% > limit 3.00%"],
+        risk_ctx={"single_cvar": 0.1242, "standalone_cvar_limit_pct": 0.03},
+    )
+    state["risk_halt"] = True
+    state["pm_decision"] = {"rating": "Underweight"}
+    write_report_tree(state, "SMCI", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_constraint"] == "analyzed_name_cvar"
+    assert doc["action_basis"] == "risk_reduction"
+    assert "12.42%" in doc["binding_reason"] and "3.00%" in doc["binding_reason"]
+
+
+def test_decision_labels_a_genuine_halt(tmp_path):
+    """The governor's own halt leg is the only producer of the `halt` label."""
+    state = _state(verdict="REJECT", reasons=["risk halt active"])
+    state["risk_halt"] = True
+    state["pm_decision"] = {"rating": "Underweight"}
+    write_report_tree(state, "TST", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_constraint"] == "halt"
+    assert doc["action_basis"] == "risk_reduction"
+    assert doc["binding_reason"] == "risk halt active"
+
+
+def test_decision_labels_a_bare_gate_reject_without_a_measured_constraint(tmp_path):
+    """A REJECT that matched no measured constraint labels the gate itself."""
+    state = _state(verdict="REJECT", reasons=["size over cap"])
+    state["risk_halt"] = True
+    state["pm_decision"] = {"rating": "Underweight"}
+    write_report_tree(state, "TST", tmp_path)
+    doc = _decision(tmp_path)
+    assert doc["binding_constraint"] == "risk_gate"
+    assert doc["action_basis"] == "risk_reduction"
+    assert "size over cap" in doc["binding_reason"]
+
+
 def test_decision_has_no_binding_constraint_for_a_setup_driven_action(tmp_path):
     state = _state(risk_ctx={"single_cvar": 0.01, "standalone_cvar_limit_pct": 0.03})
     state["pm_decision"] = {"rating": "Buy"}

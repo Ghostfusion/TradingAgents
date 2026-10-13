@@ -598,12 +598,25 @@ def _binding_constraint(final_state: dict) -> tuple[str | None, str, str]:
     Returns ``(binding_constraint, action_basis, reason)``; ``action_basis`` is
     ``"risk_reduction"`` when a portfolio/name risk constraint (halt, measured
     book drawdown, analyzed-name CVaR over budget, or a gate REJECT) bound the
-    action, else ``"setup"``. Read from ``risk_context``/``risk_gate`` only,
+    action, else ``"setup"``. Precedence is most-specific-first: a genuine halt,
+    then the two MEASURED constraints, then a bare gate REJECT - so a measured
+    breach is never reported as a generic halt (2026-10-13). Read from
+    ``risk_context``/``risk_gate`` only,
     never from prose, so a trim can be labelled as risk-driven instead of being
     presented as a setup - NVDA 2026-09-12: the structure tools said hold, the
     trim rested on the risk budget, and nothing in the report said so.
     """
-    if final_state.get("risk_halt"):
+    gate = final_state.get("risk_gate") or {}
+    reasons = [str(r) for r in (gate.get("reasons") or [])]
+    # A genuine halt is the governor's own halt leg (`halted=True`), whose only
+    # reason is `risk halt active`. `risk_halt` alone is NOT that: the graph sets
+    # it on EVERY REJECT, and since the NAME leg feeds that same gate a measured
+    # name-limit breach sets it too - so claiming the halt label from the flag
+    # alone publishes "risk halt active" beside a gate reason that names a
+    # measurement, and swallows the constraint that actually bound the action
+    # (live SMCI/EHC/INTU/NFLX 2026-10-13; `analyzed_name_cvar` is the pinned
+    # intent for a name breach).
+    if final_state.get("risk_halt") and any("halt" in r.lower() for r in reasons):
         return "halt", "risk_reduction", "risk halt active"
     ctx = final_state.get("risk_context") or {}
     dd, lim = ctx.get("book_drawdown"), ctx.get("drawdown_limit")
@@ -624,10 +637,12 @@ def _binding_constraint(final_state: dict) -> tuple[str | None, str, str]:
             f"analyzed-name CVaR {float(cvar):.2%} > "
             f"standalone limit {float(name_limit):.2%}",
         )
-    gate = final_state.get("risk_gate") or {}
     if str(gate.get("verdict") or "").upper() == "REJECT":
-        reasons = "; ".join(str(r) for r in (gate.get("reasons") or [])) or "no reason recorded"
-        return "risk_gate", "risk_reduction", f"risk gate REJECT: {reasons}"
+        return (
+            "risk_gate",
+            "risk_reduction",
+            f"risk gate REJECT: {'; '.join(reasons) or 'no reason recorded'}",
+        )
     return None, "setup", ""
 
 
