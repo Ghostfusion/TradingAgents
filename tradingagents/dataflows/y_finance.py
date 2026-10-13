@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import math
 from datetime import datetime
 from typing import Annotated
 
@@ -459,11 +460,31 @@ def get_fundamentals(
                 if label == "Dividend Yield":
                     div_yield_pct = y * 100.0
                 lines.append(f"{label}: {y * 100:.2f}%")
-            elif label == "Debt to Equity" and float(value) > 10:
-                # A D/E above 10 is a units/scaling artifact, not a real
-                # leverage ratio (MSFT 2026-09-08: 29.118 vs the true 0.13).
-                # Never emit an implausible number; say so instead.
-                lines.append(f"{label}: n/a (implausible vendor value > 10)")
+            elif label == "Debt to Equity":
+                # yfinance's `debtToEquity` is PERCENT-scaled, unlike the
+                # fraction-scaled fields above, so emitting it raw under a
+                # ratio-shaped label was unit-blind on two counts.
+                # Measured against the engine's OWN computed `d_e`:
+                # AEM `debtToEquity` 1.12 vs `d_e=0.0130` (x86), ARM 5.62 vs
+                # 0.0552 (x101.8); the repo's own note recorded MSFT 29.118 vs
+                # the true 0.13. The `> 10` guard then discarded the figure for
+                # ANY company above 10% leverage - 213 leaves across `reports/`
+                # carry `n/a (implausible vendor value > 10)`, including AMZN,
+                # AMAT, ALL and AMKR - and the raw percent made every
+                # cross-source comparison a false units conflict
+                # (`strategies/metric_reconcile`).
+                # Normalize to the ratio, NAME the unit so a reader and the
+                # reconcile layer compare like with like, and validate the
+                # RATIO: negative, non-finite, or > 10 (=1000%) is the artifact
+                # this guard exists for, not a 12% debt-to-equity company.
+                d_e = float(value) / 100.0
+                if not math.isfinite(d_e) or d_e < 0 or d_e > 10:
+                    lines.append(
+                        f"{label}: n/a (vendor value {value} is {d_e:.4g} as a "
+                        "ratio; implausible)"
+                    )
+                else:
+                    lines.append(f"{label}: {d_e:.4g} (vendor percent {value})")
             else:
                 lines.append(f"{label}: {value}")
 

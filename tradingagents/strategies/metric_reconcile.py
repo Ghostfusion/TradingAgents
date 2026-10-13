@@ -98,35 +98,41 @@ _DE_RE = re.compile(
 _DE_TOOLS = {"get_fundamentals", "get_ratios", "get_balance_sheet_health"}
 
 
-def extract_de_value(content: str) -> float | None:
-    """The D/E value in a leaf (None when absent / unparseable)."""
+def extract_de_reading(content: str) -> tuple[float, int | None] | None:
+    """``(D/E value, printed precision)`` - see `extract_metric_reading`."""
+    from tradingagents.strategies.metric_authority import declared_decimals
+
     if not content:
         return None
     m = _DE_RE.search(content)
     if not m:
         return None
+    literal = m.group(1)
     try:
-        return float(m.group(1).replace(",", ""))
+        return float(literal.replace(",", "")), declared_decimals(literal)
     except ValueError:
         return None
 
 
-def extract_metric_value(tool: str, content: str) -> float | None:
-    """The value this leaf LABELS as the tool's reconcildable metric.
+def extract_metric_reading(tool: str, content: str) -> tuple[float, int | None] | None:
+    """``(value, the precision the literal was PRINTED at)``, or None.
 
-    None when the tool has no scalar label contract (statement CSVs) or when
-    the leaf does not carry the labelled figure at all - e.g. an ETF's
-    ``get_fundamentals`` has no ``Market Cap`` row. There is deliberately no
-    fallback to an unlabelled number.
+    The precision comes from the LITERAL, not the float: ``0.10`` was printed to
+    two decimals even though its float is ``0.1``, and half an ulp of the
+    printed precision is the floor below which two sources cannot disagree
+    (Rule 5 - `metric_authority.compare_observations`).
     """
+    from tradingagents.strategies.metric_authority import declared_decimals
+
     rx = TOOL_VALUE_RE.get(str(tool or "").strip())
     if not rx or not content:
         return None
     m = rx.search(content)
     if not m:
         return None
+    literal = m.group(1)
     try:
-        return float(m.group(1).replace(",", ""))
+        return float(literal.replace(",", "")), declared_decimals(literal)
     except ValueError:
         return None
 
@@ -134,6 +140,103 @@ def extract_metric_value(tool: str, content: str) -> float | None:
 def metric_for_tool(tool: str) -> str | None:
     """Canonical metric id for a tool name (None = not reconcildable)."""
     return TOOL_METRIC_MAP.get(str(tool or "").strip())
+
+
+# Tool-name -> the DECLARED semantics of the value it prints for a metric
+# (owner review 2026-10-13, "multiple data providers" - Rule 1, comparability).
+# Nothing here is inferred from the leaf text: `unit` is the unit the printed
+# number is on, `scale` maps that number onto the unit, `basis_group` names the
+# DEFINITION (two different declared groups are NOT the same measurement), and
+# `upstream` names the lineage behind the tool - an undeclared upstream never
+# counts as independent confirmation. A pair that is not declared here
+# contributes NO observation: an undeclared unit is not evidence of agreement.
+TOOL_SEMANTICS: dict[tuple[str, str], dict[str, str]] = {
+    # --- market cap: three tools, two upstreams ----------------------------
+    ("get_fundamentals", "market_cap"): {
+        "unit": "usd",
+        "scale": "one",
+        "upstream": "yahoo",
+        "citation": "dataflows/y_finance.py::get_fundamentals (info['marketCap'])",
+    },
+    ("get_ratios", "market_cap"): {
+        "unit": "usd",
+        "scale": "one",
+        "citation": (
+            "strategies/ratios.py:28 - market cap is a passthrough of the "
+            "fundamentals payload, so the filling vendor is not recorded here "
+            "and the upstream stays undeclared"
+        ),
+    },
+    ("get_basic_financials", "market_cap"): {
+        "unit": "usd",
+        "scale": "one",
+        "upstream": "finnhub",
+        "citation": "dataflows/finnhub.py:366 (marketCapitalization)",
+    },
+    # --- debt/equity: the pair that made a UNIT look like a conflict --------
+    ("get_fundamentals", "debt_to_equity"): {
+        "unit": "ratio",
+        "scale": "one",
+        "basis_group": "vendor_reported",
+        "upstream": "yahoo",
+        "citation": (
+            "dataflows/y_finance.py (info['debtToEquity'] - percent-scaled by the "
+            "vendor, normalized to a ratio at the printer)"
+        ),
+    },
+    ("get_ratios", "debt_to_equity"): {
+        "unit": "ratio",
+        "scale": "one",
+        "basis_group": "engine_computed",
+        "citation": "strategies/ratios.py:948 (the engine's own D/E row)",
+    },
+    ("get_balance_sheet_health", "debt_to_equity"): {
+        "unit": "ratio",
+        "scale": "one",
+        "basis_group": "engine_computed",
+        "citation": "strategies/value_dip.py::debt_to_equity (engine computed)",
+    },
+    # --- prices and valuation floors ---------------------------------------
+    ("get_market_snapshot", "market_snapshot"): {
+        "unit": "usd",
+        "scale": "one",
+        "citation": "agents/utils/market_position_tools.py (`- Last: <price>`)",
+    },
+    ("get_verified_market_snapshot", "market_snapshot"): {
+        "unit": "usd",
+        "scale": "one",
+        "citation": (
+            "agents/utils/analysis_tools.py::get_verified_market_snapshot (the "
+            "OHLCV table's `| Close |` row)"
+        ),
+    },
+    ("get_value_floors", "value_floors"): {
+        "unit": "usd",
+        "scale": "one",
+        "citation": "agents/utils/value_dip_tools.py (`value floors <sym> (price <p>)`)",
+    },
+    ("get_dcf_valuation", "dcf"): {
+        "unit": "usd",
+        "scale": "one",
+        "citation": "agents/utils/analysis_tools.py::get_dcf_valuation (`fair_value=`)",
+    },
+    # `fcf yield adbe: 10.37%` - the leaf prints a PERCENT, so the scale is
+    # declared and the comparison runs on the ratio (0.1037).
+    ("get_fcf_yield", "fcf_yield"): {
+        "unit": "ratio",
+        "scale": "percent",
+        "citation": "agents/utils/value_dip_tools.py:434 (`fcf yield <sym>: <x>%`)",
+    },
+}
+
+
+def source_semantics(tool: str, metric: str) -> dict[str, str] | None:
+    """The DECLARED semantics for this tool's value of this metric, or None.
+
+    None means the pair is undeclared - it contributes no observation to the
+    reconciliation record, because an undeclared unit cannot be compared.
+    """
+    return TOOL_SEMANTICS.get((str(tool or "").strip(), str(metric or "").strip()))
 
 
 def _metric_authority_enabled(config: dict | None = None) -> bool:
@@ -167,6 +270,11 @@ def reconcile_metrics(
     vendor for the metric could have carried a value at all.
     """
     buckets: dict[str, dict] = {}
+    # (tool, value, printed precision) per metric - the SOURCE of each value.
+    # The buckets keep values and vendors unpaired (that is what the rendered
+    # range needs); the reconciliation record needs the pairing, and Rule 5 needs
+    # the precision the source actually printed.
+    pairs: dict[str, list[tuple[str, float, int | None]]] = {}
     for leaf in leaves or []:
         if not isinstance(leaf, dict):
             continue
@@ -177,8 +285,9 @@ def reconcile_metrics(
         # under its own metric so a raw-vs-computed conflict (ARM 5.62 vs
         # 0.055) is surfaced, not hidden by the first-number extractor.
         if tool in _DE_TOOLS:
-            de_v = extract_de_value(content)
-            if de_v is not None:
+            de_reading = extract_de_reading(content)
+            if de_reading is not None:
+                de_v, de_decimals = de_reading
                 de_bucket = buckets.setdefault(
                     "debt_to_equity",
                     {
@@ -191,6 +300,7 @@ def reconcile_metrics(
                 )
                 de_bucket["vendors"].append(tool)
                 de_bucket["values"].append(de_v)
+                pairs.setdefault("debt_to_equity", []).append((tool, de_v, de_decimals))
         metric = metric_for_tool(tool)
         if not metric:
             continue
@@ -207,9 +317,11 @@ def reconcile_metrics(
         bucket["vendors"].append(tool)
         if tool in TOOL_VALUE_RE:
             bucket["labelled"] = True
-        v = extract_metric_value(tool, content)
-        if v is not None:
+        reading = extract_metric_reading(tool, content)
+        if reading is not None:
+            v, decimals = reading
             bucket["values"].append(v)
+            pairs.setdefault(metric, []).append((tool, v, decimals))
 
     out: dict[str, dict] = {}
     for metric, bucket in buckets.items():
@@ -231,14 +343,114 @@ def reconcile_metrics(
             "vendors": sorted(set(bucket["vendors"])),
             "labelled": bool(bucket.get("labelled")),
         }
-    # The authority column (design doc §4 P3). Gated: with the fail-closed switch
+    # The authority column (design doc §4 P3) and the reconciliation record
+    # (owner review 2026-10-13, Rules 1/2/5). Gated: with the fail-closed switch
     # OFF this is a no-op and the returned dict is byte-identical to before.
     if _metric_authority_enabled(config):
-        from tradingagents.strategies.metric_authority import resolve_metric
+        from tradingagents.strategies.metric_authority import (
+            Observation,
+            reconcile_observations,
+            resolve_metric,
+        )
 
         for metric, bucket in out.items():
             bucket["authority"] = resolve_metric(metric)
+            observations = []
+            for tool, value, decimals in pairs.get(metric, []):
+                semantics = source_semantics(tool, metric)
+                if semantics is None:
+                    continue
+                observations.append(
+                    Observation(
+                        source=tool,
+                        metric=metric,
+                        value=value,
+                        decimals=decimals,
+                        **semantics,
+                    )
+                )
+            if observations:
+                bucket["reconciliation"] = reconcile_observations(
+                    metric, observations, config=config
+                )
     return out
+
+
+def _render_reconciliation(metric: str, record: dict, vendors: str) -> list[str]:
+    """The record's own line(s): what the policy decided, and why.
+
+    Only a decision with something to say prints - an `accepted` metric from one
+    source is not noise. A `definition_mismatch` must NOT render as a range (the
+    sources were never the same measurement), and a `conflict` with no registered
+    producer publishes no value at all.
+    """
+    status = str(record.get("status") or "")
+    rejected = record.get("rejected") or []
+    if not status:
+        return []
+    if status == "accepted" and not rejected and not record.get("rounding_applied"):
+        return []
+    if status == "definition_mismatch":
+        codes = ", ".join(
+            f"{m.get('source')}={m.get('reason_code')}"
+            for m in (record.get("definition_mismatches") or [])
+        )
+        value = record.get("value")
+        held = (
+            f"the comparable sources publish {value:.6g}"
+            if isinstance(value, (int, float))
+            else "no value is published"
+        )
+        return [
+            f"- metric {metric}: SOURCES NOT COMPARABLE vendors=[{vendors}] ({codes}) - "
+            f"{held} and the other observation is a DIFFERENT measurement; do NOT treat "
+            "this as a vendor conflict, a range, or a reason to average"
+        ]
+    if status == "conflict":
+        spread = (record.get("disagreement") or {}).get("spread_pct")
+        shown = f"{spread:.2%}" if isinstance(spread, (int, float)) else "n/a"
+        if record.get("value") is None:
+            return [
+                f"- metric {metric}: VALUES CONFLICT spread={shown} vendors=[{vendors}] - no "
+                "registered producer names the authority, so NO value is published; do NOT "
+                "quote a single value or re-derive one from unrelated figures"
+            ]
+        return [
+            f"- metric {metric}: VALUES CONFLICT spread={shown} vendors=[{vendors}] canonical "
+            f"producer: {record.get('producer_id') or 'none registered'} - treat as a range; "
+            "do NOT quote a single value"
+        ]
+    if status == "fallback":
+        rejected_codes = ", ".join(
+            f"{r.get('source')}={r.get('reason_code')}" for r in rejected
+        )
+        return [
+            f"- metric {metric}: the canonical source was REJECTED ({rejected_codes}) "
+            f"vendors=[{vendors}] - published from {record.get('selected_source')} instead; "
+            "the rejected observation is named, never silently dropped"
+        ]
+    if status == "unavailable":
+        reasons = (
+            ", ".join(f"{r.get('source')}={r.get('reason_code')}" for r in rejected)
+            or "no usable observation"
+        )
+        return [
+            f"- metric {metric}: NO USABLE VALUE vendors=[{vendors}] ({reasons}) - report the "
+            "metric unavailable; do NOT quote a value"
+        ]
+    if status == "unknown":
+        return []
+    parts: list[str] = []
+    if rejected:
+        parts.append(
+            "rejected " + ", ".join(f"{r.get('source')}={r.get('reason_code')}" for r in rejected)
+        )
+    if record.get("rounding_applied"):
+        parts.append(
+            "the sources differ only below the printed precision of the coarsest one, so they "
+            "are the same number at that precision - quote the published value, not a range"
+        )
+    return [f"- metric {metric}: accepted vendors=[{vendors}] - " + "; ".join(parts)]
 
 
 def render_reconcile(reconciled: dict[str, dict]) -> str:
@@ -258,6 +470,12 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
     for metric in sorted(reconciled):
         b = reconciled[metric]
         vendors = ", ".join(sorted(b["vendors"]))
+        record = b.get("reconciliation")
+        if record:
+            # The policy record speaks for the metric (gate on); the legacy
+            # clustering line stays for the gate-off path.
+            lines.extend(_render_reconciliation(metric, record, vendors))
+            continue
         if not b["conflict"]:
             # Only multi-vendor metrics are called out: a single-vendor
             # metric with no value has nothing to reconcile (its leaf already
@@ -295,10 +513,12 @@ def render_reconcile(reconciled: dict[str, dict]) -> str:
 __all__ = [
     "MATCH_TOLERANCE",
     "TOOL_METRIC_MAP",
+    "TOOL_SEMANTICS",
     "TOOL_VALUE_RE",
+    "extract_de_reading",
+    "extract_metric_reading",
     "metric_for_tool",
-    "extract_metric_value",
-    "extract_de_value",
     "reconcile_metrics",
     "render_reconcile",
+    "source_semantics",
 ]

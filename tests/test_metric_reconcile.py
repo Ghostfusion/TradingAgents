@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 
 from tradingagents.strategies.metric_reconcile import (
-    extract_de_value,
-    extract_metric_value,
+    extract_de_reading,
+    extract_metric_reading,
     metric_for_tool,
     reconcile_metrics,
     render_reconcile,
@@ -44,12 +44,12 @@ _QQQI_BASIC = (
 
 @pytest.mark.timeout(30)
 class TestMetricReconcile:
-    def test_extract_de_value_shapes(self):
-        assert extract_de_value("Debt to Equity: 5.62") == 5.62
-        assert extract_de_value("D/E: 0.06") == 0.06
-        assert extract_de_value("d_e=0.0552") == 0.0552
-        assert extract_de_value("Total Debt 100") is None  # no D/E label
-        assert extract_de_value("") is None
+    def test_extract_de_reading_shapes(self):
+        assert extract_de_reading("Debt to Equity: 5.62") == (5.62, 2)
+        assert extract_de_reading("D/E: 0.06") == (0.06, 2)
+        assert extract_de_reading("d_e=0.0552") == (0.0552, 4)
+        assert extract_de_reading("Total Debt 100") is None  # no D/E label
+        assert extract_de_reading("") is None
 
     def test_reconcile_flags_de_conflict(self):
         """ARM 2026-09-09 loop: get_fundamentals raw D/E 5.62 vs get_ratios
@@ -75,27 +75,38 @@ class TestMetricReconcile:
         assert metric_for_tool("get_nonexistent") is None
         assert metric_for_tool("") is None
 
-    def test_extract_metric_value_is_label_anchored(self):
-        assert extract_metric_value("get_fundamentals", "Market Cap: 99,105,693,696") == 99105693696.0
-        assert extract_metric_value("get_ratios", "- Market cap: 102,260,850,000") == 102260850000.0
-        assert (
-            extract_metric_value("get_basic_financials", "marketCapitalization: 3659011800000.0")
-            == 3659011800000.0
+    def test_extract_metric_reading_is_label_anchored(self):
+        """The reading carries the value AND the precision it was printed at."""
+        assert extract_metric_reading("get_fundamentals", "Market Cap: 99,105,693,696") == (
+            99105693696.0,
+            0,
         )
-        assert (
-            extract_metric_value("get_dcf_valuation", "dcf adbe: fair_value=278.71 ev=112274906766.12")
-            == 278.71
+        assert extract_metric_reading("get_ratios", "- Market cap: 102,260,850,000") == (
+            102260850000.0,
+            0,
         )
-        assert extract_metric_value("get_market_snapshot", "- Last: 250.27 | O 251.81 H 255") == 250.27
-        assert extract_metric_value("get_verified_market_snapshot", "| Close | 248.81 |") == 248.81
+        assert extract_metric_reading(
+            "get_basic_financials", "marketCapitalization: 3659011800000.0"
+        ) == (3659011800000.0, 1)
+        assert extract_metric_reading(
+            "get_dcf_valuation", "dcf adbe: fair_value=278.71 ev=112274906766.12"
+        ) == (278.71, 2)
+        assert extract_metric_reading("get_market_snapshot", "- Last: 250.27 | O 251.81 H 255") == (
+            250.27,
+            2,
+        )
+        assert extract_metric_reading("get_verified_market_snapshot", "| Close | 248.81 |") == (
+            248.81,
+            2,
+        )
         # an unlabelled number in the leaf is never used
-        assert extract_metric_value("get_fundamentals", _QQQI_FUNDAMENTALS) is None
-        assert extract_metric_value("get_basic_financials", _QQQI_BASIC) is None
-        assert extract_metric_value("get_ratios", "- Div yield: n/a") is None
+        assert extract_metric_reading("get_fundamentals", _QQQI_FUNDAMENTALS) is None
+        assert extract_metric_reading("get_basic_financials", _QQQI_BASIC) is None
+        assert extract_metric_reading("get_ratios", "- Div yield: n/a") is None
         # tools with no scalar label contract contribute nothing
-        assert extract_metric_value("get_balance_sheet", "Total Debt,100") is None
-        assert extract_metric_value("get_nonexistent", "Market Cap: 1") is None
-        assert extract_metric_value("get_fundamentals", "") is None
+        assert extract_metric_reading("get_balance_sheet", "Total Debt,100") is None
+        assert extract_metric_reading("get_nonexistent", "Market Cap: 1") is None
+        assert extract_metric_reading("get_fundamentals", "") is None
 
     def test_reconcile_etf_market_cap_is_not_a_conflict(self):
         """QQQI 2026-09-13 regression: two leaves that carry no market cap must
@@ -191,3 +202,91 @@ class TestMetricReconcile:
         # unavailability, so the block stays quiet instead of adding noise.
         leaves = [{"tool": "get_dcf_valuation", "content": "dcf unavailable for X"}]
         assert render_reconcile(reconcile_metrics(leaves)) == ""
+
+
+# ---------------------------------------------------------------------------
+# The reconciliation policy at the gather site (owner review 2026-10-13,
+# "multiple data providers"): the record the gate publishes, and the two live
+# defects it classifies differently from the raw clustering.
+# ---------------------------------------------------------------------------
+
+_GATED = {"enable_metric_authority": True}
+
+
+def test_the_gate_off_returns_exactly_the_shape_it_always_did():
+    """The shipped default must stay inert: only the gate-on dict carries the
+    `authority` / `reconciliation` keys."""
+    leaves = [
+        {"tool": "get_fundamentals", "content": "Market Cap: 99,105,693,696"},
+        {"tool": "get_basic_financials", "content": "marketCapitalization: 99105900000.0"},
+    ]
+    off = reconcile_metrics(leaves)
+    on = reconcile_metrics(leaves, config=_GATED)
+    assert "reconciliation" not in off["market_cap"]
+    assert "authority" not in off["market_cap"]
+    assert on["market_cap"]["reconciliation"]["status"] == "accepted"
+    assert off["market_cap"]["values"] == on["market_cap"]["values"]
+    assert off["market_cap"]["vendors"] == on["market_cap"]["vendors"]
+
+
+def test_two_declared_upstreams_agreeing_is_independent_confirmation():
+    """Yahoo (get_fundamentals) and finnhub (get_basic_financials) are different
+    lineages, so their agreement is a second opinion - and it is recorded."""
+    leaves = [
+        {"tool": "get_fundamentals", "content": "Market Cap: 99,105,693,696"},
+        {"tool": "get_basic_financials", "content": "marketCapitalization: 99105900000.0"},
+    ]
+    rec = reconcile_metrics(leaves, config=_GATED)["market_cap"]["reconciliation"]
+    assert rec["status"] == "accepted"
+    assert rec["independent_confirmation"] is True
+    assert rec["independent_upstreams"] == ["finnhub"]
+    assert rec["candidates"][1]["upstream"] == "finnhub"
+
+
+def test_the_de_false_conflict_is_a_definition_mismatch_under_the_policy():
+    """ARM 2026-09-09: the vendor's `Debt to Equity` and the engine's computed
+    `d_e` are different DEFINITIONS, not two readings of one number. The old
+    line told the analyst to treat 5.62 and 0.06 as a range."""
+    leaves = [
+        {"tool": "get_fundamentals", "content": "Debt to Equity: 0.0562 (vendor percent 5.62)"},
+        {"tool": "get_ratios", "content": "D/E: 0.06"},
+        {"tool": "get_balance_sheet_health", "content": "d_e=0.0552"},
+    ]
+    gated = reconcile_metrics(leaves, config=_GATED)
+    rec = gated["debt_to_equity"]["reconciliation"]
+    assert rec["status"] == "definition_mismatch"
+    assert rec["value"] == 0.06  # the engine-computed majority measurement
+    assert [m["source"] for m in rec["definition_mismatches"]] == ["get_fundamentals"]
+    assert rec["definition_mismatches"][0]["reason_code"] == "BASIS_DIFFERS"
+    assert rec["rounding_applied"] is True  # 0.06 vs 0.0552 at two decimals
+    text = render_reconcile(gated)
+    assert "SOURCES NOT COMPARABLE" in text and "VALUES CONFLICT" not in text
+
+
+def test_a_divergent_price_with_no_registry_producer_publishes_nothing():
+    """Rule 6 at the gather site: two calibers of the same price with no
+    registered producer means NO value is quoted - not a range to average."""
+    leaves = [
+        {"tool": "get_verified_market_snapshot", "content": "| Close | 248.81 |"},
+        {"tool": "get_market_snapshot", "content": "- Last: 260.00"},
+    ]
+    gated = reconcile_metrics(leaves, config=_GATED)
+    rec = gated["market_snapshot"]["reconciliation"]
+    assert rec["status"] == "conflict"
+    assert rec["value"] is None
+    assert rec["reason_code"] == "NO_AUTHORITY"
+    assert "NO value is published" in render_reconcile(gated)
+
+
+def test_the_printed_precision_comes_from_the_literal_not_the_float():
+    from tradingagents.strategies.metric_reconcile import (
+        extract_de_reading,
+        extract_metric_reading,
+    )
+
+    assert extract_metric_reading("get_market_snapshot", "- Last: 250.27") == (250.27, 2)
+    assert extract_de_reading("D/E: 0.10") == (0.10, 2)
+    assert extract_metric_reading("get_fundamentals", "Market Cap: 99,105,693,696") == (
+        99105693696.0,
+        0,
+    )

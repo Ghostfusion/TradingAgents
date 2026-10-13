@@ -58,7 +58,7 @@ definition site, not recalled.**
 | Instrument | Where | What it does | Why it is not the registry |
 |---|---|---|---|
 | **Forecast registry** | `strategies/forecast_registry.py` — `RegistryRow`, `FORECAST_REGISTRY`, `_module_and_attr`, `BENCHMARK_BY_FAMILY` | Declares **one AUTHORITATIVE producer per forecast key**. A row carries `producer_id` (a *stable semantic owner*, never a code path), `implementation_ref` (a *location*, `strategies/<mod>.py::<sym>`, resolved by a fixed transform), `gate`, `benchmark_ref`, `status` (`ok`/`declined`), and — for a refusal — `reason_code` + `citation`. `tests/test_forecast_registry.py` resolves every ref against the live tree, so a renamed symbol fails a build. | Covers **forecast keys** (`realized_volatility`, `regime_stress_probability`, …), not measured inputs. It is the exact shape to copy, and the proof the shape works here. |
-| **Gather-time reconciliation** | `strategies/metric_reconcile.py` — `MATCH_TOLERANCE:30` (1%), `TOOL_METRIC_MAP:39`, `extract_metric_value:114`, `metric_for_tool:136`, `reconcile_metrics:139`, `render_reconcile:221` | Maps tool → **canonical metric id** so conflicting vendor values are *compared* (Market Cap / Market cap / marketCapitalization all feed `market_cap`), marks `CONFLICT` beyond 1%, renders the reconcile line into the evidence block. | It is the **reverse index with no authority column** — it names the metric id a tool feeds, never which producer is canonical. It surfaces a conflict to the analyst and leaves the choice to the LLM. |
+| **Gather-time reconciliation** | `strategies/metric_reconcile.py` — `MATCH_TOLERANCE:30` (1%), `TOOL_METRIC_MAP:39`, `TOOL_VALUE_RE:62`, `extract_metric_reading:117`, `TOOL_SEMANTICS:153`, `source_semantics:233`, `metric_for_tool:140`, `reconcile_metrics:257`, `render_reconcile:456` | Maps tool → **canonical metric id** so conflicting vendor values are *compared* (Market Cap / Market cap / marketCapitalization all feed `market_cap`), declares each source's SEMANTICS (§3.2: unit, scale, basis, upstream), and renders the reconcile line into the evidence block. | It is the **reverse index with no authority column** — it names the metric id a tool feeds, never which producer is canonical. It surfaces a conflict to the analyst and leaves the choice to the LLM. |
 | **Cross-vendor spread** | `strategies/data_quality.py:80` `disagreement_flag` | Given measured values of one metric across vendors, returns spread% and flags `DATA CONFLICT` **rather than silently trusting one vendor**. | Detection only; it has no opinion on which vendor wins. |
 | **Report-side basis ledger** | `agents/utils/report_verifier.py` — `_basis_registry`, `basis_conflicts`, `report_ledger`, `_internal_conflicts` (~`:3519`, `:3548`, `:3777`, `:3841`, `:4212`) → `strategies/decision_packet.py:449` `_conflict_rows` (§9 CONFLICT ledger) | The typed `{metric, value, basis, source}` registry per stem, and the same-metric conflict scan that machines a `CONFLICT` row into the decision packet. | **Post-hoc and report-side.** It records what the analyst wrote and flags the disagreement; it cannot prevent the second value being produced. |
 | **Deliberate non-reconciliation** | `strategies/regime_score.py:717` `_disagreement`; `strategies/sentiment_score.py:383` `_resolve_sources` | Two precedents for the right *refusal* behaviour: the regime paths ship an echo + a `disagree` flag with **no merge, no average, no precedence**; the sentiment tone legs **refuse** a mixed-scale source rather than average it. | They refuse *within one module*; there is no cross-module rule. |
@@ -133,6 +133,57 @@ never carry `0.0`).
 - **a metric named nowhere in the registry** → `MetricAuthorityError` at the
   registry's own test time, `unknown` at runtime — a *named absence*, not a guess.
 - **a `declined` row** → `declined` + `reason_code` + `citation`.
+
+---
+
+### 3.2 The reconciliation policy (2026-10-13, the owner's "multiple data providers" review)
+
+`resolve_metric` names ONE canonical producer and shows a secondary's
+disagreement. It cannot say whether the two values were ever the same
+measurement, and it never checks a value on its own terms — which is how
+`yfinance`'s percent-scaled `debtToEquity` became a "VALUES CONFLICT" against the
+engine's own ratio (`AEM 1.12` vs `d_e=0.0130`; `ARM 5.62` vs `0.0552`), and how
+a `> 10` guard written against the percent value discarded the figure for every
+company above 10 % leverage (**213 leaves in `reports/`**). Four rules, each a
+function:
+
+| Rule | Function | What it refuses |
+|---|---|---|
+| 1 — comparability | `semantic_mismatch(a, b)` | comparing two declared units/bases/currencies/periods that are not convertible: a **`definition_mismatch`**, not a conflict |
+| 2 — validity | `invalid_reason(obs, …)` | publishing an unfit observation: `MISSING`, `NOT_FINITE`, `NEGATIVE`, `ABOVE_PLAUSIBLE_CAP`, `STALE_BEYOND_POLICY`, `UNIT_UNDECLARED` — **authority never exempts a value from the checks** |
+| 5 — materiality | `compare_observations(a, b, …)` | calling a difference a conflict when it is below the coarser source's **printed** precision (half an ulp: `declared_decimals` reads the literal, so `0.10` is two decimals and `0.1` is one) |
+| 6 — fail closed | `reconcile_observations(metric, observations, …)` | publishing a number nobody is accountable for |
+
+`reconcile_observations` returns the **canonical record**: `candidates` (each with
+its normalized value, declared semantics and validity), `rejected` (source +
+reason code), `conflicts`, `definition_mismatches`, `disagreement`,
+`rounding_applied`, `independent_upstreams`, `independent_confirmation`,
+`policy_version`, `reconciled_at`, and `status ∈ {accepted, fallback, conflict,
+definition_mismatch, unavailable, unknown}`.
+
+Three properties are the point:
+
+- **The pick is explicit.** A registered producer's own observation is the
+  canonical (as in §3.1); with no registered producer it is the **largest group of
+  compatible observations** — the majority measurement — and the record says which
+  of the two selected it (`selected_by ∈ {registry, agreement}`). No ranks, no
+  weights: that is the provider-weighting formula this layer exists to avoid.
+- **Consensus is not proof.** Two sources confirm each other only when their
+  DECLARED `upstream` values differ (`finnhub` + `yahoo`: yes; two tools behind one
+  vendor: no; an undeclared upstream: no — `independent_confirmation` is `False`,
+  not `True` by default).
+- **No authority, no value.** With no registered producer AND a disagreement,
+  nothing is published (`value: None`, `reason_code: "NO_AUTHORITY"`) — not a
+  range, not a median, not the first vendor.
+
+`strategies/metric_reconcile.py` owns the per-source declarations
+(`TOOL_SEMANTICS`: unit, scale, `basis_group`, `upstream`, citation per
+tool+metric) because that is where the printed labels are parsed, and it attaches
+the record behind **`enable_metric_authority`** — off, every read and every
+rendered line is byte-identical to before (pinned by
+`test_metric_reconcile.py::test_the_gate_off_returns_exactly_the_shape_it_always_did`).
+A declaration is a statement about what the PRINTER emits: changing a printer
+(e.g. normalizing `debtToEquity`) is changing a declaration.
 
 ---
 

@@ -524,12 +524,503 @@ def resolve_metric(
     return out
 
 
+# ---------------------------------------------------------------------------
+# The reconciliation policy (owner review 2026-10-13, "multiple data
+# providers"). `resolve_metric` names ONE canonical producer and shows a
+# secondary's disagreement; these functions decide whether two observations are
+# the same measurement at all, refuse an observation that is unfit on its own
+# terms, and publish the DECISION as a record. Three rules the registry could
+# not express:
+#
+#   Rule 1 - COMPARABILITY. Two values of one metric are compared only when
+#     their declared units are convertible and their declared bases agree. A
+#     scale difference is a definition mismatch, not a provider conflict:
+#     `y_finance.py`'s `debtToEquity` is percent-scaled while the engine's own
+#     `d_e` is a ratio (AEM 1.12 vs 0.0130, ARM 5.62 vs 0.0552), so comparing
+#     them unchanged manufactured a "VALUES CONFLICT" out of a unit.
+#   Rule 2 - VALIDITY. A source's authority never exempts its observation from
+#     the hard checks (finite, in range, fresh). Priority and quality are
+#     different things, so a high-authority value can be rejected while a
+#     lower-authority one is fit.
+#   Rule 5 - MATERIALITY. A disagreement is measured against the metric's own
+#     band AND against the precision the coarser source actually printed (half
+#     an ulp of its last digit): 0.06 is not "8.7% away from" 0.0552, it is the
+#     same number to two decimals.
+#
+# Nothing here is inferred: every semantic field is DECLARED by a source's
+# owner, and an undeclared field stays `None` - the policy never guesses a unit
+# or an upstream, because a guessed one is how a percent field becomes a ratio.
+# ---------------------------------------------------------------------------
+
+#: The scales a source's printed value may be declared in, mapped to the factor
+#: onto the metric's canonical unit. A scale not named here is UNDECLARED, and
+#: an undeclared scale is never assumed to be "one".
+OBSERVATION_SCALES: dict[str, float] = {
+    "one": 1.0,
+    "percent": 0.01,
+    "thousand": 1e3,
+    "million": 1e6,
+}
+
+#: Rule 1 - the closed vocabulary for "these two are not the same measurement".
+SEMANTIC_MISMATCH_CODES = (
+    "UNIT_NOT_CONVERTIBLE",
+    "BASIS_DIFFERS",
+    "PERIOD_DIFFERS",
+    "CURRENCY_DIFFERS",
+    "UNIT_UNDECLARED",
+)
+
+#: Rule 2 - the closed vocabulary for "this observation is unfit on its own".
+INVALID_REASON_CODES = (
+    "MISSING",
+    "NOT_FINITE",
+    "NEGATIVE",
+    "ABOVE_PLAUSIBLE_CAP",
+    "STALE_BEYOND_POLICY",
+    "UNIT_UNDECLARED",
+)
+
+#: The states a reconciliation can end in. `accepted` and `fallback` publish a
+#: value; `conflict` and `definition_mismatch` are two DIFFERENT refusals to
+#: call it agreement - the first is a real disagreement between comparable
+#: sources, the second says the sources were never comparable (the analyst must
+#: not be told to average or range them).
+RECONCILE_STATUSES = (
+    "accepted",
+    "fallback",
+    "conflict",
+    "definition_mismatch",
+    "unavailable",
+    "unknown",
+)
+
+#: Why the record is in the state it is in - a code, never prose.
+RECONCILE_REASON_CODES = (
+    "CANONICAL_ACCEPTED",
+    "CANONICAL_INVALID",
+    "SOURCES_NOT_COMPARABLE",
+    "NO_AUTHORITY",
+    "NO_VALID_OBSERVATION",
+    "NO_OBSERVATION",
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Observation:
+    """One source's reading of one metric, with the semantics it was read in.
+
+    ``scale`` maps the printed number onto ``unit`` (``"percent"`` = the printer
+    wrote a percentage); ``decimals`` is the precision the printer used;
+    ``basis_group`` names the DEFINITION (two different non-null groups are not
+    comparable); ``upstream`` names the lineage behind the vendor, and an
+    undeclared upstream never counts as independent confirmation.
+    """
+
+    source: str
+    metric: str
+    value: float | str | None = None
+    unit: str | None = None
+    scale: str = "one"
+    basis_group: str | None = None
+    currency: str | None = None
+    period_end: str | None = None
+    as_of: str | None = None
+    upstream: str | None = None
+    decimals: int | None = None
+    citation: str | None = None
+
+
+def declared_decimals(value: float | str | None) -> int | None:
+    """The precision the printer used (``None`` when it is not a literal).
+
+    Half an ulp of this is the smallest difference the source could have been
+    asked to express, so it is the floor below which a disagreement is not a
+    disagreement. A float whose repr carries more than 10 decimals is not a
+    printed precision - it is binary noise - and reads ``None``.
+    """
+    if isinstance(value, str):
+        text = value.strip().replace(",", "")
+    elif isinstance(value, (int, float)):
+        text = repr(float(value))
+    else:
+        return None
+    if "." not in text:
+        return 0
+    frac = text.split(".", 1)[1]
+    if not frac.isdigit() or len(frac) > 10:
+        return None
+    return len(frac)
+
+
+def normalize_value(obs: Observation) -> float | None:
+    """The observation on the metric's canonical unit, or ``None``.
+
+    ``None`` means the value cannot be placed on that unit - an undeclared or
+    unknown scale, a non-numeric value - and an unplaceable value is never
+    compared (Rule 1).
+    """
+    if obs.value is None:
+        return None
+    factor = OBSERVATION_SCALES.get(str(obs.scale or ""))
+    if factor is None:
+        return None
+    try:
+        return float(obs.value) * factor
+    except (TypeError, ValueError):
+        return None
+
+
+def invalid_reason(
+    obs: Observation,
+    *,
+    as_of: str | None = None,
+    max_staleness_days: int | None = None,
+    cap: float | None = None,
+) -> str | None:
+    """Rule 2: why this observation is unfit, or ``None`` when it is fit.
+
+    Authority is not consulted: a canonical producer's value is checked exactly
+    like a secondary's. A staleness policy that cannot be evaluated (no dates on
+    either side) does not reject - it simply was not applied, and the record says
+    so rather than implying freshness.
+    """
+    if obs.value is None:
+        return "MISSING"
+    if str(obs.scale or "") not in OBSERVATION_SCALES:
+        return "UNIT_UNDECLARED"
+    try:
+        raw = float(obs.value)
+    except (TypeError, ValueError):
+        return "NOT_FINITE"
+    if raw != raw or raw in (float("inf"), float("-inf")):
+        return "NOT_FINITE"
+    value = normalize_value(obs)
+    if value is None:
+        return "UNIT_UNDECLARED"
+    if value < 0:
+        return "NEGATIVE"
+    if cap is not None and value > cap:
+        return "ABOVE_PLAUSIBLE_CAP"
+    if max_staleness_days is not None and as_of and obs.as_of:
+        try:
+            from datetime import date
+
+            age = (
+                date.fromisoformat(str(as_of)[:10]) - date.fromisoformat(str(obs.as_of)[:10])
+            ).days
+        except ValueError:
+            return None
+        if age > int(max_staleness_days):
+            return "STALE_BEYOND_POLICY"
+    return None
+
+
+def semantic_mismatch(a: Observation, b: Observation) -> str | None:
+    """Rule 1: the code saying two observations are not comparable, or ``None``.
+
+    Only DECLARED differences count. An undeclared unit, basis, currency or
+    period is not evidence of agreement *or* of conflict - it is an unverified
+    pair, which the record reports as ``semantics_undeclared``.
+    """
+    if a.unit and b.unit and str(a.unit) != str(b.unit):
+        return "UNIT_NOT_CONVERTIBLE"
+    if a.basis_group and b.basis_group and str(a.basis_group) != str(b.basis_group):
+        return "BASIS_DIFFERS"
+    if a.currency and b.currency and str(a.currency).upper() != str(b.currency).upper():
+        return "CURRENCY_DIFFERS"
+    if a.period_end and b.period_end and str(a.period_end) != str(b.period_end):
+        return "PERIOD_DIFFERS"
+    return None
+
+
+def compare_observations(
+    a: Observation,
+    b: Observation,
+    *,
+    tolerance_pct: float = METRIC_TOLERANCE_PCT,
+    rounding_ulps: float = 0.5,
+) -> dict:
+    """Compare two observations of one metric on the canonal unit.
+
+    ``within`` is True when the two are the same number either inside the
+    metric's ``tolerance_pct`` band or inside the rounding tolerance the coarser
+    source's own printed precision implies (Rule 5). ``rounding_applied`` says
+    which of the two decided it, so a reader can see that a 8.7% relative
+    difference was accepted because one side printed two decimals.
+    """
+    out: dict = {
+        "comparable": False,
+        "mismatch": None,
+        "a": None,
+        "b": None,
+        "deviation_pct": None,
+        "rounding_tolerance_abs": None,
+        "within": False,
+        "rounding_applied": False,
+    }
+    mismatch = semantic_mismatch(a, b)
+    if mismatch is not None:
+        out["mismatch"] = mismatch
+        return out
+    va, vb = normalize_value(a), normalize_value(b)
+    if va is None or vb is None:
+        out["mismatch"] = "UNIT_UNDECLARED"
+        return out
+    out["comparable"] = True
+    out["a"], out["b"] = va, vb
+    out["deviation_pct"] = abs(vb - va) / max(abs(va), abs(vb), 1e-9)
+    decimals = [d for d in (a.decimals, b.decimals) if d is not None]
+    if decimals and rounding_ulps:
+        coarser = min(decimals)
+        factor = min(
+            OBSERVATION_SCALES.get(str(a.scale or ""), 1.0),
+            OBSERVATION_SCALES.get(str(b.scale or ""), 1.0),
+        )
+        out["rounding_tolerance_abs"] = rounding_ulps * (10.0 ** -coarser) * factor
+    within_band = out["deviation_pct"] <= float(tolerance_pct)
+    within_rounding = (
+        out["rounding_tolerance_abs"] is not None
+        and abs(vb - va) <= out["rounding_tolerance_abs"]
+    )
+    out["within"] = bool(within_band or within_rounding)
+    out["rounding_applied"] = bool(within_rounding and not within_band)
+    return out
+
+
+def reconcile_observations(
+    metric: str,
+    observations: list[Observation],
+    *,
+    as_of: str | None = None,
+    tolerance_pct: float | None = None,
+    max_staleness_days: int | None = None,
+    cap: float | None = None,
+    config: dict | None = None,
+    reconciled_at: str | None = None,
+) -> dict:
+    """Rule 3/4/6: the canonical record for one metric and one context.
+
+    The canonical source is the registry's producer when the registry names one,
+    else **agreement**: sources that all agree within tolerance publish the
+    shared value (``selected_by="agreement"``, no single one of them named - there
+    is no authority to name). When they do NOT agree and no producer is named,
+    nothing is published (``value=None``) and the disagreement stands: an
+    invented rank would be a provider-weighting formula, which is exactly what
+    this layer exists to avoid.
+
+    A canonical observation that fails Rule 2 is rejected like any other and the
+    next fit source serves it (``fallback``) - the one place priority moves a
+    value, and it still never skips a check.
+    """
+    row = _metric_row(metric)
+    tol = tolerance_pct
+    if tol is None:
+        tol = row.tolerance_pct if row is not None and row.tolerance_pct is not None else METRIC_TOLERANCE_PCT
+    record: dict = {
+        "metric": str(metric or "").strip(),
+        "status": "unknown",
+        "value": None,
+        "unit": row.unit if row is not None else None,
+        "selected_source": None,
+        "selected_basis": None,
+        "selected_by": None,
+        "producer_id": row.producer_id if row is not None else None,
+        "policy_version": row.definition_version if row is not None else None,
+        "tolerance_pct": float(tol),
+        "candidates": [],
+        "rejected": [],
+        "conflicts": [],
+        "definition_mismatches": [],
+        "rounding_applied": False,
+        "disagreement": None,
+        "independent_upstreams": [],
+        "independent_confirmation": None,
+        "semantics_undeclared": False,
+        "staleness_checked": False,
+        "reason_code": None,
+        "reconciled_at": reconciled_at,
+        "gate_on": _metric_authority_on(config),
+    }
+    entries: list[tuple[Observation, float | None, str | None]] = []
+    for obs in observations or []:
+        reason = invalid_reason(
+            obs, as_of=as_of, max_staleness_days=max_staleness_days, cap=cap
+        )
+        norm = normalize_value(obs)
+        entries.append((obs, norm, reason))
+        record["candidates"].append(
+            {
+                "source": obs.source,
+                "value": obs.value,
+                "normalized": norm,
+                "unit": obs.unit,
+                "scale": obs.scale,
+                "basis_group": obs.basis_group,
+                "upstream": obs.upstream,
+                "decimals": obs.decimals,
+                "valid": reason is None,
+                "invalid_reason": reason,
+                "citation": obs.citation,
+            }
+        )
+        if reason is not None:
+            record["rejected"].append(
+                {"source": obs.source, "reason_code": reason, "value": obs.value}
+            )
+        if max_staleness_days is not None and as_of and obs.as_of:
+            record["staleness_checked"] = True
+        for field in ("unit", "basis_group", "currency", "period_end"):
+            if getattr(obs, field) is None:
+                record["semantics_undeclared"] = True
+    if not entries:
+        record["status"] = "unknown"
+        record["reason_code"] = "NO_OBSERVATION"
+        return record
+    fit = [e for e in entries if e[2] is None]
+    if not fit:
+        record["status"] = "unavailable"
+        record["reason_code"] = "NO_VALID_OBSERVATION"
+        return record
+    # Group the fit observations into MEASUREMENTS: two observations are in one
+    # group when nothing declared says they differ (Rule 1). The group that
+    # speaks is the registry producer's when the registry names one, else the
+    # LARGEST group - the majority measurement - and every other group is
+    # reported as a different measurement, never as a disagreement.
+    groups: list[list[tuple[Observation, float | None, str | None]]] = []
+    for entry in fit:
+        for group in groups:
+            if all(semantic_mismatch(entry[0], other[0]) is None for other in group):
+                group.append(entry)
+                break
+        else:
+            groups.append([entry])
+    registry_keys = {
+        k for k in ((row.producer_id, row.implementation_ref) if row is not None else ()) if k
+    }
+    explicit = False
+    group_of_chosen = groups[0]
+    chosen = groups[0][0]
+    if registry_keys:
+        for group in groups:
+            named = [e for e in group if e[0].source in registry_keys]
+            if named:
+                explicit = True
+                group_of_chosen = group
+                chosen = named[0]
+                break
+    if not explicit:
+        group_of_chosen = max(groups, key=lambda g: (len(g), -groups.index(g)))
+        chosen = group_of_chosen[0]
+    selected, selected_value, _ = chosen
+    selected_in_group = {id(e[0]) for e in group_of_chosen}
+    record["selected_by"] = "registry" if explicit else "agreement"
+    rejected_named = [e for e in entries if e[0].source in registry_keys and e[2] is not None]
+    if rejected_named:
+        record["reason_code"] = "CANONICAL_INVALID"
+        record["status"] = "fallback"
+    record["selected_source"] = selected.source
+    record["selected_basis"] = selected.basis_group
+    record["value"] = selected_value
+    agreeing: list[Observation] = []
+    for obs, _norm, reason in entries:
+        if obs is selected or reason is not None:
+            continue
+        if id(obs) not in selected_in_group:
+            record["definition_mismatches"].append(
+                {
+                    "source": obs.source,
+                    "reason_code": semantic_mismatch(obs, selected) or "BASIS_DIFFERS",
+                    "value": obs.value,
+                    "basis_group": obs.basis_group,
+                }
+            )
+            continue
+        cmp = compare_observations(obs, selected, tolerance_pct=tol)
+        if not cmp["comparable"]:
+            record["definition_mismatches"].append(
+                {
+                    "source": obs.source,
+                    "reason_code": cmp["mismatch"],
+                    "value": obs.value,
+                    "basis_group": obs.basis_group,
+                }
+            )
+            continue
+        if cmp["within"]:
+            agreeing.append(obs)
+            if cmp["rounding_applied"]:
+                record["rounding_applied"] = True
+            continue
+        record["conflicts"].append(
+            {
+                "source": obs.source,
+                "value": obs.value,
+                "normalized": cmp["b"],
+                "deviation_pct": cmp["deviation_pct"],
+                "rounding_tolerance_abs": cmp["rounding_tolerance_abs"],
+                "reason_code": "DIVERGENT",
+            }
+        )
+    spreads = [c["deviation_pct"] for c in record["conflicts"] if c["deviation_pct"] is not None]
+    if spreads:
+        record["disagreement"] = {
+            "spread_pct": max(spreads),
+            "tolerance_pct": float(tol),
+        }
+    if agreeing:
+        upstreams = [
+            str(o.upstream)
+            for o in agreeing
+            if o.upstream and o.upstream != selected.upstream
+        ]
+        record["independent_upstreams"] = sorted(set(upstreams))
+        record["independent_confirmation"] = bool(upstreams)
+    if record["status"] != "fallback":
+        if record["conflicts"]:
+            record["status"] = "conflict"
+        elif record["definition_mismatches"]:
+            record["status"] = "definition_mismatch"
+        else:
+            record["status"] = "accepted"
+    if not explicit and record["conflicts"]:
+        # Fail closed: the number would depend on which vendor you believe, and
+        # no registered producer names the authority.
+        record["value"] = None
+        record["selected_source"] = None
+        record["selected_basis"] = None
+        record["selected_by"] = None
+        record["reason_code"] = "NO_AUTHORITY"
+    if record["reason_code"] is None:
+        if record["status"] == "definition_mismatch":
+            record["reason_code"] = "SOURCES_NOT_COMPARABLE"
+        else:
+            record["reason_code"] = "CANONICAL_ACCEPTED"
+    if record["reconciled_at"] is None:
+        from datetime import datetime, timezone
+
+        record["reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    return record
+
+
 __all__ = [
+    "INVALID_REASON_CODES",
     "METRIC_DECLINED_REASON_CODES",
     "METRIC_REGISTRY",
     "METRIC_STATUSES",
     "METRIC_TOLERANCE_PCT",
+    "OBSERVATION_SCALES",
+    "Observation",
+    "RECONCILE_REASON_CODES",
+    "RECONCILE_STATUSES",
+    "SEMANTIC_MISMATCH_CODES",
     "MetricAuthorityError",
     "MetricRow",
+    "compare_observations",
+    "declared_decimals",
+    "invalid_reason",
+    "normalize_value",
+    "reconcile_observations",
     "resolve_metric",
+    "semantic_mismatch",
 ]

@@ -128,9 +128,11 @@ class KeylessYFinanceTests(unittest.TestCase):
 
 class TestFundamentalsFormattingGuards(unittest.TestCase):
     """Regression (MSFT 2026-09-08): dividend yield 0.73 rendered as 73.00%
-    (percent-scaled input) and D/E 29.118 vs the true 0.13 (units artifact).
-    The formatter must re-normalize a >25% yield and never emit an
-    implausible D/E."""
+    (percent-scaled input) and D/E 29.118 read as a ratio when yfinance's
+    `debtToEquity` is PERCENT-scaled. The formatter must re-normalize a >25%
+    yield and must emit a D/E as a RATIO with its unit named - the old
+    `> 10` guard called a 12%-leverage company implausible and dropped the
+    figure (213 leaves across `reports/` carry the old message)."""
 
     @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
     @mock.patch.object(y_finance, "yf")
@@ -144,13 +146,27 @@ class TestFundamentalsFormattingGuards(unittest.TestCase):
 
     @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
     @mock.patch.object(y_finance, "yf")
-    def test_debt_to_equity_implausible_is_flagged(self, mock_yf, _):
+    def test_debt_to_equity_percent_is_normalized_to_a_ratio(self, mock_yf, _):
+        """MSFT 29.118 is 0.2912 as a ratio - a levered but ordinary company,
+        and the number the engine's own `d_e` can be compared against."""
         info = {"longName": "TestCorp", "debtToEquity": 29.118, "dividendYield": 0.0073}
         mock_yf.Ticker.return_value = _Ticker()
         mock_yf.Ticker.return_value.info = info
         out = y_finance.get_fundamentals("TST")
-        self.assertIn("Debt to Equity: n/a (implausible vendor value > 10)", out)
+        self.assertIn("Debt to Equity: 0.2912 (vendor percent 29.118)", out)
+        self.assertNotIn("implausible", out)
         self.assertIn("Dividend Yield: 0.73%", out)
+
+    @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
+    @mock.patch.object(y_finance, "yf")
+    def test_debt_to_equity_beyond_the_ratio_cap_is_flagged(self, mock_yf, _):
+        """The guard now bounds the RATIO: 1234.0 percent = 12.34, which is a
+        scaling artifact, not leverage."""
+        info = {"longName": "TestCorp", "debtToEquity": 1234.0}
+        mock_yf.Ticker.return_value = _Ticker()
+        mock_yf.Ticker.return_value.info = info
+        out = y_finance.get_fundamentals("TST")
+        self.assertIn("Debt to Equity: n/a (vendor value 1234.0 is 12.34 as a ratio", out)
 
     @mock.patch.object(y_finance, "require_symbol", side_effect=lambda s: s)
     @mock.patch.object(y_finance, "yf")
