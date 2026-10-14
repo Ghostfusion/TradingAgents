@@ -194,6 +194,10 @@ REGISTRY: dict[str, str] = {
     # one advisory card key. The prior it prints cannot gate - the candidate
     # set is the union of every registered theme with the prior's picks.
     "enable_security_context": "wired",
+    # The Fact layer (docs/design_fact_layer.md): OFF is byte-identical to the
+    # pre-layer leaves; ON renders a statement-derived number's qualifiers from
+    # the Fact that carries it. Proven by tests/test_measurement_contract.py.
+    "enable_fact_layer": "wired",
     # declared but read by nothing (see registry section 4)
     "enable_threshold_gate": "inert",
     "enable_risk_manager": "inert",

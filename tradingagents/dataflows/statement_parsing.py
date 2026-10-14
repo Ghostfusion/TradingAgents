@@ -1058,15 +1058,24 @@ def _parse_csv_statement_rows(payload: str) -> dict:
 
 def _latest(v):
     """Current-period value of a canonical item (flat float or a
-    ``{"current": .., "prior": ..}`` dict)."""
-    if isinstance(v, dict):
-        return v.get("current", v.get("value"))
-    return v
+    ``{"current": .., "prior": ..}`` dict).
+
+    One producer: :func:`tradingagents.strategies.facts.latest` owns the
+    ``{current, prior}`` shape, so a tool cannot read it a second way.
+    """
+    from tradingagents.strategies.facts import latest as _fact_latest
+
+    return _fact_latest(v)
 
 
 def _prior(v):
-    """Prior-period value of a canonical item (dict with a ``prior`` key)."""
-    return v.get("prior") if isinstance(v, dict) else None
+    """Prior-period value of a canonical item (dict with a ``prior`` key).
+
+    One producer: :func:`tradingagents.strategies.facts.prior`.
+    """
+    from tradingagents.strategies.facts import prior as _fact_prior
+
+    return _fact_prior(v)
 
 
 def sane_eps_yoy(fin: dict) -> float | None:
@@ -1585,6 +1594,27 @@ def _usd_consistent(fin: dict) -> bool:
     return not (mc and ta and ta / mc > 1000)
 
 
+def _f_coverage_fact(f_read: dict | None):
+    """The Piotroski read as a coverage-bearing Fact (nine signals, rule ALL).
+
+    ``required=9`` regardless of how many signal keys the read carries: the
+    paper's band is defined over all nine signals, so a read that declares only
+    seven cannot satisfy the rule by declaring less. ``fn`` returns the score the
+    same read already produced - a derivation's value comes from its own
+    producer, never from a second sum of the same signals.
+    """
+    from tradingagents.strategies import facts as _facts
+
+    return _facts.derive(
+        "f_score",
+        dict((f_read or {}).get("signals") or {}),
+        lambda _measured: (f_read or {}).get("score"),
+        unit="score",
+        coverage_rule="floor",
+        required=9,
+    )
+
+
 def _r3_flag(name: str, default: bool = False) -> bool:
     """Read an enable_* flag from the live config (never raises).
 
@@ -1627,10 +1657,15 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     except Exception:  # noqa: BLE001 - an advisory read must not break the screen
         f_read = None
     _f_signals = (f_read or {}).get("signals") or {}
-    f_coverage = (
-        sum(1 for v in _f_signals.values() if v is not None) if _f_signals else None
-    )
-    f_withheld = sorted(k for k, v in _f_signals.items() if v is None)
+    # Coverage is a Fact property, not a count every caller re-derives: the nine
+    # signals are the derivation's inputs and the score the same read already
+    # produced is its value (one producer per number - this does NOT re-sum
+    # them). `f_coverage`/`f_withheld` keep the row's existing shape, and an
+    # absent detailed read stays `None` (the legacy "no coverage claim" state),
+    # so a gate-off row is byte-identical.
+    f_fact = _f_coverage_fact(f_read)
+    f_coverage = f_fact.coverage.n_of if (f_fact.coverage and _f_signals) else None
+    f_withheld = list(f_fact.coverage.withheld) if (f_fact.coverage and _f_signals) else []
     # Round-3 S1/S2 (gated): the Altman variant + its distress zone, and the
     # F-Score's paper band. Both are render-only extras: with the gates off the
     # row carries neither key and `trap_verdict` receives neither argument, so

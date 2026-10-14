@@ -110,6 +110,38 @@ involved. This is the "compute, don't narrate" core.
   and `strategies/sentiment_research.inst_flow_z`, which z-scores the newest
   **complete** period's change and names any period it skipped. An unparsed
   label - or an unset run clock - is `None` (unknown), never "complete".
+- `availability.py` — the **policy** table for the same question over the other
+  filing classes: Form 10-Q 40 days (large accelerated / accelerated) or 45 days
+  (all other registrants) after the fiscal quarter end (17 CFR 249.308a(a)),
+  Form 10-K 60 / 75 / 90 days after the fiscal year end (249.310(b)), Form 20-F
+  4 months (Item 8), with the Rule 0-3(a) business-day roll and the Rule 12b-25
+  late-filing extension (+5 days for a 10-Q, +15 for a 10-K) as the upper bound.
+  `fact_availability(period_end, form=... | kind=..., as_of=...)` answers
+  `available` / `not_yet_due` / `unknown` / `not_applicable` with a basis string.
+  An **unknown filer class resolves to the slowest statutory bound and says so**;
+  a fiscal label (`2025/FY`, `2026/Q2`) yields no period end at all, because a
+  June-year issuer's "Q2" ends in March (the calendar assumption in
+  `filing_deadlines.period_end_from_text` belongs to the Form 13F rule alone).
+  Form 13F's deadline is delegated to `filing_deadlines.form_13f_deadline`.
+- `facts.py` — the **Fact layer**: `Fact` (extending `metric_authority.
+  Observation`) carries a line item's value PLUS its coverage
+  (`FactCoverage(n_of, required, rule, withheld)`, `Fact.usable`), its period
+  (`period_label`/`period_kind`/`period_end`/`basis_text`/`basis_conflict`) and
+  its availability (`available_at`, `availability_state`, `Fact.filed_basis`).
+  `resolve_facts(canonical, provenance)` builds them from the pair
+  `statement_parsing.fetch_ticker` already returns - **never** a second vendor
+  pull (two consecutive pulls for GMED 2026-10-14 returned different payload
+  sets; a qualifier from a re-fetch describes a different measurement than the
+  number it qualifies). `derive` is the one producer of a derived value's
+  coverage (a partial leg reaches `score_engine.combine` as ABSENT, not as a
+  smaller number); `FACT_UNITS` declares what a canonical line item IS and is
+  held to set equality with `statement_parsing._ROW_ALIASES` by
+  `tests/test_measurement_contract.py`; `latest`/`prior` are the only readers of
+  the `{current, prior}` shape; `render_fact`/`basis_line` render the qualifiers.
+  Behind the release toggle `enable_fact_layer` (default OFF; OFF is
+  byte-identical, ON changes only how qualifiers are printed). Design:
+  `docs/design_fact_layer.md`; tests: `tests/test_facts.py`,
+  `tests/test_availability.py`, `tests/test_measurement_contract.py`.
 
 ## 4.2 Overlays
 

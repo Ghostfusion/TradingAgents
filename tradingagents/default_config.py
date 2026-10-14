@@ -332,6 +332,11 @@ _ENV_OVERRIDES = {
     # a fail-closed PUBLICATION gate, not a feature flag - when on, a measured
     # metric with no named, registered producer may not publish a value.
     "TRADINGAGENTS_ENABLE_METRIC_AUTHORITY": "enable_metric_authority",
+    # The Fact layer (strategies/facts.py): when on, a statement-derived tool
+    # leaf renders a number's qualifiers (period, source, coverage,
+    # availability) from the Fact that carries it instead of hand-authoring
+    # them. A RELEASE toggle - off is byte-identical to the pre-layer leaves.
+    "TRADINGAGENTS_ENABLE_FACT_LAYER": "enable_fact_layer",
     "TRADINGAGENTS_ENABLE_BOOTSTRAP_INTERVALS": "enable_bootstrap_intervals",
     "TRADINGAGENTS_ENABLE_EVENT_IV_LIFT": "enable_event_iv_lift",
     "TRADINGAGENTS_ENABLE_TRIADIC_STRESS": "enable_triadic_stress",
@@ -1241,6 +1246,11 @@ SHIPPED_DEFAULTS = {
         # a metric with no named, registered producer publish `unavailable`
         # (never a legacy value).
         "enable_metric_authority": False,
+        # The Fact layer (strategies/facts.py): ships OFF. OFF is byte-identical
+        # to the pre-layer tool leaves; ON renders each statement-derived
+        # number's qualifiers from the Fact that carries it (period, source,
+        # coverage, availability) instead of re-authoring them per leaf.
+        "enable_fact_layer": False,
         "enable_bootstrap_intervals": False,
         "enable_event_iv_lift": False,
         "enable_triadic_stress": False,

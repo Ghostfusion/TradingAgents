@@ -234,6 +234,12 @@ the **interpretation**:
   `trap_risk: MEDIUM` (whose only trigger was that score) and read 8.00 at 8 of
   9 signals an hour later. `f_score` itself is unchanged, so the declared factor
   panel keeps its producer.
+- **Coverage is a TYPE now (2026-10-14, the Fact layer).** The hand-rolled count
+  above is produced by `strategies/facts.py::derive(..., coverage_rule="floor",
+  required=9)` and read off `FactCoverage.n_of`/`withheld`, so the coverage of a
+  derived value is one producer rather than a parameter each caller re-derives,
+  and a partial leg reaches `score_engine.combine` as an ABSENT component. See
+  `docs/design_fact_layer.md` — this row is that layer's P2 fixture.
 - **Data:** two consecutive balance sheets/income statements (`_prv` chain);
   `income before extraordinary items` is usually absent in vendor feeds →
   recorded as a deviation (net income used, basis printed), never silently.

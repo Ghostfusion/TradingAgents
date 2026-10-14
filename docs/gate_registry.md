@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers.** The rows below are every policy, data-surface and
-context gate: **all 119 of the 119 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+context gate: **all 120 of the 120 `enable_*` keys** in `DEFAULT_CONFIG`, plus
 the numeric limits and the always-on checks. R4 stage 2 registered the last six
 families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
 the factor-model family (§7g), the event family (§7h), the vendor and screener
@@ -450,6 +450,7 @@ size or a verdict.
 | `enable_growth_scores` | `TRADINGAGENTS_ENABLE_GROWTH_SCORES` | adds the growth-score block to `get_quality_factors` | `tradingagents/agents/utils/quant_formula_tools.py::get_quality_factors` | `test_round3_wiring.py::test_quality_tool_compresses_the_median_exclusions_when_no_panel_is_supplied` | wired |
 | `enable_score_eval_rows` | `TRADINGAGENTS_ENABLE_SCORE_EVAL_ROWS` | adds the IC / score-evaluation rows to the strategy-quality report | `scripts/strategy_quality_report.py::build_report` | `test_score_eval_rows.py::test_report_gate_off_omits_score_eval`, `::test_report_gate_on_without_ledger_is_unavailable` | wired |
 | `enable_analyst_revision_index` | `TRADINGAGENTS_ENABLE_ANALYST_REVISION_INDEX` | adds the analyst-revision index to the sentiment / news component reads and the `get_analyst_revision_index` tool | `tradingagents/agents/utils/analyst_revision_tools.py::get_analyst_revision_index`, `tradingagents/agents/utils/analysis_tools.py::_sentiment_components` / `::_news_components` | `test_analyst_revision_index.py::test_tool_is_a_disabled_sentinel_while_the_flag_is_off`, `::test_tool_renders_the_weighted_index_and_the_estimate_unavailable` | wired |
+| `enable_fact_layer` | `TRADINGAGENTS_ENABLE_FACT_LAYER` | a RELEASE toggle for the Fact layer (`strategies/facts.py`): when on, a statement-derived tool leaf renders a number's qualifiers — period, source, coverage, basis conflict, availability — from the Fact that carries it, instead of hand-authoring them per leaf; when off (the shipped default) every leaf's text is byte-identical to the pre-layer path. It never changes a value, only how a number's qualifiers are printed, and it never causes a second vendor pull: the Facts are resolved from the canonical/provenance pair the leaf already consumed | `tradingagents/strategies/facts.py::fact_layer_on` (the read) → `analysis_tools.py::_fact_qualifier_lines` (the verdict + ratios basis line) and `::_dcf_fact_note` (the fair value's own derived coverage) | `test_measurement_contract.py::test_a_clean_reading_is_byte_identical_across_the_gate`, `::test_the_gate_adds_a_qualifier_without_moving_a_value`, `::test_the_gate_never_causes_a_second_vendor_pull`, `::test_a_not_yet_filed_period_is_named_in_the_leaf_qualifier`, `::test_the_dcf_fair_value_fact_is_partial_when_a_bridge_leg_is_assumed` | wired |
 
 ## 7k. Remaining odds and ends
 

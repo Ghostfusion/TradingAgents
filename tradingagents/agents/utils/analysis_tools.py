@@ -1647,6 +1647,132 @@ def _screen_basis_line(provenance: dict) -> str:
     return line
 
 
+#: The statement keys each Fact-qualified leaf renders the qualifiers of, so the
+#: leaf's basis line is built from the Facts that carry its values, rather than
+#: hand-authored per leaf. One table, read by ``_fact_qualifier_lines``.
+_FACT_QUALIFIER_KEYS: dict[str, tuple[str, ...]] = {
+    "verdict": _SCREEN_BASIS_KEYS,
+    "ratios": (
+        "total_assets",
+        "total_equity",
+        "net_income",
+        "revenue",
+        "operating_income",
+        "operating_cashflow",
+        "capex",
+        "cash_and_investments",
+        "total_debt",
+        "shares",
+        "market_cap",
+    ),
+    "dcf": (
+        "operating_cashflow",
+        "capex",
+        "cash_and_investments",
+        "total_debt",
+        "shares",
+        "market_cap",
+        "beta",
+    ),
+}
+
+
+def _fact_qualifier_lines(
+    canonical, provenance, kind: str, *, as_of: str | None = None
+) -> list[str]:
+    """The Fact-rendered qualifier lines for a statement tool, or ``[]``.
+
+    Resolved from the **same canonical/provenance pair the leaf already
+    consumed** - never a second :func:`fetch_ticker`. One fetch, one parse: a
+    re-fetch is not deterministic across this vendor chain (two consecutive
+    pulls for GMED 2026-10-14 returned different payload sets and moved P/E
+    19.05 -> 19.14), so a qualifier built from a second read would describe a
+    different measurement than the number it qualifies - the exact defect this
+    layer exists to remove.
+
+    Behind ``enable_fact_layer`` (release toggle, default OFF): OFF returns
+    nothing, so the caller's legacy hand-authored line is what the reader sees
+    and gate-off stays byte-identical. ON renders the period, source, coverage,
+    basis conflict and availability verdict from the Facts that carry the
+    values, so a leaf cannot state a period its value does not have.
+    """
+    from tradingagents.strategies import facts as _facts
+
+    if not _facts.fact_layer_on():
+        return []
+    keys = _FACT_QUALIFIER_KEYS.get(kind) or ()
+    if not keys:
+        return []
+    try:
+        resolved = _facts.resolve_facts(
+            canonical or {}, provenance or {}, as_of=as_of, keys=keys
+        )
+    except Exception:  # noqa: BLE001 - a qualifier must never break a leaf
+        return []
+    if not resolved:
+        return []
+    return [_facts.basis_line(resolved, keys)]
+
+
+#: The legs the DCF's per-share value is DERIVED from, so its coverage reads the
+#: measurement state of exactly those (``shares`` is excluded: ``_dcf_context``
+#: derives it from ``market_cap`` and refuses the leaf when it cannot, so it is
+#: not an independently-measured input; ``beta`` IS included, because an assumed
+#: beta is a genuine coverage gap the leaf already flags in prose).
+_DCF_FACT_INPUTS: tuple[str, ...] = (
+    "operating_cashflow",
+    "capex",
+    "cash_and_investments",
+    "total_debt",
+    "market_cap",
+    "beta",
+)
+
+
+def _dcf_fact_note(ctx: dict, fair_value, *, current_date: str) -> str:
+    """The DCF's own per-share value as a derived Fact, or ``""`` (gate off).
+
+    The fair value is a COMPOSITE of the bridge legs, so its coverage has to
+    travel with it: a bridge whose cash or debt leg was ASSUMED 0 (the vendor
+    chain did not report it) produces a fair value whose input set was not fully
+    measured, and the reader must see that as a PARTIAL qualifier rather than
+    parse it back out of the prose note. Resolved from the SAME
+    canonical/provenance pair ``_dcf_context`` already fetched - never a second
+    pull.
+    """
+    from tradingagents.strategies import facts as _facts
+
+    if not _facts.fact_layer_on():
+        return ""
+    keys = _FACT_QUALIFIER_KEYS["dcf"]
+    resolved = _facts.resolve_facts(
+        ctx.get("fin") or {}, ctx.get("provenance") or {}, as_of=current_date, keys=keys
+    )
+    inputs: dict = {k: resolved.get(k) for k in _DCF_FACT_INPUTS}
+    # An ASSUMED leg is not a measurement: drop it from the derivation's inputs
+    # so the coverage reads PARTIAL and names it.
+    for name, assumed in (
+        ("cash_and_investments", ctx.get("cash_assumed")),
+        ("total_debt", ctx.get("debt_assumed")),
+    ):
+        if assumed:
+            inputs[name] = None
+    fact = _facts.derive(
+        "fair_value",
+        inputs,
+        lambda _measured: fair_value,
+        unit="usd_per_share",
+        coverage_rule="all",
+        as_of=current_date,
+        # The value spans a TTM cash-flow series AND a quarterly bridge: the one
+        # label its canonical inputs agree on is not the value's period.
+        claim_period=False,
+    )
+    return chr(10) + _facts.render_fact(fact, label="fair_value_fact") + chr(10) + _facts.basis_line(
+        resolved, keys
+    )
+
+
 @tool
 def get_analyst_verdict(
     ticker: Annotated[str, "ticker symbol"],
@@ -1686,7 +1812,14 @@ def get_analyst_verdict(
             "the vendor chain; do not fabricate value screens."
         )
     row = screen_ticker(ticker, fin)
-    lines = [f"analyst verdict {ticker}:", _screen_basis_line(provenance)]
+    # The basis line comes from the Facts that carry the screen inputs when the
+    # Fact layer is on, and from the provenance map otherwise (gate-off is
+    # byte-identical).
+    fact_lines = _fact_qualifier_lines(fin, provenance, "verdict", as_of=current_date)
+    lines = [
+        f"analyst verdict {ticker}:",
+        fact_lines[0] if fact_lines else _screen_basis_line(provenance),
+    ]
     for key, _label in (
         ("earnings_yield", "EY"),
         ("ev_ebit", "EV/EBIT"),
@@ -3270,6 +3403,7 @@ def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
     return {
         "error": None,
         "fin": fin,
+        "provenance": prov,
         "fcf": fcf,
         "fcf_latest": fcf[-1],
         "shares": shares,
@@ -3280,6 +3414,8 @@ def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
         "erp": erp,
         "cash": cash,
         "debt": debt,
+        "cash_assumed": cash_assumed,
+        "debt_assumed": debt_assumed,
         "cash_basis": cash_basis,
         "debt_basis": debt_basis,
         "cash_debt_note": cash_debt_note,
@@ -3454,6 +3590,7 @@ def get_dcf_valuation(
         f"bridge=({cash_basis} - {debt_basis}) equity={res['equity_value']:,.0f} "
         f"fair_value = equity / shares "
         f"(provider-derived; growth/ERP are analyst overrides{cash_debt_note})"
+        f"{_dcf_fact_note(ctx, res['price'], current_date=current_date)}"
     )
 
 
@@ -8905,7 +9042,11 @@ def get_ratios(
             f"ratios unavailable for {ticker}: no usable statement line items; "
             "do not fabricate valuation ratios."
         )
-    return f"## {ticker.upper()} Ratios (computed)\n\n" + render_ratios(ratios)
+    block = render_ratios(ratios)
+    fact_lines = _fact_qualifier_lines(fin, provenance, "ratios", as_of=current_date)
+    if fact_lines:
+        block = block + "\n\n" + chr(10).join(fact_lines)
+    return f"## {ticker.upper()} Ratios (computed)\n\n" + block
 
 
 # Item-5: credit-stress read (market analyst) - HY/CCC/BB OAS from FRED
