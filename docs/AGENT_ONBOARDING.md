@@ -142,6 +142,38 @@ a fresh agent must follow them without being reminded:
     durable design belongs in one `docs/design_*.md` stating a decision and its evidence.  If a document
     would be obsolete the moment the task it describes finishes, it does not belong in the repo -
     `docs/implementation_plan_*.md` are legacy, not the pattern to add to.
+13. **An OPEN QUESTION is resolved by research, not by asking (owner standing order, 2026-10-14)** -
+    when a task raises a choice that could otherwise be handed back to the owner, the default is to
+    **answer it**: run an **extensive and deep** web search, adopt the **recommended** approach, land
+    it, and record the evidence and the decision in the commit and the durable doc. Rule 7 is the
+    search-before-deciding form of this rule; this is the resolution form - it says who decides a
+    judgement call (the agent, with evidence) and what is left to ask.
+    - **"Extensive and deep" means primary sources, plural.** The vendor's own docs / SDK / spec, the
+      governing statute, standard or specification, and at least one independent practitioner source;
+      READ them rather than their descriptions (rule 11's lead-gating is the same discipline with the
+      same four documented refutations behind it). Name which source settled it and where sources
+      disagreed.
+    - **Use the recommended approach.** Where the sources agree, that IS the decision - never present
+      it as a menu of options for the owner to pick from. Where they disagree, take the
+      conservative / fail-closed option, name the tradeoff, mark `[INFERENCE]` anything not directly
+      evidenced, and proceed.
+    - **An "open question" is any choice between viable approaches**: which model / provider /
+      library, which threshold, window or estimator, which of two plausible designs, an ambiguous
+      requirement, a "should this be X or Y?" - **including anything a previous agent parked as "the
+      owner's call" purely because it was a judgement call rather than owner policy.** Parked
+      judgement calls are work items, not questions.
+    - **Ask only for OWNER POLICY, never for research.** Two categories stay questions: (a) a value or
+      contract the owner SET (a mandate, a threshold, a rating/veto semantic, a spend, a licence);
+      (b) an action that is destructive or irreversible (deleting user data or report trees,
+      force-pushing, rotating keys, changing operator/daemon state - rule 10's list). Everything else
+      is researched, decided, landed and reported.
+    - **Never stall on an open question.** "Asked, awaiting the owner" is a valid state ONLY for those
+      two policy categories; for anything else it is a stalled task. If the search is genuinely
+      inconclusive and the choice is reversible, take the **boring/safe** option, say it was taken on
+      judgement, and note what would overturn it.
+    - **Record it.** The commit body, the CHANGELOG entry or the owning `docs/design_*.md` names the
+      question, the sources, the decision and its falsifier - so a later reader re-opens it with
+      evidence instead of re-deciding from memory.
 
 ---
 
@@ -503,6 +535,7 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-10-14 `(working tree)` - **Working agreement gains rule 13: an OPEN QUESTION is resolved by research, not by asking (owner standing order, 2026-10-14).** Rule 7 already required a deep web search *before deciding*; rule 13 is the resolution form of the same discipline and says **who** decides a judgement call. When a task raises a choice between viable approaches, the default is to answer it - an extensive and deep search over **primary sources, plural** (the vendor's own docs/SDK/spec, the governing statute or standard, and at least one independent practitioner source, READ rather than described), then **adopt the recommended approach** and land it; where sources disagree, take the conservative/fail-closed option, mark `[INFERENCE]` what is not directly evidenced, and proceed. A menu of options is not a deliverable. Only two categories remain questions: **(a)** a value or contract the OWNER SET (a mandate, a threshold, a rating/veto semantic, a spend, a licence) and **(b)** an action that is destructive or irreversible (rule 10's list) - so "parked as the owner's call" is a work item, not a question, and "asked, awaiting the owner" is a valid state only for those two. If a search is genuinely inconclusive and the choice is reversible, take the boring option, say it was taken on judgement, and name its falsifier. Recorded because the recurring failure mode is a judgement call dressed as a question: it stalls a task and hands back work the evidence could have settled.
 - 2026-10-14 `(working tree)` - **A number now travels with its qualifiers: the Fact layer types the coverage, period and availability every tool leaf used to re-author (P1-P4; new `strategies/facts.py` + `strategies/availability.py`; gate `enable_fact_layer`, default OFF).** The one root cause behind the three defects listed below: `_canonicalize` (`dataflows/statement_parsing.py`) collapses a statement to `{current, prior}` scalars and `fetch_ticker`'s `absorb` is last-writer-wins over loosely-matched row labels with the per-key period map **opt-in**, so ~100 tool leaves re-authored the qualifiers - and a leaf that could not see the period printed the number without it. `facts.Fact` **extends** `metric_authority.Observation` (no second type) with `FactCoverage(n_of, required, rule, withheld)` + `Fact.usable`, the period group (`period_label`/`period_kind`/`period_end`/`basis_text`/`basis_conflict`) and the availability group (`available_at`/`available_latest`/`availability_state`/`Fact.filed_basis`). **One producer per concept:** `facts.latest`/`facts.prior` own the `{current, prior}` shape (`_latest`/`_prior` now delegate); `facts.FACT_UNITS` declares what a canonical line item IS (held to set equality with `_ROW_ALIASES` by `tests/test_measurement_contract.py`); `facts.derive` produces a derived value's coverage; `facts.render_fact` / `facts.basis_line` render a fact's qualifiers; `availability.form_deadline` produces a filing class's due date (13F delegating to `filing_deadlines.form_13f_deadline`, its one producer). **The rule that keeps it honest:** a Fact is resolved from the SAME canonical/provenance pair the leaf already consumed - **never** a second `fetch_ticker`. Two consecutive pulls for GMED 2026-10-14 returned different payload sets and moved P/E 19.05 -> 19.14, so a qualifier built from a re-fetch describes a different measurement than the number it qualifies; `test_the_gate_never_causes_a_second_vendor_pull` is the regression (the first implementation broke this).
   - **P1** the type + renderer, wired to `get_analyst_verdict` (its basis line), `get_ratios` (a trailing qualifier line) and `get_dcf_valuation` (`fair_value_fact`). **P2** coverage for composites: `screen_ticker`'s Piotroski coverage now comes from `derive(..., coverage_rule="floor", required=9)` (the row keeps its `f_score_n`/`f_score_withheld` keys), and the DCF's per-share value is derived over its measured legs so an ASSUMED cash/debt leg reads `PARTIAL` instead of prose; `score_engine.combine` needed no change - its `coverage`/`floor`/`withheld` contract was already the right shape, and a partial leg now reaches it as **absent**. **P3** `availability.py`: 10-Q 40/45 days (17 CFR 249.308a(a)), 10-K 60/75/90 (249.310(b)), 13F 45, 20-F 120 (Item 8), the Rule 0-3(a) business-day roll, the Rule 12b-25 extension (+5 / +15) as the upper bound, and an unknown filer class resolved to the **slowest** bound and named. It refuses to map a fiscal label (`2025/FY`, `2026/Q2`) onto a calendar date - a June-year issuer's "Q2" ends in March, and `period_end_from_text`'s calendar assumption belongs to the Form 13F rule, which is why the two are separate functions. **P4** `tests/test_measurement_contract.py`: the unit registry drift gate, gate-off byte-identity on a clean reading, the qualifier-only difference, the single-pull rule, the `NOT FILED YET` qualifier, and the assumed-bridge `PARTIAL`.
   - Live [verified] with the gate on, GMED 2026-10-14: `fair_value_fact: 78.94 usd_per_share (derived) - derived from beta, capex, cash_and_investments, market_cap, operating_cashflow, total_debt`, plus a qualifier line naming each leg's period and source and `NOT SUPPLIED BY THE CHAIN: shares`; and `NOT FILED YET: ... (earliest due 2026-11-16)` for a quarter whose 10-Q is not yet due. Gate-off on the same fixture is byte-identical to the pre-layer text. Design + the full evidence list (VIM 2.9 / GUM 3.1.2, XBRL 2.1 §1.4 and the Precision/Decimals WGN, Rule 0-3(a)/12b-25, 17 CFR 249.308a/249.310/240.13f-1, Livnat's WRDS note on Compustat rewriting history, Fowler's release-toggle taxonomy, JSR-385): `docs/design_fact_layer.md`.
