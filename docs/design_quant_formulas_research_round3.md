@@ -224,6 +224,16 @@ the **interpretation**:
   per-signal booleans + `basis` + `deviations`, while `piotroski_f_score`
   stays byte-identical for existing callers), `trap_verdict`, screener column,
   fundamentals tool row.
+- **Coverage is published (2026-10-14).** The detail read is now made
+  unconditionally by `statement_parsing.screen_ticker` and the row carries
+  `f_score_n` (computable signals) + `f_score_withheld`; `trap_verdict` takes
+  `f_coverage` and fires the F leg **only on a complete nine-signal read**,
+  returning the exclusion as `f_score_excluded`; the analyst-verdict line names
+  the coverage. Reason: a sum over nine signals with an unmeasurable one scored
+  0 is not a measurement. GMED 2026-10-14 published `f_score=3` with
+  `trap_risk: MEDIUM` (whose only trigger was that score) and read 8.00 at 8 of
+  9 signals an hour later. `f_score` itself is unchanged, so the declared factor
+  panel keeps its producer.
 - **Data:** two consecutive balance sheets/income statements (`_prv` chain);
   `income before extraordinary items` is usually absent in vendor feeds →
   recorded as a deviation (net income used, basis printed), never silently.

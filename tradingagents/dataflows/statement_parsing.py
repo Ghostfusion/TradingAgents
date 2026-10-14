@@ -1612,6 +1612,25 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
     m_score = beneish_m_score(fin)
     z_score = altman_z_score(fin) if usd else None
     f_score = piotroski_f_score(fin)
+    # The published score is a SUM over nine binary signals and
+    # ``piotroski_f_score`` scores an unmeasurable one as 0 - so the reader (and
+    # the trap-risk gate) must know how many were actually computable. One
+    # paper-basis read supplies the coverage AND the band below; the band stays
+    # render-gated so a gate-off row keeps its pre-round-3 shape.
+    f_read = None
+    try:
+        from tradingagents.dataflows.quantitative_scores import (
+            piotroski_f_score_detailed,
+        )
+
+        f_read = piotroski_f_score_detailed(fin, sector=fin.get("sector"))
+    except Exception:  # noqa: BLE001 - an advisory read must not break the screen
+        f_read = None
+    _f_signals = (f_read or {}).get("signals") or {}
+    f_coverage = (
+        sum(1 for v in _f_signals.values() if v is not None) if _f_signals else None
+    )
+    f_withheld = sorted(k for k, v in _f_signals.items() if v is None)
     # Round-3 S1/S2 (gated): the Altman variant + its distress zone, and the
     # F-Score's paper band. Both are render-only extras: with the gates off the
     # row carries neither key and `trap_verdict` receives neither argument, so
@@ -1637,15 +1656,8 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
                     z_zone = altman_zone(read["value"], variant)
         except Exception:  # noqa: BLE001 - an advisory row must not break the screen
             z_variant = z_zone = None
-    if _r3_flag("enable_f_score_detail"):
-        try:
-            from tradingagents.dataflows.quantitative_scores import (
-                piotroski_f_score_detailed,
-            )
-
-            f_band = (piotroski_f_score_detailed(fin, sector=sector) or {}).get("band")
-        except Exception:  # noqa: BLE001 - an advisory row must not break the screen
-            f_band = None
+    if _r3_flag("enable_f_score_detail") and f_read:
+        f_band = f_read.get("band")
     # Quality rows (informational): Novy-Marx gross profitability and
     # Hirshleifer et al. net operating assets. They feed the watchlist columns
     # only - no score, ranking or filter reads them.
@@ -1667,17 +1679,21 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         and mc < (2.0 / 3.0) * (ca - tl)
     )
     trap = "n/a"
+    trap_excluded = None
     if any(v is not None for v in (f_score, m_score, z_score)):
         from tradingagents.strategies.normalized import trap_verdict
 
-        trap = trap_verdict(
+        verdict = trap_verdict(
             f_score=f_score,
+            f_coverage=f_coverage,
             m_score=m_score,
             z_score=z_score,
             z_variant=z_variant,
             z_zone=z_zone,
             f_band=f_band,
-        )["level"]
+        )
+        trap = verdict["level"]
+        trap_excluded = verdict.get("f_score_excluded")
     ne = _latest(fin.get("net_income"))
     te = _latest(fin.get("total_equity"))
     roe = None
@@ -1690,10 +1706,13 @@ def screen_ticker(ticker: str, fin: dict) -> dict:
         "ev": round(ev, 2) if ev is not None else None,
         "tobins_q": round(q_row["value"], 3) if q_row else None,
         "f_score": f_score,
+        "f_score_n": f_coverage,
+        "f_score_withheld": f_withheld,
         "beneish_m": round(m_score, 3) if m_score is not None else None,
         "altman_z": round(z_score, 3) if z_score is not None else None,
         "net_net": net_net,
         "trap": trap,
+        "trap_excluded": trap_excluded,
         "gp_a": round(gp_a_row["value"], 4) if gp_a_row else None,
         "noa": round(noa_row["value"], 4) if noa_row else None,
         "gp_a_classification": gp_a_row["classification"] if gp_a_row else None,

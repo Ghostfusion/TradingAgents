@@ -94,12 +94,33 @@ def inst_flow_z(rows: list[dict] | None, *, min_obs: int = 4) -> dict | None:
 
     if not rows:
         return None
-    changes = _clean(r.get("pct_change") for r in rows)
+    # A period whose Form 13F filings are still arriving cannot enter the
+    # series: its pct_change is a delta over a quarter that is still
+    # accumulating, so it is not the same measurement as a completed period's
+    # (GMED 2026-10-14: the vendor's newest row was "2026/Q3", whose filings are
+    # not due until 2026-11-16 - the delta would have z-scored an early-filer
+    # snapshot against completed quarters). Rows carrying no completeness
+    # verdict (``period_complete`` missing or None) are KEPT: unknown is not a
+    # claim that the period is incomplete.
+    partial = [
+        str(r.get("period", "?")) for r in rows if r.get("period_complete") is False
+    ]
+    usable = [r for r in rows if r.get("period_complete") is not False]
+    if not usable:
+        return {
+            "inst_flow_z": None,
+            "pct_change": None,
+            "n": 0,
+            "reason": "no completed 13F period yet; still filing: " + ", ".join(partial),
+            "basis": "period-over-period change in institutional % of float (pp)",
+        }
+    changes = _clean(r.get("pct_change") for r in usable)
     n = len(changes)
     latest = changes[0] if changes else None
     basis = (
         f"period-over-period change in institutional % of float (pp), latest "
         f"against its own {n}-period history; sample sigma (ddof=1)"
+        + (f"; skipped still-filing period(s): {', '.join(partial)}" if partial else "")
     )
     if n < min_obs:
         return {

@@ -2569,7 +2569,7 @@ def screen_value_dip_moomoo(
 # ---------------------------------------------------------------------------
 
 
-def institution_holdings_rows(ticker: str) -> list[dict] | None:
+def institution_holdings_rows(ticker: str, *, as_of=None) -> list[dict] | None:
     """Structured 13F-style institutional-ownership rows, NEWEST PERIOD FIRST.
 
     The same ``get_shareholders_institutional`` frame the markdown renderer
@@ -2583,7 +2583,16 @@ def institution_holdings_rows(ticker: str) -> list[dict] | None:
     - ``pct_of_float`` (float|None): 0..100 percent of float (``holder_pct``),
     - ``pct_change`` (float|None): percentage points vs the PRIOR period
       (``holder_pct_change``) - the delta ``strategies.sentiment_research.inst_flow_z``
-      z-scores.
+      z-scores,
+    - ``period_complete`` (bool|None): whether that period's Form 13F filings
+      are all DUE as of ``as_of`` (``strategies.filing_deadlines``). The vendor
+      labels the newest row with the current quarter, whose 13F is not due until
+      45 days after quarter end - so on 2026-10-14 the "2026/Q3" row is an
+      early-filer snapshot and its ``pct_change`` is a partial-quarter delta.
+      ``None`` when the label or the clock cannot be understood: unknown is
+      never an assertion that the period is complete.
+
+    ``as_of`` (optional) overrides the run clock (``date_window``) for tests.
 
     Values are the vendor's own objects (uncoerced), so the renderer's
     ``isinstance`` formatting is byte-identical; a producer coerces what it
@@ -2597,11 +2606,22 @@ def institution_holdings_rows(ticker: str) -> list[dict] | None:
     df = data
     if df is None or df.empty:
         return None
+    # A period's Form 13F is due 45 days after quarter end (17 CFR
+    # 240.13f-1(a) + a weekend/holiday roll). The vendor labels its newest row
+    # with the quarter IN PROGRESS at the run date, so that row's pct_change is
+    # still accumulating. One producer decides completeness
+    # (strategies.filing_deadlines); this producer only records it.
+    from tradingagents.dataflows.date_window import get_run_trade_date
+    from tradingagents.strategies.filing_deadlines import filing_period_complete
+
+    today = as_of if as_of is not None else get_run_trade_date()
     rows: list[dict] = []
     for _, row in df.iterrows():
+        period = str(row.get("period_text", "?"))
         rows.append(
             {
-                "period": str(row.get("period_text", "?")),
+                "period": period,
+                "period_complete": filing_period_complete(period, as_of=today),
                 "institutions": row.get("institution_quantity"),
                 "shares_held": row.get("holder_quantity"),
                 "pct_of_float": row.get("holder_pct"),
@@ -2643,6 +2663,36 @@ def get_institution_holdings_moomoo(ticker: str) -> str:
         chg_s = f"{float(chg):+.1f}pp" if isinstance(chg, (int, float)) else "n/a"
         lines.append(f"| {period} | {inst_s} | {qty_s} | {pct_s} | {chg_s} |")
     lines.append("")
+    # Name any period whose filings are still arriving. The newest row is the
+    # quarter in progress (13F due 45 days after quarter end), so publishing its
+    # % of float and its change beside completed quarters is a basis error
+    # unless the reader is told (GMED 2026-10-14: "2026/Q3" 90.3% / +0.3pp,
+    # while Q3 13F filings were not due until 2026-11-16).
+    from tradingagents.strategies.filing_deadlines import (
+        form_13f_deadline,
+        period_end_from_text,
+    )
+
+    partial = []
+    for row in rows[:6]:
+        if row.get("period_complete") is not False:
+            continue
+        label = str(row.get("period", "?"))
+        end = period_end_from_text(label)
+        partial.append(
+            f"{label} (13F due {form_13f_deadline(end).isoformat()})"
+            if end is not None
+            else label
+        )
+    if partial:
+        lines.append(
+            "PARTIAL PERIOD: "
+            + ", ".join(partial)
+            + " - those filings are still arriving, so the % of float and the "
+            "change above are an early-filer snapshot of a quarter that is still "
+            "accumulating, not a completed-period measurement."
+        )
+        lines.append("")
     lines.append(
         "Interpretation: the % of float held by institutions and its period change "
         "is the smart-money ownership signal; a persistent decline can precede "

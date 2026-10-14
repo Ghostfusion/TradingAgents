@@ -80,8 +80,55 @@ class InstitutionHoldingsRowsTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0]["pct_change"], -1.2)
         self.assertEqual(
             set(rows[0]),
-            {"period", "institutions", "shares_held", "pct_of_float", "pct_change"},
+            {
+                "period",
+                "period_complete",
+                "institutions",
+                "shares_held",
+                "pct_of_float",
+                "pct_change",
+            },
         )
+
+    def test_the_renderer_names_a_still_filing_period(self):
+        """A period whose 13F is not due yet is labelled as still accumulating."""
+        from tradingagents.dataflows.date_window import set_run_trade_date
+
+        frame = pd.DataFrame(
+            {
+                "period_text": ["2026/Q3", "2026/Q2"],
+                "institution_quantity": [696, 694],
+                "holder_quantity": [1.213e8, 1.209e8],
+                "holder_pct": [90.3, 90.0],
+                "holder_pct_change": [0.3, 7.0],
+            }
+        )
+        ctx = mock.Mock()
+        ctx.get_shareholders_institutional.return_value = (RET_OK, frame)
+        try:
+            set_run_trade_date("2026-10-14")
+            with (
+                mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+                mock.patch.object(moomoo, "_moomoo_code", return_value="US.GMED"),
+            ):
+                out = get_institution_holdings_moomoo("GMED")
+        finally:
+            set_run_trade_date("")
+        # Q3 2026 13F filings are due 2026-11-16 -> still accumulating on the
+        # run date; Q2 is complete and must not be named.
+        assert "PARTIAL PERIOD: 2026/Q3 (13F due 2026-11-16)" in out
+        assert "2026/Q2 (" not in out
+
+    def test_no_run_clock_means_no_completeness_claim(self):
+        """An unset clock (offline/test default) must not assert a period is complete."""
+        ctx = mock.Mock()
+        ctx.get_shareholders_institutional.return_value = (RET_OK, self._fixture())
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AVGO"),
+        ):
+            rows = institution_holdings_rows("AVGO")
+        assert rows[0]["period_complete"] is None
 
     def test_empty_frame_returns_none(self):
         ctx = mock.Mock()

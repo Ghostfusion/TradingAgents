@@ -1542,7 +1542,7 @@ def surprise_basis_note(last) -> str:
         pass
     return ""
 
-def screen_value_line(key: str, v, ev_ebit) -> str:
+def screen_value_line(key: str, v, ev_ebit, *, coverage=None, withheld=None) -> str:
     """One analyst-verdict line with EV/EBIT artifact guards (IREN loop)."""
     label = {
         "earnings_yield": "EY",
@@ -1564,7 +1564,20 @@ def screen_value_line(key: str, v, ev_ebit) -> str:
         )
     if key == "earnings_yield" and ev_ebit is not None and abs(ev_ebit) > 1000:
         return f"  {label}: {v:.2%} (ARTIFACT: same near-zero EBIT denominator)"
-    if key in ("beneish_m", "altman_z", "f_score", "ev_ebit", "tobins_q"):
+    if key == "f_score":
+        # A sum over nine binary signals with no coverage read is not a
+        # measurement: `piotroski_f_score` scores an unmeasurable signal as 0,
+        # so state how many were computable and refuse the paper band's reading
+        # when any are withheld (the band is defined over all nine).
+        if coverage is None or int(coverage) >= 9:
+            return f"  {label}: {v:.2f}"
+        names = ", ".join(withheld or [])
+        return (
+            f"  {label}: {v:.2f} (PARTIAL: {int(coverage)} of 9 signals "
+            f"computable; band withheld{'; not computable: ' + names if names else ''})"
+            " - a partial sum is not evidence of weakness"
+        )
+    if key in ("beneish_m", "altman_z", "ev_ebit", "tobins_q"):
         return f"  {label}: {v:.2f}"
     if key in ("roe", "eps_yoy", "revenue_yoy", "earnings_yield"):
         return f"  {label}: {v:.2%}"
@@ -1686,7 +1699,15 @@ def get_analyst_verdict(
         ("revenue_yoy", "Revenue YoY"),
     ):
         v = row.get(key)
-        lines.append(screen_value_line(key, v, row.get("ev_ebit")))
+        lines.append(
+            screen_value_line(
+                key,
+                v,
+                row.get("ev_ebit"),
+                coverage=row.get("f_score_n"),
+                withheld=row.get("f_score_withheld"),
+            )
+        )
     lines.append(f"  net_net: {row.get('net_net')}")
     # Ohlson O-score + Zmijewski X-score (distress models, a different
     # functional form than Altman Z). Only rendered when the canonical carries
@@ -1722,7 +1743,16 @@ def get_analyst_verdict(
         lines.append("  ohlson_o: n/a (unavailable)")
         lines.append("  zmijewski_x: n/a (unavailable)")
     trap = row.get("trap")
-    lines.append(f"  trap_risk: {trap}" if trap not in (None, "n/a") else "  trap_risk: n/a")
+    excluded = row.get("trap_excluded")
+    if trap in (None, "n/a"):
+        lines.append("  trap_risk: n/a")
+    elif excluded:
+        # Name the leg that was dropped for want of coverage: a LOW built on an
+        # unmeasured F-Score is not the same statement as a LOW built on nine
+        # computed signals.
+        lines.append(f"  trap_risk: {trap} ({excluded})")
+    else:
+        lines.append(f"  trap_risk: {trap}")
     return chr(10).join(lines)
 
 
@@ -3025,7 +3055,27 @@ def _dcf_beta(fund):
     return float(v) if v is not None else None
 
 
-def _dcf_cash_debt(bal):
+def _dcf_payload_period(source: str, basis: str, payload: str) -> str | None:
+    """The period a statement payload's newest column states (``None`` if unknown).
+
+    The bridge must be able to say WHEN its legs are from: a fair value whose
+    net-debt leg is dated nowhere is not reproducible from itself.
+    """
+    if not payload:
+        return None
+    try:
+        from tradingagents.dataflows.statement_parsing import _basis_entry
+
+        period = _basis_entry(source, basis, payload).get("period")
+        # The provenance string carries the period KIND and the currency after
+        # the label ("2026/Q2  (FY 2026, currency: USD)"); the bridge prints the
+        # label alone.
+        return str(period).split()[0] if period else None
+    except Exception:  # noqa: BLE001 - the period is a label, never a hard stop
+        return None
+
+
+def _dcf_cash_debt(bal, *, period=None):
     """``(cash, debt, cash_basis, debt_basis)`` for the DCF EV -> equity bridge.
 
     Cash INCLUDING short-term investments is the right leg for a net-debt
@@ -3038,15 +3088,24 @@ def _dcf_cash_debt(bal):
     fair value whose bridge is invisible is not reproducible from itself, and
     the swing here was $8.58/share (124.80 vs 116.22) on identical FCF and WACC.
 
+    ``period`` is the as-of of the pair and is printed inside the basis string:
+    net debt belongs at the newest as-reported balance sheet, so which one was
+    used is part of the number, not commentary (GMED 2026-10-14 read the
+    FY2025-12-31 pair while a 2026-06-30 pair sat in the same payload).
+
     The caller substitutes 0.0 for an absent line and labels it as an
     assumption, so a missing vendor row is never rendered as a measurement.
     """
+    suffix = f" @ {period}" if period else ""
     wide = _dcf_latest(bal.get("cash_and_investments"))
     narrow = _dcf_latest(bal.get("cash"))
     if wide is not None:
-        cash, cash_basis = float(wide), "cash + ST investments"
+        cash, cash_basis = float(wide), f"cash + ST investments{suffix}"
     elif narrow is not None:
-        cash, cash_basis = float(narrow), "cash and equivalents (no ST-investments row)"
+        cash, cash_basis = (
+            float(narrow),
+            f"cash and equivalents (no ST-investments row){suffix}",
+        )
     else:
         cash, cash_basis = None, "cash assumed 0"
     debt = _dcf_latest(bal.get("total_debt"))
@@ -3054,7 +3113,7 @@ def _dcf_cash_debt(bal):
         cash,
         float(debt) if debt is not None else None,
         cash_basis,
-        "total debt" if debt is not None else "debt assumed 0",
+        f"total debt{suffix}" if debt is not None else "debt assumed 0",
     )
 
 
@@ -3151,13 +3210,46 @@ def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
     # Screener-grade canonical line items (fundamentals + balance sheet +
     # income statement + finnhub gap-fill), so market cap / shares resolve
     # even when moomoo's statement payload has no "Market Cap" row.
-    fin = fetch_ticker(ticker, current_date) or {}
+    fin: dict = {}
+    prov: dict = {}
+    try:
+        fin, prov = fetch_ticker(ticker, current_date, with_provenance=True)
+    except Exception:  # noqa: BLE001 - provenance is advisory, the DCF is not
+        fin = fetch_ticker(ticker, current_date) or {}
     market_cap = _dcf_market_cap(fin)
     beta = _dcf_beta(fin)
     beta_assumed = beta is None
     if beta_assumed:
         beta = 1.0
-    cash, debt, cash_basis, debt_basis = _dcf_cash_debt(fin)
+    # The bridge wants the NEWEST AS-REPORTED balance sheet, for the same reason
+    # the FCF leg above prefers the quarterly series: fetch_ticker absorbs the
+    # statements with basis="annual", so the canonical cash/debt pair is the
+    # last FISCAL YEAR - one quarter stale on GMED 2026-10-14 (cash + ST
+    # investments 557.243bn and total debt 118.656bn at 2025-12-31 against
+    # 595.142bn / 111.192bn at 2026-06-30: net cash 438.6bn instead of 484.0bn,
+    # $0.34/share of fair value, and the reverse DCF inherits it). Read the
+    # quarterly payload first and name its period; when only the annual pair is
+    # usable, say that too.
+    bridge_note = ""
+    qb_payload = (
+        route_to_vendor("get_balance_sheet", ticker, "quarterly", current_date) or ""
+    )
+    qb = _dcf_canonical(qb_payload) if qb_payload else {}
+    qb_cash = _dcf_latest(qb.get("cash_and_investments"))
+    if qb_cash is None:
+        qb_cash = _dcf_latest(qb.get("cash"))
+    if qb_cash is not None and _dcf_latest(qb.get("total_debt")) is not None:
+        cash, debt, cash_basis, debt_basis = _dcf_cash_debt(
+            qb, period=_dcf_payload_period("get_balance_sheet", "quarterly", qb_payload)
+        )
+    else:
+        annual_period = (prov.get("cash_and_investments") or {}).get("period")
+        cash, debt, cash_basis, debt_basis = _dcf_cash_debt(fin, period=annual_period)
+        if qb_payload:
+            bridge_note = (
+                "; bridge from the ANNUAL statement (no usable quarterly balance "
+                "sheet) - a newer as-reported quarter may exist"
+            )
     cash_assumed = cash is None
     debt_assumed = debt is None
     cash = 0.0 if cash_assumed else cash
@@ -3171,6 +3263,7 @@ def _dcf_context(ticker: str, current_date: str, *, erp: float = 0.05) -> dict:
             if absent
         )
         cash_debt_note = f"; {missing} assumed 0 (not reported)"
+    cash_debt_note += bridge_note
     shares, shares_basis = _dcf_shares(fin, fin, market_cap, ticker)
     if not shares:
         return {"error": "no shares outstanding."}

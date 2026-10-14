@@ -73,6 +73,7 @@ def accruals_ratio(
 def trap_verdict(
     *,
     f_score=None,
+    f_coverage=None,
     m_score=None,
     z_score=None,
     mom12: float | None = None,
@@ -86,6 +87,18 @@ def trap_verdict(
 
     Evidence triggers: Beneish M > -1.78 (manipulation), Altman Z < 1.81
     (distress), negative 12-1m momentum, accrual > 0.06, no F-Score.
+
+    ``f_coverage`` is the number of Piotroski signals that were actually
+    COMPUTABLE (``piotroski_f_score_detailed``'s non-``None`` signals). The
+    F leg fires only on a complete read: the paper's bands (0-2 weak / 8-9
+    strong) are defined over all nine signals, and ``piotroski_f_score`` scores
+    an unmeasurable signal as 0 - so a thin vendor payload reads as a red flag
+    when in truth the criteria were never computed (GMED 2026-10-14 published
+    ``f_score=3`` and trap_risk MEDIUM from a canonical missing the
+    prior-period legs; the same ticker reads 8 at coverage 8 of 9 an hour
+    later). Below nine the leg is EXCLUDED and the exclusion is returned as
+    ``f_score_excluded`` rather than silently dropped. ``f_coverage=None``
+    keeps the legacy behaviour for a caller that has no coverage read.
 
     ``z_zone`` (from ``altman_zone``) and ``f_band`` (from
     ``piotroski_f_score_detailed``) are ADDITIVE render-only keys: the caller
@@ -103,9 +116,17 @@ def trap_verdict(
         evidence.append("12-1m momentum negative")
     if accrual is not None and accrual > th.get("accrual_cap", 0.06):
         evidence.append(f"accruals={accrual:.3f}")
-    if f_score is not None and f_score < th.get("f_floor", 4):
-        evidence.append(f"f_score={f_score} (< {th.get('f_floor', 4)})")
+    if f_score is not None and f_coverage is not None and int(f_coverage) < 9:
+        f_excluded = (
+            f"f_score={f_score} excluded: {int(f_coverage)} of 9 signals computable"
+        )
+    else:
+        f_excluded = None
+        if f_score is not None and f_score < th.get("f_floor", 4):
+            evidence.append(f"f_score={f_score} (< {th.get('f_floor', 4)})")
     extras: dict = {}
+    if f_excluded is not None:
+        extras["f_score_excluded"] = f_excluded
     if z_zone is not None:
         extras["altman_zone"] = z_zone.get("zone") if isinstance(z_zone, dict) else z_zone
         extras["z_variant"] = z_variant

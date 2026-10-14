@@ -87,7 +87,13 @@ involved. This is the "compute, don't narrate" core.
   (doji/hammer/shooting-star/engulfing/morning+evening star). Exposed as
   `get_extended_indicators` + `get_candlestick_patterns` on the market analyst.
 - `dcf.py` — pragmatic FCF-DCF intrinsic valuation (WACC via CAPM, Gordon TV,
-  EV->equity bridge) powering `get_dcf_valuation`.
+  EV->equity bridge) powering `get_dcf_valuation`. The bridge legs come from
+  `_dcf_context`, which reads the **quarterly** balance-sheet payload first and
+  prints the period it used (`@ 2026-06-30`): `fetch_ticker` absorbs the
+  statements with `basis="annual"`, so the canonical pair is the last fiscal
+  year (GMED 2026-10-14 bridged on 2025-12-31 while 2026-06-30 was in the same
+  payload - net cash 438.587m instead of 483.950m). When only the annual pair
+  is usable the leaf says so.
 - `journal.py` — `--journal` alloc/journal.
 - `ratios.py` — computed valuation & profitability ratios (EV, EV/EBIT,
   EV/EBITDA, EV/Sales, P/E, P/B, P/S, P/CF, P/FCF, ROE, ROA, D/E, liquidity,
@@ -95,6 +101,15 @@ involved. This is the "compute, don't narrate" core.
   canonical statements — a free, offline replication of the plan-gated Massive
   ratio block; exposed as `get_ratios` on the fundamentals analyst.
   Also adds the `inventory` canonical alias so Quick ratio computes.
+- `filing_deadlines.py` — SEC filing-deadline arithmetic, the single producer of
+  a period's **completeness**: Form 13F is due 45 days after quarter/year end
+  (17 CFR 240.13f-1(a)) and the date rolls to the next business day on a weekend
+  or **federal holiday** (it reproduces the published 2026 dates: February 17,
+  May 15, August 14, November 16). Consumers: `dataflows/moomoo.py`
+  (`period_complete` on each holdings row + the `PARTIAL PERIOD:` render line)
+  and `strategies/sentiment_research.inst_flow_z`, which z-scores the newest
+  **complete** period's change and names any period it skipped. An unparsed
+  label - or an unset run clock - is `None` (unknown), never "complete".
 
 ## 4.2 Overlays
 
