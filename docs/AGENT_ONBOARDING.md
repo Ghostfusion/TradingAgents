@@ -295,6 +295,14 @@ py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/wor
      and mirror the membership in `TradingExecution/mandate.json` in the same
      pass — the two sets are equal by construction and a mismatch is silent:
      `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u TRADINGAGENTS_RISK_BASKET_WEIGHTS py -3.12 -c "import tradingagents; from tradingagents.default_config import DEFAULT_CONFIG as C; print(len(C['risk_basket_tickers']), round(sum(C['risk_basket_weights'].values()),4))"`
+   - **A basket re-sync also restarts the web app.** `trading_web/backend/
+     config.py:44` loads `TradingAgents/.env` at import with `override=False`,
+     so the *app* exports the file's basket into `os.environ`; every capability
+     it spawns runs with `cwd=TradingAgents` and `env=dict(os.environ)`, where
+     that inherited value then beats the fresh file read (the 2026-10-15
+     re-sync needed exactly this — the app is long-lived and its copy is
+     frozen at start). Restart `trading-web` after `positions_to_basket.py
+     --apply`, or every run it spawns keeps the pre-sync book, silently.
    - The standing prefix for any basket-dependent run (batch, screener,
      pipeline, the web app) unsets the four drifted vars - keep using it; it
      is cheap and it is the difference between the file's book leg and whatever
