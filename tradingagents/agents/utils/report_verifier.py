@@ -132,21 +132,21 @@ class VerifierClaim(BaseModel):
     """One extracted claim + its grounding verdict."""
 
     claim: str = Field(description="The sentence/claim as written in the report.")
-    status: Literal[
-        "GROUNDED", "UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT"
-    ] = Field(
-        ...,
-        description=(
-            "GROUNDED: the claim's specifics (figures, direction, state) are "
-            "present in the evidence leaves; UNSUPPORTED: the claim asserts "
-            "specifics the evidence does not contain; CONTRADICTED: evidence "
-            "contains an opposing value/state; MISQUOTED: the claim's figures "
-            "ARE present in the evidence but attached to the wrong label / "
-            "subject / context (e.g. a 92% and 58% transposed between two "
-            "peers) - the deterministic anchor detected the misuse rather than "
-            "silently grounding it; INTERNAL_CONFLICT: the same metric is "
-            "reported at conflicting values within this one report."
-        ),
+    status: Literal["GROUNDED", "UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT"] = (
+        Field(
+            ...,
+            description=(
+                "GROUNDED: the claim's specifics (figures, direction, state) are "
+                "present in the evidence leaves; UNSUPPORTED: the claim asserts "
+                "specifics the evidence does not contain; CONTRADICTED: evidence "
+                "contains an opposing value/state; MISQUOTED: the claim's figures "
+                "ARE present in the evidence but attached to the wrong label / "
+                "subject / context (e.g. a 92% and 58% transposed between two "
+                "peers) - the deterministic anchor detected the misuse rather than "
+                "silently grounding it; INTERNAL_CONFLICT: the same metric is "
+                "reported at conflicting values within this one report."
+            ),
+        )
     )
     reason: str = Field(
         ...,
@@ -360,9 +360,7 @@ def basis_conflicts(registry: list[BasisAssertion], section: str = "") -> list[C
     by_metric: dict[str, list[ConflictSide]] = {}
     for b in registry:
         by_metric.setdefault(b.metric, []).append(
-            ConflictSide(
-                value=b.value, basis=b.basis, producer=b.producer, source=b.source
-            )
+            ConflictSide(value=b.value, basis=b.basis, producer=b.producer, source=b.source)
         )
 
     rows: list[ConflictRow] = []
@@ -372,10 +370,7 @@ def basis_conflicts(registry: list[BasisAssertion], section: str = "") -> list[C
         # Distinct value clusters at the metric's own tolerance.
         clusters: list[float] = []
         for s in sorted(sides, key=lambda s: -s.value):
-            if not any(
-                abs(c - s.value) / max(abs(c), abs(s.value), 1e-9) <= tol
-                for c in clusters
-            ):
+            if not any(abs(c - s.value) / max(abs(c), abs(s.value), 1e-9) <= tol for c in clusters):
                 clusters.append(s.value)
         if len(clusters) < 2:
             continue
@@ -431,6 +426,7 @@ def report_ledger(state: dict | None) -> tuple[list[ConflictRow], int]:
 
 class ReportVerification(BaseModel):
     """Verdicts for one analyst report."""
+
     report: str = Field(..., description="Analyst key, e.g. 'fundamentals'.")
     claims: list[VerifierClaim] = Field(default_factory=list)
     overall: Literal["PASS", "FLAG", "UNKNOWN", "NUMERIC_ONLY"] = Field(
@@ -750,11 +746,7 @@ def _debate_degradation(report_dir: Path) -> dict:
     # computed with the config in hand); otherwise derive from the artifact -
     # a tree that positively claims the structured debate while lacking its
     # evidence is degraded, an unknown is not.
-    degraded = (
-        bool(card["degraded"])
-        if "degraded" in card
-        else (enabled is True and not evidence)
-    )
+    degraded = bool(card["degraded"]) if "degraded" in card else (enabled is True and not evidence)
     return {
         "enabled": enabled,
         "evidence": evidence,
@@ -892,8 +884,7 @@ def _build_prompt(report_name: str, report_text: str, digest: str) -> str:
 def _overall_from_claims(claims: list) -> Literal["PASS", "FLAG", "UNKNOWN"]:
     """Derive the report-level verdict from per-claim statuses."""
     if any(
-        c.get("status")
-        in ("UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT")
+        c.get("status") in ("UNSUPPORTED", "CONTRADICTED", "MISQUOTED", "INTERNAL_CONFLICT")
         for c in claims
     ):
         return "FLAG"
@@ -1009,7 +1000,7 @@ def _is_weighting_statement(claim: str) -> bool:
     """Is this claim the mandated statement of which signal was weighted, why?"""
     text = claim or ""
     for m in _WEIGHT_VERB_RE.finditer(text):
-        window = text[max(0, m.start() - _WEIGHTING_WINDOW): m.end() + _WEIGHTING_WINDOW]
+        window = text[max(0, m.start() - _WEIGHTING_WINDOW) : m.end() + _WEIGHTING_WINDOW]
         if _SIGNAL_OBJECT_RE.search(window) and _WEIGHT_COMPARATIVE_RE.search(window):
             return True
     return False
@@ -1077,7 +1068,8 @@ def _anchor_claims(
                 VerifierClaim(
                     claim=c.claim,
                     status="GROUNDED",
-                    reason=(c.reason or "") + " [anchored: the claim asserts the series is unavailable, which the absent leaf corroborates]",
+                    reason=(c.reason or "")
+                    + " [anchored: the claim asserts the series is unavailable, which the absent leaf corroborates]",
                 )
             )
             continue
@@ -1096,8 +1088,7 @@ def _anchor_claims(
                 VerifierClaim(
                     claim=c.claim,
                     status="GROUNDED",
-                    reason=c.reason
-                    + " [anchored: the prompt's mandated 0-10 rescale of "
+                    reason=c.reason + " [anchored: the prompt's mandated 0-10 rescale of "
                     f"computed_score is {sentiment_anchor:.1f} +/-{_SENTIMENT_BAND}]",
                 )
             )
@@ -1111,8 +1102,7 @@ def _anchor_claims(
                 VerifierClaim(
                     claim=c.claim,
                     status="GROUNDED",
-                    reason=(c.reason or "")
-                    + " [anchored: a stated weighting is a methodological "
+                    reason=(c.reason or "") + " [anchored: a stated weighting is a methodological "
                     "judgment, not a claim about the external world]",
                 )
             )
@@ -1126,8 +1116,7 @@ def _anchor_claims(
                     VerifierClaim(
                         claim=c.claim,
                         status="MISQUOTED",
-                        reason=c.reason
-                        + " [anchored: figures ARE in tool evidence but the "
+                        reason=c.reason + " [anchored: figures ARE in tool evidence but the "
                         "claim may attach them to the wrong label/context - "
                         "verify attribution]",
                     )
@@ -1198,6 +1187,7 @@ def _stem_overall(
 # ---------------------------------------------------------------------------
 # Internal-consistency (cross-claim) check — deterministic
 # ---------------------------------------------------------------------------
+
 
 # Metric label -> regex to locate its numeric value(s) in text. Covers the
 # load-bearing metrics the analyst may quote from multiple vendors (the JPM/
@@ -1278,6 +1268,7 @@ _DISCLOSURE_MARKERS = re.compile(
     r"|\bmislabell?ed\b|\bnon[- ]current\b|\bwrong\s+row\b"
 )
 
+
 def _marker_beside_a_value(para: str, flagged: set[str]) -> bool:
     """Is a disclosure marker printed in the same unit as a flagged value?
 
@@ -1329,7 +1320,8 @@ def _value_context_rejected(label: str, raw: str, line: str) -> bool:
         # 80 chars, not 40: the tool name starts the clause -
         # "`get_vif_read` on [rsi, mom, std, vol, range] returns **rsi 5.4 ..."
         # is 50-odd chars before the score.
-        rx.search(line[max(0, m.start() - 80): m.start()]) for m in occurrences
+        rx.search(line[max(0, m.start() - 80) : m.start()])
+        for m in occurrences
     )
 
 
@@ -1350,7 +1342,7 @@ def _disclosed_pair(report_text: str, regex: re.Pattern, flagged: set[str]) -> b
             return True
         pair = sorted(flagged)
         for i, a in enumerate(pair):
-            for b in pair[i + 1:]:
+            for b in pair[i + 1 :]:
                 dash = rf"(?<![\d.]){re.escape(a)}[\s]*[\u2013-][\s]*{re.escape(b)}(?![\d])"
                 paren = rf"(?<![\d.]){re.escape(a)}\s*\(\s*{re.escape(b)}\s*\)"
                 if re.search(dash, para) or re.search(paren, para):
@@ -1375,30 +1367,34 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # Default tolerance 1%: vendor-consensus rounding (80.76 vs 80.75) is ONE
     # cluster; a real ratio conflict (ROE 53.92 vs 59.77) is TWO.
     "dcf fair value": (re.compile(r"dcf\s*(?:fair\s*)?value", re.I), 0.01),
-    "eps ttm":(re.compile(r"\beps\s*(\(|\s)ttm\s*(?:\))?(?!\s*growth)", re.I), 0.01),
+    "eps ttm": (re.compile(r"\beps\s*(\(|\s)ttm\s*(?:\))?(?!\s*growth)", re.I), 0.01),
     "diluted eps": (re.compile(r"diluted\s*eps|eps\s*\(diluted\)", re.I), 0.005),
-        # DELL 2026-09-10 news.md: body quoted 'EPS actual 7.04' and the
-        # summary row 'EPS actual 7.00' (both labeled Finnhub, same quarter) —
-        # a 0.6% dual value. Level-type metrics use a 0.5% bucket.
-
-
-        "eps actual":(re.compile(r"\beps\s+actual\b", re.I), 0.005),
-        # NO generic "eps estimate" entry: an EPS estimate is only comparable
-        # within ONE earnings date, and this pass keys on the label alone. AMZN
-        # 2026-09-16 news.md quotes 1.83 for the already-reported 2026-07-30
-        # print beside 2.03 (Zacks, upcoming) and 1.95 (calendar,
-        # 2026-10-29) - three estimates for two dates, each stated with its
-        # own period - and the label-keyed pass paired 1.83 with 2.03 as a
-        # conflict. The date-scoped ``_eps_estimate_duals`` is the check that
-        # owns this metric: it flags two DIFFERENT estimates anchored to the
-        # SAME date (MSFT 2026-09-10: 4.72 in the table vs 4.16 in the forward
-        # calendar, both 2026-10-28) and stays silent across dates.
+    # DELL 2026-09-10 news.md: body quoted 'EPS actual 7.04' and the
+    # summary row 'EPS actual 7.00' (both labeled Finnhub, same quarter) —
+    # a 0.6% dual value. Level-type metrics use a 0.5% bucket.
+    "eps actual": (re.compile(r"\beps\s+actual\b", re.I), 0.005),
+    # NO generic "eps estimate" entry: an EPS estimate is only comparable
+    # within ONE earnings date, and this pass keys on the label alone. AMZN
+    # 2026-09-16 news.md quotes 1.83 for the already-reported 2026-07-30
+    # print beside 2.03 (Zacks, upcoming) and 1.95 (calendar,
+    # 2026-10-29) - three estimates for two dates, each stated with its
+    # own period - and the label-keyed pass paired 1.83 with 2.03 as a
+    # conflict. The date-scoped ``_eps_estimate_duals`` is the check that
+    # owns this metric: it flags two DIFFERENT estimates anchored to the
+    # SAME date (MSFT 2026-09-10: 4.72 in the table vs 4.16 in the forward
+    # calendar, both 2026-10-28) and stays silent across dates.
     "earnings power value": (re.compile(r"earnings\s*power\s*value|epv", re.I), 0.01),
     "market cap": (re.compile(r"market\s*cap|market\s*capitali[sz]ation", re.I), 0.01),
     "roe": (re.compile(r"\broe\b|return\s*on\s*equity", re.I), 0.01),
     "debt/equity": (re.compile(r"debt[-\s/]equity|\bd/e\b|debt\s*to\s*equity", re.I), 0.01),
-                "200-day sma": (re.compile(r"(?<![\w-])close_200_sma(?!\s*\|)|200[-\s]?day\s+sma(?!\s*\|)", re.I), 0.01),
-    "insider net": (re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I), 0.01),
+    "200-day sma": (
+        re.compile(r"(?<![\w-])close_200_sma(?!\s*\|)|200[-\s]?day\s+sma(?!\s*\|)", re.I),
+        0.01,
+    ),
+    "insider net": (
+        re.compile(r"insider.{0,30}net|net.{0,15}(?:insider|buying|shares)", re.I),
+        0.01,
+    ),
     "dividend yield": (re.compile(r"dividend\s*yield", re.I), 0.01),
     "book value": (re.compile(r"book\s*value|book\s*value/share|bvps", re.I), 0.01),
     # AMZN 2026-09-09 review-loop metrics. EXACT/price-level metrics (T1/RSI/
@@ -1408,7 +1404,10 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # The qualifier is part of the label ("EMA20 trail 481.74"): leaving it in
     # the label-to-value gap would make the value look like prose.
     "ema20": (re.compile(r"\bema\s*20\b(?:\s*(?:trail|line|band|value))?", re.I), 0.005),
-        "atr":(re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),0.005),
+    "atr": (
+        re.compile(r"(?<![A-Za-z0-9\-])atr\b(?!\s*:\s*\d+\s*-)|average\s*true\s*range", re.I),
+        0.005,
+    ),
     # Exact price levels: a 0.35% target mismatch (T1 265.03 vs 265.97) is a
     # real conflict, so level-type metrics use a 0.1% bucket. Their values come
     # from the pair-aware reader (_METRIC_VALUE_READERS); these patterns are the
@@ -1433,7 +1432,10 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     "rsi": (re.compile(r"\brsi\b|relative\s*strength\s*index", re.I), 0.005),
     "aws growth": (re.compile(r"aws.{0,10}(?:growth|yoy)|yoy.{0,10}aws", re.I), 0.005),
     "hy oas": (re.compile(r"hy[-\s]?oas|high\s*yield.{0,20}oas", re.I), 0.005),
-    "forward peg": (re.compile(r"peg|forward\s*p/e.{0,6}growth|price.{0,6}earnings.{0,6}growth", re.I), 0.005),
+    "forward peg": (
+        re.compile(r"peg|forward\s*p/e.{0,6}growth|price.{0,6}earnings.{0,6}growth", re.I),
+        0.005,
+    ),
     "ttm p/e": (re.compile(r"ttm\s*p/e|p/e\s*ttm|pe\s*ttm", re.I), 0.005),
     # MU 2026-09-09 review-loop metrics: Altman Z 24.60 (body) vs 25.70
     # (summary + get_analyst_verdict leaf 25.70) — a provider-sourced score
@@ -1443,25 +1445,41 @@ _INTERNAL_CONFLICT_METRICS: dict[str, tuple[re.Pattern, float]] = {
     # "Yes 93%" for the same "Fed rate cuts in 2026" Polymarket event, with
     # no prediction-market leaf. A market-implied probability must not be
     # quoted at two values in one report.
-    "fed cuts 2026": (re.compile(r"fed\s*rate?\s*cuts?\s+in\s+2026|no\s*fed\s*rate\s*cuts|will\s*fed\s*rate\s*cuts", re.I), 0.02),
-# DELL 2026-09-10 review loop: scenario-DCF bear was quoted as 87.75
+    "fed cuts 2026": (
+        re.compile(
+            r"fed\s*rate?\s*cuts?\s+in\s+2026|no\s*fed\s*rate\s*cuts|will\s*fed\s*rate\s*cuts", re.I
+        ),
+        0.02,
+    ),
+    # DELL 2026-09-10 review loop: scenario-DCF bear was quoted as 87.75
     # in the body and87.60 in the summary table — a transcription slip, not a real
     # scenario shift. Level-type (exact price) metrics use a 0.1% bucket
     # Only the "bear" label is pair-safe — "bear" is the FIRST leg of the slash list,
     # so "bear": $N  is the same dollar in both the body and the summary row.
-
     # The trailing "\d" used to be consumed by the label match itself, so the
     # value lost its leading digit: "bear 171.38" was read as "71.38" and the
     # same number then looked like two conflicting scenarios (MU fundamentals.md
     # 2026-09-14: 71.38/171.38, 94.96/194.96, 27.07/227.07). A lookahead keeps
     # the digit in the value.
-    "scenario dcf bear": (re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|(?=\d)))", re.I),0.001),
-    "scenario dcf base": (re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|(?=\d)|$)", re.I), 0.001),
+    "scenario dcf bear": (
+        re.compile(r"(?i)(?:scenario[\s-]*dcf.{0,60}?bear\b|bear\s*(?:\||:|\$|(?=\d)))", re.I),
+        0.001,
+    ),
+    "scenario dcf base": (
+        re.compile(r"scenario[\s-]*dcf.{0,40}?base\b|base\s*(?:\||:|=|/|\$|(?=\d)|$)", re.I),
+        0.001,
+    ),
     # The bare "bull" alternative needs a scenario neighbour: a REGIME row
     # ("| Regime | BULL 0.7255, vol NORMAL ... |") also carries the word, and
     # its state score was read as a second scenario-DCF bull (MU/SNDK/DELL
     # fundamentals.md 2026-09-14).
-    "scenario dcf bull": (re.compile(r"scenario[\s-]*dcf.{0,40}?bull\b|(?:bear|base)[^\n]{0,40}?bull\s*(?:\||:|=|/|\$|(?=\d)|$)", re.I), 0.001),
+    "scenario dcf bull": (
+        re.compile(
+            r"scenario[\s-]*dcf.{0,40}?bull\b|(?:bear|base)[^\n]{0,40}?bull\s*(?:\||:|=|/|\$|(?=\d)|$)",
+            re.I,
+        ),
+        0.001,
+    ),
     "beta": (re.compile(r"\bbeta\b", re.I), 0.05),
     "cash conversion": (re.compile(r"cash\s*conversion|cash_conversion|ocf\s*/\s*ni", re.I), 0.02),
     # WDC 2026-09-10 fundamentals review loop: current ratio 10.87
@@ -1544,15 +1562,14 @@ def _is_date_fragment_in(raw: str, line: str) -> bool:
         or re.search(rf"(?<!\d){re.escape(raw)}-\d{{2}}(?!\d)", line)
     )
 
+
 # Metrics a report routinely quotes for a PEER in the same breath as the
 # subject: "AMKR ... PEG 0.59 ... vs NVMI forward P/E 32.93, PEG 1.88". The
 # comparand's figure is not a second reading of the subject's (AMKR
 # 2026-09-14 news.md), so for these the line is cut at the comparison marker
 # before values are read.
 _COMPARISON_METRICS = frozenset({"forward peg", "market cap", "ttm p/e", "ev/ebit"})
-_COMPARAND_SPLIT_RE = re.compile(
-    r"(?i)\bvs\.?\b|\bversus\b|\bcompared\s+(?:to|with)\b|\bpeers?\b"
-)
+_COMPARAND_SPLIT_RE = re.compile(r"(?i)\bvs\.?\b|\bversus\b|\bcompared\s+(?:to|with)\b|\bpeers?\b")
 _MAG_SUFFIX_RE = re.compile(r"([BMKT])$")
 
 
@@ -1582,11 +1599,23 @@ _VIF_MARKER_RE = re.compile(r"\bvif\b|\bvif[\s_]*(?:read|factor)?\b|get_vif_read
 # amount) rather than a rate: a percentage printed after the label is that
 # metric's GROWTH or yield, not its value ("Diluted EPS +1368.5% YoY",
 # "market cap +2.1% w/w").
-_LEVEL_METRICS = frozenset({
-    "diluted eps", "eps ttm", "eps actual", "eps estimate", "book value",
-    "dcf fair value", "scenario dcf bear", "scenario dcf base",
-    "scenario dcf bull", "market cap", "insider net", "200-day sma", "ema20",
-})
+_LEVEL_METRICS = frozenset(
+    {
+        "diluted eps",
+        "eps ttm",
+        "eps actual",
+        "eps estimate",
+        "book value",
+        "dcf fair value",
+        "scenario dcf bear",
+        "scenario dcf base",
+        "scenario dcf bull",
+        "market cap",
+        "insider net",
+        "200-day sma",
+        "ema20",
+    }
+)
 
 # A label whose SAME spelling is reused by a neighbouring quantity on the same
 # line, keyed to the context that gives it away: "put/call **1.49**" is the OI
@@ -1617,7 +1646,8 @@ def _segment_before(line: str, pos: int) -> str:
     """
     seg = line[:pos]
     cut = max(seg.rfind(". "), seg.rfind("; "), seg.rfind(";"), seg.rfind("|"))
-    return seg[cut + 1:]
+    return seg[cut + 1 :]
+
 
 # ---------------------------------------------------------------------------
 # Macro-authority gate (deterministic; SKHY 2026-09-09 review loop)
@@ -1641,8 +1671,7 @@ _MACRO_AUTHORITY_PHRASES_TOOLS: tuple[
 ] = (
     (("polymarket", "prediction market"), ("get_prediction_markets",), ()),
     (
-        ("no rate cuts", "no fed rate cuts", "cut probability", "hike probability",
-         "fed watch"),
+        ("no rate cuts", "no fed rate cuts", "cut probability", "hike probability", "fed watch"),
         ("get_prediction_markets", "get_fed_watch"),
         (),
     ),
@@ -1657,8 +1686,7 @@ _MACRO_AUTHORITY_PHRASES_TOOLS: tuple[
     (
         ("fomc",),
         ("get_prediction_markets", "get_fed_watch"),
-        ("federal open market committee", "federal reserve", "fed decision",
-         "fed meeting"),
+        ("federal open market committee", "federal reserve", "fed decision", "fed meeting"),
     ),
     # TGA balance != RRP: a get_tga_balance leaf must not satisfy an RRP
     # claim (SKHY 2026-09-09: "RRP at 0.432B" passed the old mapping because
@@ -1675,7 +1703,9 @@ _MACRO_AUTHORITY_PHRASES_TOOLS: tuple[
 _METRIC_WINDOW = 40
 
 
-def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) -> list[VerifierClaim]:
+def _macro_authority_gate(
+    report_text: str, evidence: dict, analyst_key: str
+) -> list[VerifierClaim]:
     """Deterministic: market-implied/macro terms need a matching tool leaf.
 
     The news prompt's MACRO DATA PROVENANCE pins (the sentiment prompt pins the
@@ -1693,7 +1723,9 @@ def _macro_authority_gate(report_text: str, evidence: dict, analyst_key: str) ->
     if not isinstance(leaves, list):
         leaves = []
     leaf_tools = {str(leaf.get("tool") or "") for leaf in leaves if isinstance(leaf, dict)}
-    leaf_text = "\n".join(str(leaf.get("content") or "") for leaf in leaves if isinstance(leaf, dict))
+    leaf_text = "\n".join(
+        str(leaf.get("content") or "") for leaf in leaves if isinstance(leaf, dict)
+    )
     leaf_text_low = leaf_text.lower()
     out: list[VerifierClaim] = []
     for line in report_text.splitlines():
@@ -1869,12 +1901,39 @@ def _masked_numbers(text: str) -> list[str]:
     src = text or ""
     for m in _DIGIT_MASKED_NUMBER_RE.finditer(src):
         token = m.group(0)
-        if ".." in token and _ISO_DATE_RANGE_RE.search(
-            src[max(0, m.start() - 30): m.end() + 30]
-        ):
+        if ".." in token and _ISO_DATE_RANGE_RE.search(src[max(0, m.start() - 30) : m.end() + 30]):
             continue
         out.append(token)
     return out
+
+
+# The SECOND alphabet of the same defect. Where the placeholders above REPLACE
+# the digits, this shape keeps every digit and closes a ``**`` span INSIDE the
+# token: ``55.37`` is written ``**55.**37``, a date ``2026-10-14`` becomes
+# ``2026-**10-**14``, an indicator ``close_50_sma`` becomes
+# ``close_**-**50**_sma``. The text still reads, so the placeholder detector
+# cannot see it - but the marker SPLITS the token, and that is measurable
+# rather than cosmetic: on BKR 2026-10-14 ``market.md``'s reference-price line
+# ``_DEC_RE`` (a decimal is ``\d+\.\d+``) matches NOTHING at all, while
+# ``_DOLLAR_RE`` returns the fragments as separate integers (``55`` and ``37``
+# for 55.37) - the same "one real value read as two" shape the date guards
+# below exist to stop for "2026-06-30".
+#
+# Three spellings, all requiring the span to CLOSE on a separator (or be a bare
+# marker glued to a digit), which is what keeps a well-formed figure
+# (``**55.37**``, ``**$122.54**``) and a bolded sentence that merely contains a
+# digit (``**size = 0 new risk.**``) out of the match. U+2011 is the non-breaking
+# hyphen the models also emit, as a bold span holding "-1." for a value of -1.
+_MARKER_SPLIT_NUMBER_RE = re.compile(
+    r"\*\*(?=[+\-\u2011]*\d)[+\-\u2011]*\d[\d,]*(?:[.\-\u2011]\d*)?[.\-\u2011]\*\*"
+    r"|\*\*\*\*(?=\d)"
+    r"|\*\*[.\-\u2011]+\*\*(?=\d)"
+)
+
+
+def _marker_split_numbers(text: str) -> list[str]:
+    """Bold-marker-split number fragments in ``text`` (see the regex above)."""
+    return [m.group(0) for m in _MARKER_SPLIT_NUMBER_RE.finditer(text or "")]
 
 
 # A label run joined by slashes ("bear/base/bull") binds, in order, to the
@@ -1888,7 +1947,7 @@ _SLASH_HEAD_RE = re.compile(r"\s*/\s*")
 
 def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
     """The label's own leg when labels and values are both slash-separated."""
-    before = line[:m.start()]
+    before = line[: m.start()]
     ordinal = 0
     cell_start = before.rfind("|") if "|" in line else -1
     if cell_start >= 0:
@@ -1907,12 +1966,12 @@ def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
                 break
             pos = mm.start(1)
             ordinal += 1
-    after = line[m.end():]
+    after = line[m.end() :]
     if "|" in line:
         # A table row: the figures that follow belong to the cell AFTER the
         # label's own ("| RSI / MACD / ATR(14) | 60.16 / ... |" — the 14 of
         # ATR(14) is not the RSI leg).
-        rest_of_line = line[m.end():]
+        rest_of_line = line[m.end() :]
         bar = rest_of_line.find("|")
         if bar >= 0:
             after = rest_of_line[bar:]
@@ -1930,7 +1989,7 @@ def _slash_pair_value(line: str, m: re.Match) -> tuple[str, float] | None:
         except ValueError:
             return None
         legs.append((num_s + unit, value))
-        rest = rest[mm.end():]
+        rest = rest[mm.end() :]
         if idx < ordinal and not _SLASH_HEAD_RE.match(rest):
             return None
     return legs[ordinal]
@@ -1992,13 +2051,10 @@ def _extract_metric_values(
             # The label must be a whole token: "stoch" inside "stochrsi" is a
             # different indicator (MU market.md L18) and "beta" inside "betas"
             # is a different noun.
-            if (
-                line[m.end():m.end() + 1].isalpha()
-                and line[m.end() - 1].isalnum()
-            ):
+            if line[m.end() : m.end() + 1].isalpha() and line[m.end() - 1].isalnum():
                 continue
             if reject_before is not None and reject_before.search(
-                line[max(0, m.start() - 32):m.start()]
+                line[max(0, m.start() - 32) : m.start()]
             ):
                 continue
             # A label cell with no figure of its own hands its value over from
@@ -2023,25 +2079,25 @@ def _extract_metric_values(
                 continue
             # Skip a label immediately followed by a parenthetical multiplier
             # like "T1(2R)" — 2R is a reward multiple, not the metric's value.
-            tail = line[m.end():m.end() + _METRIC_WINDOW]
+            tail = line[m.end() : m.end() + _METRIC_WINDOW]
             stripped = re.sub(r"^\([^)]*\)", "", tail.strip())
             mnum = _DOLLAR_RE.search(stripped)
             if mnum is None:
                 continue
-            gap = stripped[:mnum.start()]
+            gap = stripped[: mnum.start()]
             if not _LABEL_TO_VALUE_FILLER_RE.match(gap):
                 continue
             if _THRESHOLD_BEFORE_RE.search(gap):
                 continue
-            if _date_fragment_around(gap, stripped[mnum.end():]):
+            if _date_fragment_around(gap, stripped[mnum.end() :]):
                 continue
             if _VIF_MARKER_RE.search(
-                line[max(0, m.start() - 24):m.start()]
+                line[max(0, m.start() - 24) : m.start()]
                 + gap
-                + stripped[mnum.end():mnum.end() + 24]
+                + stripped[mnum.end() : mnum.end() + 24]
             ):
                 continue
-            if level_metric and stripped[mnum.end():mnum.end() + 1] == "%":
+            if level_metric and stripped[mnum.end() : mnum.end() + 1] == "%":
                 continue
             num_s, unit = mnum.group(1), (mnum.group(2) or "")
             # "12m" is a twelve-month window, not twelve million: reports write
@@ -2109,7 +2165,9 @@ _METRIC_VALUE_READERS = {
 }
 
 
-_FED_CUTS_LABEL_RE = re.compile(r"(?i)fed\s*rate?\s*cuts?\s+in\s+2026|will\s*fed\s*rate\s*cuts?|no\s*fed\s*rate\s*cuts|fed\s*cuts\s+2026|no\s*rate\s*cuts")
+_FED_CUTS_LABEL_RE = re.compile(
+    r"(?i)fed\s*rate?\s*cuts?\s+in\s+2026|will\s*fed\s*rate\s*cuts?|no\s*fed\s*rate\s*cuts|fed\s*cuts\s+2026|no\s*rate\s*cuts"
+)
 _PCT_OF = re.compile(r"\b(Yes|No)\b[^0-9]{0,14}?(\d{1,3})%?")
 
 
@@ -2127,7 +2185,7 @@ def _fed_cuts_contradiction(report_text: str) -> list[VerifierClaim]:
         return []
     probs: set[float] = set()
     for m in labels:
-        window = report_text[m.end():m.end() + 120]
+        window = report_text[m.end() : m.end() + 120]
         for pm in _PCT_OF.finditer(window):
             try:
                 probs.add(float(pm.group(2)))
@@ -2136,16 +2194,18 @@ def _fed_cuts_contradiction(report_text: str) -> list[VerifierClaim]:
     # a 0% and a >50% on the same event -> contradiction
     if len(probs) >= 2 and min(probs) <= 2.0 and max(probs) >= 50.0:
         p = ", ".join(f"{x:.0f}%" for x in sorted(probs))
-        return [VerifierClaim(
-            claim="'fed cuts 2026' cited at conflicting probabilities: " + p,
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "The same 'Fed rate cuts in 2026' event is asserted at two "
-                "materially different probabilities in this report with no "
-                "prediction-market leaf. Resolve to one tool-sourced value "
-                "(rule pinned by the IGV 2026-09-09 review loop)."
-            ),
-        )]
+        return [
+            VerifierClaim(
+                claim="'fed cuts 2026' cited at conflicting probabilities: " + p,
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The same 'Fed rate cuts in 2026' event is asserted at two "
+                    "materially different probabilities in this report with no "
+                    "prediction-market leaf. Resolve to one tool-sourced value "
+                    "(rule pinned by the IGV 2026-09-09 review loop)."
+                ),
+            )
+        ]
     return []
 
 
@@ -2264,8 +2324,9 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
         # label regex stays as the fallback for its other spellings.
         reader = _METRIC_VALUE_READERS.get(label)
         if reader is not None and label in _MULTI_PRODUCER_METRICS:
-            groups = [[(raw, v, None) for raw, v in g]
-                      for g in _tool_scoped_values(report_text, label)]
+            groups = [
+                [(raw, v, None) for raw, v in g] for g in _tool_scoped_values(report_text, label)
+            ]
         elif reader is not None:
             groups = [[(raw, v, None) for raw, v in reader(report_text)]]
         else:
@@ -2343,9 +2404,10 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
             # it as a variance ratio (AMZN 2026-09-15 market.md: +2.10pp vs
             # +0.0490, each beside its own tool). Two unit classes are two
             # constructs, not one metric at two values.
-            if label in _UNIT_SCOPED_METRICS and len(
-                {_unit_after(b[3], b[1]) for b in distinct}
-            ) > 1:
+            if (
+                label in _UNIT_SCOPED_METRICS
+                and len({_unit_after(b[3], b[1]) for b in distinct}) > 1
+            ):
                 continue
             # Different frameworks quote their own T1/T2 by design
             # (get_swing_set off the structure stop, get_swing_exits off the
@@ -2356,8 +2418,7 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
             if label in _MULTI_PRODUCER_METRICS:
                 paras = [p for p in re.split(r"\n\s*\n", report_text) if regex.search(p)]
                 paired = any(
-                    sum(1 for b in distinct if _value_in(b[1].strip(), p)) >= 2
-                    for p in paras
+                    sum(1 for b in distinct if _value_in(b[1].strip(), p)) >= 2 for p in paras
                 )
                 if not paired:
                     continue
@@ -2389,7 +2450,9 @@ def _internal_conflicts(report_text: str) -> list[VerifierClaim]:
 # ONE report. Deterministic identity checks below; advisory, never rewrite.
 
 _PE_RE = re.compile(r"\bP\s*/\s*E\b\s*:?\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
-_PRICE_RE = re.compile(r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d{2})|at\s+\$(\d[\d,]*\.\d{2})")
+_PRICE_RE = re.compile(
+    r"(?i)(?:last|price|latest close)\s*:?\s*\**\s*\$?\s*\**\s*(\d[\d,]*\.\d{2})|at\s+\$(\d[\d,]*\.\d{2})"
+)
 _TTM_EPS_RE = re.compile(r"(?i)\beps\b[^0-9]{0,40}ttm[^0-9]{0,40}\$\s*\**\s*(\d[\d,]*(?:\.\d+)?)")
 # A "[\d.]+" capture swallows a sentence-ending period, and float() then
 # raises: "equity_multiplier 1.5286. Margin-led" made the whole DuPont check
@@ -2441,7 +2504,7 @@ def _dupont_identity(report_text: str) -> list[VerifierClaim]:
                 return [
                     VerifierClaim(
                         claim="DuPont identity: net_margin x asset_turnover x equity_multiplier "
-                              f"= {product_pct:.1f}% but ROE quoted at {roe:.1f}% on the same line",
+                        f"= {product_pct:.1f}% but ROE quoted at {roe:.1f}% on the same line",
                         status="INTERNAL_CONFLICT",
                         reason=(
                             "The decomposition inputs on the DuPont line do not multiply to "
@@ -2477,7 +2540,7 @@ def _pe_basis_conflict(report_text: str) -> list[VerifierClaim]:
             return [
                 VerifierClaim(
                     claim=f"P/E quoted at {pe:.2f} vs {price:,.2f} / TTM EPS {ttm_eps:.2f} "
-                          f"= {implied:.2f}",
+                    f"= {implied:.2f}",
                     status="INTERNAL_CONFLICT",
                     reason=(
                         "The P/E basis does not match the TTM EPS basis the report itself "
@@ -2508,13 +2571,13 @@ def _ev_net_cash_conflict(report_text: str) -> list[VerifierClaim]:
         return [
             VerifierClaim(
                 claim=f"EV {ev:,.0f} > market cap {mcap:,.0f} while report asserts "
-                      f"net cash ${net_cash/1e9:.2f}B",
+                f"net cash ${net_cash / 1e9:.2f}B",
                 status="INTERNAL_CONFLICT",
                 reason=(
                     "A net-cash balance sheet must price EV below (or around) market cap. "
-"The quoted EV uses a different debt/cash/lease basis than the "
-                        "balance-sheet row. Reconcile EV to one basis (rule pinned by "
-                        "the MU 2026-09-09 review loop)."
+                    "The quoted EV uses a different debt/cash/lease basis than the "
+                    "balance-sheet row. Reconcile EV to one basis (rule pinned by "
+                    "the MU 2026-09-09 review loop)."
                 ),
             )
         ]
@@ -2609,7 +2672,7 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
     for m in _NET_FIGURE_RE.finditer(report_text):
         line_start = report_text.rfind("\n", 0, m.start()) + 1
         line_end = report_text.find("\n", m.end())
-        line = report_text[line_start: line_end if line_end != -1 else len(report_text)]
+        line = report_text[line_start : line_end if line_end != -1 else len(report_text)]
         # A vendor row the report names as wrong is QUOTED, not asserted: MSFT
         # 2026-09-16 fundamentals.md wrote 'the vendor "Net Debt
         # 19,359,000,000" row is mis-signed and I do not quote it as debt'
@@ -2631,11 +2694,7 @@ def _net_debt_identity(report_text: str) -> list[VerifierClaim]:
     if not debt_m:
         return []
     debt = _money_billions(debt_m.group(1), debt_m.group(2))
-    quoted = (
-        net_value
-        if net_value is not None
-        else _money_billions(net_raw, net_m.group(4))
-    )
+    quoted = net_value if net_value is not None else _money_billions(net_raw, net_m.group(4))
     if debt is None or quoted is None:
         return []
     is_debt = net_m.group(1).lower() == "debt"
@@ -2791,9 +2850,7 @@ def _roa_consistency(report_text: str) -> list[VerifierClaim]:
     # R1 pinned (NVDA 2026-09-12: ROA 81.41% vs margin 0.637 x turnover 0.946
     # = 60.3%).
     quoted_roa = [float(v) for v in _ROA_RE.findall(report_text)]
-    if len(quoted_roa) > 1 and any(
-        q > 0 and abs(implied - q) / q <= 0.05 for q in quoted_roa
-    ):
+    if len(quoted_roa) > 1 and any(q > 0 and abs(implied - q) / q <= 0.05 for q in quoted_roa):
         return []
     return [
         VerifierClaim(
@@ -2918,8 +2975,10 @@ def _quarter_label_consistency(report_text: str) -> list[VerifierClaim]:
                     quarter, fiscal_year = derived
                     claims.append(
                         VerifierClaim(
-                            claim=(f"date {date} bound to {label} but its fiscal quarter is "
-                                   f"Q{quarter} FY{fiscal_year}"),
+                            claim=(
+                                f"date {date} bound to {label} but its fiscal quarter is "
+                                f"Q{quarter} FY{fiscal_year}"
+                            ),
                             status="INTERNAL_CONFLICT",
                             reason=(
                                 "The column header binds this ISO period-end date to a "
@@ -2939,9 +2998,7 @@ _DRAWDOWN_RE = re.compile(
 )
 # A 52-week high with its value on the SAME line (never crosses a newline, so
 # "52-week high" at end of line cannot latch onto the next line's "52"):
-_52W_HIGH_RE = re.compile(
-    r"(?i)\b52[-\s]?week\s+high\s*[:=-]?\s*\$?\s*(\d{2,}(?:[.,]\d+)?)\b"
-)
+_52W_HIGH_RE = re.compile(r"(?i)\b52[-\s]?week\s+high\s*[:=-]?\s*\$?\s*(\d{2,}(?:[.,]\d+)?)\b")
 
 
 def _dd_price(report_text: str) -> float | None:
@@ -2982,17 +3039,19 @@ def _drawdown_identity(report_text: str) -> list[VerifierClaim]:
             continue
         implied = (price - high) / high * 100.0
         if abs(claimed - abs(implied)) / max(abs(implied), 1e-9) > 0.2:
-            out.append(VerifierClaim(
-                claim=f"'{claimed:.0f}% below 52-week high' vs price {price:,.2f} / "
-                      f"high {high:,.2f} = {implied:.1f}%",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "Claimed 'X% below 52-week high' does not match (price - "
-                    "52w high)/52w high computed from the same report - "
-                    "recompute the drawdown (rule pinned by the SOXX 2026-09-09 "
-                    "review loop)."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"'{claimed:.0f}% below 52-week high' vs price {price:,.2f} / "
+                    f"high {high:,.2f} = {implied:.1f}%",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "Claimed 'X% below 52-week high' does not match (price - "
+                        "52w high)/52w high computed from the same report - "
+                        "recompute the drawdown (rule pinned by the SOXX 2026-09-09 "
+                        "review loop)."
+                    ),
+                )
+            )
             break  # one drawdown claim per report is enough
     return out
 
@@ -3014,9 +3073,7 @@ _DIV_YIELD_RE = re.compile(r"(?i)(?:dividend\s*yield|ttm\s*yield)[^0-9]{0,14}\s*
 # distribution table paying ~14%. Dated prints let the cadence be INFERRED
 # (a 26-33 day median gap is monthly, 80-100 quarterly) instead of assumed,
 # which is what keeps a quarterly payer from being annualized x12.
-_DIST_DATED_RE = re.compile(
-    r"(?i)(20\d\d-\d\d-\d\d)[^\n$%]{0,12}\$\s*([0-9]+\.[0-9]{2,4})"
-)
+_DIST_DATED_RE = re.compile(r"(?i)(20\d\d-\d\d-\d\d)[^\n$%]{0,12}\$\s*([0-9]+\.[0-9]{2,4})")
 _DIST_AMOUNTS_RE = re.compile(r"\$\s*([0-9]+\.[0-9]{2,4})")
 _DIST_CADENCE_RE = re.compile(r"(?i)\b(monthly|quarterly)\b")
 
@@ -3065,17 +3122,20 @@ def _fcf_unit_slip(report_text: str) -> list[VerifierClaim]:
         return []
     worst = max(big) / max(small)
     if worst >= 100.0:
-        return [VerifierClaim(
-            claim=f"FCF quoted at {max(small)/1e6:,.1f}M and "
-                  f"{max(big)/1e9:,.2f}B in one report (unit slip)",
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "FCF amounts span a unit-scale range in the same report "
-                "(WDC 2026-09-10: $3.10M vs $3.5B - the FY26 FCF is "
-                "3,511M). Quote cash-flow totals on one unit scale."
-            ),
-        )]
+        return [
+            VerifierClaim(
+                claim=f"FCF quoted at {max(small) / 1e6:,.1f}M and "
+                f"{max(big) / 1e9:,.2f}B in one report (unit slip)",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "FCF amounts span a unit-scale range in the same report "
+                    "(WDC 2026-09-10: $3.10M vs $3.5B - the FY26 FCF is "
+                    "3,511M). Quote cash-flow totals on one unit scale."
+                ),
+            )
+        ]
     return []
+
 
 _VRP_PP = re.compile(r"vrp\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(?:pp)?", re.I)
 _VRP_SIGN_LABEL = re.compile(r"vrp\s*positive", re.I)
@@ -3097,14 +3157,16 @@ def _vrp_sign_label(report_text: str) -> list[VerifierClaim]:
     negs = [float(m.group(1)) for m in _VRP_PP.finditer(text) if m.group(1).startswith("-")]
     if not negs:
         return []
-    return [VerifierClaim(
-        claim=f"VRP labeled positive while quoted at {negs[0]:.2f}pp",
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "A 'VRP positive' label conflicts with a quoted negative VRP value "
-            "(MU 2026-09-10: -5.24pp labeled positive in the summary)."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim=f"VRP labeled positive while quoted at {negs[0]:.2f}pp",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "A 'VRP positive' label conflicts with a quoted negative VRP value "
+                "(MU 2026-09-10: -5.24pp labeled positive in the summary)."
+            ),
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -3165,36 +3227,42 @@ def _tone_claim_conflict(report_text: str) -> list[VerifierClaim]:
         if positive == negative:
             continue
         if cited is None:
-            out.append(VerifierClaim(
-                claim="a disclosure tone direction asserted over a zero-hit tone read",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "The cited disclosure-tone read reports zero dictionary hits "
-                    "(no signal found), so no direction is supported. State the "
-                    "counts, or cite a document that carries tone words."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim="a disclosure tone direction asserted over a zero-hit tone read",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The cited disclosure-tone read reports zero dictionary hits "
+                        "(no signal found), so no direction is supported. State the "
+                        "counts, or cite a document that carries tone words."
+                    ),
+                )
+            )
             continue
         if positive and cited < 0:
-            out.append(VerifierClaim(
-                claim=f"disclosure described as confident while the cited tone is {cited:+.4f}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "A positive tone claim cannot stand on a negative cited tone "
-                    "(Q6: the deterministic read is the second opinion the claim "
-                    "must be consistent with)."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"disclosure described as confident while the cited tone is {cited:+.4f}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "A positive tone claim cannot stand on a negative cited tone "
+                        "(Q6: the deterministic read is the second opinion the claim "
+                        "must be consistent with)."
+                    ),
+                )
+            )
         elif negative and cited > 0:
-            out.append(VerifierClaim(
-                claim=f"disclosure described as cautious while the cited tone is {cited:+.4f}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "A negative tone claim cannot stand on a positive cited tone "
-                    "(Q6: the deterministic read is the second opinion the claim "
-                    "must be consistent with)."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"disclosure described as cautious while the cited tone is {cited:+.4f}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "A negative tone claim cannot stand on a positive cited tone "
+                        "(Q6: the deterministic read is the second opinion the claim "
+                        "must be consistent with)."
+                    ),
+                )
+            )
     return out
 
 
@@ -3215,43 +3283,50 @@ def _valuation_band_conflict(report_text: str) -> list[VerifierClaim]:
         low, high = (float(v.replace(",", "")) for v in pair.groups())
         realized = _BAND_REALIZED_RE.search(line)
         if not realized:
-            out.append(VerifierClaim(
-                claim=f"valuation band [{low:g}, {high:g}] quoted without realized coverage",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "A conformal band without its realized coverage overclaims: the "
-                    "coverage guarantee is marginal and only under exchangeability, "
-                    "so the measured coverage must be printed beside the nominal level."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"valuation band [{low:g}, {high:g}] quoted without realized coverage",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "A conformal band without its realized coverage overclaims: the "
+                        "coverage guarantee is marginal and only under exchangeability, "
+                        "so the measured coverage must be printed beside the nominal level."
+                    ),
+                )
+            )
             continue
         nominal = _BAND_NOMINAL_RE.search(line)
         cov = float(realized.group(1)) / 100.0
         if nominal is not None:
             nom = float(nominal.group(1)) / 100.0
             if cov < nom - _BAND_COVERAGE_SLACK:
-                out.append(VerifierClaim(
-                    claim=f"valuation band nominal {nom:.0%} but realized coverage {cov:.1%}",
-                    status="INTERNAL_CONFLICT",
-                    reason=(
-                        "The measured coverage is far below the nominal level; the "
-                        "band is not doing what its label claims on this name."
-                    ),
-                ))
+                out.append(
+                    VerifierClaim(
+                        claim=f"valuation band nominal {nom:.0%} but realized coverage {cov:.1%}",
+                        status="INTERNAL_CONFLICT",
+                        reason=(
+                            "The measured coverage is far below the nominal level; the "
+                            "band is not doing what its label claims on this name."
+                        ),
+                    )
+                )
         pt = _BAND_POINT_RE.search(line)
         if pt:
             value = float(pt.group(1).replace(",", ""))
             verdict = pt.group(2)
             truth = low <= value <= high
             if truth != (verdict == "INSIDE"):
-                out.append(VerifierClaim(
-                    claim=(
-                        f"point value {value:g} labeled {verdict} a band "
-                        f"[{low:g}, {high:g}]"
-                    ),
-                    status="INTERNAL_CONFLICT",
-                    reason=("The INSIDE/OUTSIDE verdict contradicts the band bounds on the same line."),
-                ))
+                out.append(
+                    VerifierClaim(
+                        claim=(
+                            f"point value {value:g} labeled {verdict} a band [{low:g}, {high:g}]"
+                        ),
+                        status="INTERNAL_CONFLICT",
+                        reason=(
+                            "The INSIDE/OUTSIDE verdict contradicts the band bounds on the same line."
+                        ),
+                    )
+                )
     return out
 
 
@@ -3350,32 +3425,51 @@ def _dividend_yield_sanity(report_text: str) -> list[VerifierClaim]:
         understated = implied > 1.4 * quoted
         if not (overstated or understated):
             continue
-        return [VerifierClaim(
-            claim=f"dividend yield {quoted:.2f}% vs {annual:.3f}/share / price "
-                  f"{price:,.2f} => {implied:.3f}% implied ({evidence})",
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "Quoted dividend yield is "
-                + ("above" if overstated else "below")
-                + " the rate this report's own per-share payments imply - a stale/"
-                "unit-scaled vendor field (MU 2026-09-10: 4.91% vs 0.061% implied) or an "
-                "understated fund yield field (QQQI 2026-09-13: 9.00% vs 14.02% implied "
-                "by its monthly distribution list)."
-            ),
-        )]
+        return [
+            VerifierClaim(
+                claim=f"dividend yield {quoted:.2f}% vs {annual:.3f}/share / price "
+                f"{price:,.2f} => {implied:.3f}% implied ({evidence})",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "Quoted dividend yield is "
+                    + ("above" if overstated else "below")
+                    + " the rate this report's own per-share payments imply - a stale/"
+                    "unit-scaled vendor field (MU 2026-09-10: 4.91% vs 0.061% implied) or an "
+                    "understated fund yield field (QQQI 2026-09-13: 9.00% vs 14.02% implied "
+                    "by its monthly distribution list)."
+                ),
+            )
+        ]
     return []
 
 
 _DD_CLAIM = re.compile(
     r"\b(?:the\s+)?(\d+|[a-z]+)\s+(?:straight|consecutive)\s+"
-    r"double[- ]digit\s+(?:eps\s+)?beats?\b", re.I)
+    r"double[- ]digit\s+(?:eps\s+)?beats?\b",
+    re.I,
+)
 # Shared word->count map for streak claims ('seven straight >40% beats' must
 # parse the same way 'the seventh consecutive double-digit beat' does). An
 # unparsed word silently disables the check, so cover at least two..ten.
 _COUNT_WORDS = {
-    "two": 2, "second": 2, "three": 3, "third": 3, "four": 4, "fourth": 4,
-    "five": 5, "fifth": 5, "six": 6, "sixth": 6, "seven": 7, "seventh": 7,
-    "eight": 8, "eighth": 8, "nine": 9, "ninth": 9, "ten": 10, "tenth": 10,
+    "two": 2,
+    "second": 2,
+    "three": 3,
+    "third": 3,
+    "four": 4,
+    "fourth": 4,
+    "five": 5,
+    "fifth": 5,
+    "six": 6,
+    "sixth": 6,
+    "seven": 7,
+    "seventh": 7,
+    "eight": 8,
+    "eighth": 8,
+    "nine": 9,
+    "ninth": 9,
+    "ten": 10,
+    "tenth": 10,
 }
 _DD_PCT = re.compile(r"surprise_pct\s*=\s*([\d.]+)|\+\s*([\d.]+)%")
 
@@ -3399,8 +3493,7 @@ def _double_digit_streak_identity(report_text: str) -> list[VerifierClaim]:
     claims = list(_DD_CLAIM.finditer(report_text))
     if not claims:
         return []
-    lines = [ln for ln in report_text.splitlines()
-             if "surprise_pct" in ln or "Straight" in ln]
+    lines = [ln for ln in report_text.splitlines() if "surprise_pct" in ln or "Straight" in ln]
     merged = "\n".join(lines)
     pcts = []
     for m in _DD_PCT.finditer(merged):
@@ -3419,16 +3512,17 @@ def _double_digit_streak_identity(report_text: str) -> list[VerifierClaim]:
         claimed = _parse_dd_count(m.group(1))
         if claimed is None or claimed == streak:
             continue
-        out.append(VerifierClaim(
-            claim=f"'{m.group(0).strip()}' vs {streak} consecutive "
-                  f">=10% surprises in calendar",
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "Claimed consecutive double-digit-beat count does not match "
-                "the calendar's >=10% run (MU 2026-09-10: 'fifth' vs 3 - "
-                "Sep-25 +5.94% breaks it)."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim=f"'{m.group(0).strip()}' vs {streak} consecutive >=10% surprises in calendar",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "Claimed consecutive double-digit-beat count does not match "
+                    "the calendar's >=10% run (MU 2026-09-10: 'fifth' vs 3 - "
+                    "Sep-25 +5.94% breaks it)."
+                ),
+            )
+        )
     return out
 
 
@@ -3460,22 +3554,25 @@ def _insider_sold_value_identity(report_text: str) -> list[VerifierClaim]:
         implied = sh * (lo + hi) / 2.0
         ratio = implied / val
         if ratio < 0.8 or ratio > 1.25:
-            out.append(VerifierClaim(
-                claim=f"sold {sh:,.0f} sh at {lo:,.2f}-{hi:,.2f} vs value {val:,.0f}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "Shares x price range does not reconcile to the quoted value "
-                    "(MU 2026-09-10 summary: 30,000 x ~974 = $29M vs $38.8M; "
-                    "the leaf shows the sale as 40,000 sh / 38,756,162)."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"sold {sh:,.0f} sh at {lo:,.2f}-{hi:,.2f} vs value {val:,.0f}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "Shares x price range does not reconcile to the quoted value "
+                        "(MU 2026-09-10 summary: 30,000 x ~974 = $29M vs $38.8M; "
+                        "the leaf shows the sale as 40,000 sh / 38,756,162)."
+                    ),
+                )
+            )
     return out
 
 
 _SMA200_VAL_RE = re.compile(r"(?i)200[-\s]?day[^0-9]{0,14}?(\d[\d,]*(?:\.\d+)?)")
 _SMA_PCT_RE = re.compile(
     r"(?i)(\d+(?:\.\d+)?)\s*%\s*(above|below)\s+(?:the\s+)?"
-    r"(price\b|200[-\s]?day\b)")
+    r"(price\b|200[-\s]?day\b)"
+)
 
 
 def _sma200_identity(report_text: str) -> list[VerifierClaim]:
@@ -3506,31 +3603,36 @@ def _sma200_identity(report_text: str) -> list[VerifierClaim]:
             continue
         dir_, obj = cm.group(2).lower(), cm.group(3).lower()
         if obj.startswith("200"):
-            implied = (price - sma) / sma * 100.0 if dir_ == "above" else (sma - price) / sma * 100.0
+            implied = (
+                (price - sma) / sma * 100.0 if dir_ == "above" else (sma - price) / sma * 100.0
+            )
         else:
-            implied = (sma - price) / price * 100.0 if dir_ == "above" else (price - sma) / price * 100.0
+            implied = (
+                (sma - price) / price * 100.0 if dir_ == "above" else (price - sma) / price * 100.0
+            )
         if abs(implied) <= 0.5:
             continue
         if abs(pct - abs(implied)) / abs(implied) > 0.2:
-            out.append(VerifierClaim(
-                claim=f"'{pct:.0f}% {dir_} {obj}' vs price {price:,.2f} / "
-                      f"200-day {sma:,.2f} => {implied:.1f}%",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "Claimed distance from the 200-day does not match price/sma "
-                    "- direction or basis flipped (SNDK 2026-09-10: '65% below "
-                    "price' vs 39.6% below; the 65.5% is price ABOVE the sma)."
-                ),
-            ))
+            out.append(
+                VerifierClaim(
+                    claim=f"'{pct:.0f}% {dir_} {obj}' vs price {price:,.2f} / "
+                    f"200-day {sma:,.2f} => {implied:.1f}%",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "Claimed distance from the 200-day does not match price/sma "
+                        "- direction or basis flipped (SNDK 2026-09-10: '65% below "
+                        "price' vs 39.6% below; the 65.5% is price ABOVE the sma)."
+                    ),
+                )
+            )
     return out
+
 
 # A separator ("=", ":", "is", "at") may sit between the label and the value:
 # "10-EMA = 54.66" is the common written form and the old pattern only matched
 # the space/paren shapes ("10-EMA 54.66", "10-EMA (graph 55.54)"), so a report
 # that quoted the 10-EMA as "= NN.NN" never entered the identity check at all.
-_TEMA_VAL = re.compile(
-    r"10\s*-?\s*EMA\s*(?:=|:|is|at)?\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I
-)
+_TEMA_VAL = re.compile(r"10\s*-?\s*EMA\s*(?:=|:|is|at)?\s*\(?(?:graph\s*)?([0-9]+\.?[0-9]+)", re.I)
 _TRAIL_VAL = re.compile(r"EMA\s*-?\s?trail[^0-9]{0,12}?([0-9]+\.?[0-9]*)", re.I)
 # A dated series is one value CHANGING, not two competing readings: IEI
 # 2026-09-15 market.md quotes "10 EMA 116.1043 -> **115.0450**" (moomoo, 08-17
@@ -3551,22 +3653,24 @@ def _ema_identity(report_text: str) -> list[VerifierClaim]:
         return []
     vals: set[str] = set()
     for m in _TEMA_VAL.finditer(report_text):
-        if _EMA_SERIES_AFTER_RE.match(report_text[m.end(1): m.end(1) + 16]):
+        if _EMA_SERIES_AFTER_RE.match(report_text[m.end(1) : m.end(1) + 16]):
             continue
-        if _EMA_SERIES_BEFORE_RE.search(report_text[max(0, m.start(1) - 16): m.start(1)]):
+        if _EMA_SERIES_BEFORE_RE.search(report_text[max(0, m.start(1) - 16) : m.start(1)]):
             continue
         vals.add(m.group(1))
     if len(vals) <= 1:
         return []
-    return [VerifierClaim(
-        claim="10-EMA cited at conflicting values: " + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes two different 10-EMA values (HPE 2026-09-10: "
-            "54.66 in the trend section vs 55.54 in the summary). Keep one "
-            "canonical 10-EMA per report and label the source."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="10-EMA cited at conflicting values: " + " / ".join(sorted(vals)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes two different 10-EMA values (HPE 2026-09-10: "
+                "54.66 in the trend section vs 55.54 in the summary). Keep one "
+                "canonical 10-EMA per report and label the source."
+            ),
+        )
+    ]
 
 
 def _ema_trail_identity(report_text: str) -> list[VerifierClaim]:
@@ -3585,21 +3689,25 @@ def _ema_trail_identity(report_text: str) -> list[VerifierClaim]:
         # position, so the cell value before the slash belongs to the
         # chandelier - reading it as a second EMA trail invented a stop
         # conflict on a row that labels both tools (TSM 2026-09-15 market.md).
-        if re.search(r"(?i)chandelier\s*(?:stop)?\s*/", report_text[max(0, m.start() - 40): m.start()]):
+        if re.search(
+            r"(?i)chandelier\s*(?:stop)?\s*/", report_text[max(0, m.start() - 40) : m.start()]
+        ):
             continue
         vals.add(m.group(1))
     vals = _cluster_value_tokens(sorted(vals))
     if len(vals) <= 1:
         return []
-    return [VerifierClaim(
-        claim="EMA-trail stop cited at conflicting values: " + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes more than one EMA-trail stop value (HPE "
-            "2026-09-10: body 53.91 vs summary 59.02). One canonical stop "
-            "per methodology, explicitly labeled."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="EMA-trail stop cited at conflicting values: " + " / ".join(sorted(vals)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes more than one EMA-trail stop value (HPE "
+                "2026-09-10: body 53.91 vs summary 59.02). One canonical stop "
+                "per methodology, explicitly labeled."
+            ),
+        )
+    ]
 
 
 _SMA200_PCT = re.compile(r"200\s*-?\s*SMA[^\n]{0,60}?([+]?\d+(?:\.\d+)?)%", re.I)
@@ -3619,7 +3727,7 @@ _SMA_LABEL_STRIP_RE = re.compile(r"(?i)\b200\s*-?\s*(?:day\s*)?sma\b")
 
 def _sma200_pct_is_foreign(line: str, m: re.Match) -> bool:
     """True when the % in this match is some other metric's, not the SMA's."""
-    window = _SMA_LABEL_STRIP_RE.sub(" ", line[max(0, m.start(1) - 22): m.start(1)])
+    window = _SMA_LABEL_STRIP_RE.sub(" ", line[max(0, m.start(1) - 22) : m.start(1)])
     return bool(_FOREIGN_PCT_LABEL_RE.search(window) or _RANGE_DASH_RE.search(window))
 
 
@@ -3692,7 +3800,10 @@ def _primary_price(report_text: str) -> float | None:
         return None
 
 
-_SMA_ABOVE_RE = re.compile(r"([+]?-?\d+(?:\.\d+)?)%\s*(?:above|below)\s+the\s+200\s*-?\s*SMA\b[^\n:!]{0,16}?([0-9]+\.?[0-9]*)", re.I)
+_SMA_ABOVE_RE = re.compile(
+    r"([+]?-?\d+(?:\.\d+)?)%\s*(?:above|below)\s+the\s+200\s*-?\s*SMA\b[^\n:!]{0,16}?([0-9]+\.?[0-9]*)",
+    re.I,
+)
 
 
 _SMA_LABEL_RE = re.compile(r"\b(?:10|20|50|200)\s*-?\s*(?:day\s*)?SMA\b", re.I)
@@ -3741,8 +3852,11 @@ def _sma200_percent_values(report_text: str) -> list[str]:
                 if pos <= m.start() < pos + len(cell):
                     labels = list(_SMA_LABEL_RE.finditer(cell))
                     value_cell = next(
-                        (c for c in line.split("|")[idx + 1:]
-                         if len(_PCT_TOKEN_RE.findall(c)) >= 2),
+                        (
+                            c
+                            for c in line.split("|")[idx + 1 :]
+                            if len(_PCT_TOKEN_RE.findall(c)) >= 2
+                        ),
                         None,
                     )
                     ordinal = _sma_label_ordinal(cell, m.start() - pos, labels)
@@ -3782,20 +3896,23 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
     #    market.md states 2.35 and 2.44, both of which render "+2.4%" - the
     #    claim read "+2.4% / +2.4%" and invented a conflict the report does
     #    not contain. Compare at the precision the claim prints.
-    vals = sorted({round(v, 1) for raw in _sma200_percent_values(report_text)
-                   if (v := _pct(raw)) is not None})
+    vals = sorted(
+        {round(v, 1) for raw in _sma200_percent_values(report_text) if (v := _pct(raw)) is not None}
+    )
     if len(vals) > 1:
-        out.append(VerifierClaim(
-            claim="200-SMA distance cited at different values: "
-                  + " / ".join(f"{v:+.1f}%" for v in vals),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "The report quotes differing % distances to the 200-SMA "
-                "(HPE 2026-09-10: +64.7% body = 55.46/33.68-1 vs +184.7% "
-                "summary table - the extra value matches no leaf). Keep one "
-                "canonical distance per report."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim="200-SMA distance cited at different values: "
+                + " / ".join(f"{v:+.1f}%" for v in vals),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report quotes differing % distances to the 200-SMA "
+                    "(HPE 2026-09-10: +64.7% body = 55.46/33.68-1 vs +184.7% "
+                    "summary table - the extra value matches no leaf). Keep one "
+                    "canonical distance per report."
+                ),
+            )
+        )
 
     # 2) mislabeled-%-as-200-SMA: the claim line ALSO carries a 50-SMA value
     #    and the stated % is objectively the 50-SMA distance, not the 200-SMA
@@ -3807,7 +3924,7 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
         claimed = _pct(m.group(1))
         sma200 = m.group(2)
         if claimed is not None and sma200:
-            line = report_text[m.start():].split("\n", 1)[0]
+            line = report_text[m.start() :].split("\n", 1)[0]
             m50 = re.search(r"50\s*-?\s*SMA\b[^\n:!]{0,20}?([0-9]+\.?[0-9]+)", line, re.I)
             price = _primary_price(report_text)
             if m50 and price is not None:
@@ -3819,23 +3936,25 @@ def _sma200_pct_identity(report_text: str) -> list[VerifierClaim]:
                     d200_rel = abs(claimed - d200) / max(abs(d200), 1e-9)
                     d50_rel = abs(claimed - d50) / max(abs(d50), 1e-9)
                     if d200_rel > 0.2 and d50_rel <= 0.1:
-                        out.append(VerifierClaim(
-                            claim=(
-                                f"stated {claimed:+.1f}% as the 200-SMA distance "
-                                f"({sma200}) is actually the 50-SMA distance "
-                                f"({s50}): at price {price:.2f} the 200-SMA is "
-                                f"{d200:+.1f}%, the 50-SMA {d50:+.1f}%"
-                            ),
-                            status="INTERNAL_CONFLICT",
-                            reason=(
-                                "A % quoted 'above/below the 200-SMA' is, by the "
-                                "report's own numbers, the 50-SMA distance - the "
-                                "label was swapped (MSFT 2026-09-10 decision.md: "
-                                "+8.8% above the 200-SMA 429.51 at ~490.50 is "
-                                "+14.2% on the 200-SMA and +8.8% on the 50-SMA "
-                                "450.83). Recompute from the paired SMA values."
-                            ),
-                        ))
+                        out.append(
+                            VerifierClaim(
+                                claim=(
+                                    f"stated {claimed:+.1f}% as the 200-SMA distance "
+                                    f"({sma200}) is actually the 50-SMA distance "
+                                    f"({s50}): at price {price:.2f} the 200-SMA is "
+                                    f"{d200:+.1f}%, the 50-SMA {d50:+.1f}%"
+                                ),
+                                status="INTERNAL_CONFLICT",
+                                reason=(
+                                    "A % quoted 'above/below the 200-SMA' is, by the "
+                                    "report's own numbers, the 50-SMA distance - the "
+                                    "label was swapped (MSFT 2026-09-10 decision.md: "
+                                    "+8.8% above the 200-SMA 429.51 at ~490.50 is "
+                                    "+14.2% on the 200-SMA and +8.8% on the 50-SMA "
+                                    "450.83). Recompute from the paired SMA values."
+                                ),
+                            )
+                        )
     return out
 
 
@@ -3850,16 +3969,17 @@ def _garch_cond_identity(report_text: str) -> list[VerifierClaim]:
     vals = _cluster_value_tokens([m.group(1) for m in _GARCH_COND.finditer(report_text)])
     if len(vals) <= 1:
         return []
-    return [VerifierClaim(
-        claim="GARCH conditional vol cited at conflicting values: "
-              + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes two GARCH conditional-volatility values for "
-            "the same estimator (HPE 2026-09-10: body 58.90% vs table "
-            "65.90%). Keep one canonical GARCH cond print."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="GARCH conditional vol cited at conflicting values: " + " / ".join(sorted(vals)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes two GARCH conditional-volatility values for "
+                "the same estimator (HPE 2026-09-10: body 58.90% vs table "
+                "65.90%). Keep one canonical GARCH cond print."
+            ),
+        )
+    ]
 
 
 def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
@@ -3876,17 +3996,18 @@ def _chandelier_identity(report_text: str) -> list[VerifierClaim]:
     vals = _cluster_value_tokens(raw)
     if len(vals) <= 1:
         return []
-    return [VerifierClaim(
-        claim="chandelier stop cited at conflicting values: "
-              + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes more than one chandelier stop value without "
-            "labeling the differing calculations (HPE 2026-09-10: 54.11 in "
-            "the swing trail vs 58.2 / 58.11 in the summary). One canonical "
-            "stop per methodology, explicitly labeled."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="chandelier stop cited at conflicting values: " + " / ".join(sorted(vals)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes more than one chandelier stop value without "
+                "labeling the differing calculations (HPE 2026-09-10: 54.11 in "
+                "the swing trail vs 58.2 / 58.11 in the summary). One canonical "
+                "stop per methodology, explicitly labeled."
+            ),
+        )
+    ]
 
 
 _SUM_LINE = re.compile(
@@ -3918,21 +4039,22 @@ def _sum_identity(report_text: str) -> list[VerifierClaim]:
         # millions and the total in dollars ("672+752+615+553 =
         # $2,592,000,000") - the arithmetic is right, the units are implicit.
         if abs(s - total) / abs(s) > 0.005 and not any(
-            abs(s * scale - total) / abs(s * scale) <= 0.005
-            for scale in (1e3, 1e6, 1e9, 1e12)
+            abs(s * scale - total) / abs(s * scale) <= 0.005 for scale in (1e3, 1e6, 1e9, 1e12)
         ):
             expr = "+".join(str(x) for x in addends)
-            return [VerifierClaim(
-                claim=f"quoted sum {expr} = {total:g} (as written) sums to {s:g}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "The report states addends and a total whose "
-                    "arithmetic does not match (ADBE 2026-09-10: TTM OCF "
-                    "2.165+2.958+3.160+2.198 written as $10.62B but "
-                    "summing to 10.481B). Re-add from the verbatim "
-                    "addends."
-                ),
-            )]
+            return [
+                VerifierClaim(
+                    claim=f"quoted sum {expr} = {total:g} (as written) sums to {s:g}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The report states addends and a total whose "
+                        "arithmetic does not match (ADBE 2026-09-10: TTM OCF "
+                        "2.165+2.958+3.160+2.198 written as $10.62B but "
+                        "summing to 10.481B). Re-add from the verbatim "
+                        "addends."
+                    ),
+                )
+            ]
     return []
 
 
@@ -3963,22 +4085,23 @@ def _price_target_identity(report_text: str) -> list[VerifierClaim]:
         for m in _PRICE_TARGET.finditer(line):
             # "current 1.2770 vs mean 1.9691, std 0.5373" is a z-score series'
             # mean, not a consensus target (TSM 2026-09-14 fundamentals.md).
-            if _PT_CONTEXT_REJECT.search(line[max(0, m.start() - 30): m.start()]):
+            if _PT_CONTEXT_REJECT.search(line[max(0, m.start() - 30) : m.start()]):
                 continue
             vals.add(m.group(1))
     if len(vals) <= 1:
         return []
-    return [VerifierClaim(
-        claim="mean price target cited at conflicting values: "
-              + " / ".join(sorted(vals)),
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes more than one distinct 'mean PT' figure "
-            "without labeling the datasets (HPE 2026-09-10: leaf 69.38 vs "
-            "table 58.38 / 58.97). Quote the consensus mean once - body and "
-            "summary must agree - and name the tool that produced it."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="mean price target cited at conflicting values: " + " / ".join(sorted(vals)),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes more than one distinct 'mean PT' figure "
+                "without labeling the datasets (HPE 2026-09-10: leaf 69.38 vs "
+                "table 58.38 / 58.97). Quote the consensus mean once - body and "
+                "summary must agree - and name the tool that produced it."
+            ),
+        )
+    ]
 
 
 _MONEY_ELLIPSIS = re.compile(r"\$\s*\d[\d,]*\.?\d*\s*[BMK]?\s*\.\.\.")
@@ -4002,9 +4125,7 @@ _DEGENERATION_MARKERS = re.compile(
 _FINAL_PROPOSAL = re.compile(r"\bFINAL\s+TRANSACTION\s+PROPOSAL\b", re.I)
 # The verdict token on a proposal line, to tell a repeated conclusion from a
 # restarted one: two HOLD lines is a style habit, HOLD then SELL is a restart.
-_FINAL_VERDICT = re.compile(
-    r"FINAL\s+TRANSACTION\s+PROPOSAL\s*:?\s*\**\s*([A-Za-z]+)", re.I
-)
+_FINAL_VERDICT = re.compile(r"FINAL\s+TRANSACTION\s+PROPOSAL\s*:?\s*\**\s*([A-Za-z]+)", re.I)
 # Leaked tool-call markup: an unexecuted call transcript written as the report
 # (wdc 2026-09-14 market_report.md is 25 lines of invoke-tag markup and nothing
 # else - the model emitted XML tool syntax, no tool ran, and the raw text was
@@ -4053,14 +4174,9 @@ def _repetition_loops(report_text: str) -> list[str]:
                 contexts.setdefault(s, set()).add(prev)
         prev = s
     return sorted(
-        (
-            s
-            for s, n in counts.items()
-            if n >= _REPETITION_MIN and len(contexts.get(s) or ()) < 2
-        ),
+        (s for s, n in counts.items() if n >= _REPETITION_MIN and len(contexts.get(s) or ()) < 2),
         key=lambda s: -counts[s],
     )
-
 
 
 def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
@@ -4092,18 +4208,64 @@ def _digit_obfuscation(report_text: str) -> list[VerifierClaim]:
     if not hits:
         return []
     sample = ", ".join(sorted({h.strip() for h in hits})[:5])
-    return [VerifierClaim(
-        claim=f"digit-masked numbers in report text ({len(hits)}): {sample}",
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "Digits were replaced by placeholders, so the figures cannot be "
-            "read - and any value extracted from the fragment is invented "
-            "(IEI 2026-09-16 market.md: 'rsi=23._15' for the leaf's 23.15, "
-            "'GARCH cond **_._**04%' for 3.04%; EHC 2026-10-09 trader.md: "
-            "'$.220.' for 120.085, '**$,' for a cash figure). Emit real digits; "
-            "a masked number is neither quotable nor checkable."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim=f"digit-masked numbers in report text ({len(hits)}): {sample}",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "Digits were replaced by placeholders, so the figures cannot be "
+                "read - and any value extracted from the fragment is invented "
+                "(IEI 2026-09-16 market.md: 'rsi=23._15' for the leaf's 23.15, "
+                "'GARCH cond **_._**04%' for 3.04%; EHC 2026-10-09 trader.md: "
+                "'$.220.' for 120.085, '**$,' for a cash figure). Emit real digits; "
+                "a masked number is neither quotable nor checkable."
+            ),
+        )
+    ]
+
+
+def _marker_injected_numbers(report_text: str) -> list[VerifierClaim]:
+    """Numbers a bold marker was injected INTO - the token is split, digits intact.
+
+    The SECOND alphabet of the defect :func:`_digit_obfuscation` reports: instead
+    of replacing the digits with placeholders, the model closes a ``**`` span
+    inside the number, writing ``55.37`` as ``**55.**37`` and a date as
+    ``2026-**10-**14``. Every digit survives, so the text still reads and the
+    placeholder alphabet cannot see it - but the marker splits the token, which
+    is measurable rather than cosmetic: on BKR 2026-10-14 ``market.md``
+    ``_DEC_RE`` (a decimal is ``\\d+\\.\\d+``) matches NOTHING on the
+    reference-price line while ``_DOLLAR_RE`` returns the fragments as separate
+    integers (``55`` and ``37`` for 55.37). One real value read as two is the
+    same failure the date guards exist to stop for "2026-06-30", and the digits
+    are unrecoverable as a single figure either way.
+
+    Measured 2026-10-15 on the trees at hand: BKR 2026-10-14 market.md (29
+    tokens), INTU 2026-10-15 sentiment.md (22), KGC 2026-10-15 market.md (16),
+    plus CMCSA 2026-10-14 fundamentals.md, EIX 2026-10-15 sentiment.md and
+    GMED 2026-10-14 market.md. A well-formed bold figure (``**55.37**``, and
+    ``**$122.54**`` in the fixtures below) and a bolded sentence that merely
+    contains a digit (``**size = 0 new risk.**``) are NOT matches.
+    """
+    if not report_text:
+        return []
+    hits = _marker_split_numbers(report_text)
+    if not hits:
+        return []
+    sample = ", ".join(sorted({h.strip() for h in hits})[:5])
+    return [
+        VerifierClaim(
+            claim=(f"numbers with a bold marker injected inside them ({len(hits)}): {sample}"),
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "Digits are all present but the marker splits the figure, so no "
+                "extractor can read it as one number: a decimal matcher finds "
+                "nothing and the value matcher reads the fragments as two figures "
+                '("**55.**37" for 55.37). Wrap the whole number '
+                '("**55.37**") - a marker inside it is neither quotable nor '
+                "checkable."
+            ),
+        )
+    ]
 
 
 def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
@@ -4127,103 +4289,113 @@ def _self_correction_artifacts(report_text: str) -> list[VerifierClaim]:
             markers.append("money-ellipsis")
     out: list[VerifierClaim] = []
     if markers:
-        out.append(VerifierClaim(
-            claim="self-correction artifacts present in report text: "
-                  + ", ".join(sorted(set(markers))),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "The report contains inline self-correction markers (e.g. "
-                "'9.87 ... corrected: 4.8', '278.346 ... correction - 154.3360', "
-                "'Total debt $8.22B... verbatim'); these are the model retyping a "
-                "figure mid-generation and leaking the repair into the artifact. "
-                "Emit only the final corrected value; never include the wrong "
-                "value with a caveat (HPE 2026-09-10)."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim="self-correction artifacts present in report text: "
+                + ", ".join(sorted(set(markers))),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report contains inline self-correction markers (e.g. "
+                    "'9.87 ... corrected: 4.8', '278.346 ... correction - 154.3360', "
+                    "'Total debt $8.22B... verbatim'); these are the model retyping a "
+                    "figure mid-generation and leaking the repair into the artifact. "
+                    "Emit only the final corrected value; never include the wrong "
+                    "value with a caveat (HPE 2026-09-10)."
+                ),
+            )
+        )
 
     # A generation that restarted, looped, or lost its spacing is not a
     # readable report and must not pass as one (HPE 2026-09-14 fundamentals).
     degeneration = sorted({m.group(0).strip() for m in _DEGENERATION_MARKERS.finditer(report_text)})
     if degeneration:
-        out.append(VerifierClaim(
-            claim="generation-degeneration markers present: "
-                  + ", ".join(f"'{d}'" for d in degeneration),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "The text announces that it is restarting/discarding itself "
-                "('I am stuck repeating myself ... I will restart cleanly', "
-                "'This is degenerating', 'Wait correction needed'). Everything "
-                "after such a marker is a SECOND, unreviewed copy of the "
-                "report - treat neither copy as analysis (HPE 2026-09-14 "
-                "fundamentals.md). Regenerate the report."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim="generation-degeneration markers present: "
+                + ", ".join(f"'{d}'" for d in degeneration),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The text announces that it is restarting/discarding itself "
+                    "('I am stuck repeating myself ... I will restart cleanly', "
+                    "'This is degenerating', 'Wait correction needed'). Everything "
+                    "after such a marker is a SECOND, unreviewed copy of the "
+                    "report - treat neither copy as analysis (HPE 2026-09-14 "
+                    "fundamentals.md). Regenerate the report."
+                ),
+            )
+        )
     loops = _repetition_loops(report_text)
     if loops:
-        out.append(VerifierClaim(
-            claim="repetition loop in report text: "
-                  + "; ".join(f"{ln[:60]!r}" for ln in loops[:3]),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "A line repeated four or more times is decoder repetition, not "
-                "prose - the report stopped making progress (HPE 2026-09-14 "
-                "fundamentals.md repeated one 'Inventory series:' line ten "
-                "times). Regenerate the report."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim="repetition loop in report text: "
+                + "; ".join(f"{ln[:60]!r}" for ln in loops[:3]),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A line repeated four or more times is decoder repetition, not "
+                    "prose - the report stopped making progress (HPE 2026-09-14 "
+                    "fundamentals.md repeated one 'Inventory series:' line ten "
+                    "times). Regenerate the report."
+                ),
+            )
+        )
     glued = _GLUED_RUN.search(report_text)
     if glued:
-        out.append(VerifierClaim(
-            claim=f"degenerate run ({len(glued.group(0))} chars with no whitespace) in report text",
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "A 200+ character run with no whitespace is either text that lost "
-                "its spacing - labels and figures glued together, decimals gone, "
-                "so neither the numbers nor any conflict read out of them can be "
-                "trusted ('DCFFairValue194EV440527404343', HPE 2026-09-14 "
-                "fundamentals.md) - or a stuck decoder repeating one unit "
-                "('Stop_loss_loss_loss_...', MSFT 2026-09-03 "
-                "final_trade_decision.md). Either way the passage is unreadable."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim=f"degenerate run ({len(glued.group(0))} chars with no whitespace) in report text",
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A 200+ character run with no whitespace is either text that lost "
+                    "its spacing - labels and figures glued together, decimals gone, "
+                    "so neither the numbers nor any conflict read out of them can be "
+                    "trusted ('DCFFairValue194EV440527404343', HPE 2026-09-14 "
+                    "fundamentals.md) - or a stuck decoder repeating one unit "
+                    "('Stop_loss_loss_loss_...', MSFT 2026-09-03 "
+                    "final_trade_decision.md). Either way the passage is unreadable."
+                ),
+            )
+        )
     verdicts = {m.group(1).strip().upper() for m in _FINAL_VERDICT.finditer(report_text)}
     if len(verdicts) > 1:
-        out.append(VerifierClaim(
-            claim="conflicting 'FINAL TRANSACTION PROPOSAL' verdicts in one report: "
-                  + ", ".join(sorted(verdicts)),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "A report concludes once. Two DIFFERENT verdicts means a restart "
-                "left both bodies in the artifact, and the downstream reader "
-                "cannot tell which one was meant. (Two identical proposal lines "
-                "are a style habit, not flagged here.)"
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim="conflicting 'FINAL TRANSACTION PROPOSAL' verdicts in one report: "
+                + ", ".join(sorted(verdicts)),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "A report concludes once. Two DIFFERENT verdicts means a restart "
+                    "left both bodies in the artifact, and the downstream reader "
+                    "cannot tell which one was meant. (Two identical proposal lines "
+                    "are a style habit, not flagged here.)"
+                ),
+            )
+        )
     markup = [m.group(0) for m in _TOOL_CALL_MARKUP.finditer(report_text)]
     if markup:
         # A whole file of call markup is the worst case: no report at all.
         prose_lines = sum(
-            1
-            for ln in report_text.splitlines()
-            if ln.strip() and not _TOOL_CALL_MARKUP.search(ln)
+            1 for ln in report_text.splitlines() if ln.strip() and not _TOOL_CALL_MARKUP.search(ln)
         )
         what = (
             "the whole artifact is a call transcript with no report text"
             if prose_lines <= 2
             else "a call transcript leaked into the report"
         )
-        out.append(VerifierClaim(
-            claim=f"unexecuted tool-call markup in report text ({len(markup)} tags): "
-                  + ", ".join(sorted({m[:40] for m in markup})[:3]),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                f"{what}: the model emitted XML tool syntax instead of prose and "
-                "the raw text was saved as the analyst's report, so the calls it "
-                "describes never ran and no evidence backs the section (wdc "
-                "2026-09-14 market_report.md is 25 lines of <invoke name=...> and "
-                "nothing else). Regenerate the report."
-            ),
-        ))
+        out.append(
+            VerifierClaim(
+                claim=f"unexecuted tool-call markup in report text ({len(markup)} tags): "
+                + ", ".join(sorted({m[:40] for m in markup})[:3]),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    f"{what}: the model emitted XML tool syntax instead of prose and "
+                    "the raw text was saved as the analyst's report, so the calls it "
+                    "describes never ran and no evidence backs the section (wdc "
+                    "2026-09-14 market_report.md is 25 lines of <invoke name=...> and "
+                    "nothing else). Regenerate the report."
+                ),
+            )
+        )
     return out
 
 
@@ -4257,16 +4429,18 @@ def _bollinger_band_identity(report_text: str) -> list[VerifierClaim]:
     if len(pairs) <= 1:
         return []
     shown = ", ".join(f"({u}/{low})" for u, low in sorted(pairs))
-    return [VerifierClaim(
-        claim=f"bollinger bands cited at conflicting sets: {shown}",
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "The report quotes more than one Bollinger (upper/lower) pair "
-            "without labeling the alternate source/calculation; %b is only "
-            "consistent with one of them (TSM 2026-09-10: body 438.16/405.14 "
-            "vs table wide 438.59/404.71). Keep one canonical band set."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim=f"bollinger bands cited at conflicting sets: {shown}",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "The report quotes more than one Bollinger (upper/lower) pair "
+                "without labeling the alternate source/calculation; %b is only "
+                "consistent with one of them (TSM 2026-09-10: body 438.16/405.14 "
+                "vs table wide 438.59/404.71). Keep one canonical band set."
+            ),
+        )
+    ]
 
 
 def _sector_rank_identity(report_text: str) -> list[VerifierClaim]:
@@ -4285,17 +4459,18 @@ def _sector_rank_identity(report_text: str) -> list[VerifierClaim]:
     claims = []
     for sec, rks in sorted(per_sector.items()):
         if len(rks) > 1:
-            claims.append(VerifierClaim(
-                claim=f"{sec} cited at conflicting sector ranks: "
-                      f"{' / '.join(sorted(rks))}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "The report quotes two different numeric ranks for the "
-                    "same sector; the sector-rank tool returns exactly one "
-                    "rank (TSM 2026-09-10: XLK rank 4 in two tools vs rank5 "
-                    "in the summary table)."
-                ),
-            ))
+            claims.append(
+                VerifierClaim(
+                    claim=f"{sec} cited at conflicting sector ranks: {' / '.join(sorted(rks))}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The report quotes two different numeric ranks for the "
+                        "same sector; the sector-rank tool returns exactly one "
+                        "rank (TSM 2026-09-10: XLK rank 4 in two tools vs rank5 "
+                        "in the summary table)."
+                    ),
+                )
+            )
     return claims
 
 
@@ -4322,18 +4497,20 @@ def _eps_estimate_duals(report_text: str) -> list[VerifierClaim]:
         per_date.setdefault(d, set()).add(v)
     for d, vals in sorted(per_date.items()):
         if len(vals) > 1:
-            claims.append(VerifierClaim(
-                claim=f"eps estimate for {d} cited at conflicting values: "
-                      f"{' / '.join(sorted(vals))}",
-                status="INTERNAL_CONFLICT",
-                reason=(
-                    "The report quotes more than one EPS estimate for the same "
-                    "earnings date; the earnings-calendar leaf supplies exactly "
-                    "one estimate per print. Keep one value per date (MSFT "
-                    "2026-09-10: 4.72 in the table vs 4.16 in the forward "
-                    "calendar for 2026-10-28)."
-                ),
-            ))
+            claims.append(
+                VerifierClaim(
+                    claim=f"eps estimate for {d} cited at conflicting values: "
+                    f"{' / '.join(sorted(vals))}",
+                    status="INTERNAL_CONFLICT",
+                    reason=(
+                        "The report quotes more than one EPS estimate for the same "
+                        "earnings date; the earnings-calendar leaf supplies exactly "
+                        "one estimate per print. Keep one value per date (MSFT "
+                        "2026-09-10: 4.72 in the table vs 4.16 in the forward "
+                        "calendar for 2026-10-28)."
+                    ),
+                )
+            )
     return claims
 
 
@@ -4360,25 +4537,28 @@ def _expected_band_identity(report_text: str) -> list[VerifierClaim]:
     # was read as the fabrication this check exists to catch.
     ls = report_text.rfind("\n", 0, m.start()) + 1
     le = report_text.find("\n", m.end())
-    line = report_text[ls: le if le != -1 else len(report_text)]
+    line = report_text[ls : le if le != -1 else len(report_text)]
     if re.search(r"(?i)unavailable|no[_ ]data|not\s*[\u00b1+-]", line):
         return []
-    return [VerifierClaim(
-                claim="expected-move dollar band quoted as +/-$0.00 (impossible for a positive move)",
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "An expected-move percentage was rendered with a +/-$0.00 dollar "
-            "band - impossible for a positive move at a nonzero price "
-            "(MSFT 2026-09-10: 6.6% would be a ~$32 band; quote the vendor "
-            "band or write 'unavailable', never $0.00)."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim="expected-move dollar band quoted as +/-$0.00 (impossible for a positive move)",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "An expected-move percentage was rendered with a +/-$0.00 dollar "
+                "band - impossible for a positive move at a nonzero price "
+                "(MSFT 2026-09-10: 6.6% would be a ~$32 band; quote the vendor "
+                "band or write 'unavailable', never $0.00)."
+            ),
+        )
+    ]
 
 
 _BEAT_STREAK_RE = re.compile(r"(?i)(\d+|[a-z]+)\s*straight\s*>(\d+(?:\.\d+)?)\s*%")
 _SURPRISE_ROW = re.compile(r"(?im)^\|\s*\d{4}/Q\d\s*\|")
 
 _INLINE_SURPRISE_RE = re.compile(r"(?i)\b(\d{4}/Q\d)\b[^()]*\(([+\-]?\d+(?:\.\d+)?)%")
+
 
 def _inline_surprise_streak(text: str, threshold: float) -> int:
     streak = 0
@@ -4392,7 +4572,6 @@ def _inline_surprise_streak(text: str, threshold: float) -> int:
         else:
             break
     return streak
-
 
 
 def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
@@ -4423,21 +4602,23 @@ def _beat_streak_identity(report_text: str) -> list[VerifierClaim]:
         if pct >= threshold:
             streak += 1
         else:
-                break
+            break
     if rows_seen == 0:
         streak = _inline_surprise_streak(report_text, threshold)
     if streak == claimed:
         return []
-    return [VerifierClaim(
-        claim=f"'{claimed} straight >{threshold:.0f}% beats' vs surprise table gives "
-              f"{streak} consecutive",
-        status="INTERNAL_CONFLICT",
-        reason=(
-            "Claimed beat-streak length does not match the consecutive >threshold "
-            "surprises in the earnings-surprise table (DELL 2026-09-10 review "
-            "loop: 'three straight >40%' vs +44.0/+100.8/+14.6 — only two)."
-        ),
-    )]
+    return [
+        VerifierClaim(
+            claim=f"'{claimed} straight >{threshold:.0f}% beats' vs surprise table gives "
+            f"{streak} consecutive",
+            status="INTERNAL_CONFLICT",
+            reason=(
+                "Claimed beat-streak length does not match the consecutive >threshold "
+                "surprises in the earnings-surprise table (DELL 2026-09-10 review "
+                "loop: 'three straight >40%' vs +44.0/+100.8/+14.6 — only two)."
+            ),
+        )
+    ]
 
 
 # --- R-multiple (2R/3R target) identity — market-side. ---------------------
@@ -4456,9 +4637,7 @@ _STOP_RE = re.compile(
 # report's own correct 2R target as wrong (VST 2026-09-14 market.md: T1(2R)
 # 162.2338 resolves from 140.73 / 129.9781). A number introduced by another
 # metric's label is not the stop.
-_STOP_GAP_REJECT = re.compile(
-    r"(?i)swing[\s_]*(?:low|high)|\bentry\b|\bavg\b|\btarget\b|\bbase\b"
-)
+_STOP_GAP_REJECT = re.compile(r"(?i)swing[\s_]*(?:low|high)|\bentry\b|\bavg\b|\btarget\b|\bbase\b")
 # ... and the value may be followed by a parenthetical naming another metric.
 _STOP_TAIL_REJECT = re.compile(
     r"^\s*\(\s*[^)]{0,24}?(?:sma|ema|vwma|atr|wall|mid|band|sma50|sma200)[^)]{0,12}\)",
@@ -4554,8 +4733,7 @@ def _tool_scoped_values(text: str, label: str) -> list[list[tuple[str, float]]]:
         # LINE: it keeps the framework-label (or report-wide) scope.
         segments = [("", line[: bounds[0]])]
         segments += [
-            (mark.group(1), line[bounds[i]: bounds[i + 1]])
-            for i, mark in enumerate(marks)
+            (mark.group(1), line[bounds[i] : bounds[i + 1]]) for i, mark in enumerate(marks)
         ]
         for tool, segment in segments:
             if not segment:
@@ -4610,7 +4788,7 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
             # parenthetical: "puts 386.51 (structure stop) and 381.68
             # (200-SMA) in play" (WDC 2026-09-15 market.md) bound the 200-SMA
             # as the stop and flagged a correct 2R target.
-            if _STOP_TAIL_REJECT.match(line[cand.end(1): cand.end(1) + 24]):
+            if _STOP_TAIL_REJECT.match(line[cand.end(1) : cand.end(1) + 24]):
                 continue
             line_stop = float(cand.group(1).replace(",", ""))
             break
@@ -4664,16 +4842,17 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
                 # inputs - a 1.1% drift, which the old "clean decimal" test
                 # rejected and so flagged the tool's verbatim output on JCI
                 # and AMKR 2026-09-14).
-                if stated_mults and any(
-                    abs(implied - m) / m <= 0.05 for m in stated_mults
-                ):
+                if stated_mults and any(abs(implied - m) / m <= 0.05 for m in stated_mults):
                     continue
                 # A plan line that states avg entry + risk/share but drops the
                 # tool's "(1.8R)" parenthetical still implies a clean multiple:
                 # 149.07 from 133.90 / 8.43 is 1.798 = 1.8R with the tool's own
                 # rounding (JCI 2026-09-14 market.md). 3% of a tenth still
                 # rejects a real mis-binding (2.5R quoted for a 2R pair).
-                if 1.0 <= implied <= 4.0 and abs(implied * 10 - round(implied * 10)) / implied <= 0.03:
+                if (
+                    1.0 <= implied <= 4.0
+                    and abs(implied * 10 - round(implied * 10)) / implied <= 0.03
+                ):
                     continue
             if any(
                 target > 0 and abs(quoted - target) / target <= _RMULT_TOL
@@ -4687,7 +4866,7 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
                 out.append(
                     VerifierClaim(
                         claim=f"{mult}R target {quoted:,.2f} != entry {entry:,.2f} + "
-                              f"{mult}*risk ({risk:,.2f}) = {expected:,.2f}",
+                        f"{mult}*risk ({risk:,.2f}) = {expected:,.2f}",
                         status="INTERNAL_CONFLICT",
                         reason=(
                             "The quoted R-multiple target does not resolve from the "
@@ -4722,16 +4901,18 @@ def _report_as_of(report_dir) -> str | None:
     if not m:
         return None
     try:
-        return datetime(  # noqa: DTZ001 - a calendar date, not an instant
-            int(m.group(1)), int(m.group(2)), int(m.group(3))
-        ).date().isoformat()
+        return (
+            datetime(  # noqa: DTZ001 - a calendar date, not an instant
+                int(m.group(1)), int(m.group(2)), int(m.group(3))
+            )
+            .date()
+            .isoformat()
+        )
     except ValueError:
         return None
 
 
-def _days_countdown_identity(
-    report_text: str, as_of: str | None = None
-) -> list[VerifierClaim]:
+def _days_countdown_identity(report_text: str, as_of: str | None = None) -> list[VerifierClaim]:
     """A stated day-count that does not follow from its own two dates.
 
     NVDA 2026-09-12 news.md: "NVDA's earnings optionality is 83 days away" and
@@ -4765,7 +4946,7 @@ def _days_countdown_identity(
         # 2026-07-30 print, when the 45 belonged to the 2026-10-29 one.
         ls = report_text.rfind("\n", 0, m.start()) + 1
         le = report_text.find("\n", m.end())
-        line = report_text[ls: le if le != -1 else len(report_text)]
+        line = report_text[ls : le if le != -1 else len(report_text)]
         best: tuple[str, int, int] | None = None
         for dm in _ANY_ISO_DATE_RE.finditer(line):
             ds = dm.group(0)
@@ -4794,28 +4975,28 @@ def _days_countdown_identity(
         if key in seen:
             continue
         seen.add(key)
-        claims.append(VerifierClaim(
-            claim=(
-                f"day count does not follow from its own dates: '{stated} days "
-                f"{direction}' for {best[0]} is {best[2]} days from "
-                f"{as_of}"
-            ),
-            status="INTERNAL_CONFLICT",
-            reason=(
-                "The report states both dates and a day count, and the count "
-                "does not follow from them. Quote the tool's own countdown "
-                "(`in Nd` from get_earnings_calendar) instead of computing it: a "
-                "wrong base date - the prior print instead of today - shifts it "
-                "silently (NVDA 2026-09-12: 83 days quoted, 66 true; 83 was the "
-                "gap from the 2026-08-26 print)."
-            ),
-        ))
+        claims.append(
+            VerifierClaim(
+                claim=(
+                    f"day count does not follow from its own dates: '{stated} days "
+                    f"{direction}' for {best[0]} is {best[2]} days from "
+                    f"{as_of}"
+                ),
+                status="INTERNAL_CONFLICT",
+                reason=(
+                    "The report states both dates and a day count, and the count "
+                    "does not follow from them. Quote the tool's own countdown "
+                    "(`in Nd` from get_earnings_calendar) instead of computing it: a "
+                    "wrong base date - the prior print instead of today - shifts it "
+                    "silently (NVDA 2026-09-12: 83 days quoted, 66 true; 83 was the "
+                    "gap from the 2026-08-26 print)."
+                ),
+            )
+        )
     return claims
 
 
-def _valuation_identity_checks(
-    report_text: str, as_of: str | None = None
-) -> list[VerifierClaim]:
+def _valuation_identity_checks(report_text: str, as_of: str | None = None) -> list[VerifierClaim]:
     """Run all identity checks (DuPont, P/E, EV/net-cash, R-multiple, ratios).
 
     The basis-identity family (net debt, current ratio, ROA, quarter labels)
@@ -4916,6 +5097,7 @@ def _text_metrics(
         ("self_correction_artifacts", _self_correction_artifacts),
         ("price_target_identity", _price_target_identity),
         ("digit_obfuscation", _digit_obfuscation),
+        ("marker_injected_numbers", _marker_injected_numbers),
         ("sma200_pct_identity", _sma200_pct_identity),
         ("garch_cond_identity", _garch_cond_identity),
         ("chandelier_identity", _chandelier_identity),
@@ -4937,7 +5119,8 @@ def _text_metrics(
             logger.warning(
                 "report_verifier: metric %s failed on this report (%s); "
                 "claim checks from it are unavailable",
-                name, exc,
+                name,
+                exc,
             )
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
     return claims, errors
@@ -5221,16 +5404,15 @@ def _family_materiality(outcomes: dict) -> dict | None:
         claims = (entry or {}).get("claims") or []
         if len(claims) < 2:
             continue
-        signals[stem] = [
-            1.0 if (c or {}).get("status") == "GROUNDED" else 0.0 for c in claims
-        ]
+        signals[stem] = [1.0 if (c or {}).get("status") == "GROUNDED" else 0.0 for c in claims]
     if len(signals) < 2:
         return None
     window = min(len(series) for series in signals.values())
     candidates = {stem: series[:window] for stem, series in signals.items()}
     try:
-        return family_materiality(candidates, [0.0] * window, n_boot=200,
-                                  block_len=2, seed=0, min_n=2)
+        return family_materiality(
+            candidates, [0.0] * window, n_boot=200, block_len=2, seed=0, min_n=2
+        )
     except Exception as exc:  # noqa: BLE001 - advisory: never break the payload
         logger.warning("report_verifier: family materiality skipped: %s", exc)
         return None
@@ -5272,8 +5454,10 @@ def verify_report_dir(
             max_calls = 12
     if llm_override is None:
         resolve_provider = provider or str(cfg.get("llm_provider") or "")
-        resolve_model = model or str(cfg.get("report_verify_model") or "") or str(
-            cfg.get("quick_think_llm") or ""
+        resolve_model = (
+            model
+            or str(cfg.get("report_verify_model") or "")
+            or str(cfg.get("quick_think_llm") or "")
         )
         client = create_llm_client(
             provider=resolve_provider,
@@ -5394,12 +5578,12 @@ def verify_report_dir(
             # may contain inappropriate content" rejection did exactly that.)
             # The reason is recorded and the stem does not consume budget.
             failed_reason = f"verify call failed: {type(exc).__name__}: {exc}"
-            logger.warning("report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc)
+            logger.warning(
+                "report_verifier: report %s failed (%s); degrading to UNKNOWN", stem, exc
+            )
             verification = ReportVerification(report=stem, overall="UNKNOWN")
         evidence_dec = _evidence_decimals(evidence, stem)
-        anchored = _anchor_claims(
-            verification, evidence_dec, _sentiment_anchor(evidence, stem)
-        )
+        anchored = _anchor_claims(verification, evidence_dec, _sentiment_anchor(evidence, stem))
         text_claims, metric_errors = _text_metrics(report_text, as_of=as_of)
         all_claims = [
             *anchored.claims,
@@ -5408,9 +5592,7 @@ def verify_report_dir(
         ]
         basis = _basis_registry(report_text, evidence_dec)
         entry: dict = {
-            "overall": _stem_overall(
-                anchored, all_claims, deterministic_triples=len(basis)
-            ),
+            "overall": _stem_overall(anchored, all_claims, deterministic_triples=len(basis)),
             "claims": [c.model_dump() for c in all_claims],
             # The typed (metric, value, basis) triples this report asserts, so
             # two runs of one ticker are comparable without diffing prose.
@@ -5441,9 +5623,9 @@ def verify_report_dir(
 
     payload = {
         "report_dir": str(report_dir),
-        "model": model or str(cfg.get("report_verify_model") or "") or str(
-            cfg.get("quick_think_llm") or ""
-        ),
+        "model": model
+        or str(cfg.get("report_verify_model") or "")
+        or str(cfg.get("quick_think_llm") or ""),
         # Tree-level (no LLM): did the advertised structured debate actually
         # run? A degraded tree must be visible in verify_flags.json, not only
         # inferable from the prose.
@@ -5484,6 +5666,7 @@ _PROSE_DIRS = ("2_research", "3_trading", "4_risk", "5_portfolio")
 # measured 2026-10-09). Legibility is convention-free, so it transfers.
 _PROSE_FAMILIES = (
     ("digit_obfuscation", _digit_obfuscation),
+    ("marker_injected_numbers", _marker_injected_numbers),
     ("self_correction_artifacts", _self_correction_artifacts),
 )
 
@@ -5528,11 +5711,7 @@ def _prose_integrity(report_dir: Path) -> dict:
                         "report_verifier: prose metric %s failed on %s: %s", name, path, exc
                     )
             reports[f"{sub}/{path.name}"] = {
-                "overall": (
-                    "FLAG"
-                    if any(c.status in _FLAG_STATUSES for c in claims)
-                    else "PASS"
-                ),
+                "overall": ("FLAG" if any(c.status in _FLAG_STATUSES for c in claims) else "PASS"),
                 "claims": [c.model_dump() for c in claims],
             }
     flagged = sorted(k for k, v in reports.items() if v["overall"] == "FLAG")

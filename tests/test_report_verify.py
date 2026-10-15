@@ -35,9 +35,7 @@ def _mk_report_dir(tmp_path, *, evidence=EVIDENCE_OK, reports=None):
         }
     for stem, text in reports.items():
         (tmp_path / "1_analysts" / f"{stem}.md").write_text(text, encoding="utf-8")
-    (tmp_path / "tool_evidence.json").write_text(
-        json.dumps(evidence), encoding="utf-8"
-    )
+    (tmp_path / "tool_evidence.json").write_text(json.dumps(evidence), encoding="utf-8")
     return tmp_path
 
 
@@ -48,6 +46,7 @@ def _mk_llm(verdict_json: str):
         def invoke(self, prompt):  # noqa: ANN001
             class _R:
                 content = verdict_json
+
             return _R()
 
     return _LLM()
@@ -163,7 +162,9 @@ def test_anchor_grounds_unsupported_with_matching_figures():
     v = rv.ReportVerification(
         report="fundamentals",
         claims=[
-            rv.VerifierClaim(claim="ROE 0.18 and EPS 2.41", status="UNSUPPORTED", reason="llm missed")
+            rv.VerifierClaim(
+                claim="ROE 0.18 and EPS 2.41", status="UNSUPPORTED", reason="llm missed"
+            )
         ],
         overall="FLAG",
     )
@@ -198,9 +199,7 @@ def test_anchor_marks_misquoted_on_attribution_cue():
 def test_anchor_keeps_unsupported_without_matching_figures():
     v = rv.ReportVerification(
         report="fundamentals",
-        claims=[
-            rv.VerifierClaim(claim="ROE 0.99", status="UNSUPPORTED", reason="no match")
-        ],
+        claims=[rv.VerifierClaim(claim="ROE 0.99", status="UNSUPPORTED", reason="no match")],
         overall="FLAG",
     )
     a = rv._anchor_claims(v, {0.18})
@@ -273,9 +272,7 @@ def test_sentiment_prompt_requires_verbatim_counts():
         reddit_block="",
         computed_line="computed_score=+0.08",
     )
-    m = re.search(
-        r"\*\*Copy counts and quotes verbatim\.\*\*(.*?)(?=\n\s*\d+\.\s+\*\*)", msg, re.S
-    )
+    m = re.search(r"\*\*Copy counts and quotes verbatim\.\*\*(.*?)(?=\n\s*\d+\.\s+\*\*)", msg, re.S)
     assert m, "the sentiment prompt dropped the verbatim-counts item"
     item = m.group(1)
     assert re.search(r"message counts", item, re.I)
@@ -317,11 +314,7 @@ def test_sentiment_prompt_pins_macro_to_the_leaf():
 
 
 def test_internal_conflict_same_metric_two_values():
-    text = (
-        "DCF fair value is $80.76.\n"
-        "The table shows DCF value at 79.60.\n"
-        "EPS TTM is 5.40.\n"
-    )
+    text = "DCF fair value is $80.76.\nThe table shows DCF value at 79.60.\nEPS TTM is 5.40.\n"
     conf = rv._internal_conflicts(text)
     by = {c.claim.split("'")[1]: c for c in conf}
     assert "dcf fair value" in by
@@ -354,15 +347,15 @@ def test_internal_conflict_wired_into_report_dir(tmp_path):
         tmp_path,
         reports={
             "fundamentals": (
-                "DCF fair value $80.76.\n"
-                "DCF fair value 79.60 in the summary table.\n"
-                "EPS 5.4.\n"
+                "DCF fair value $80.76.\nDCF fair value 79.60 in the summary table.\nEPS 5.4.\n"
             )
         },
     )
     payload = rv.verify_report_dir(
         d,
-        llm_override=_mk_llm('{"claims": [{"claim": "EPS 5.4", "status": "GROUNDED", "reason": "leaf"}]}'),
+        llm_override=_mk_llm(
+            '{"claims": [{"claim": "EPS 5.4", "status": "GROUNDED", "reason": "leaf"}]}'
+        ),
     )
     stems = payload["verification"]["fundamentals"]
     assert any(c["status"] == "INTERNAL_CONFLICT" for c in stems["claims"])
@@ -401,8 +394,12 @@ def test_internal_conflict_table_cell_names_two_metrics():
     # position among the cell's legs - a "/" inside a label (P/E) is not a
     # separator.
     t = "| P/E / EV/EBIT / EV/EBITDA | 7.68 / 5.50 / 4.40 | TTM flows; BS 2026-01-31 |\n"
-    got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
-        t, rv._INTERNAL_CONFLICT_METRICS["ev/ebit"][0], "ev/ebit", with_lines=True)}
+    got = {
+        f"{v:g}"
+        for _r, v, _l in rv._extract_metric_values(
+            t, rv._INTERNAL_CONFLICT_METRICS["ev/ebit"][0], "ev/ebit", with_lines=True
+        )
+    }
     assert got == {"5.5"}, got
     assert rv._internal_conflicts(t) == []
 
@@ -413,12 +410,13 @@ def test_internal_conflict_bear_base_bull_row_binds_each_leg():
     # whole `bear/base/bull` phrase and the ordinal was read from the match's
     # START. The metric named is the match's TAIL (LULU 2026-09-15).
     t = "| Scenario DCF bear/base/bull | 132.5 / 173.58 / 249.05 vs price 98.30 |\n"
-    for label, want in (("scenario dcf bear", "132.5"),
-                        ("scenario dcf base", "173.58"),
-                        ("scenario dcf bull", "249.05")):
+    for label, want in (
+        ("scenario dcf bear", "132.5"),
+        ("scenario dcf base", "173.58"),
+        ("scenario dcf bull", "249.05"),
+    ):
         rx, _tol = rv._INTERNAL_CONFLICT_METRICS[label]
-        got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
-            t, rx, label, with_lines=True)}
+        got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(t, rx, label, with_lines=True)}
         assert got == {f"{float(want):g}"}, (label, got)
     assert rv._internal_conflicts(t) == []
 
@@ -429,8 +427,12 @@ def test_internal_conflict_value_leg_does_not_donate_another_metric():
     # (JCI fundamentals.md 2026-09-17). A leg that goes on to name a second
     # metric must not donate that metric's number.
     t = "| Trap risk / Altman Z | LOW / 2.90 (grey); Ohlson -7.2461 healthy | verdict |\n"
-    got = {f"{v:g}" for _r, v, _l in rv._extract_metric_values(
-        t, rv._INTERNAL_CONFLICT_METRICS["altman z"][0], "altman z", with_lines=True)}
+    got = {
+        f"{v:g}"
+        for _r, v, _l in rv._extract_metric_values(
+            t, rv._INTERNAL_CONFLICT_METRICS["altman z"][0], "altman z", with_lines=True
+        )
+    }
     assert got == {"2.9"}, got
     assert rv._internal_conflicts(t) == []
 
@@ -474,10 +476,12 @@ def test_basis_conflicts_classifies_two_producers_as_a_basis_difference():
     printing two values - accusing two producers that are each right.
     """
     reg = [
-        rv.BasisAssertion(metric="t1", value=115.40, basis="ratio",
-                          producer="get_tranche_plan", source="report"),
-        rv.BasisAssertion(metric="t1", value=115.2778, basis="ratio",
-                          producer="get_swing_set", source="report"),
+        rv.BasisAssertion(
+            metric="t1", value=115.40, basis="ratio", producer="get_tranche_plan", source="report"
+        ),
+        rv.BasisAssertion(
+            metric="t1", value=115.2778, basis="ratio", producer="get_swing_set", source="report"
+        ),
     ]
     rows = rv.basis_conflicts(reg)
     assert len(rows) == 1
@@ -488,10 +492,20 @@ def test_basis_conflicts_classifies_two_producers_as_a_basis_difference():
 def test_basis_conflicts_reads_two_spellings_of_one_producer_as_one():
     """`get_ratios` and `(ratios)` are one producer, so this is a real defect."""
     reg = [
-        rv.BasisAssertion(metric="ttm p/e", value=20.9661, basis="ttm:ttm",
-                          producer="get_fundamentals", source="report"),
-        rv.BasisAssertion(metric="ttm p/e", value=20.334, basis="ttm:ttm",
-                          producer="fundamentals", source="report"),
+        rv.BasisAssertion(
+            metric="ttm p/e",
+            value=20.9661,
+            basis="ttm:ttm",
+            producer="get_fundamentals",
+            source="report",
+        ),
+        rv.BasisAssertion(
+            metric="ttm p/e",
+            value=20.334,
+            basis="ttm:ttm",
+            producer="fundamentals",
+            source="report",
+        ),
     ]
     rows = rv.basis_conflicts(reg)
     assert rows[0].classification == "defect", rows[0].reason
@@ -526,9 +540,12 @@ def test_basis_conflicts_classifies_two_unit_classes_as_a_basis_difference():
 
 def test_basis_conflicts_is_empty_when_one_cluster():
     """A metric quoted once, or twice within tolerance, is not a conflict."""
-    assert rv.basis_conflicts(
-        [rv.BasisAssertion(metric="roe", value=22.09, basis="ttm:ttm", source="report")]
-    ) == []
+    assert (
+        rv.basis_conflicts(
+            [rv.BasisAssertion(metric="roe", value=22.09, basis="ttm:ttm", source="report")]
+        )
+        == []
+    )
     near = [
         rv.BasisAssertion(metric="roe", value=22.09, basis="ttm:ttm", source="report"),
         rv.BasisAssertion(metric="roe", value=22.1, basis="ttm:ttm", source="report"),
@@ -569,8 +586,7 @@ def test_basis_of_binds_the_atr_window_printed_beside_the_figure():
     # The window alone does not identify an ATR: the swing tools state a simple
     # mean of TR where the snapshot's is Wilder's, at the same 14.
     assert (
-        rv._basis_of("ATR(14, simple mean of TR)=2.5302 below", "atr", "2.5302")
-        == "atr:14-simple"
+        rv._basis_of("ATR(14, simple mean of TR)=2.5302 below", "atr", "2.5302") == "atr:14-simple"
     )
     # `_period_tag_near`-style proximity: HPE 2026-09-14 writes "The verified
     # ATR(14) is 3.75. The swing model uses its own ATR basis of 3.7714", and
@@ -672,9 +688,9 @@ def test_internal_conflict_scopes_multi_producer_r_targets():
 def test_expected_move_band_is_not_a_conformal_band():
     # get_expected_move's option-implied band has no calibration pairs, so it
     # owes no realized coverage (MU market.md 2026-09-14).
-    assert rv._valuation_band_conflict(
-        "- Last close 919.38; band [814.32, 1024.45] (±11.4%)\n"
-    ) == []
+    assert (
+        rv._valuation_band_conflict("- Last close 919.38; band [814.32, 1024.45] (±11.4%)\n") == []
+    )
 
 
 def test_r_multiple_identity_binds_the_lines_own_pair():
@@ -738,7 +754,6 @@ def test_internal_conflict_t1_mislabel():
 def test_internal_conflict_eps_actual_dual_values():
     # DELL 2026-09-10 news.md: body 'EPS actual 7.04'vs summary
     # 'EPS actual 7.00' (both Finnhub, same quarter) — 0.6% apart must flag.
-
 
     t = "EPS actual **7.04** vs estimate **5.012**  ...  EPS actual **7.00** vs est **5.03**"
     out = rv._internal_conflicts(t)
@@ -812,16 +827,66 @@ def test_digit_masked_numbers_are_reported_and_never_read_as_values():
     assert rv._digit_obfuscation(clean) == []
 
 
+def test_marker_injected_numbers_are_reported_and_the_token_is_split():
+    """The second alphabet: the marker goes INSIDE the number, digits intact.
+
+    BKR 2026-10-14 market.md wrote the reference price 55.37 as "**55.**37"
+    (29 such tokens in that report; INTU 2026-10-15 sentiment.md 22, KGC
+    2026-10-15 market.md 16). The text still reads, so nothing in the
+    placeholder alphabet above can see it - but the marker splits the token,
+    and that is measurable here: the decimal matcher finds nothing and the
+    value matcher returns the fragments as two integers.
+    """
+    line = "**Reference price:** **55.**37 (**2026-**10-**14**, **FORMING** intraday bar)"
+    claims = rv._marker_injected_numbers(line)
+    assert len(claims) == 1 and claims[0].status == "INTERNAL_CONFLICT"
+    assert "bold marker injected" in claims[0].claim
+    assert "**55.**" in claims[0].claim
+
+    # The harm, measured on that line: no decimal is readable at all, and the
+    # value matcher reads 55 and 37 as two figures where the report means 55.37.
+    assert rv._DEC_RE.findall(line) == []
+    assert [m[0] for m in rv._DOLLAR_RE.findall(line)][:2] == ["55", "37"]
+    clean = line.replace("**", "")
+    assert rv._DEC_RE.findall(clean)[0] == "55.37"
+    assert [m[0] for m in rv._DOLLAR_RE.findall(clean)][:2] == ["55.37", "2026"]
+
+    # The other spellings: an indicator, a signed figure, the non-breaking
+    # hyphen, and a bare marker glued to a digit.
+    assert rv._marker_injected_numbers("close_**-**50**_sma below")
+    assert rv._marker_injected_numbers("dip **+1.** then **\u20111.**")
+    assert rv._marker_injected_numbers("stochK ****13 pinned")
+
+    # Shapes a well-formed report uses are NOT matches: a bold figure, a bold
+    # amount, a bolded sentence that merely contains a digit, a clean indicator
+    # line, an ISO date, and the empty text.
+    assert rv._marker_injected_numbers("Entry **55.37** today") == []
+    assert rv._marker_injected_numbers("ceiling **$122.54**") == []
+    assert rv._marker_injected_numbers("**Anchored conclusion: size = 0 new risk.**") == []
+    assert rv._marker_injected_numbers("close_50_sma 116.30, rsi 23.15") == []
+    assert rv._marker_injected_numbers("run on 2026-10-14") == []
+    assert rv._marker_injected_numbers("") == []
+
+    # The two alphabets are disjoint: a MASKED amount (EHC 2026-10-09, the
+    # digits gone) belongs to _digit_obfuscation alone and is not reported twice.
+    ehc = "| Reference / spot cited | **$222.*** |\n| Cash flow | **$,** |\n"
+    assert rv._digit_obfuscation(ehc)
+    assert rv._marker_injected_numbers(ehc) == []
+
+
 def test_the_sentiment_rescale_anchor_is_checked_deterministically():
     """The 0-10 headline score is the prompt's own rescale of computed_score
     (5 + 5*score, +/-0.5). The LLM verifier applied that inconsistently on
     2026-09-16 - AMZN's 9.5/10 and IEI's ~0/10 were flagged while MSFT's and
     VTV's were accepted - so the band is anchored in code."""
+
     def _v(*claims):
         return rv.ReportVerification(
             report="sentiment",
             overall="FLAG",
-            claims=[rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf") for c in claims],
+            claims=[
+                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf") for c in claims
+            ],
         )
 
     amzn = rv._anchor_claims(_v("Overall Sentiment: Bullish (Score: 9.5/10)"), set(), 10.0)
@@ -853,8 +918,7 @@ def test_eps_estimates_for_different_dates_are_not_a_conflict():
     assert rv._internal_conflicts(t) == []
     # The same date with two values is still a conflict.
     same_date = (
-        "2026-10-28 (est EPS 4.72) in the table; forward calendar lists "
-        "2026-10-28 est 4.16."
+        "2026-10-28 (est EPS 4.72) in the table; forward calendar lists 2026-10-28 est 4.16."
     )
     assert rv._eps_estimate_duals(same_date)
 
@@ -898,17 +962,13 @@ def test_internal_conflict_t2_pair_leg_not_2r_price():
     body = "entry 1027.77, structure stop 862.81, 2R/3R targets **1357.69 / 1521.68**"
     hit = [
         c
-        for c in rv._internal_conflicts(
-            body + "\nsummary 2R/3R targets **1357.69 / 1541.68**"
-        )
+        for c in rv._internal_conflicts(body + "\nsummary 2R/3R targets **1357.69 / 1541.68**")
         if "'t2'" in c.claim
     ]
     assert hit and hit[0].status == "INTERNAL_CONFLICT"
     assert "1521.68" in hit[0].claim and "1541.68" in hit[0].claim
     # The same pair in body and summary is ONE cluster -> no false positive.
-    assert rv._internal_conflicts(
-        body + "\nsummary 2R/3R targets **1357.69 / 1521.68**"
-    ) == []
+    assert rv._internal_conflicts(body + "\nsummary 2R/3R targets **1357.69 / 1521.68**") == []
     # The "xR" spelling is the same label, and a lone 3xR with its own value is
     # still compared against the pair's 3R leg.
     assert any(
@@ -1002,9 +1062,7 @@ def test_dividend_yield_sanity_distribution_cadence_is_inferred():
         "2026-09-30 $0.50; ttm yield 2.00%"
     )
     assert rv._dividend_yield_sanity(quarterly) == []
-    no_cadence = (
-        "price 100.00; distributions $0.50 / $0.52 / $0.49 / $0.51; ttm yield 2.00%"
-    )
+    no_cadence = "price 100.00; distributions $0.50 / $0.52 / $0.49 / $0.51; ttm yield 2.00%"
     assert rv._dividend_yield_sanity(no_cadence) == []
 
 
@@ -1101,8 +1159,10 @@ def test_internal_conflict_scenario_dcf_base_dual_values():
 def test_sma200_identity_flags_direction_flip():
     # SNDK 2026-09-10: '65% below price' while price 1,698.41 / sma 1,026.54
     # => the 200-day is 39.6% below price (65.5% is price ABOVE the sma).
-    t = ("200-day (approx 1,026.54 area is 65% below price currently per value-dip tool); "
-         "price 1,698.41")
+    t = (
+        "200-day (approx 1,026.54 area is 65% below price currently per value-dip tool); "
+        "price 1,698.41"
+    )
     cs = rv._sma200_identity(t)
     assert len(cs) == 1
     assert "39.6%" in cs[0].claim
@@ -1117,8 +1177,10 @@ def test_internal_conflict_current_ratio_dual_values():
     # WDC 2026-09-10 fundamentals: current ratio 10.87 (balance-sheet
     # health) vs vendored 1.329 in one report - an 8x computed-vs-provider
     # conflict that must flag.
-    t = ("get_balance_sheet_health pass=True (D/E 0.12<1.0, CR 10.87>1.5); "
-         "Current ratio vendor 1.329 vs get_ratios 10.87 - conflict")
+    t = (
+        "get_balance_sheet_health pass=True (D/E 0.12<1.0, CR 10.87>1.5); "
+        "Current ratio vendor 1.329 vs get_ratios 10.87 - conflict"
+    )
     out = rv._internal_conflicts(t)
     assert any("'current ratio'" in c.claim for c in out)
 
@@ -1150,8 +1212,7 @@ def test_internal_conflict_macd_dual_value():
     # WDC 2026-09-10 market.md: body (verified snapshot) MACD -9.32 / hist
     # +8.37 vs the summary row macd/macdh -0.32/+0.25 - one metric at two
     # values in one report.
-    t = ("macd -9.32 (verified) ... histogram +8.37 ... | macd / macdh "
-         "| -0.32 / +0.25 (verified) |")
+    t = "macd -9.32 (verified) ... histogram +8.37 ... | macd / macdh | -0.32 / +0.25 (verified) |"
     out = rv._internal_conflicts(t)
     assert any("'macd histogram'" in c.claim for c in out)
 
@@ -1200,8 +1261,10 @@ def test_eps_estimate_duals_conflict_same_date():
     # MSFT 2026-09-10 news.md: 2026-10-28 cited as est 4.72 in the headline
     # and table but est 4.16 in the forward-calendar line - same print, two
     # estimates; leaf said 4.72.
-    t = ("next print 2026-10-28 (est EPS 4.72; last reported 4.74)\n"
-         "MSFT earnings 2026-10-28 (est 4.16)")
+    t = (
+        "next print 2026-10-28 (est EPS 4.72; last reported 4.74)\n"
+        "MSFT earnings 2026-10-28 (est 4.16)"
+    )
     cs = rv._eps_estimate_duals(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1212,8 +1275,10 @@ def test_bollinger_band_identity_conflicting_sets():
     # TSM 2026-09-10 market.md: body lower=405.14 upper=438.16 (canonical
     # get_bollinger_pct_b) vs summary 'wide 438.59 / low 404.71' - a second
     # band set; %b 0.7394 is only true for the body pair.
-    t = ("%b at 73.94% (mid/high zone, lower=405.14 upper=438.16)\n"
-         "| Bollinger %b | 0.7394 (mid/high; wide 438.59 / low 404.71) |")
+    t = (
+        "%b at 73.94% (mid/high zone, lower=405.14 upper=438.16)\n"
+        "| Bollinger %b | 0.7394 (mid/high; wide 438.59 / low 404.71) |"
+    )
     cs = rv._bollinger_band_identity(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1237,8 +1302,10 @@ def test_sector_rank_identity_conflicting_ranks():
 def test_self_correction_artifacts_hpe():
     # HPE 2026-09-10 news.md leaked the model's retyping into the artifact:
     # '9.87 ... corrected: 4.8' and '172.346 ... correction - 154.3360'.
-    t = ("10Y at 4.78 (2026-08-09, latest print 09-08: 9.87 ... corrected: "
-         "latest 4.8); FX USD/JPY 172.346 ... correction: 154.3360")
+    t = (
+        "10Y at 4.78 (2026-08-09, latest print 09-08: 9.87 ... corrected: "
+        "latest 4.8); FX USD/JPY 172.346 ... correction: 154.3360"
+    )
     cs = rv._self_correction_artifacts(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1247,9 +1314,11 @@ def test_self_correction_artifacts_hpe():
 def test_price_target_identity_hpe_triple():
     # HPE 2026-09-10 fundamentals.md: leaf mean 69.38, body 69.38, but the
     # table wrote mean PT 58.38 and mean 58.97 - three distinct means.
-    t = ("mean PT $69.38 (high 88, low 54)\n"
-         "| Verdict | BUY | mean PT $58.38 |\n"
-         "| Analyst target | mean 58.97, high 69.38 |")
+    t = (
+        "mean PT $69.38 (high 88, low 54)\n"
+        "| Verdict | BUY | mean PT $58.38 |\n"
+        "| Analyst target | mean 58.97, high 69.38 |"
+    )
     cs = rv._price_target_identity(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1263,8 +1332,7 @@ def test_price_target_identity_clean_single():
 
 def test_sma200_pct_identity_hpe():
     # HPE 2026-09-10 market.md: body +64.7% (55.46/33.68-1) vs table +184.7%.
-    t = ("price 55.46 vs 200-SMA 33.68 = +64.7%;\n"
-         "| price vs 200-SMA +184.7% (verified) |")
+    t = "price 55.46 vs 200-SMA 33.68 = +64.7%;\n| price vs 200-SMA +184.7% (verified) |"
     cs = rv._sma200_pct_identity(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1275,8 +1343,10 @@ def test_sma200_mislabel_recompute_msft():
     # MSFT 2026-09-10 decision.md: 'price +8.8% above the 200-SMA 429.51'
     # with the same line's 50-SMA 450.83: at 490.50 the 200-SMA distance is
     # +14.2% and +8.8% is the 50-SMA distance - a mislabeled label.
-    t = ("Stay flat on msft at 491.65. ... STRONG_BULL regime (F=0.75), "
-         "price +8.8% above the 200-SMA 429.51 and above the rising 50-SMA 450.83")
+    t = (
+        "Stay flat on msft at 491.65. ... STRONG_BULL regime (F=0.75), "
+        "price +8.8% above the 200-SMA 429.51 and above the rising 50-SMA 450.83"
+    )
     cs = rv._sma200_pct_identity(t)
     assert len(cs) == 1
     assert "50-SMA distance" in cs[0].claim
@@ -1295,8 +1365,7 @@ def test_sma200_pct_identity_clean():
 def test_garch_cond_identity_hpe():
     # HPE 2026-09-10: body 'GARCH long-run 50.71%, conditional 58.90%' vs
     # summary 'GARCH cond 65.90%'.
-    t = ("GARCH long-run 50.71%, conditional 58.90%;\n"
-         "| GARCH cond 65.90% |")
+    t = "GARCH long-run 50.71%, conditional 58.90%;\n| GARCH cond 65.90% |"
     cs = rv._garch_cond_identity(t)
     assert len(cs) == 1
     assert "58.90" in cs[0].claim and "65.90" in cs[0].claim
@@ -1309,8 +1378,10 @@ def test_garch_cond_identity_clean():
 
 def test_chandelier_identity_hpe():
     # HPE 2026-09-10: body 54.11 (3xATR below 22-bar high) vs table 58.2.
-    t = ("chandelier 3xATR below 22-bar high = 54.11 (exit=False)\n"
-         "| chandelier 58.2/ema-trail 59.02 for exits |")
+    t = (
+        "chandelier 3xATR below 22-bar high = 54.11 (exit=False)\n"
+        "| chandelier 58.2/ema-trail 59.02 for exits |"
+    )
     cs = rv._chandelier_identity(t)
     assert len(cs) == 1
     assert "54.11" in cs[0].claim and "58.2" in cs[0].claim
@@ -1319,7 +1390,7 @@ def test_chandelier_identity_hpe():
 def test_sum_identity_adbe_missum():
     # ADBE 2026-09-10 fundamentals.md: TTM OCF written as
     # 2.165+2.958+3.160+2.198 = $10.62B but the addends sum to 10.481B.
-    t = ("TTM OCF = $2.165+2.958+3.160+2.198 = $10.62B; TTM FCF = $10.28B")
+    t = "TTM OCF = $2.165+2.958+3.160+2.198 = $10.62B; TTM FCF = $10.28B"
     cs = rv._sum_identity(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1335,8 +1406,7 @@ def test_sum_identity_clean_when_math_right():
 def test_ema_identity_hpe_dual():
     # HPE 2026-09-10 market.md: trend section 10-EMA 54.66 vs summary
     # 'retake of the 10-EMA (graph 55.54)'.
-    t = ("Above the 10-EMA 54.66 (+1.5%)\n"
-         "Watch for retake of the 10-EMA (graph 55.54)")
+    t = "Above the 10-EMA 54.66 (+1.5%)\nWatch for retake of the 10-EMA (graph 55.54)"
     cs = rv._ema_identity(t)
     assert len(cs) == 1
     assert cs[0].status == "INTERNAL_CONFLICT"
@@ -1371,8 +1441,7 @@ def test_ema_conflict_flags_report_dir_overall(tmp_path):
         tmp_path,
         reports={
             "market": (
-                "Above the 10-EMA = 54.66 (+1.5%).\n"
-                "Summary: retake of the 10-EMA = 55.54 first.\n"
+                "Above the 10-EMA = 54.66 (+1.5%).\nSummary: retake of the 10-EMA = 55.54 first.\n"
             )
         },
     )
@@ -1388,8 +1457,7 @@ def test_ema_conflict_flags_report_dir_overall(tmp_path):
 
 def test_ema_trail_identity_hpe_dual():
     # HPE 2026-09-10: body '20d EMA trail = 53.91' vs table 'ema-trail 59.02'.
-    t = ("20d EMA trail = 53.91 (not hit)\n"
-         "| chandelier 58.2/ema-trail 59.02 for exits |")
+    t = "20d EMA trail = 53.91 (not hit)\n| chandelier 58.2/ema-trail 59.02 for exits |"
     cs = rv._ema_trail_identity(t)
     assert len(cs) == 1
     assert "53.91" in cs[0].claim and "59.02" in cs[0].claim
@@ -1415,8 +1483,10 @@ def test_chandelier_identity_ignores_a_neighbouring_metrics_assignment():
     # "1R=4.3821" printed beside it belongs to the R-multiple read. The loose
     # "=" reader walked past the 22-bar-high parenthetical to that "=" and
     # flagged 4.3821 as a second chandelier stop.
-    t = ("- `get_swing_exits`: chandelier 485.9179 (3x ATR below the 22-bar "
-         "high), 1R=4.3821, t1=499.0642, t2=503.4463.")
+    t = (
+        "- `get_swing_exits`: chandelier 485.9179 (3x ATR below the 22-bar "
+        "high), 1R=4.3821, t1=499.0642, t2=503.4463."
+    )
     assert rv._chandelier_values(t) == ["485.9179"]
     assert rv._chandelier_identity(t) == []
 
@@ -1425,9 +1495,11 @@ def test_chandelier_identity_reads_the_stop_after_the_word_stop():
     # "chandelier stop 486.3121" was invisible to the space reader (it wanted a
     # digit straight after the label) while the "=" reader took the
     # "t1=522.6358" two clauses later as the stop (MSFT 2026-09-15 14:02).
-    t = ("- `get_swing_exits`: **chandelier stop 486.3121** (3x ATR below the "
-         "22-bar high), ema20 trail 492.9986, **t1=522.6358, t2=534.7438, "
-         "1R=12.1079**.")
+    t = (
+        "- `get_swing_exits`: **chandelier stop 486.3121** (3x ATR below the "
+        "22-bar high), ema20 trail 492.9986, **t1=522.6358, t2=534.7438, "
+        "1R=12.1079**."
+    )
     assert rv._chandelier_values(t) == ["486.3121"]
     assert rv._chandelier_identity(t) == []
 
@@ -1436,17 +1508,18 @@ def test_chandelier_identity_ignores_the_atr_multiple_leg():
     # "chandelier 486.7536 (= 3x10.3422 below the 22-bar anchor high 517.78)"
     # read the 3 of the ATR multiple as a second chandelier value (MSFT
     # 2026-09-16 13:04), flagging one stop against itself.
-    t = ("Swing exits: chandelier 486.7536 (= 3x10.3422 below the 22-bar anchor "
-         "high 517.78), exit=False; EMA20 trail 492.9439.\n"
-         "| Stop / targets | structure stop 475.6578; chandelier 486.7536 |")
+    t = (
+        "Swing exits: chandelier 486.7536 (= 3x10.3422 below the 22-bar anchor "
+        "high 517.78), exit=False; EMA20 trail 492.9439.\n"
+        "| Stop / targets | structure stop 475.6578; chandelier 486.7536 |"
+    )
     assert rv._chandelier_identity(t) == []
 
 
 def test_money_ellipsis_flagged_as_artifact():
     # HPE 2026-09-10: 'Total debt $8.22B... verbatim $20.24B' leaks a
     # mid-edit dollar value into the final report.
-    t = ("Total debt $8.22B... verbatim from get_balance_sheet: Total Debt "
-         "$20.24B, Cash $6.22B")
+    t = "Total debt $8.22B... verbatim from get_balance_sheet: Total Debt $20.24B, Cash $6.22B"
     cs = rv._self_correction_artifacts(t)
     assert len(cs) == 1
     assert "money-ellipsis" in cs[0].claim
@@ -1493,21 +1566,14 @@ def test_self_correction_artifacts_detects_leaked_tool_markup():
     assert "no report text" in claims[0].reason
     # the DSML-wrapped spelling counts too (the wdc run wrote exactly this)
     dsml = "</\uff5cDSML\uff5c invoke>"
-    assert any(
-        "tool-call markup" in c.claim
-        for c in rv._self_correction_artifacts(dsml)
-    )
+    assert any("tool-call markup" in c.claim for c in rv._self_correction_artifacts(dsml))
     # ...including the spelling whose block word lost its "tool_" prefix, and
     # both wrapper widths: NFLX and NVDA on 2026-09-15 wrote " calls"/" invoke"
     # (single and double wrapped) as the trader's "Computed verification".
     for edge in ("\uff5cDSML\uff5c", "\uff5c\uff5cDSML\uff5c\uff5c"):
-        field_spelling = (
-            "<" + edge + " calls>"
-            + "<" + edge + ' invoke name="get_risk_gate">'
-        )
+        field_spelling = "<" + edge + " calls>" + "<" + edge + ' invoke name="get_risk_gate">'
         assert any(
-            "tool-call markup" in c.claim
-            for c in rv._self_correction_artifacts(field_spelling)
+            "tool-call markup" in c.claim for c in rv._self_correction_artifacts(field_spelling)
         ), edge
 
 
@@ -1515,9 +1581,11 @@ def test_ema20_does_not_cross_table_pipe():
     # IREN 2026-09-10 market.md: 'Chandelier / EMA20 trail | 39.8302 / 41.7342'
     # - the chandelier (39.83) is a DIFFERENT level from EMA20 (41.73); the
     # ema20 metric must not attribute the chandelier value across the row.
-    t = ("get_swing_exits: chandelier stop **39.8302** (exit=False), EMA20 "
-         "trail **41.7342** (trail_exit=False)\n"
-         "| Chandelier / EMA20 trail | 39.8302 / 41.7342 |")
+    t = (
+        "get_swing_exits: chandelier stop **39.8302** (exit=False), EMA20 "
+        "trail **41.7342** (trail_exit=False)\n"
+        "| Chandelier / EMA20 trail | 39.8302 / 41.7342 |"
+    )
     cs = rv._internal_conflicts(t)
     assert not any("ema20" in c.claim for c in cs)
 
@@ -1525,8 +1593,10 @@ def test_ema20_does_not_cross_table_pipe():
 def test_atr_stop_basis_dual_flags():
     # IREN 2026-09-10: headline ATR 3.38 vs the swing-set's 3.1533 used for
     # the structure stop (34.81 - 3.1533 = 31.6567, not 34.81 - 3.38).
-    t = ("ATR 3.38 as stop yardstick; get_swing_set structure_stop uses "
-         "ATR 3.1533 below swing low 34.81")
+    t = (
+        "ATR 3.38 as stop yardstick; get_swing_set structure_stop uses "
+        "ATR 3.1533 below swing low 34.81"
+    )
     cs = rv._internal_conflicts(t)
     assert any("atr" in c.claim for c in cs)
 
@@ -1581,10 +1651,10 @@ def test_verify_evidence_call_structured_path(tmp_path):
     report_dir = _mk_report_dir(tmp_path)
     text = (report_dir / "1_analysts" / "fundamentals.md").read_text()
     llm = _mk_llm('{"claims": [{"claim": "ROE 0.18", "status": "GROUNDED", "reason": "ev"}]}')
-    structured = _mk_structured('{"claims": [{"claim": "ROE 0.18", "status": "GROUNDED", "reason": "ev"}]}')
-    v = rv.verify_evidence_call(
-        llm, structured, "fundamentals", text, EVIDENCE_OK
+    structured = _mk_structured(
+        '{"claims": [{"claim": "ROE 0.18", "status": "GROUNDED", "reason": "ev"}]}'
     )
+    v = rv.verify_evidence_call(llm, structured, "fundamentals", text, EVIDENCE_OK)
     assert v.overall == "PASS"
     assert v.claims[0].status == "GROUNDED"
 
@@ -1639,8 +1709,9 @@ def test_verify_report_dir_builds_backup_from_config(tmp_path, monkeypatch):
         },
     )
 
-    def _spy_invoke(structured, plain, prompt, render, agent_name,
-                    fallback_llm=None, backup_llm=None, **kw):  # noqa: ANN002
+    def _spy_invoke(
+        structured, plain, prompt, render, agent_name, fallback_llm=None, backup_llm=None, **kw
+    ):  # noqa: ANN002
         calls["backup_llm"] = backup_llm
         return '{"claims": [], "overall": "PASS"}'
 
@@ -1682,7 +1753,9 @@ def test_verify_report_dir_provider_failure_degrades_unknown(tmp_path, monkeypat
 
 def test_verify_report_dir_unknown_when_there_is_no_figure_to_check(tmp_path, monkeypatch):
     """A stem with no extractable figure stays UNKNOWN under a dead provider."""
-    report_dir = _mk_report_dir(tmp_path, reports={"fundamentals": "Prose with no figures at all.\n"})
+    report_dir = _mk_report_dir(
+        tmp_path, reports={"fundamentals": "Prose with no figures at all.\n"}
+    )
     monkeypatch.setattr(
         "tradingagents.agents.utils.structured.invoke_structured_or_freetext",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("provider down")),
@@ -1699,6 +1772,7 @@ class _NoopLLM:
     def invoke(self, prompt):  # noqa: ANN001
         class _R:
             content = ""
+
         return _R()
 
 
@@ -1747,10 +1821,7 @@ def test_dupont_identity_flags_offline_inputs_even_with_other_roe():
 
 
 def test_pe_basis_conflict_catches_annual_vs_ttm():
-    text = (
-        "P/E: 135.94\nDiluted EPS | TTM $44.17\n"
-        "latest price $1,027.77"
-    )
+    text = "P/E: 135.94\nDiluted EPS | TTM $44.17\nlatest price $1,027.77"
     claims = rv._pe_basis_conflict(text)
     assert len(claims) == 1
     assert claims[0].status == "INTERNAL_CONFLICT"
@@ -1800,9 +1871,7 @@ def test_net_debt_identity_flags_r2_sign_flip():
 
 
 def test_net_debt_identity_clean_when_net_cash_agrees():
-    text = (
-        "Cash + ST Investments $62.47B; Total Debt $38.35B; net cash of $24.12B."
-    )
+    text = "Cash + ST Investments $62.47B; Total Debt $38.35B; net cash of $24.12B."
     assert rv._net_debt_identity(text) == []
 
 
@@ -1811,9 +1880,11 @@ def test_net_debt_identity_ignores_a_vendor_row_the_report_rejects():
     # 19,359,000,000" row in order to correct it ("mis-signed and I do not
     # quote it as debt") beside its own +19,825,000,000 net cash. The quoted
     # row is not the report's figure, so there is nothing to reconcile.
-    row = "the vendor \"Net Debt 19,359,000,000\" row {0}."
-    body = ("**Net cash**: cash + ST investments 76,651,000,000 vs total debt "
-            "56,826,000,000 = **+19,825,000,000 net cash**; ")
+    row = 'the vendor "Net Debt 19,359,000,000" row {0}.'
+    body = (
+        "**Net cash**: cash + ST investments 76,651,000,000 vs total debt "
+        "56,826,000,000 = **+19,825,000,000 net cash**; "
+    )
     rejected = body + row.format("is mis-signed and I do not quote it as debt")
     assert rv._net_debt_identity(rejected) == []
     # ...and the cue is what suppresses it: quoted as-is, the same row is read
@@ -1899,8 +1970,10 @@ def test_quarter_label_consistency_flags_r2_same_date_two_quarters():
     )
     cs = rv._quarter_label_consistency(text)
     assert any(
-        c.status == "INTERNAL_CONFLICT" and "2025-07-31" in c.claim
-        and "Q1 FY26" in c.claim and "Q2 FY26" in c.claim
+        c.status == "INTERNAL_CONFLICT"
+        and "2025-07-31" in c.claim
+        and "Q1 FY26" in c.claim
+        and "Q2 FY26" in c.claim
         for c in cs
     )
 
@@ -1937,7 +2010,7 @@ def test_fed_cuts_contradiction_flags_0_vs_93():
 
 
 def test_fed_cuts_contradiction_clean_single_value():
-    assert rv._fed_cuts_contradiction('Will Fed rate cuts happen in 2026? Yes 0%.') == []
+    assert rv._fed_cuts_contradiction("Will Fed rate cuts happen in 2026? Yes 0%.") == []
     assert rv._fed_cuts_contradiction("Fed cuts 2026: Yes 93%.") == []
 
 
@@ -1945,8 +2018,7 @@ def test_drawdown_identity_flags_mismatch():
     # SOXX 2026-09-09: claimed "~39% below 52-week high" with price 532 /
     # high 655.95 => 18.9%. The drawdown must match price/high - 1.
     text = (
-        "NAV ≈ $532 is at ~39% below its 52-week high.\n"
-        "52-week high 655.95, latest price $532.00"
+        "NAV ≈ $532 is at ~39% below its 52-week high.\n52-week high 655.95, latest price $532.00"
     )
     cs = rv._drawdown_identity(text)
     assert len(cs) == 1
@@ -2005,9 +2077,7 @@ def test_r_multiple_identity_flags_wrong_3r():
     # Generating the classic "swap" is outside tolerance only for a real
     # framework error; a 0.06% transcription typo stays under (evidence anchor
     # catches that class). Here the 3R is genuinely mis-bound.
-    text = (
-        "entry 100.00, structure stop 90.00, 2R/3R targets 120.00 / 130.00"
-    )  # 2R=120 ✓, 3R=130 vs correct 100+3*10=130 → clean
+    text = "entry 100.00, structure stop 90.00, 2R/3R targets 120.00 / 130.00"  # 2R=120 ✓, 3R=130 vs correct 100+3*10=130 → clean
     assert rv._r_multiple_identity(text) == []
 
 
@@ -2053,7 +2123,9 @@ _SKHY_STYLE_NEWS = (
 
 
 def test_macro_gate_flags_recalled_polymarket_without_prediction_leaf():
-    evidence = {"news": [{"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"}]}
+    evidence = {
+        "news": [{"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"}]
+    }
     claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
     flagged = [c for c in claims if c.status == "UNSUPPORTED"]
     # Both lines fail: no get_prediction_markets / get_macro_indicators leaf.
@@ -2066,7 +2138,11 @@ def test_macro_gate_passes_with_full_pinned_tool_set():
     evidence = {
         "news": [
             {"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"},
-            {"tool": "get_prediction_markets", "status": "ok", "content": "no Fed rate cuts in 2026 Yes 93%"},
+            {
+                "tool": "get_prediction_markets",
+                "status": "ok",
+                "content": "no Fed rate cuts in 2026 Yes 93%",
+            },
             {"tool": "get_macro_indicators", "status": "ok", "content": "RRP 0.432B WTI oil 91.48"},
         ]
     }
@@ -2080,7 +2156,11 @@ def test_macro_gate_passes_fomc_line_but_flags_rrp_without_macro_leaf():
     evidence = {
         "news": [
             {"tool": "get_fed_watch", "status": "ok", "content": "| 2026-09-15 | 60.2%"},
-            {"tool": "get_prediction_markets", "status": "ok", "content": "no Fed rate cuts in 2026 Yes 93%"},
+            {
+                "tool": "get_prediction_markets",
+                "status": "ok",
+                "content": "no Fed rate cuts in 2026 Yes 93%",
+            },
         ]
     }
     claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
@@ -2094,7 +2174,11 @@ def test_macro_gate_passes_when_macro_leaf_carries_term():
     # tool name -> the line is grounded (e.g. WTI from an economic calendar).
     evidence = {
         "news": [
-            {"tool": "get_economic_calendar", "status": "ok", "content": "WTI crude 91.2 rescheduled"},
+            {
+                "tool": "get_economic_calendar",
+                "status": "ok",
+                "content": "WTI crude 91.2 rescheduled",
+            },
         ]
     }
     claims = rv._macro_authority_gate(_SKHY_STYLE_NEWS, evidence, "news")
@@ -2119,8 +2203,8 @@ def test_pe_capture_requires_a_digit(tmp_path):
         "StockTwits bull case (sub-30 P/E, cheap vs Costco/Meta) is the same "
         "argument.\nLast: 336.37; EPS TTM $12.34.\n"
     )
-    assert rv._pe_basis_conflict(t) == []          # would raise ValueError before
-    assert rv._text_metrics(t)[1] == []            # no metric errored
+    assert rv._pe_basis_conflict(t) == []  # would raise ValueError before
+    assert rv._text_metrics(t)[1] == []  # no metric errored
 
 
 def test_verify_report_dir_survives_a_comma_only_pe_capture(tmp_path):
@@ -2141,6 +2225,7 @@ def test_verify_report_dir_survives_a_comma_only_pe_capture(tmp_path):
 def test_verify_report_dir_records_a_failing_metric(tmp_path, monkeypatch):
     """A metric that cannot parse a report is recorded, not fatal: the other
     metrics' claims and the section entry still land in the payload."""
+
     def _boom(_text):
         raise ValueError("could not convert string to float: ''")
 
@@ -2351,9 +2436,7 @@ def test_verify_report_dir_carries_the_envelope_block(tmp_path):
 
     payload = R.verify_report_dir(d, llm_override=_mk_llm('{"claims": [], "overall": "PASS"}'))
     assert payload["envelope"]["strict"] is True
-    assert [p["code"] for p in payload["envelope"]["problems"]] == [
-        "producer_set_reserved_field"
-    ]
+    assert [p["code"] for p in payload["envelope"]["problems"]] == ["producer_set_reserved_field"]
 
 
 def test_the_cli_counts_an_envelope_flag_in_its_exit_code(tmp_path, monkeypatch, capsys):
@@ -2379,11 +2462,7 @@ def test_the_identity_fan_out_registers_the_basis_checks():
     call) would leave every unit test green while the check stopped running -
     the exact failure mode that let these defects ship unnoticed.
     """
-    net_debt = (
-        "Cash + ST Investments: $62.47B\n"
-        "Total Debt: $38.35B\n"
-        "Net Debt: $10.92B\n"
-    )
+    net_debt = "Cash + ST Investments: $62.47B\nTotal Debt: $38.35B\nNet Debt: $10.92B\n"
     assert any("net cash" in c.claim.lower() for c in rv._valuation_identity_checks(net_debt))
 
     labels = (
@@ -2393,14 +2472,9 @@ def test_the_identity_fan_out_registers_the_basis_checks():
         "| Item | 2026-07-31 | 2026-04-30 | 2026-01-31 | 2025-07-31 |\n"
         "| Metric | Q2 FY27 | Q1 FY27 | Q4 FY26 | Q2 FY26 |\n"
     )
-    assert any(
-        "2025-07-31" in c.claim for c in rv._valuation_identity_checks(labels)
-    )
+    assert any("2025-07-31" in c.claim for c in rv._valuation_identity_checks(labels))
 
-    ratio = (
-        "Current Assets/Current Liabilities = $197.41B / $43.02B\n"
-        "current ratio 4.6808\n"
-    )
+    ratio = "Current Assets/Current Liabilities = $197.41B / $43.02B\ncurrent ratio 4.6808\n"
     assert any("4.6808" in c.claim for c in rv._valuation_identity_checks(ratio))
 
     roa = "ROA TTM 81.41% vs net_margin 0.637 asset_turnover 0.946\n"
@@ -2410,8 +2484,7 @@ def test_the_identity_fan_out_registers_the_basis_checks():
     # (the run date), so its registration is checked with one.
     dated = "| Next earnings | 2026-11-17 | get_earnings_calendar | 83 days out |"
     assert any(
-        "83 days out" in c.claim
-        for c in rv._valuation_identity_checks(dated, as_of="2026-09-12")
+        "83 days out" in c.claim for c in rv._valuation_identity_checks(dated, as_of="2026-09-12")
     )
 
 
@@ -2452,9 +2525,9 @@ def test_days_countdown_identity_tolerates_one_day():
     """The anchor is the run date while a report may date its data to the prior
     close, so a one-day offset is not a defect; two days is."""
     for stated in (65, 66, 67):
-        assert rv._days_countdown_identity(
-            f"2026-11-17 is {stated} days out", "2026-09-12"
-        ) == [], stated
+        assert (
+            rv._days_countdown_identity(f"2026-11-17 is {stated} days out", "2026-09-12") == []
+        ), stated
     assert rv._days_countdown_identity("2026-11-17 is 68 days out", "2026-09-12")
 
 
@@ -2489,13 +2562,9 @@ def test_days_countdown_identity_ignores_wrong_side_dates():
     )
     assert rv._days_countdown_identity(prior, "2026-09-14") == []
     # The mirror case: a future date cannot be an elapsed count either.
-    assert rv._days_countdown_identity(
-        "the 2026-11-17 print is 45 days ago", "2026-09-14"
-    ) == []
+    assert rv._days_countdown_identity("the 2026-11-17 print is 45 days ago", "2026-09-14") == []
     # A same-side date that does not fit still flags (the check is not off).
-    claims = rv._days_countdown_identity(
-        "the 2026-11-17 print is 83 days away", "2026-09-14"
-    )
+    claims = rv._days_countdown_identity("the 2026-11-17 print is 83 days away", "2026-09-14")
     assert len(claims) == 1 and "64 days" in claims[0].claim
 
 
@@ -2540,9 +2609,7 @@ def test_reference_price_line_is_evidence_for_every_stem():
     ref = "**Reference price: 413.23** (2026-09-15, FORMING intraday bar - provisional)"
     ev = {
         "news": [{"tool": "get_news", "status": "ok", "content": "px 416.60"}],
-        rv.RENDERED_BLOCK_KEY: [
-            {"analyst": "news", "block": ref + "\n\n## Tool Evidence"}
-        ],
+        rv.RENDERED_BLOCK_KEY: [{"analyst": "news", "block": ref + "\n\n## Tool Evidence"}],
     }
     assert rv._reference_price_line(ev, "news") == ref
     assert rv._reference_price_line(ev, "market") == ""
@@ -2572,7 +2639,7 @@ def test_instrument_identity_line_is_evidence_for_every_stem():
 
 
 def test_r_multiple_ignores_a_line_that_labels_its_own_multiple():
-    """"targets T1(2R) 444.2039, T2(3R) 459.6909" off the swing set's own
+    """ "targets T1(2R) 444.2039, T2(3R) 459.6909" off the swing set's own
     swing-low/ATR basis: with no entry on the line the report-wide spot is not
     their basis (TSM 2026-09-15 market.md)."""
     t = (
@@ -2583,7 +2650,7 @@ def test_r_multiple_ignores_a_line_that_labels_its_own_multiple():
 
 
 def test_stop_candidate_rejects_a_parenthesised_metric_tail():
-    """"puts 386.51 (structure stop) and 381.68 (200-SMA) in play" must not
+    """ "puts 386.51 (structure stop) and 381.68 (200-SMA) in play" must not
     bind the SMA as the stop (WDC 2026-09-15 market.md flagged a correct 2R)."""
     t = (
         "Price 413.53. A close under 410.85 with volume puts 386.51 (structure "
@@ -2640,7 +2707,7 @@ def test_roa_identity_needs_one_paragraph_and_one_basis():
 
 
 def test_internal_conflict_reads_a_stated_period_as_a_basis():
-    """"D/E 0.37 (balance sheet 2025-12-31)" against "quarterly total
+    """ "D/E 0.37 (balance sheet 2025-12-31)" against "quarterly total
     debt/equity 0.2816" is a period difference, stated (AMZN 2026-09-15)."""
     t = (
         "- get_ratios reports D/E 0.37, balance-sheet data dated 2025-12-31.\n"
@@ -2656,7 +2723,9 @@ def test_unusable_note_stems_are_reported_not_judged():
     """A replaced-stem note is not a report: its own sentences describe the
     lost generation, so judging them produced one UNSUPPORTED flag per sentence
     (HPE 2026-09-14 fundamentals, NVDA 2026-09-15 market)."""
-    assert rv._unusable_note("# NVDA - Market Analyst: SECTION UNUSABLE (generation degenerated)\n\n> ...")
+    assert rv._unusable_note(
+        "# NVDA - Market Analyst: SECTION UNUSABLE (generation degenerated)\n\n> ..."
+    )
     assert not rv._unusable_note("## NVDA - Market\n\n**Verdict:** ...")
 
 
@@ -2691,9 +2760,7 @@ def test_basis_of_falls_back_to_the_unit_class():
 
 
 def test_basis_registry_emits_deduped_typed_triples_with_provenance():
-    reg = rv._basis_registry(
-        "Diluted EPS $24.67 (leaf).\nDiluted EPS 24.67 again.\n", {24.67}
-    )
+    reg = rv._basis_registry("Diluted EPS $24.67 (leaf).\nDiluted EPS 24.67 again.\n", {24.67})
     assert [(b.metric, b.value, b.basis, b.source) for b in reg] == [
         ("diluted eps", 24.67, "level", "evidence")
     ]
@@ -2779,8 +2846,7 @@ def test_a_stated_weighting_is_not_a_claim_about_the_world():
             report="news",
             overall="FLAG",
             claims=[
-                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf")
-                for c in claims
+                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf") for c in claims
             ],
         )
 
@@ -2812,8 +2878,7 @@ def test_a_world_claim_that_merely_says_weighted_is_not_exempted():
             report="market",
             overall="FLAG",
             claims=[
-                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf")
-                for c in claims
+                rv.VerifierClaim(claim=c, status="UNSUPPORTED", reason="no leaf") for c in claims
             ],
         )
 
@@ -2903,10 +2968,7 @@ def test_scenario_slash_leg_is_not_bound_to_the_first_value():
     later leg: `| Scenario DCF bear/base/bull | $97.82 / … / $167.27 |` read
     97.82 (the bear) as the `bull` value on MSFT 2026-09-27."""
     rx = rv._INTERNAL_CONFLICT_METRICS["scenario dcf bull"][0]
-    row = (
-        "| Scenario DCF bear/base/bull | $97.82 / $123.26 / $167.27"
-        " — price above bull |"
-    )
+    row = "| Scenario DCF bear/base/bull | $97.82 / $123.26 / $167.27 — price above bull |"
     assert rv._extract_metric_values(row, rx, "scenario dcf bull") == []
 
 
@@ -2952,8 +3014,7 @@ def test_a_sibling_labelled_template_is_not_a_repetition_loop():
     component under its own label line, were reported as a decoder loop (MSFT
     2026-09-27). A stuck decoder in one context is still caught."""
     template = "".join(
-        f"- {name} (weight {w}): NA/100\n"
-        "    withheld: 0 of 1 components present, floor is 1\n"
+        f"- {name} (weight {w}): NA/100\n    withheld: 0 of 1 components present, floor is 1\n"
         for name, w in (
             ("fundamental_impact", 20),
             ("corporate_events", 10),
