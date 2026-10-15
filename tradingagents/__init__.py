@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import warnings
 
 # Load .env files at package import so DEFAULT_CONFIG's env-var overlay
@@ -15,6 +16,49 @@ try:
     load_dotenv(find_dotenv(".env.enterprise", usecwd=True), override=False)
 except ImportError:
     pass
+
+
+def env_shadow_keys(declared: dict, environ) -> list[str]:
+    """TRADINGAGENTS_* keys whose EXPORTED value overrides a different .env value.
+
+    ``load_dotenv`` defaults to ``override=False``, so a variable the launching
+    process already exported wins over the file. That order is correct - it is
+    what python-dotenv's own README documents, what pydantic-settings states
+    ("environment variables will always take priority over values loaded from a
+    dotenv file") and what 12factor.net III requires ("store config in the
+    environment") - and it is also invisible: the exported set on this machine
+    has drifted, and a drifted key changes what a run computes (a 13-name vs
+    15-name risk basket moves the book-CVaR GATE INPUT; a flipped decider gate
+    changed the verdict battery from three files to four with nothing in the
+    report tree saying so). This names the survivors so the drift is visible.
+
+    ``declared`` maps a key to the value the .env file(s) declare; a valueless
+    ``KEY`` line arrives as ``None`` and is skipped, because ``load_dotenv``
+    ignores those. Only the engine's own ``TRADINGAGENTS_*`` config family is
+    audited; vendor keys (``OPENROUTER_API_KEY``, ``ALPACA_*`` ...) belong to
+    the modules that read them.
+    """
+    return sorted(
+        key
+        for key, exported in environ.items()
+        if key.startswith("TRADINGAGENTS_")
+        and declared.get(key) is not None
+        and exported != declared[key]
+    )
+
+
+def env_shadow_warning(shadowed: list[str]) -> str | None:
+    """One line naming the shadowed keys - key NAMES only, NEVER a value."""
+    if not shadowed:
+        return None
+    shown = ", ".join(shadowed[:6])
+    more = f" (+{len(shadowed) - 6} more)" if len(shadowed) > 6 else ""
+    return (
+        f"config: {len(shadowed)} TRADINGAGENTS_* key(s) are overridden by the process "
+        f"environment (load_dotenv override=False), so this run uses the EXPORTED value, "
+        f"not the .env one: {shown}{more}"
+    )
+
 
 # Output-token caps are budget windows, not per-invocation overrides: a
 # reasoning model spends part of its output cap on hidden reasoning, so a
@@ -35,15 +79,19 @@ try:
         "TRADINGAGENTS_MAX_OUTPUT_TOKENS_QUICK",
         "TRADINGAGENTS_MAX_OUTPUT_TOKENS_DEEP",
     )
-    _declared: dict = {}
+    _file_declared: dict = {}
     for _path in (_find(usecwd=True), _find(".env.enterprise", usecwd=True)):
         if not _path:
             continue
         for _key, _value in (_dotenv_values(_path) or {}).items():
-            if _key in _CAP_KEYS and _value:
-                _declared[_key] = _value
+            _file_declared[_key] = _value  # a later file wins, as before
     # A cap .env does not declare keeps whatever the caller exported.
-    _os.environ.update(_declared)
+    _os.environ.update({k: v for k, v in _file_declared.items() if k in _CAP_KEYS and v})
+    # Audit AFTER the caps: a cap re-forced from the file is not a shadow, so
+    # what gets named here is what the effective config actually runs with.
+    _shadow_msg = env_shadow_warning(env_shadow_keys(_file_declared, _os.environ))
+    if _shadow_msg:
+        logging.getLogger(__name__).warning(_shadow_msg)
 except (ImportError, OSError):
     pass
 

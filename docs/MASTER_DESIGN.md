@@ -484,7 +484,9 @@ cannot drift (`toolsets.py:1-17`; asserted by
   — every public function in `strategies/*.py` and `dataflows/*.py` must be
   referenced outside its own module, or be in the audited `LEGACY_WHITELIST`.
 - `…::test_module_reachable_or_whitelisted` — same, per module.
-- `…::test_tool_bound_to_agent_surface`, `…::test_bound_tool_has_prompt_guidance`.
+- `…::test_tool_bound_to_agent_surface`, and
+  `tests/test_prompt_trigger_contract.py::test_bound_tools_carry_a_prompt_trigger`
+  (a bound tool must carry a prompt trigger).
 - `tests/test_doc_binding_claims.py` — the `docs/api_reference.md` "Bound to"
   column must equal the real toolset objects.
 - `tests/test_prompt_signature_contract.py` / `test_prompt_trigger_contract.py`

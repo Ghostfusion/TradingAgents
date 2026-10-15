@@ -42,6 +42,12 @@ Breakpoint debugging: add `breakpoint()` or `-s` on a test.
   (the process hangs). Contexts close at the end of `propagate`, in test
   teardown, and via daemon-guarded atexit.
 - **Port 11111** — OpenD; when down the TCP probe times out (tests mock it).
+- **An exported `TRADINGAGENTS_*` beats `.env`** (`load_dotenv` defaults to
+  `override=False`), so a stale launcher export changes what a run computes.
+  `import tradingagents` now logs ONE line naming every key whose exported
+  value differs from the file's (names only, never a value) — treat that line
+  as the provenance of the config you are reading, and never "fix" it by
+  flipping to `override=True` (see §0, "Environment uniqueness", item 8).
 
 ## 8.5 Adding a feature — step checklist
 

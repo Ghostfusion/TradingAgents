@@ -32,7 +32,8 @@ a fresh agent must follow them without being reminded:
    the graph ToolNode list for that agent. Every hop must be checked and
    landed when the change produces a usable computed read; the gates in
    `tests/test_calc_agent_wiring.py` (test_public_calc_reachable_or_whitelisted,
-   test_tool_bound_to_agent_surface, test_bound_tool_has_prompt_guidance)
+   test_module_reachable_or_whitelisted, test_tool_bound_to_agent_surface) plus
+   `tests/test_prompt_trigger_contract.py::test_bound_tools_carry_a_prompt_trigger`
    enforce the chain automatically - run them before finishing and add the
    prompt line whenever a new bound tool appears.
 2. **Keep every doc true** - whenever code/behavior changes, update the
@@ -264,6 +265,39 @@ py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/wor
    `override=`, so an exported variable still wins over `.env` and writing a
    default can never mask someone's shell environment; prove any top-up with
    a before/after comparison of the effective config.
+
+   **The export wins - and the survivors are now named at import
+   (2026-10-14).** The precedence is deliberate, and researched rather than
+   assumed: python-dotenv's own README documents that `override=False`
+   resolves *environment -> `.env` -> default*; pydantic-settings states
+   "environment variables will always take priority over values loaded from a
+   dotenv file"; 12factor.net III says config lives in the environment (the
+   `.env` file is a development convenience, not part of the methodology).
+   **Never "fix" this by flipping to `override=True`** - that rewrites every
+   exported `TRADINGAGENTS_*` value, gates included, which is exactly the
+   failure the caps block below was written to undo. Instead the drift is
+   made visible: `tradingagents/__init__.py::env_shadow_keys` +
+   `env_shadow_warning` log ONE line naming every `TRADINGAGENTS_*` key whose
+   **exported value differs from the file's** (**key names only, never a
+   value** - the values in this file are usually secrets). It runs *after*
+   the three forced output-token caps, so a cap re-forced from the file is
+   not reported, and it is **silent when nothing differs**.
+   - It has bitten twice, both invisibly: an exported risk basket of **13
+     names against the file's 15** (the book leg is a GATE INPUT - a
+     different book CVaR), and an exported
+     `TRADINGAGENTS_ENABLE_NOUL_DECIDER=true` against the file's `false`,
+     which wrote **4** verdict files into a tree the file's own config would
+     have given **3**, with nothing in the report tree saying so.
+   - Anchor check (expect `15 ... 0.5362`; any other pair means your shell is
+     shadowing the file):
+     `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u TRADINGAGENTS_RISK_BASKET_WEIGHTS py -3.12 -c "import tradingagents; from tradingagents.default_config import DEFAULT_CONFIG as C; print(len(C['risk_basket_tickers']), round(sum(C['risk_basket_weights'].values()),4))"`
+   - The standing prefix for any basket-dependent run (batch, screener,
+     pipeline, the web app) unsets the four drifted vars - keep using it; it
+     is cheap and it is the difference between a 15-name and a 13-name book
+     leg: `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u
+     TRADINGAGENTS_RISK_BASKET_WEIGHTS -u
+     TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS -u
+     TRADINGAGENTS_MASSIVE_API_KEY py -3.12 ...`
 9. **A `fetch_ticker` `fin` stores `<key>_series` as a BARE LIST of floats.**
    `annual_series` / `sec_annual_series` return `{"values", "years", "periods"}`
    to *their* callers, but the merge keeps only `values`
