@@ -288,13 +288,18 @@ py -3.12 -m ruff check .   # the WHOLE repo - CI runs exactly this (`.github/wor
      `TRADINGAGENTS_ENABLE_NOUL_DECIDER=true` against the file's `false`,
      which wrote **4** verdict files into a tree the file's own config would
      have given **3**, with nothing in the report tree saying so.
-   - Anchor check (expect `15 ... 0.5362`; any other pair means your shell is
-     shadowing the file):
+   - Anchor check (**expect `12 ... 0.5031` — the 2026-10-15 book**; any other
+     pair means your shell is shadowing the file). It is a *current* value, not
+     an example: re-read it from the live `.env` and update this line whenever
+     the book is re-synced (`scripts/positions_to_basket.py <csv> --apply`),
+     and mirror the membership in `TradingExecution/mandate.json` in the same
+     pass — the two sets are equal by construction and a mismatch is silent:
      `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u TRADINGAGENTS_RISK_BASKET_WEIGHTS py -3.12 -c "import tradingagents; from tradingagents.default_config import DEFAULT_CONFIG as C; print(len(C['risk_basket_tickers']), round(sum(C['risk_basket_weights'].values()),4))"`
    - The standing prefix for any basket-dependent run (batch, screener,
      pipeline, the web app) unsets the four drifted vars - keep using it; it
-     is cheap and it is the difference between a 15-name and a 13-name book
-     leg: `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u
+     is cheap and it is the difference between the file's book leg and whatever
+     the shell exported (the 2026-10-14 instance was 13 exported names against
+     the file's 15): `env -u TRADINGAGENTS_RISK_BASKET_TICKERS -u
      TRADINGAGENTS_RISK_BASKET_WEIGHTS -u
      TRADINGAGENTS_OPENROUTER_IGNORE_PROVIDERS -u
      TRADINGAGENTS_MASSIVE_API_KEY py -3.12 ...`
@@ -569,6 +574,8 @@ has changed before); never assume an endpoint works — the SDK's
   `structured_agents`). Adds a real deadline so a hung vendor call can't block
   the session indefinitely - see `docs/developer/10-tests-layout.md`.
 
+- 2026-10-15 `(working tree)` - **The book was re-synced from the 2026-10-15 positions export and the executor's mandate re-signed to match it — 15 names / Σw 0.5362 → 12 names / Σw 0.5031.** One producer per number: `scripts/positions_to_basket.py "Positions/Account1/Portfolio_Positions_Oct-15-2026.csv" --apply --write-book-json` rewrote the two `TRADINGAGENTS_RISK_BASKET_*` lines (backup `.env.bak`; `SPAXX`'s money-market line and `Pending activity` both count as cash, so the denominator is positions + cash and the weights land on the CSV's own percent-of-account), and `signald mandate-add` / `mandate-remove` re-signed `TradingExecution/mandate.json` — **3 adds** (AMKR, MLI, THC, each a name now held) and **6 removes** (CF, EHC, EXE, FOXA, INTU, KGC, each confirmed **not held** by the broker precheck, so no `--force` was needed). Nine rows chained into the daemon's own ledger `signals/audit/audit.jsonl` (the CLI was run with `--data signals`, so the chain continues where the daemon writes it: `verify` reads **OK — 1807 rows chained**), and each carries its reason in `mandate.json.archive.jsonl`. The two sets are **equal by construction and now asserted**: basket names == mandate `symbols.allowed` == {ALL, AMKR, BAC, GLD, GOOG, MLI, NLR, NVDA, SPY, THC, TROW, UTHR}; book value $350,374.16, cash $174,135.50 (49.7 %). The §0 item 8 anchor below moved to `12 ... 0.5031` in the same pass, because it is a **current** value, not an example.
+  - **Reported, not fixed:** `TradingExecution/signals/signald.pid` is **stale** — the last heartbeat is 16:02 ET and no process holds PID 12904, so the executor was already down before the re-sign. The re-sign is correct regardless (a running daemon re-reads `mandate.json` every scan and audits `mandate_reloaded`), but the production instance is Task Scheduler's (`Signald_Daemon`, at logon + daily 08:00 CT) and `run_daemon.cmd` says not to run it by hand, so it was left to the scheduler.
 - 2026-10-15 `(working tree)` - **The verifier's SECOND corruption alphabet: a bold marker injected INSIDE a number is now reported and typed (found while re-running the `INTU KGC SMCI AMKR` batch, fixed on sight).** `_digit_obfuscation`/`_DIGIT_MASKED_NUMBER_RE` cover the placeholder alphabet, where the digits are REPLACED (`rsi=23._15` for 23.15, `**$222.***` for 122.54 - the 2026-10-09 entry below). The same defect has a spelling that keeps every digit and closes the `**` span INSIDE the token: `**55.**37` for 55.37, `2026-**10-**14` for a date, `close_**-**50**_sma` for an indicator. Every digit survives, so the text still reads and the placeholder detector returned **0** for the whole file - which is how this went unnoticed while it damaged reports from 2026-09-16 onward. New `_MARKER_SPLIT_NUMBER_RE` + `_marker_split_numbers` + `_marker_injected_numbers`, registered in BOTH the per-stem consistency list and `_PROSE_FAMILIES`, report it as one `INTERNAL_CONFLICT` claim per report.
   - **It is measurable, not cosmetic.** On `reports/BKR_20261014_232320/1_analysts/market.md`'s own reference-price line `_DEC_RE` (`\d+\.\d+`) matches **NOTHING** - the figure is unreadable to the decimal matcher - while `_DOLLAR_RE` returns the fragments as two integers (`55` and `37` where the report means 55.37). One real value read as two is exactly the failure `_DATE_TAIL_BEFORE_RE`/`_DATE_HEAD_AFTER_RE` exist to stop for "2026-06-30"; the star-split case has no such guard yet (queued, not landed here).
   - **Swept every tree on disk: 1370 tokens in 38 of 184 trees** (BKR 162, MSFT_20260916 142, VZ_20261009 96, ALL 76, AMKR_20260917 68, KGC 52, ZM 50, CMCSA 48, AMZN 48 ...) over 28 symbols and every date from 2026-09-16 on, with **0 false positives**: all 167 distinct token shapes are numeric fragments, and `**55.37**` (well-formed figure), `**$122.54**` (bold amount) and `**size = 0 new risk.**` (a bolded sentence that merely contains a digit) are excluded, each pinned by a test.
