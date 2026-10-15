@@ -58,7 +58,18 @@ ADVISORY_RISK_KEYS = (
     "book_drawdown",
     "drawdown_limit",
     "single_cvar",
+    # The window rides WITH the value, for all three legs. `candidate_cvar_n`
+    # always travelled; the name and book legs did not, so the artifact
+    # published `single_cvar: 0.0988` with nothing to say it was 319
+    # observations - while `reporting.py` printed "(1-day 95% historical,
+    # simple returns, 319 obs)" from the in-memory copy and
+    # `metric_authority.analyzed_name_cvar` states that `single_cvar_n` is what
+    # carries the window (found 2026-10-15, explaining AMKR's 9.88% out of
+    # reports/AMKR_20261015_124732). Three tail readings with genuinely
+    # different windows cannot be compared, or told apart, from the value alone.
+    "single_cvar_n",
     "book_cvar",
+    "book_cvar_n",
     "candidate_cvar",
     "candidate_cvar_n",
     "candidate_weight_pct",
@@ -79,9 +90,7 @@ def hash_body(obj: Any) -> str:
     ``sort_keys=True, default=str`` over the **body**, never the file bytes, so
     re-indenting cannot change a hash and either side can recompute it.
     """
-    return hashlib.sha256(
-        json.dumps(obj, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def body_of(doc: dict) -> dict:
@@ -233,9 +242,7 @@ def risk_advisory(final_state: dict) -> dict | None:
     ctx = final_state.get("risk_context") or {}
     if not isinstance(ctx, dict):
         ctx = {}
-    out: dict[str, Any] = {
-        key: ctx[key] for key in ADVISORY_RISK_KEYS if ctx.get(key) is not None
-    }
+    out: dict[str, Any] = {key: ctx[key] for key in ADVISORY_RISK_KEYS if ctx.get(key) is not None}
     gate = final_state.get("risk_gate")
     if isinstance(gate, dict) and gate:
         out["risk_gate"] = {

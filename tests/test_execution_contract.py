@@ -149,13 +149,18 @@ def test_the_two_hashes_recompute_from_the_body(tmp_path):
     doc = _emit(tmp_path)
 
     body = {k: v for k, v in doc.items() if k not in ("artifact_sha256", "decision_hash")}
-    assert doc["artifact_sha256"] == hashlib.sha256(
-        json.dumps(body, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
+    assert (
+        doc["artifact_sha256"]
+        == hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    )
     with_artifact = {k: v for k, v in doc.items() if k != "decision_hash"}
-    assert doc["decision_hash"] == "sha256:" + hashlib.sha256(
-        json.dumps(with_artifact, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
+    assert (
+        doc["decision_hash"]
+        == "sha256:"
+        + hashlib.sha256(
+            json.dumps(with_artifact, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+    )
     assert ec.seal_problems(doc) == []
 
 
@@ -216,12 +221,14 @@ def test_the_run_id_is_the_report_directory_name(tmp_path):
 
 
 def test_the_unusable_pm_confidence_is_dropped_not_clamped(tmp_path):
-    assert _emit(tmp_path / "a", pm_decision={"rating": "Hold", "confidence": 3.0})[
-        "confidence"
-    ] is None
-    assert _emit(tmp_path / "b", pm_decision={"rating": "Hold", "confidence": 0.4})[
-        "confidence"
-    ] == 0.4
+    assert (
+        _emit(tmp_path / "a", pm_decision={"rating": "Hold", "confidence": 3.0})["confidence"]
+        is None
+    )
+    assert (
+        _emit(tmp_path / "b", pm_decision={"rating": "Hold", "confidence": 0.4})["confidence"]
+        == 0.4
+    )
 
 
 # --------------------------------------------------------------------------
@@ -366,7 +373,13 @@ def test_the_artifact_does_not_set_executor_owned_fields(tmp_path):
 
     assert [k for k in ec.EXECUTOR_OWNED if k in doc] == []
     # The advisory label keeps its own name: it explains the *research* verdict.
-    assert doc["binding_constraint"] in (None, "halt", "book_drawdown", "analyzed_name_cvar", "risk_gate")
+    assert doc["binding_constraint"] in (
+        None,
+        "halt",
+        "book_drawdown",
+        "analyzed_name_cvar",
+        "risk_gate",
+    )
 
 
 def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
@@ -376,6 +389,9 @@ def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
             "book_drawdown": 0.0724,
             "drawdown_limit": 0.10,
             "single_cvar": 0.0483,
+            "single_cvar_n": 319,
+            "book_cvar": 0.0102,
+            "book_cvar_n": 218,
             "candidate_cvar": 0.0410,
             "candidate_cvar_n": 319,
             "candidate_weight_pct": 0.10,
@@ -393,6 +409,9 @@ def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
         "book_drawdown",
         "drawdown_limit",
         "single_cvar",
+        "single_cvar_n",
+        "book_cvar",
+        "book_cvar_n",
         "candidate_cvar",
         "candidate_cvar_n",
         "candidate_weight_pct",
@@ -402,6 +421,46 @@ def test_the_risk_context_is_an_allow_listed_advisory_block(tmp_path):
         "cvar_gate_basis",
         "risk_gate",
     }
+
+
+def test_every_published_cvar_carries_the_window_it_was_measured_over(tmp_path):
+    """A tail mean without its observation count is not comparable.
+
+    ``risk_context`` publishes THREE tail readings whose windows genuinely
+    differ: the name leg is a 1-day 95% CVaR over the PIT series, the book leg
+    over the configured basket, the candidate leg over that basket plus this
+    name. The report prints each window (``reporting.py`` renders "(1-day 95%
+    historical, simple returns, 319 obs)"), and
+    ``metric_authority.analyzed_name_cvar`` states that ``single_cvar_n`` is the
+    key carrying it - but the allow-list shipped only ``candidate_cvar_n``, so
+    the ARTIFACT published ``single_cvar: 0.0988`` with nothing to say it was 319
+    observations. Found 2026-10-15 while explaining AMKR's 9.88% out of
+    ``reports/AMKR_20261015_124732``.
+    """
+    doc = _emit(
+        tmp_path,
+        risk_context={
+            "single_cvar": 0.0988,
+            "single_cvar_n": 319,
+            "book_cvar": 0.0102,
+            "book_cvar_n": 218,
+            "candidate_cvar": 0.0103,
+            "candidate_cvar_n": 219,
+        },
+    )
+
+    ctx = doc["risk_context"]
+    for value_key, window_key in (
+        ("single_cvar", "single_cvar_n"),
+        ("book_cvar", "book_cvar_n"),
+        ("candidate_cvar", "candidate_cvar_n"),
+    ):
+        assert window_key in ctx, f"{value_key} was published without its window"
+    assert (ctx["single_cvar_n"], ctx["book_cvar_n"], ctx["candidate_cvar_n"]) == (
+        319,
+        218,
+        219,
+    )
 
 
 def test_the_context_carries_only_what_actually_ran(tmp_path):
