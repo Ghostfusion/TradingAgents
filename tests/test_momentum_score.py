@@ -122,7 +122,16 @@ def test_the_gate_ships_off_and_is_registered():
     assert ENGINE_TOOLS["momentum"] == "get_momentum_score"
     assert ENGINE_SECTIONS["momentum"] == "market"
     assert SHIPPED_DEFAULTS["enable_momentum_score"] is False
-    assert DEFAULT_CONFIG["enable_momentum_score"] is False
+    # `DEFAULT_CONFIG` is the EFFECTIVE config, and `default_config`'s own
+    # SHIPPED_DEFAULTS docstring states the contract: "A test that asserts a gate
+    # ships off reads this, never `DEFAULT_CONFIG`". The developer `.env` reaches
+    # the effective config through `os.environ` (loaded at package import) and the
+    # live `.env` turns this gate ON, so the effective value is pinned here only
+    # when nothing declares it - the hermetic guard is the line above.
+    import os
+
+    if not os.environ.get("TRADINGAGENTS_ENABLE_MOMENTUM_SCORE"):
+        assert DEFAULT_CONFIG["enable_momentum_score"] is False
 
 
 # ---------------------------------------------------------------------------

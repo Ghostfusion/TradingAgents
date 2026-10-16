@@ -375,6 +375,14 @@ def market_tools() -> list:
                 # P0-4: the FRED macro read was bound only to news_tools(), so the
                 # market-level regime path could not reach the VIX series it ranks.
                 get_macro_indicators,
+                # The cross-sectional momentum BOOK is the market-wide companion
+                # of the turbulence read below, and the market analyst's own
+                # prompt already names it ("Use it before any 'leaders are
+                # outrunning laggards' claim") - but it was bound only to
+                # fundamentals_company_tools(), so the analyst could not call the
+                # read it was told to cite (wired 2026-10-16, found while landing
+                # docs/design_momentum_screener.md).
+                get_cross_section_momentum,
                 # FinRL's turbulence gate: the cross-section's own Mahalanobis
                 # distance from its strictly-prior history (design_finrl §6.1/§7).
                 # A market-state read, so the market analyst owns the claim.
