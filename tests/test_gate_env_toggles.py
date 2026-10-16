@@ -43,6 +43,7 @@ REGISTRY: dict[str, str] = {
     "enable_agreement": "wired",
     "enable_decision_guardrail": "wired",
     "enable_exits": "wired",
+    "enable_exit_engine": "wired",
     "enable_kelly_alloc": "wired",
     "enable_correlation_penalty": "wired",
     "enable_pre_market_review": "wired",

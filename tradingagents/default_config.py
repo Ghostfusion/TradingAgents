@@ -114,6 +114,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_ENABLE_KELLY_ALLOC": "enable_kelly_alloc",
     "TRADINGAGENTS_KELLY_FRACTION": "kelly_alloc_fraction",
     "TRADINGAGENTS_ENABLE_EXITS": "enable_exits",
+    "TRADINGAGENTS_ENABLE_EXIT_ENGINE": "enable_exit_engine",
     "TRADINGAGENTS_ENABLE_RISK_GOVERNOR": "enable_risk_governor",
     "TRADINGAGENTS_ENABLE_DECISION_AUDIT": "enable_decision_audit",
     "TRADINGAGENTS_REGIME_STATE_ENABLE": "regime_state_enable",
@@ -1017,6 +1018,7 @@ SHIPPED_DEFAULTS = {
         # Value-style enhancements (value_style_gap_plan.md).
         "enable_composite_rank": False,  # V2: composite (value+momentum) ranking
         "enable_exits": False,  # V4: ATR exits / rebalance hints
+        "enable_exit_engine": False,  # the five-mechanism exit engine
         # Qlib integration (design_qlib_integration.md): advisory calculators,
         # all default-off; the factor profile tool returns "unavailable" when
         # its flag is off (mirrors the OpenBB gated-tool convention).

@@ -123,7 +123,6 @@ ADVISORY_CALCULATORS = {
     "strategies/evaluate.py:rolling_beta": "reference",
     "strategies/evaluate.py:rolling_sharpe": "reference",
     "strategies/evaluate.py:turnover_cost": "reference",
-    "strategies/exits.py:net_of_cost": "reference",
     "strategies/exits.py:rebalance_due": "reference",
     "strategies/exits.py:stop_to_breakeven_r": "reference",
     "strategies/factor_expressions.py:clear_expr_cache": "reference",

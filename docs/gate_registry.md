@@ -24,7 +24,7 @@ document on every suite run:
    by nothing.
 
 **What this file covers.** The rows below are every policy, data-surface and
-context gate: **all 120 of the 120 `enable_*` keys** in `DEFAULT_CONFIG`, plus
+context gate: **all 121 of the 121 `enable_*` keys** in `DEFAULT_CONFIG`, plus
 the numeric limits and the always-on checks. R4 stage 2 registered the last six
 families — the score-engine gates (§7e), the debate and run-shape flags (§7f),
 the factor-model family (§7g), the event family (§7h), the vendor and screener
@@ -63,6 +63,7 @@ same way rather than being stored as a truthy string.
 | `enable_agreement` | `TRADINGAGENTS_ENABLE_AGREEMENT` | consensus / agreement scaling of the size | `strategies/consensus.py` | `test_strategies_value_dip.py`, `test_graph_tool_loop.py` | wired |
 | `enable_decision_guardrail` | `TRADINGAGENTS_ENABLE_DECISION_GUARDRAIL` | post-PM downgrade-only stabilizer + confidence cap | `agents/managers/portfolio_manager.py` | `test_decision_guardrail.py` | wired |
 | `enable_exits` | `TRADINGAGENTS_ENABLE_EXITS` | exit / stop arithmetic on a held position | `strategies/contract.py` | `test_v2_v5_wiring.py` | wired |
+| `enable_exit_engine` | `TRADINGAGENTS_ENABLE_EXIT_ENGINE` | the five-mechanism exit engine (`get_exit_engine` tool + `scripts/exit_engine.py`) | `strategies/exit_engine.py` | `test_exit_engine.py` | wired |
 | `enable_kelly_alloc` | `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | portfolio-level fractional-Kelly allocation | `strategies/portfolio.py` | `test_formulas_p3.py` | wired |
 | `enable_correlation_penalty` | `TRADINGAGENTS_ENABLE_CORRELATION_PENALTY` | down-weight a name whose average pairwise correlation with the book is high | `strategies/portfolio.py` | `test_strategies_portfolio.py` | wired |
 | `enable_pre_market_review` | `TRADINGAGENTS_ENABLE_PRE_MARKET_REVIEW` | same-night pre-market re-check artefact beside the report | `batch.py::_batch_pre_market_check` | `test_batch_pre_market_parity.py` | wired |

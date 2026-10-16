@@ -129,6 +129,7 @@ changing a config key; `--check` exits non-zero when the table is stale.
 | `TRADINGAGENTS_ENABLE_KELLY_ALLOC` | `enable_kelly_alloc` | allocation block uses multi-asset fractional Kelly (advisory, default off) |
 | `TRADINGAGENTS_KELLY_FRACTION` | `kelly_alloc_fraction` | fractional-Kelly scaling (default 0.25) |
 | `TRADINGAGENTS_ENABLE_EXITS` | `enable_exits` | default `false` |
+| `TRADINGAGENTS_ENABLE_EXIT_ENGINE` | `enable_exit_engine` | default `false` |
 | `TRADINGAGENTS_ENABLE_RISK_GOVERNOR` | `enable_risk_governor` | default `false` |
 | `TRADINGAGENTS_ENABLE_DECISION_AUDIT` | `enable_decision_audit` | on, the PM's report shows a claim-vs-computed audit note |
 | `TRADINGAGENTS_REGIME_STATE_ENABLE` | `regime_state_enable` | regime-state size multiplier |
@@ -939,6 +940,7 @@ reason lives in `tests/test_calc_agent_wiring.py::TOOL_LEGACY_BINDING`.
 | `get_downside_read(ticker, target?)` | `strategies.rate_utils.downside_measures` | market | semi-deviation / downside deviation / shortfall probability / average shortfall vs a target (MAR) |
 | `get_horizon_var(ticker, horizon_days?, confidence_level?)` | `strategies.book_risk.var_cvar_horizon` | market | empirical + parametric VaR/CVaR at a multi-day horizon, with the sqrt(T) i.i.d. scaling gate. The argument is a confidence **LEVEL** (0.95), the opposite convention from the daily-tail `cvar` reads' tail probability (0.05) — the parameter was `alpha` until 2026-10-12 |
 | `get_trailing_exit(ticker, entry, peak, current, trail_pct?)` | `strategies.exits.trailing_stop_exit` | market | peak-trailing / give-back stop verdict + exit price |
+| `get_exit_engine(ticker, entry_bars?, entry_date?, entry_price?, risk_gate?)` | `strategies.exit_engine.evaluate_long_exit` | market | the five-mechanism exit decision for a position that is ALREADY OPEN — 2.5×ATR initial stop, 3×ATR chandelier ratcheted from the high-water mark since entry, a confirmed MA50 breakdown (two consecutive closes), momentum deterioration as persistence, and the opportunity-cost stall — published as `HOLD` / `REDUCE` / `EXIT` / `RISK_EXIT` / `UNAVAILABLE` with the rule that decided. Point-in-time: the stop tested on a bar never uses that bar's own high, a close-evaluated signal fills at the next tradable price and an intraday stop that gapped fills at the open. Pass `entry_bars` or `entry_date`; any rule it cannot measure is named rather than assumed safe. Gated by `enable_exit_engine` |
 | `get_exit_plan(entry, atr?, current?, peak?, stop?, giveback_pct?, ticker?)` | `strategies.exits.breakeven_after_confirmation` + `max_giveback_exit` | market | structure/R breakeven trigger + margin-giveback stop in one exit-management read. Same measured-level contract as `get_exit_check`: pass `ticker` for a MEASURED close + ATR, otherwise the output labels its levels caller-supplied |
 | `get_scaleout_plan(entry, stop, t1_fraction?)` | `strategies.swing.scaleout_plan` | market | tiered partial-profit plan (sell T1 fraction -> break-even -> trail) |
 | `get_payoff_asymmetry(ticker, returns?, threshold?)` | `strategies.statistical.omega` | market | Omega ratio (gains/losses payoff asymmetry) about a threshold |
@@ -1131,6 +1133,7 @@ so a tree carries its own consistency record instead of depending on the opt-in
 | `python batch.py --symbols ...` | headless concurrent; `--vendor`, `--workers`, `--analysts`, `--depth`, `--date` |
 | `python pipeline.py --universe top-losers --top 5` | screener + composite rank + batch (B2) |
 | `python scripts/value_screener.py ...` | value screens / scans / composite |
+| `python scripts/exit_engine.py --tickers … --entry-bars N [--variants]` | the five-mechanism exit decision per name, with the per-rule census and the four-variant A/B (report → `screener/`) |
 | `python scripts/action_report.py ...` | conditional action report (basket vs report verdicts vs live market) |
 | `python scripts/positions_to_basket.py ...` | combine broker position CSVs -> TRADINGAGENTS_RISK_BASKET_* weights (cash in the denominator; `--apply` rewrites .env) |
 | `python scripts/rebuild_complete_report.py reports/<dir>` | re-render TOC reports |

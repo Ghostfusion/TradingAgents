@@ -5382,6 +5382,159 @@ def get_exit_plan(
     ) + levels["note"]
 
 
+def _fmt_exit_price(value: float | None) -> str:
+    return "n/a" if value is None else f"{float(value):.2f}"
+
+
+def _recorded_momentum_scores(ticker: str) -> tuple[list[float], str]:
+    """The composite series the score-history store holds for ``ticker``.
+
+    The persistence rule needs more than today's score, and that store is the one
+    producer holding a row per scored run date. An empty store is reported as an
+    empty store: the rule is then absent, never "no deterioration".
+    """
+    try:
+        from tradingagents.strategies.score_history import read_history
+
+        rows = read_history(ticker)
+    except Exception as exc:  # noqa: BLE001 - an advisory store must not break a tool
+        return [], f"score history unreadable ({type(exc).__name__})"
+    scores = [float(r["score"]) for r in rows if isinstance(r.get("score"), (int, float))]
+    if not scores:
+        return [], "no recorded score history"
+    return scores, f"{len(scores)} recorded score(s)"
+
+
+def _rs_verdict(closes: list) -> tuple[bool | None, str]:
+    """``lagging`` is the repo's own word for relative strength deteriorating."""
+    bench = _benchmark_closes()
+    if not bench:
+        return None, "no benchmark series"
+    try:
+        from tradingagents.strategies.relative_strength import relative_strength_report
+
+        verdict = str(relative_strength_report(closes, bench).get("verdict") or "")
+    except Exception as exc:  # noqa: BLE001
+        return None, f"RS unavailable ({type(exc).__name__})"
+    if verdict == "unknown":
+        return None, "RS verdict unknown"
+    return verdict == "lagging", f"RS {verdict}"
+
+
+def _render_exit_engine(ticker: str, result: dict, *, scores_note: str, rs_note: str) -> str:
+    """The tool's compact read: the action, the deciding rule, the levels, the absences."""
+    if result["action"] == "UNAVAILABLE":
+        return f"exit engine {ticker}: UNAVAILABLE - {result['reason']}"
+    outcome = (
+        "no exit fired"
+        if result["exit_index"] is None
+        else f"exited bar {result['exit_index']} @ {_fmt_exit_price(result['exit_price'])} "
+        f"({result['execution']})"
+    )
+    net = "" if result["net_return"] is None else f", net {result['net_return']:+.2%}"
+    open_return = (
+        "n/a" if result["unrealized_return"] is None else f"{result['unrealized_return']:+.2%}"
+    )
+    absent = ", ".join(sorted(result["absent"])) or "none"
+    return "\n".join(
+        [
+            f"exit_engine {ticker}: {result['action']} ({result['reason']}); {outcome}{net}",
+            f"  levels: entry {_fmt_exit_price(result['entry_price'])}; initial stop "
+            f"{_fmt_exit_price(result['initial_stop'])}; live stop "
+            f"{_fmt_exit_price(result['stop_now'])}; chandelier "
+            f"{_fmt_exit_price(result['trailing_stop'])}; high-water "
+            f"{_fmt_exit_price(result['hwm'])}; ATR {_fmt_exit_price(result['atr'])}",
+            f"  held {result['days_held']} session(s); open return {open_return}",
+            f"  rules: trend break {result['trend_break']}; momentum deteriorating "
+            f"{result['momentum_deteriorating']}; {scores_note}; {rs_note}",
+            f"  coverage {result['coverage']}; absent {absent}",
+            f"  basis: {result['basis']}",
+        ]
+    )
+
+
+@tool
+def get_exit_engine(
+    ticker: Annotated[str, "ticker symbol"],
+    entry_bars: Annotated[
+        int | None, "sessions held so far (pass this or entry_date)"
+    ] = None,
+    entry_date: Annotated[
+        str | None, "YYYY-MM-DD the position was opened (searched in the run's own bars)"
+    ] = None,
+    entry_price: Annotated[
+        float | None, "the actual fill price; omit to use the close at the entry bar"
+    ] = None,
+    risk_gate: Annotated[
+        str | None, "the risk gate's verdict when one was read (PASS/WARN/REJECT)"
+    ] = None,
+) -> str:
+    """The five-mechanism exit decision for an open long, walk-forward.
+
+    Answers one question - hold, reduce or exit **now** - and names the rule that
+    decided: the 2.5xATR protective stop, the 3xATR chandelier ratcheted from the
+    high-water mark since entry, a *confirmed* MA50 breakdown (two consecutive
+    closes), momentum deterioration as persistence rather than level, and the
+    opportunity-cost stall. Returns HOLD / REDUCE / EXIT / RISK_EXIT /
+    UNAVAILABLE, and names any rule it could not measure rather than implying the
+    position is safe.
+
+    The walk is point-in-time: the stop tested on a bar never uses that bar's own
+    high, so the levels are the ones a decision could actually have used, and a
+    stop gap fills at the open rather than at the stop. Cite it before any
+    'hold / reduce / exit / stop out / the trend has broken' claim on a position
+    that is already open. Gated by ``enable_exit_engine``.
+    """
+    if not _r3_flag("enable_exit_engine"):
+        return "exit engine unavailable: the engine is gated off (enable_exit_engine)"
+    if entry_bars is None and not entry_date:
+        return (
+            f"exit engine unavailable for {ticker}: pass entry_bars=<sessions held> or "
+            "entry_date=YYYY-MM-DD - an exit rule without an entry is not an exit rule."
+        )
+    try:
+        from tradingagents.strategies.exit_engine import ExitConfig, evaluate_long_exit
+
+        data = _ohlcv(ticker)
+        closes = [float(c) for c in data.get("closes") or []]
+        if len(closes) < 2:
+            return f"exit engine unavailable for {ticker}: fewer than two daily bars."
+        dates = list(data.get("dates") or [])
+        entry_idx = None
+        if entry_bars is not None:
+            entry_idx = max(0, len(closes) - 1 - int(entry_bars))
+        elif dates:
+            wanted = str(entry_date)[:10]
+            for i, value in enumerate(dates):
+                if str(value)[:10] <= wanted:
+                    entry_idx = i
+                else:
+                    break
+        if entry_idx is None:
+            return (
+                f"exit engine unavailable for {ticker}: {entry_date} is not inside the "
+                f"{len(closes)} bars on hand (say entry_bars instead)."
+            )
+        scores, scores_note = _recorded_momentum_scores(ticker)
+        rs, rs_note = _rs_verdict(closes)
+        result = evaluate_long_exit(
+            closes,
+            highs=[float(h) for h in data.get("highs") or []] or None,
+            lows=[float(low) for low in data.get("lows") or []] or None,
+            opens=[float(o) for o in data.get("opens") or []] or None,
+            dates=dates or None,
+            entry_idx=entry_idx,
+            entry_price=float(entry_price) if entry_price else None,
+            config=ExitConfig(),
+            momentum_scores=scores or None,
+            rs_deteriorating=rs,
+            risk_gate=risk_gate,
+        )
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
+        return f"exit engine unavailable for {ticker}: {type(exc).__name__}: {exc}"
+    return _render_exit_engine(ticker, result, scores_note=scores_note, rs_note=rs_note)
+
+
 @tool
 def get_scaleout_plan(
     entry: Annotated[float, "entry price"],
