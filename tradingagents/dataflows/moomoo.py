@@ -1467,10 +1467,9 @@ def get_insider_transactions_moomoo(symbol: str) -> str:
         price = row.get("max_price") or row.get("min_price")
         date = row.get("max_trade_date_str") or row.get("min_trade_date_str") or "?"
         source = row.get("source_group_name") or ""
-        shares_str = (
-            f"{shares:+,}" if isinstance(shares, (int, float)) and shares else str(shares or "?")
-        )
-        price_str = f"{price:.2f}" if isinstance(price, (int, float)) else str(price or "?")
+        shares_n, price_n = _num_or_none(shares), _num_or_none(price)
+        shares_str = f"{shares_n:+,}" if shares_n else str(shares or "?")
+        price_str = f"{price_n:.2f}" if price_n is not None else str(price or "?")
         lines.append(
             f"- {date}: {name} ({title}) — {tx_type} {shares_str} @ {price_str} ({source})"
         )
@@ -1712,7 +1711,8 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
             wk = str(row.get("capital_flow_item_time", ""))[:10]
 
             def _fmt_flow(v):
-                return f"{v / 1e8:+.1f}B" if isinstance(v, (int, float)) else "N/A"
+                fv = _num_or_none(v)
+                return f"{fv / 1e8:+.1f}B" if fv is not None else "N/A"
 
             lines.append(
                 f"| {wk} | {_fmt_flow(row.get('in_flow'))} | {_fmt_flow(row.get('super_in_flow'))} "
@@ -1731,9 +1731,9 @@ def get_capital_flow_moomoo(ticker: str, curr_date: str = None) -> str:
             ("Mid", "capital_in_mid", "capital_out_mid"),
             ("Small", "capital_in_small", "capital_out_small"),
         ]:
-            iv, ov = row.get(in_key), row.get(out_key)
-            ivs = f"{iv / 1e8:+.1f}B" if isinstance(iv, (int, float)) else "N/A"
-            ovs = f"{ov / 1e8:+.1f}B" if isinstance(ov, (int, float)) else "N/A"
+            iv, ov = _num_or_none(row.get(in_key)), _num_or_none(row.get(out_key))
+            ivs = f"{iv / 1e8:+.1f}B" if iv is not None else "N/A"
+            ovs = f"{ov / 1e8:+.1f}B" if ov is not None else "N/A"
             lines.append(f"| {bucket} | {ivs} | {ovs} |")
     lines.append("")
     lines.append(
@@ -1867,7 +1867,8 @@ def get_fed_watch_moomoo() -> str:
         meeting = str(row.get("meeting_date", "?"))
         tgt = str(row.get("target_range", "?"))
         prob = row.get("probability")
-        prob_s = f"{float(prob):.1f}%" if isinstance(prob, (int, float)) else str(prob)
+        prob_n = _num_or_none(prob)
+        prob_s = f"{prob_n:.1f}%" if prob_n is not None else str(prob)
         lines.append(f"| {meeting} | {tgt} | {prob_s} |")
     lines.append("")
     lines.append(
@@ -1901,10 +1902,11 @@ def _rise_fall_rows(buckets: list) -> list[tuple[float, float, str, object]]:
     """
 
     def _num(v, default: float) -> float:
-        return float(v) if isinstance(v, (int, float)) else default
+        # `v == v` excludes NaN, which `isinstance` alone lets through.
+        return float(v) if isinstance(v, (int, float)) and v == v else default
 
     def _pct(v, default: str) -> str:
-        return f"{v}%" if isinstance(v, (int, float)) else default
+        return f"{v}%" if isinstance(v, (int, float)) and v == v else default
 
     rows = []
     for b in buckets:
@@ -1942,7 +1944,8 @@ def get_market_breadth_moomoo() -> str:
             for _, row in hm.head(8).iterrows():
                 name = str(row.get("plate_name", "?"))
                 chg = row.get("change_rate")
-                chg_s = f"{float(chg):+.2f}%" if isinstance(chg, (int, float)) else "-"
+                chg_n = _num_or_none(chg)
+                chg_s = f"{chg_n:+.2f}%" if chg_n is not None else "-"
                 rise, fall = row.get("rise_count", 0), row.get("fall_count", 0)
                 leader = str(row.get("leader_stock", ""))
                 lines.append(f"| {name} | {chg_s} | {rise} | {fall} | {leader} |")
@@ -2041,7 +2044,8 @@ def get_revenue_breakdown_moomoo(ticker: str) -> str:
             rev = item.get("main_oper_income")
             rev_s = _fmt_fin_val(rev, currency)
             ratio = item.get("ratio")
-            ratio_s = f"{float(ratio):.1f}%" if isinstance(ratio, (int, float)) else "-"
+            ratio_n = _num_or_none(ratio)
+            ratio_s = f"{ratio_n:.1f}%" if ratio_n is not None else "-"
             lines.append(f"| {name} | {rev_s} | {ratio_s} |")
         lines.append("")
         if _rev_conc is not None:
@@ -2126,13 +2130,19 @@ def get_earnings_catalyst_moomoo(ticker: str) -> str:
     for _, row in data.head(8).iterrows():
         period = str(row.get("period_text", "?"))
         pub = str(row.get("pub_trading_day_str", "?"))[:10]
-        imp = row.get("predict_vola_ratio_newest")
-        imp_s = f"{float(imp):.1f}%" if isinstance(imp, (int, float)) else "-"
-        crush = row.get("option_iv_crush")
-        crush_s = f"{float(crush):.1f}pp" if isinstance(crush, (int, float)) else "-"
-        close, last_close = row.get("close_price"), row.get("last_close_price")
+        # `_num_or_none` maps the SDK's missing cells (None / NoneDataType / NaN) to
+        # None, so a NaN column prints this table's own "-" rather than "nan%"
+        # (observed live 2026-10-16: every implied-move / IV-crush / day-move cell).
+        imp = _num_or_none(row.get("predict_vola_ratio_newest"))
+        imp_s = f"{imp:.1f}%" if imp is not None else "-"
+        crush = _num_or_none(row.get("option_iv_crush"))
+        crush_s = f"{crush:.1f}pp" if crush is not None else "-"
+        close, last_close = (
+            _num_or_none(row.get("close_price")),
+            _num_or_none(row.get("last_close_price")),
+        )
         move = "-"
-        if isinstance(close, (int, float)) and isinstance(last_close, (int, float)) and last_close:
+        if close is not None and last_close:
             move = f"{(close / last_close - 1) * 100:+.1f}%"
         lines.append(f"| {period} | {pub} | {imp_s} | {crush_s} | {move} |")
     lines.append("")
@@ -2649,18 +2659,19 @@ def get_institution_holdings_moomoo(ticker: str) -> str:
     lines.append("| --- | --- | --- | --- | --- |")
     for row in rows[:6]:
         period = str(row.get("period", "?"))
-        inst = row.get("institutions")
-        inst_s = int(inst) if isinstance(inst, (int, float)) else "n/a"
-        qty = row.get("shares_held")
+        # `int(nan)` raises, so a NaN cell here was a crash, not merely a bad render.
+        inst = _num_or_none(row.get("institutions"))
+        inst_s = int(inst) if inst is not None else "n/a"
+        qty = _num_or_none(row.get("shares_held"))
         qty_s = (
             f"{qty / 1e9:.2f}B"
-            if isinstance(qty, (int, float)) and abs(qty) >= 1e9
-            else (f"{qty / 1e6:.1f}M" if isinstance(qty, (int, float)) else "n/a")
+            if qty is not None and abs(qty) >= 1e9
+            else (f"{qty / 1e6:.1f}M" if qty is not None else "n/a")
         )
-        pct = row.get("pct_of_float")
-        pct_s = f"{float(pct):.1f}%" if isinstance(pct, (int, float)) else "n/a"
-        chg = row.get("pct_change")
-        chg_s = f"{float(chg):+.1f}pp" if isinstance(chg, (int, float)) else "n/a"
+        pct = _num_or_none(row.get("pct_of_float"))
+        pct_s = f"{pct:.1f}%" if pct is not None else "n/a"
+        chg = _num_or_none(row.get("pct_change"))
+        chg_s = f"{chg:+.1f}pp" if chg is not None else "n/a"
         lines.append(f"| {period} | {inst_s} | {qty_s} | {pct_s} | {chg_s} |")
     lines.append("")
     # Name any period whose filings are still arriving. The newest row is the
@@ -2786,10 +2797,10 @@ def get_earnings_surprise_history_moomoo(ticker: str, curr_date: str = None) -> 
             {
                 "period": period,
                 "date": pub,
-                "implied": _num(row.get("predict_vola_ratio_newest")),
-                "iv_crush": _num(row.get("option_iv_crush")),
-                "close": _num(row.get("close_price")),
-                "last_close": _num(row.get("last_close_price")),
+                "implied": _num_or_none(row.get("predict_vola_ratio_newest")),
+                "iv_crush": _num_or_none(row.get("option_iv_crush")),
+                "close": _num_or_none(row.get("close_price")),
+                "last_close": _num_or_none(row.get("last_close_price")),
             }
         )
     prints.sort(key=lambda p: p["date"], reverse=True)

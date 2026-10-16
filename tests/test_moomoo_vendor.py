@@ -677,6 +677,39 @@ class MoomooSdkHandlingTests(unittest.TestCase):
         self.assertIn("IV crush", out)
         self.assertIn("-7.4%", out)  # (308.64/333.14 - 1) = -7.36%
 
+    def test_earnings_catalyst_missing_cells_are_not_nan(self):
+        """A NaN vendor cell is absent, never "nan%" (2026-10-16).
+
+        The SDK reports a missing numeric cell as NaN, which an
+        ``isinstance(x, (int, float))`` guard lets straight through, so every
+        implied-move / IV-crush / day-move cell of a live GMED report (2026-10-16)
+        read ``nan%`` / ``nanpp``. The guard is ``_num_or_none`` (moomoo.py:2180),
+        which maps None / NoneDataType / NaN to None; the surprise-history sibling
+        was already hardened, and pinned at tests/test_moomoo_a_series.py:207.
+        """
+        nan = float("nan")
+        df = pd.DataFrame(
+            {
+                "period_text": ["2026/Q3", "2026/Q2"],
+                "pub_trading_day_str": ["2026-07-30", "2026-04-29"],
+                "predict_vola_ratio_newest": [nan, 3.9],
+                "option_iv_crush": [nan, nan],
+                "close_price": [nan, 308.64],
+                "last_close_price": [nan, 333.14],
+            }
+        )
+        ctx = mock.Mock()
+        ctx.get_financials_earnings_price_history.return_value = (RET_OK, df)
+        with (
+            mock.patch.object(moomoo, "_ensure_ctx", return_value=ctx),
+            mock.patch.object(moomoo, "_moomoo_code", return_value="US.AAPL"),
+        ):
+            out = moomoo.get_earnings_catalyst_moomoo("AAPL")
+        self.assertNotIn("nan", out.lower())
+        # The measurable row still carries its own cells, and the NaN row is "-".
+        self.assertIn("3.9%", out)
+        self.assertIn("-7.4%", out)
+
     def test_capital_flow_embeds_flow_signal(self):
         """L2: deterministic flow summary appended to the tool output."""
         flow = pd.DataFrame({"capital_flow_item_time": ["2026-08-10"],
