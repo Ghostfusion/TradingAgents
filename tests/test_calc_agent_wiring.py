@@ -110,7 +110,6 @@ ADVISORY_CALCULATORS = {
     "strategies/backtest_models.py:slip_price": "reference",
     "strategies/breadth_depth.py:concentration_hhi": "reference",
     "strategies/calibration.py:isotonic_calibrate": "reference",
-    "strategies/capital_income.py:adtv_dollar": "reference",
     "strategies/catalyst.py:apply_catalyst_scale": "reference",
     "strategies/cross_section.py:no_trade_band": "reference",
     "strategies/cross_section.py:residualize_returns": "reference",

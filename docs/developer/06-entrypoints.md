@@ -71,13 +71,13 @@ eodhd-losers | moomoo-screen)
 `--max-debt-assets` `--dip-days` `--pb-min` `--pb-max` `--exchanges` (default
 `NYSE,NASDAQ`; `''` = off) `--sector-rank` `--revision`
 `--inst-accum` `--intraday` `--scan`
-(value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
+(value|trend-pullback|breakout|momentum|momentum-score|swing|vcp|value-dip|all)
 `--value-dip-loose` `--out-dir` `--rank` `--enable-float` `--journal`
 `--alloc`.
 
 Screens: Magic Formula (EY, EV/EBIT), Acquirer's Multiple, Piotroski F,
 Beneish M, Altman Z, Net-Net + trend-pullback / breakout / momentum / swing /
-vcp / value-dip scans.
+vcp / value-dip scans, and the `momentum-score` cross-sectional screen below.
 
 **Universe**: `eodhd-us` (the default) pulls the EODHD full US symbol list
 (~18k common stocks, no moomoo quota); `top-losers` / `heat-proxy` use the
@@ -97,13 +97,32 @@ degrades to the unfiltered list if the reference call fails).
 %b<=0.10 (harvest mode) and appends a ranked near-miss table naming the
 failed gate. Every OHLCV-capable
 scan (`trend-pullback`/`breakout`/`momentum`/`swing`/`vcp`/`value-dip`) runs a
-**two-stage gate**: a cheap OHLCV-only pre-filter (Stage A, no provider call —
+**two-stage gate** — `value`, `all` and `momentum-score` are the exceptions (the
+first two carry no cheap technical signal; the momentum screen's rank and its
+reference cross-section only exist once every name has been scored, so no name
+can be dropped on price alone):
+a cheap OHLCV-only pre-filter (Stage A, no provider call —
 `scan_signals` flags, momentum pillars minus float, `vcp_setup`, or the
 value-dip prefilter RSI <= 35 / %b <= 0.10 / stop <= 2%) before any
 fundamentals fetch, then memoized fundamentals (Stage B) and provider
 enrichment only on finalists (Stage C). Non-candidates cost ~1 vendor call
 (OHLCV) instead of ~7 (statements + cashflow), which keeps a large `eodhd-us`
 slice or movers universe tractable.
+
+**`--scan momentum-score`** (`docs/design_momentum_screener.md`) is the
+cross-sectional screen. After the per-symbol loop it assembles each scanned
+name's `MomentumScore` member vector through the engine's own builder
+(`agents/utils/analysis_tools.py::_momentum_components` — the same assembly the
+momentum leaf and `quant_scorecard` call), scores it with
+`strategies/momentum_score.py`, applies seven eligibility rules in order
+(size/liquidity via `capital_income.passes_liq_screen`, a 274-session history,
+a positive 12−1, a stacked trend, the composite's own coverage floor, and a tail
+under the configured name CVaR limit), ranks the eligible set with
+`factors.percentile_rank`, and writes six fields per row plus a basis line,
+exclusion census, sector-concentration read and the ranked top-10 into the
+report. It needs `enable_momentum_score` (shipped off — the mode refuses with
+exit 2 when it is off), gates no row, and changes no other mode's columns or
+ordering.
 
 ## 6.5 `scripts/*` utilities
 

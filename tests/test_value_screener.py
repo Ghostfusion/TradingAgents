@@ -1307,3 +1307,122 @@ def test_moomoo_screen_flags_override_config_defaults(capsys):
     assert kw["chg5d_max"] == pytest.approx(-0.10)
     assert kw["rsi_max"] == 30.0        # roe untouched -> config default kept
     assert kw["roe_min"] == pytest.approx(0.15)
+
+
+# ---------------------------------------------------------------------------
+# The momentum screen: `--scan momentum-score` (docs/design_momentum_screener.md)
+# ---------------------------------------------------------------------------
+def _momentum_series(drift: float, n: int = 320) -> list:
+    """A synthetic daily series long enough for `momentum_12_1` (252 + 21)."""
+    closes, price = [], 100.0
+    for i in range(n):
+        price *= 1.0 + drift + (0.004 if i % 2 else -0.004)
+        closes.append(round(price, 4))
+    return closes
+
+
+def _momentum_bars(closes: list) -> dict:
+    """The `_ohlcv` shape the member assembler reads, with a volume series."""
+    return {"closes": closes, "volumes": [5_000_000] * len(closes)}
+
+
+def test_momentum_screen_ranks_the_eligible_cross_section(monkeypatch):
+    """The pass publishes the spec's fields, ranks the eligible set, and names
+    each name's first failed rule.
+
+    The reference cross-section carries `rs_percentile` ONLY. Handing the engine
+    a column for any other member double-maps it (normalise to 0-100, then
+    re-map through that member's own ramp), which saturates the value and
+    collapses the composite into ties - so the distinct, ordered ranks asserted
+    here are also the guard on that contract.
+    """
+    from tradingagents.agents.utils import analysis_tools
+
+    date = "2026-10-15"
+    bars = {
+        "UP1": _momentum_series(0.0015, 320),
+        "UP2": _momentum_series(0.0010, 300),
+        "DOWN": _momentum_series(-0.0015, 320),
+        "YOUNG": _momentum_series(0.0015, 100),
+    }
+    monkeypatch.setattr(
+        analysis_tools,
+        "_ohlcv",
+        lambda ticker, days=320: _momentum_bars(
+            bars.get(str(ticker).upper(), bars["UP1"])
+        ),
+    )
+    monkeypatch.setattr(
+        vs,
+        "_momentum_sector_map",
+        lambda: dict.fromkeys(bars, "Tech"),
+    )
+    for sym in bars:
+        monkeypatch.setitem(vs._FIN_CACHE, (sym, date), {"market_cap": 5.0e9})
+
+    rows = [{"ticker": sym} for sym in bars]
+    rec = vs._momentum_screen(rows, date, min_cap=1e9)
+    by = {r["ticker"]: r for r in rows}
+
+    # The verdicts, one per rule.
+    assert by["UP1"]["momentum_eligible"] is True
+    assert by["UP2"]["momentum_eligible"] is True
+    assert by["DOWN"]["momentum_exclusion"] == "mom_12_1_not_positive"
+    assert by["YOUNG"]["momentum_exclusion"] == "insufficient_history"
+    assert rec["eligible"] == 2
+    assert rec["census"] == {"insufficient_history": 1, "mom_12_1_not_positive": 1}
+
+    # The published fields.
+    assert by["UP1"]["momentum_score"] is not None
+    assert by["UP1"]["momentum_regime"] == "positive"
+    assert by["DOWN"]["momentum_regime"] == "negative"
+    assert by["UP1"]["momentum_rank"] is not None
+    assert by["UP2"]["momentum_rank"] is not None
+    # An ineligible name carries NO rank: never a rank from a lower population.
+    assert by["DOWN"]["momentum_rank"] is None
+    assert by["YOUNG"]["momentum_rank"] is None
+    assert 0.0 < by["UP1"]["momentum_rank"] <= 100.0
+    # The rank column and the ranked block agree.
+    assert [n["ticker"] for n in rec["top"]] == sorted(
+        ("UP1", "UP2"), key=lambda s: by[s]["momentum_rank"], reverse=True
+    )
+
+    # The flags are readings, and a short history is one of them.
+    assert "thin_history" not in by["UP1"]["momentum_risk_flags"]
+    assert "thin_history" in by["UP2"]["momentum_risk_flags"]
+
+    # The reference path was actually consumed - the whole point of §5.2 - and
+    # it runs over the rows the run SCANNED, so an ineligible name keeps its
+    # percentile member (its own score is still reported beside its reason).
+    assert by["UP1"]["momentum_screen"]["components"]["rs_percentile"] is not None
+    assert by["DOWN"]["momentum_screen"]["components"]["rs_percentile"] is not None
+    assert rec["population"] == 3  # every scanned name with a measured 12-1
+    assert by["UP1"]["momentum_screen"]["single_cvar_n"] == 319
+    assert by["UP1"]["momentum_screen"]["reference_population"] == 3
+
+    block = vs._momentum_screen_markdown(rec)
+    assert "## Momentum screen (momentum-score)" in block
+    assert "Exclusions: insufficient_history 1, mom_12_1_not_positive 1." in block
+    assert "UP1" in block and "DOWN" not in block  # the ranked block: eligible only
+
+
+def test_momentum_screen_refuses_a_closed_gate_and_an_unusable_date(capsys, monkeypatch):
+    """Fail closed, name the reason: a gate that is off and a date that is not
+    an ISO date both refuse BEFORE any vendor work (exit 2, no empty table)."""
+    import tradingagents.dataflows.config as _config
+
+    base = dict(_config.get_config())
+    monkeypatch.setattr(
+        _config, "get_config", lambda: {**base, "enable_momentum_score": False}
+    )
+    assert vs.main(["--scan", "momentum-score", "--universe", "tickers", "AAPL"]) == 2
+    assert "enable_momentum_score" in capsys.readouterr().out
+
+    monkeypatch.setattr(
+        _config, "get_config", lambda: {**base, "enable_momentum_score": True}
+    )
+    rc = vs.main(
+        ["--scan", "momentum-score", "--universe", "tickers", "AAPL", "--date", "yesterday"]
+    )
+    assert rc == 2
+    assert "YYYY-MM-DD" in capsys.readouterr().out

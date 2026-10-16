@@ -157,6 +157,12 @@ _WATCHLIST_LEGEND = (
     ("G", "Mohanram G-Score (0-8 growth quality; 6-8 good / 0-2 poor) vs this run's sector medians; a median leg the feed lacks is excluded, never scored 0"),
     ("C", "Montier C-Score (0-6 overpricing / fragile-accounting RISK screen; 0-2 good / 5-6 poor)"),
     ("Qual", "composite quality score 0-100: tie-aware percentile of the winsorised-z mean over F / M / Z / O / GP-A / NOA / accruals in this run's scan universe (quality bands - never the decision rating bands)"),
+    ("Momentum", "eight-leg MomentumScore composite 0-100 (RESEARCH_ONLY): the engine's own member vector scored over this run's scanned cross-section; withheld below its coverage floor, never 0"),
+    ("MoRank", "tie-aware percentile of Momentum over the ELIGIBLE set (0-100; empty for an ineligible name - never a rank from a lower population)"),
+    ("MoElig", "every momentum-screen rule passed: market cap + ADTV (`passes_liq_screen`), history, a positive 12-1, a stacked trend, the composite floor, and a tail under the configured CVaR name limit"),
+    ("Regime", "momentum-screen trend regime: positive (price above its MA with the SMAs stacked) / negative / mixed (a member could not measure - never 'positive')"),
+    ("MoFlags", "momentum-screen risk readings: tail_over_limit, vol_high, extended, thin_history, sector_concentration; a reading nobody took is named '<flag>_unmeasured' rather than dropped"),
+    ("MoExcl", "the FIRST rule the name failed on the momentum screen (empty when eligible)"),
     ("ILLIQ", "Amihud illiquidity (price impact per $ traded; higher = more illiquid)"),
     ("FltTurn", "float turnover = ADV / float shares (daily; <0.5% thin, >100% squeeze)"),
     ("IWF", "free-float factor = float / total shares (<0.5 = passive under-allocation)"),
@@ -312,6 +318,7 @@ def _watchlist_markdown(results: list) -> str:
         "VCP", "Brk",
         "VDip", "FCFy", "RSI", "%b", "Stp%",
         "Trap", "ILLIQ", "FltTurn", "IWF", "Graham", "NCAV", "EPV", "MFI", "StocK", "KST", "Chandel", "StochRSI", "RSI2", "W%R", "Kelt", "Donch", "OBV", "PSAR", "Elder", "Aroon", "Fisher", "Supertrend", "POC", "DayChg", "Pre", "Aft", "Ovn", "Sent7", "SentZ", "RevIdx", "RevEC", "G", "C", "Qual",
+        "Momentum", "MoRank", "MoElig", "Regime", "MoFlags", "MoExcl",
     ]
     seps = ["---"] * len(heads)
     header = f"# Value Watchlist ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
@@ -384,6 +391,12 @@ def _watchlist_markdown(results: list) -> str:
             cell(r.get("rev_index"), "{:+.4f}"),
             cell(r.get("rev_ec"), "{:+.4f}"),
             cell(r.get("g_disp")), cell(r.get("c_disp")), cell(r.get("qual_disp")),
+            cell(r.get("momentum_score"), "{:.1f}"),
+            cell(r.get("momentum_rank"), "{:.0f}"),
+            flag(r.get("momentum_eligible")),
+            cell(r.get("momentum_regime")),
+            cell(r.get("momentum_risk_flags")),
+            cell(r.get("momentum_exclusion")),
         ]
         rows.append(dict(zip(heads, cells, strict=True)))
     if not rows:
@@ -897,6 +910,382 @@ def _vd_near_miss_row(vd: dict, symbol: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# The momentum screen (`--scan momentum-score`) - docs/design_momentum_screener.md
+# ---------------------------------------------------------------------------
+#: The `--scan` value. Deliberately NOT `momentum`: that one is the
+#: Warrior-Trading day-trade pre-filter, and re-pointing an existing value would
+#: silently change a screen the owner can already run.
+MOMENTUM_SCREEN = "momentum-score"
+#: The engine's own PIT bar window - `analysis_tools._ohlcv(ticker, days=320)`,
+#: the same series `graph/trading_graph.py::_pit_closes(ticker, days=320)`
+#: reads. A name with fewer bars has a shorter history than the window every
+#: other name on the screen is measured over: `thin_history`, reported only.
+MOMENTUM_BAR_WINDOW = 320
+#: `momentum.momentum_12_1(closes, skip=21, window=252)` returns None at
+#: `window + skip` bars or fewer, so the history floor IS that producer's own
+#: requirement rather than a second number.
+MOMENTUM_MIN_HISTORY = 274
+#: The share of the eligible set one sector may hold before the screen reports a
+#: concentration read (a majority: the rank is then a sector bet). Printed.
+MOMENTUM_SECTOR_SHARE_LIMIT = 0.50
+
+
+def _momentum_regime(members: dict) -> str:
+    """`positive` / `mixed` / `negative`, from the T leg's own two members.
+
+    Fail-closed: a member that could not measure leaves the regime `mixed`,
+    never `positive`, so the eligibility rule written as `regime == "positive"`
+    can never pass on a reading nobody took.
+    """
+    mad = members.get("ma_distance")
+    stack = members.get("sma_stack")
+    if mad is None or stack is None:
+        return "mixed"
+    if float(mad) > 0 and bool(stack):
+        return "positive"
+    if float(mad) <= 0 and not bool(stack):
+        return "negative"
+    return "mixed"
+
+
+def _momentum_sector_map() -> dict | None:
+    """`{ticker: GICS sector}` from the S&P 500 union, or None when unavailable.
+
+    ONE disk-cached (weekly) call for the whole screen, never one per name. A
+    name the union does not carry is `unmapped`, which the block reports rather
+    than imputing.
+    """
+    try:
+        from tradingagents.dataflows.sp500_universe import _GICS_MAP, fetch_sp500_universe
+
+        blob = fetch_sp500_universe()
+        rows = (blob or {}).get("rows") or {}
+        if not rows:
+            return None
+        by_etf = {etf: sector.title() for sector, etf in _GICS_MAP.items()}
+        return {sym: by_etf.get(etf, etf) for etf, syms in rows.items() for sym in syms}
+    except Exception as exc:  # noqa: BLE001 - an advisory read must not abort a run
+        logger.warning("momentum screen: sector map unavailable: %s", exc)
+        return None
+
+
+def _momentum_tail(closes: list, *, min_observations: int) -> tuple:
+    """`(single_cvar, n)` for one name - the engine's own tail read.
+
+    The same two producers the decision leg prices (`contract._simple_returns`
+    then `book_risk.cvar`, alpha 0.05) under the same observation floor
+    (`trading_graph._cvar_min_observations`), so a screened row's tail is the
+    number the risk governor would price - not a second estimator.
+    """
+    from tradingagents.strategies.book_risk import cvar
+    from tradingagents.strategies.contract import _simple_returns
+
+    rets = _simple_returns(closes)
+    if len(rets) < min_observations:
+        return None, len(rets)
+    cv = cvar(rets)
+    return (abs(cv) if cv is not None else None), len(rets)
+
+
+def _momentum_screen(results: list, current_date: str, *, min_cap: float) -> dict:
+    """Rank the run's own cross-section by the engine's eight-leg MomentumScore.
+
+    Spec: `docs/design_momentum_screener.md` §5. Every number comes from a
+    producer that already exists - the member vector from
+    `analysis_tools._momentum_components` (the SAME assembly the engine's leaf
+    and the quant scorecard call), the composite from `momentum_score`, the rank
+    from `factors.percentile_rank`, the liquidity gate from
+    `capital_income.passes_liq_screen`, the tail from `book_risk.cvar` over
+    `contract._simple_returns`. No producer's arithmetic is re-derived here and
+    no new threshold is declared: the floors are the operator's own `--min-mcap`
+    (else `capital_income`'s constant), and the tail limit is
+    `risk_governor.default_limits`' configured name limit.
+
+    The reference cross-section carries `rs_percentile` ONLY. Passing a column
+    for any other member would double-map it: `momentum_score` normalises the
+    column to 0-100 and `align_components` then maps that through the member's
+    own ramp - `RAMPS` says `rs_percentile`'s ramp is the identity `(0.0, 100.0)`
+    for exactly this reason.
+    """
+    from tradingagents.agents.utils.analysis_tools import _momentum_components, _ohlcv
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.strategies.capital_income import (
+        MIN_ADTV_DOLLARS,
+        MIN_MARKET_CAP,
+        adtv_dollar,
+        passes_liq_screen,
+    )
+    from tradingagents.strategies.factors import percentile_rank
+    from tradingagents.strategies.momentum_score import (
+        MOMENTUM_BANDS,
+        RAMPS,
+        momentum_score,
+    )
+    from tradingagents.strategies.risk_governor import default_limits
+
+    # One size floor: the operator's own --min-mcap when set, else the
+    # constant `passes_liq_screen` compares against anyway.
+    min_cap = float(min_cap or MIN_MARKET_CAP)
+    cfg = get_config()
+    cvar_limit = float(default_limits(cfg)["risk_standalone_cvar_limit_pct"])
+    try:
+        # `trading_graph._cvar_min_observations`: the same key, the same 250.
+        min_obs = max(1, int(cfg.get("risk_cvar_min_observations", 250)))
+    except (TypeError, ValueError):
+        min_obs = 250
+    strong_edge = next(edge for edge, label in MOMENTUM_BANDS if label == "strong")
+
+    names: list = []
+    for r in results:
+        sym = str(r.get("ticker") or "").upper()
+        members = _momentum_components(sym) if sym else {}
+        bars = _ohlcv(sym) if sym else {}
+        closes = [float(c) for c in (bars.get("closes") or [])]
+        fin = _FIN_CACHE.get((sym, current_date))
+        cap = _latest(fin.get("market_cap")) if isinstance(fin, dict) else None
+        adtv = adtv_dollar(closes, bars.get("volumes") or [])
+        single_cvar, n_rets = _momentum_tail(closes, min_observations=min_obs)
+        regime = _momentum_regime(members)
+        # §5.3 in the spec's own order: the first failed rule names itself.
+        if cap is None:
+            excl = "market_cap_unmeasured"
+        elif adtv is None:
+            excl = "adtv_unmeasured"
+        elif not passes_liq_screen(cap, adtv, min_cap=min_cap):
+            excl = "below_liquidity_floor"
+        elif len(closes) < MOMENTUM_MIN_HISTORY:
+            excl = "insufficient_history"
+        elif members.get("mom_12_1") is None:
+            excl = "mom_12_1_unmeasured"
+        elif float(members["mom_12_1"]) <= 0:
+            excl = "mom_12_1_not_positive"
+        elif members.get("ma_distance") is None or members.get("sma_stack") is None:
+            excl = "trend_unmeasured"
+        elif regime != "positive":
+            excl = "trend_not_stacked"
+        elif single_cvar is None:
+            excl = "tail_unmeasured"
+        elif single_cvar > cvar_limit:
+            excl = "tail_over_limit"
+        else:
+            excl = ""
+        names.append(
+            {
+                "row": r,
+                "ticker": sym,
+                "members": members,
+                "closes": closes,
+                "bars": len(closes),
+                "cap": cap,
+                "adtv": adtv,
+                "regime": regime,
+                "single_cvar": single_cvar,
+                "n_rets": n_rets,
+                "excl": excl,
+                "result": {},
+                "rank": None,
+                "flags": [],
+            }
+        )
+
+    # The reference population is the rows this run SCANNED, not the subset that
+    # passed the rules. A percentile is a statement about the population it was
+    # taken over, and taking it over the survivors would leave the column
+    # degenerate whenever the owner's own tail limit excludes the whole scan
+    # (measured 2026-10-16: AAPL/MSFT/NVDA all failed, and `rs_percentile`
+    # became absent - which is exactly the silent loss the member exists to
+    # avoid). Eligibility never depends on the reference, so there is no cycle.
+    pool = [
+        (n["ticker"], float(n["members"]["mom_12_1"]))
+        for n in names
+        if isinstance(n["members"].get("mom_12_1"), (int, float))
+    ]
+    for n in names:
+        own = n["members"].get("mom_12_1")
+        reference = None
+        if own is not None:
+            # The engine's convention: the name under test is APPENDED last.
+            reference = {
+                "rs_percentile": [v for sym, v in pool if sym != n["ticker"]] + [float(own)]
+            }
+        n["result"] = momentum_score(n["members"], reference=reference)
+        if not n["excl"] and n["result"].get("score") is None:
+            n["excl"] = "components_incomplete"  # the engine's own coverage floor
+
+    eligible = [n for n in names if not n["excl"]]
+    scores = [
+        float(n["result"]["score"])
+        for n in eligible
+        if isinstance(n["result"].get("score"), (int, float))
+    ]
+    for n in eligible:
+        score = n["result"].get("score")
+        if scores and isinstance(score, (int, float)):
+            n["rank"] = percentile_rank(float(score), scores) * 100.0
+
+    # §5.5's five flags: readings only, never gates. A reading nobody took is
+    # named `unmeasured` rather than quietly dropped.
+    sectors = _momentum_sector_map()
+    counts: dict = {}
+    if sectors is not None:
+        for n in eligible:
+            label = sectors.get(n["ticker"], "unmapped")
+            counts[label] = counts.get(label, 0) + 1
+    top_sector = max(counts, key=lambda k: counts[k]) if counts else None
+    top_share = (counts[top_sector] / len(eligible)) if top_sector and eligible else 0.0
+    concentrated = top_share > MOMENTUM_SECTOR_SHARE_LIMIT
+
+    for n in names:
+        flags = n["flags"]
+        if n["single_cvar"] is None:
+            flags.append("tail_unmeasured")
+        elif n["single_cvar"] > cvar_limit:
+            flags.append("tail_over_limit")
+        rv = n["members"].get("realized_vol")
+        if rv is None:
+            flags.append("vol_unmeasured")
+        elif float(rv) > RAMPS["realized_vol"][1]:
+            flags.append("vol_high")
+        near_high = n["result"].get("components", {}).get("dist_from_high")
+        if near_high is None:
+            flags.append("extended_unmeasured")
+        elif near_high >= strong_edge:
+            flags.append("extended")
+        if n["bars"] < MOMENTUM_BAR_WINDOW:
+            flags.append("thin_history")
+        if sectors is None:
+            flags.append("sector_concentration_unmeasured")
+        elif concentrated and sectors.get(n["ticker"], "unmapped") == top_sector:
+            flags.append("sector_concentration")
+
+    status = next(
+        (n["result"].get("status") for n in names if n["result"].get("status")),
+        "RESEARCH_ONLY",
+    )
+    census: dict = {}
+    for n in names:
+        if n["excl"]:
+            census[n["excl"]] = census.get(n["excl"], 0) + 1
+    basis = (
+        f"gate enable_momentum_score=on; status {status}; bars: the engine's own PIT "
+        f"series (analysis_tools._ohlcv, {MOMENTUM_BAR_WINDOW}-bar window) as of {current_date}; "
+        f"floors: market cap >= ${min_cap:,.0f} (--min-mcap, else capital_income's "
+        f"${MIN_MARKET_CAP:,.0f}) and ADTV >= ${MIN_ADTV_DOLLARS:,.0f} over adtv_dollar's own "
+        f"63-session window; history >= {MOMENTUM_MIN_HISTORY} sessions (momentum_12_1's "
+        f"window+skip); reference cross-section: this run's scanned rows "
+        f"(n={len(pool)}), rs_percentile over each name's own mom_12_1; tail: cvar alpha 0.05, "
+        f"window in single_cvar_n, floor {min_obs} observations, limit {cvar_limit:.2%} "
+        f"(risk_governor); rows {len(names)}, eligible {len(eligible)}"
+    )
+    for n in names:
+        row = n["row"]
+        row["momentum_score"] = n["result"].get("score")
+        row["momentum_eligible"] = not n["excl"]
+        row["momentum_regime"] = n["regime"]
+        row["momentum_risk_flags"] = ", ".join(n["flags"])
+        row["momentum_rank"] = n["rank"]
+        row["momentum_exclusion"] = n["excl"]
+        row["momentum_screen"] = {
+            "score": n["result"].get("score"),
+            "coverage": n["result"].get("coverage"),
+            "floor": n["result"].get("floor"),
+            "withheld": n["result"].get("withheld"),
+            "label": n["result"].get("label"),
+            "status": n["result"].get("status"),
+            "basis": n["result"].get("basis"),
+            "legs": n["result"].get("legs"),
+            "components": n["result"].get("components"),
+            "present": n["result"].get("present"),
+            "absent": n["result"].get("absent"),
+            "members": n["members"],
+            "bars": n["bars"],
+            "market_cap": n["cap"],
+            "adtv": n["adtv"],
+            "single_cvar": n["single_cvar"],
+            "single_cvar_n": n["n_rets"],
+            "reference_population": len(pool),
+        }
+    ranked = sorted(
+        (n for n in eligible if n["rank"] is not None),
+        key=lambda n: n["rank"],
+        reverse=True,
+    )
+    return {
+        "rows": len(names),
+        "eligible": len(eligible),
+        "population": len(pool),
+        "census": census,
+        "sectors": sectors,
+        "counts": counts,
+        "top_sector": top_sector,
+        "top_share": top_share,
+        "concentrated": concentrated,
+        "limit": cvar_limit,
+        "min_obs": min_obs,
+        "min_cap": min_cap,
+        "cap_floor": MIN_MARKET_CAP,
+        "adtv_floor": MIN_ADTV_DOLLARS,
+        "history_floor": MOMENTUM_MIN_HISTORY,
+        "bar_window": MOMENTUM_BAR_WINDOW,
+        "status": status,
+        "basis": basis,
+        "top": ranked,
+    }
+
+
+def _momentum_screen_markdown(rec: dict) -> str:
+    """The momentum screen's own block: basis line, exclusion census, rank."""
+    unmapped = rec["counts"].get("unmapped", 0)
+    if rec["sectors"] is None:
+        concentration = (
+            "- Sector concentration: unmeasured (the S&P 500 sector map was unavailable)."
+        )
+    elif not rec["eligible"]:
+        concentration = (
+            "- Sector concentration: no eligible name in this run, so there is nothing to "
+            "concentrate (the counts are over the eligible set)."
+        )
+    else:
+        tail = ""
+        if rec["concentrated"]:
+            tail = f" - above the {MOMENTUM_SECTOR_SHARE_LIMIT:.0%} majority read"
+        if unmapped:
+            tail += (
+                f"; {unmapped} eligible name(s) are outside the S&P 500 union (unmapped)"
+            )
+        concentration = (
+            f"- Sector concentration: {rec['top_sector']} holds "
+            f"{rec['top_share']:.0%} of the eligible set{tail}."
+        )
+    census = ", ".join(f"{k} {v}" for k, v in sorted(rec["census"].items())) or "none"
+    out = [
+        "",
+        "---",
+        "",
+        f"## Momentum screen ({MOMENTUM_SCREEN})",
+        "",
+        rec["basis"],
+        "",
+        f"- Rows scored: {rec['rows']}; eligible: {rec['eligible']}; "
+        f"reference population: {rec['population']}.",
+        f"- Exclusions: {census}.",
+        concentration,
+        "",
+        "| MoRank | Ticker | Momentum | Regime | Risk flags |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for n in rec["top"][:10]:
+        flags = ", ".join(n["flags"]) or "-"
+        out.append(
+            f"| {n['rank']:.0f} | {n['ticker']} | {n['result']['score']:.1f} | "
+            f"{n['regime']} | {flags} |"
+        )
+    if not rec["top"]:
+        out.append("| - | - | - | - | no eligible name in this run |")
+    return "\n".join(out) + "\n"
+
+
 def _cheap_gate(ohlcv: dict, scan: str, loose: bool = False) -> bool | None:
     """Two-stage gate, stage A: a PURE OHLCV-only pre-filter (no provider).
 
@@ -914,8 +1303,10 @@ def _cheap_gate(ohlcv: dict, scan: str, loose: bool = False) -> bool | None:
     """
     scan = (scan or "").strip().lower()
     # value / all have no cheap technical signal (value needs fundamentals;
-    # 'all' flags everything) -> keep, defer.
-    if scan in ("value", "all"):
+    # 'all' flags everything; the momentum screen's rank and its reference
+    # cross-section only exist once EVERY name has been scored, so no name can be
+    # dropped on price alone) -> keep, defer.
+    if scan in ("value", "all", MOMENTUM_SCREEN):
         return True
     closes = (ohlcv or {}).get("closes") or []
     highs = (ohlcv or {}).get("highs") or []
@@ -1506,6 +1897,7 @@ def main(argv: list[str] | None = None) -> int:
             "trend-pullback",
             "breakout",
             "momentum",
+            "momentum-score",
             "swing",
             "vcp",
             "value-dip",
@@ -1514,7 +1906,11 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
         help="scan mode: 'value' (classic), 'trend-pullback' (20/50 EMA "
         "dip in uptrend), 'breakout' (volatility contraction/breakout), "
-        "'momentum' (day-trade pre-filter + first pullback), 'swing' "
+        "'momentum' (day-trade pre-filter + first pullback), "
+        "'momentum-score' (cross-sectional: the engine's own eight-leg "
+        "MomentumScore for every name, normalised over the scan's own "
+        "eligible universe and ranked - research-only, needs the engine's "
+        "enable_momentum_score gate), 'swing' "
         "(techno-fundamental swing: stacked trend + RS vs benchmark + "
         "pullback + stops/targets), 'vcp' (volatility contraction pattern: "
         "successively shallower pullbacks on fading volume), 'value-dip' "
@@ -1556,6 +1952,35 @@ def main(argv: list[str] | None = None) -> int:
         "--alloc", action="store_true", help="append a capped allocation plan block"
     )
     args = parser.parse_args(argv)
+
+    # The momentum screen is gated on the engine's own switch
+    # (docs/design_momentum_screener.md §4): with the gate off there is no leaf
+    # to read, so the mode refuses up front instead of printing an empty table.
+    # It also refuses a date it cannot use - its bars are the engine's
+    # PIT-filtered series, so the as-of date it pins must be a real ISO date.
+    if args.scan == MOMENTUM_SCREEN:
+        try:
+            from tradingagents.dataflows.config import get_config as _mc
+
+            _m_gate = bool(_mc().get("enable_momentum_score"))
+        except Exception as exc:  # noqa: BLE001 - fail closed, name the reason
+            print(f"momentum-score: could not read the engine config ({exc})")
+            return 2
+        if not _m_gate:
+            print(
+                "momentum-score needs the engine's enable_momentum_score gate, which is "
+                "off (TRADINGAGENTS_ENABLE_MOMENTUM_SCORE). The composite stays "
+                "RESEARCH_ONLY either way; turn the gate on to run the screen."
+            )
+            return 2
+        try:
+            datetime.strptime(args.date, "%Y-%m-%d")
+        except ValueError:
+            print(
+                f"momentum-score: --date {args.date!r} is not a YYYY-MM-DD date, and the "
+                "screen's bars are PIT-filtered to the run date - pass a real one."
+            )
+            return 2
 
     # 'heat-proxy' is a misnomer kept for CLI compatibility: it is the
     # top-movers rank (price movement), NOT the Heat List. The Heat List IS
@@ -2579,6 +3004,28 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - an advisory column must not abort a run
             logger.warning("round-3 screener columns unavailable: %s", exc)
 
+    # The momentum screen (`--scan momentum-score`): its own cross-sectional
+    # pass, after every row exists and before the report is rendered. It ranks
+    # and reports - it never gates a row, and it changes no other mode's columns
+    # or ordering (the run's own --rank step still orders the table).
+    momentum_rec = None
+    if args.scan == MOMENTUM_SCREEN and results:
+        from tradingagents.dataflows.date_window import get_run_trade_date, set_run_trade_date
+
+        previous_date = get_run_trade_date()
+        # The bars this pass reads are the engine's PIT-filtered series, so pin
+        # the run's own as-of date for the duration (the graph does the same at
+        # run start) and restore the previous value afterwards.
+        set_run_trade_date(args.date)
+        try:
+            momentum_rec = _momentum_screen(results, args.date, min_cap=args.min_mcap)
+            print(f"[momentum-screen] {momentum_rec['basis']}")
+        except Exception as exc:  # noqa: BLE001 - an advisory pass must not abort a run
+            logger.warning("momentum screen unavailable: %s", exc)
+            momentum_rec = None
+        finally:
+            set_run_trade_date(previous_date)
+
     # Resolve the ranking mode: an explicit --rank wins, else the env/config
     # flag (enable_composite_rank). Previously --rank composite / the config
     # key were parsed but never read — the screener always used value ranking.
@@ -2615,6 +3062,13 @@ def main(argv: list[str] | None = None) -> int:
         if sector_table:
             markdown = markdown.rstrip() + "\n\n" + sector_table
             print(sector_table)
+    # The momentum screen's own block (--scan momentum-score): the basis line,
+    # the exclusion census, the concentration read and the ranked top of the
+    # eligible set. Appended here for the same reason the sector table is - the
+    # rank is a property of the RUN, not of one row.
+    if momentum_rec:
+        markdown = markdown.rstrip() + "\n\n" + _momentum_screen_markdown(momentum_rec)
+
     # EODHD rate/reference block (--rates): the whole `enable_eodhd_rates`
     # surface, because the gate is one read of one vendor's rate/reference
     # surface. P0 real yields + the inflation expectation, P1 the Treasury bill

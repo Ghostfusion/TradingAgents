@@ -1160,7 +1160,7 @@ so a tree carries its own consistency record instead of depending on the opt-in
   (NYSE,NASDAQ default, '' = off) `--sector-rank`
   `--revision` `--inst-accum`
   `--intraday` `--enrich-sector` `--enrich-rev` `--enrich-inst` `--scan`
-  (value|trend-pullback|breakout|momentum|swing|vcp|value-dip|all)
+  (value|trend-pullback|breakout|momentum|momentum-score|swing|vcp|value-dip|all)
   `--value-dip-loose` `--knife-z` `--out-dir` `--rank` `--enable-float` `--journal`
   `--alloc`.
 - action_report.py: `--basket` (SYM=W,SYM=W override; default config

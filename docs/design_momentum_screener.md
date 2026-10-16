@@ -113,6 +113,16 @@ universe ──► data quality ──► member vector ──► eligibility �
 - It is off by default, behind the engine's own `enable_momentum_score`
   (`default_config.py::SHIPPED_DEFAULTS`, shipped `False`) — no new gate key.
 
+**Landed 2026-10-16** as `--scan momentum-score` in `scripts/value_screener.py`
+(`_momentum_screen` + `_momentum_screen_markdown`, a post-loop cross-sectional
+pass pinned to the run's own trade date). Three of this document's own statements
+were corrected by the build — §5.2 (the reference carries `rs_percentile` only,
+and its population is the scanned rows), §5.3 (the floors are the script's own
+`--min-mcap` and `capital_income`'s constants, and the history floor is the
+producer's own 274) and §5.4 (what `percentile_rank` actually returns) — and the
+corrections are in place above rather than silently divergent from the code. The
+web app carries the mode's own label and prose in the same landing (rule 4).
+
 ## 5. The screener spec
 
 ### 5.1 The published fields (one row per name)
@@ -141,33 +151,57 @@ engine already exposes the hook: `momentum_score(values, reference={member:
 cross_section})` normalises a member by §48 over the supplied population and
 takes **the last entry as the name under test**.
 
-**Decision: the screener is the reference path's first production consumer.** It
-passes, for each member, the column of that member's values across the eligible
-universe with the name appended. Consequences, all of them fail-closed:
+**Decision: the screener is the reference path's first production consumer — and
+it supplies exactly ONE member, `rs_percentile`.** That member is the only one
+whose ramp is the §48 identity (`RAMPS["rs_percentile"] = (0.0, 100.0)`, and the
+table's own comment says so). Every other member carries a real-world ramp, and
+`momentum_score` normalises the reference column to 0–100 *before*
+`align_components` maps that through the member's own ramp — so a reference
+column for any of them is mapped twice and saturates. Measured on the engine's
+own function (2026-10-16): `values={"mom_12_1": 0.10}` scores **50.0**, and the
+same call with `reference={"mom_12_1": [0.05, 0.10, 0.15]}` scores **100.0**;
+`realized_vol` moves 76.9 → **0.0** (its ramp inverts, being `lower_better`).
+Passing every member's column — which is what this section originally specified —
+would collapse the composite into ties. So the screen passes the name's own raw
+member vector as `values`, and only `rs_percentile` through `reference`.
+Consequences, all of them fail-closed:
 
 - A reference column with fewer than two finite values, or with zero spread,
   yields `None` for that member (`normalize_component` — **never 50**), so the
   member leaves its leg's denominator and the leg's coverage says so.
-- A member the screener has no cross-section for falls back to its declared
-  ramp, and the row records **which basis each member used**. A leg mixing
-  reference-normalised and ramp-mapped members is then visible in the output
-  rather than silent.
+- `rs_percentile` is the percentile of the name's own `mom_12_1` within the
+  population below, so the R leg gains the one cross-sectional member the
+  per-name path cannot give it; a name whose 12−1 could not be measured gets no
+  reference at all, and the member is `absent` rather than defaulted.
+- **The population is the rows this run scanned**, not the subset that passed
+  §5.3's rules. A percentile is a statement about the population it was taken
+  over, and taking it over the survivors leaves the column degenerate whenever a
+  strict tail limit excludes most of the scan — measured the same day: AAPL, MSFT
+  and NVDA all failed their own rules and `rs_percentile` vanished silently.
+  Eligibility never depends on the reference, so no cycle is created, and the
+  basis line prints `n`.
 - The bar-level extraction stays one function: the 41-member vector is assembled
-  by the builder the engine's leaf already calls
-  (`agents/utils/analysis_tools.py::_momentum_components:6676`), refactored to a
-  series-taking core with the ticker-fetching leaf as its caller. Two assemblies
-  of the same members would be the second producer this design exists to avoid.
+  by `agents/utils/analysis_tools.py::_momentum_components:6676`, **called as it
+  is**. The plan to refactor it into a series-taking core is dropped on evidence:
+  that assembler owns its own bar fetch (`_ohlcv` → `load_ohlcv`, PIT-filtered
+  and cached per `(ticker, days)`), and feeding it the screener's *vendor* bars
+  would publish a different number than the engine's own leaf does — a second
+  producer wearing the first one's name.
 
 ### 5.3 Eligibility (the brief's stage 3), rule by rule
 
 Every rule reads a producer that already exists; a missing input **fails the
-rule** and names itself.
+rule** and names itself, and a rule that fails on a *measured* value names its
+own case too (`below_liquidity_floor`, `mom_12_1_not_positive`,
+`trend_not_stacked`, `tail_over_limit`). The first failed rule is published as
+`momentum_exclusion`, and the run's trailing block prints the census of all of
+them.
 
-| # | Rule | Producer | Missing value |
+| # | Rule | Producer | Missing / failing value |
 | --- | --- | --- | --- |
-| 1 | size ≥ `--min-market-cap` (default 1e9) | the dated market-cap field the screener already reads (`scripts/value_screener.py:800`) | ineligible, reason `market_cap_unmeasured` |
-| 2 | ADTV ≥ `--min-adtv` (default 1e7) over the producer's own 63-session window | `capital_income.adtv_dollar:74` compared by `passes_liq_screen:93` | ineligible, reason `adtv_unmeasured` |
-| 3 | history ≥ 253 sessions of PIT bars | `_pit_closes` → `load_ohlcv:274` | ineligible, reason `insufficient_history` |
+| 1 | size ≥ `--min-mcap` — the script's own floor, and when that is 0 or off, `capital_income.MIN_MARKET_CAP` ($250M) | the dated market-cap field the screener already reads (`scripts/value_screener.py:800`) | `market_cap_unmeasured`, or `below_liquidity_floor` |
+| 2 | ADTV ≥ `capital_income.MIN_ADTV_DOLLARS` ($1M) over `adtv_dollar`'s own 63-session window, on the SAME PIT bars the members are assembled from | `capital_income.adtv_dollar:74`, compared by `passes_liq_screen:93` | `adtv_unmeasured`, or `below_liquidity_floor` |
+| 3 | history ≥ **274** sessions of PIT bars — `momentum_12_1`'s own requirement (window 252 + skip 21; below it the producer returns `None`), not the brief's 253 | `_momentum_components` → `analysis_tools._ohlcv:229` → `load_ohlcv:274` | ineligible, reason `insufficient_history` |
 | 4 | the 12−1 return is positive (the time-series direction overlay) | `momentum.momentum_12_1:395` | ineligible, reason `mom_12_1_unmeasured` |
 | 5 | trend: `ma_distance > 0` **and** `sma_stack == 1` — the brief's `P > SMA50 > SMA200`, expressed through the engine's own two T members | `technical_factors.sma_legs:1050`, `swing.trend_architecture:76` (via the T leg) | ineligible, reason `trend_unmeasured` |
 | 6 | the composite cleared its floor and every component rules 1–5 read is present in `components` | the engine's `withheld` / `absent` | ineligible, reason `components_incomplete` |
@@ -191,31 +225,50 @@ the regime it prints.
 ### 5.4 The rank
 
 One rank column, over the **eligible** cross-section only, from
-`factors.percentile_rank` (0–100, tie-aware, the screener's existing `Qual`
-convention). Ineligible names carry `None`, never a rank from a lower population:
-two runs with different universes are then not silently comparable, and `n` is
-printed in the basis line so a rank over nine names cannot be read as a decile of
-the market.
+`factors.percentile_rank` — which returns `count(v ≤ value) / n` over the values
+it is given, so ×100 is a 0–100 rank with ties shared and the maximum at 100. Its
+own `0.5`-when-empty default is unreachable here by construction: the screen calls
+it only with a non-empty eligible set. Ineligible names carry `None`, never a rank
+from a lower population: two runs with different universes are then not silently
+comparable, and `n` is printed in the basis line so a rank over nine names cannot
+be read as a decile of the market. The rank does **not** reorder the table — the
+run's own `--rank` step still orders it, because a screen that silently changed
+another mode's ordering would be a decision change rather than a screen — so the
+ranked view is the trailing block's top-10.
 
 ### 5.5 Risk flags (the brief's `momentum_risk_flags`)
 
 | Flag | Reading | Threshold |
 | --- | --- | --- |
-| `tail_over_limit` | `single_cvar` / `single_cvar_n` | > the configured standalone CVaR limit |
+| `tail_over_limit` | `single_cvar` / `single_cvar_n` | > the configured standalone CVaR limit (`risk_governor.default_limits`) |
 | `vol_high` | the D leg's `realized_vol` member | above the engine's own declared ramp edge (`RAMPS["realized_vol"]`, `0.15 → 0.80`) |
-| `extended` | the B leg's `dist_from_high` member | within the engine's declared near-high ramp — *reported, never a gate* (the brief itself says a strong trend can stay extended) |
-| `sector_concentration` | the sector counts of the **eligible** set, from `sp500_universe.fetch_sp500_universe`'s GICS map | the largest sector above a printed share — the anti-concentration read that replaces the declined neutral rank |
-| `thin_history` | the realized session count | < 2× the 12−1 requirement, i.e. the name passes rule 3 but not by much |
+| `extended` | the B leg's `dist_from_high` member, at its ALIGNED (0–100) value | ≥ the engine's own `strong` band edge (`MOMENTUM_BANDS`, 75) — *reported, never a gate* (the brief itself says a strong trend can stay extended) |
+| `sector_concentration` | the sector counts of the **eligible** set, from `sp500_universe.fetch_sp500_universe`'s GICS map (one disk-cached call for the run, sectors title-cased; a name outside the S&P 500 union is `unmapped` and counted as such) | the largest sector holds **more than half** the eligible set — the anti-concentration read that replaces the declined neutral rank |
+| `thin_history` | the realized session count | below the engine's own bar window (`analysis_tools._ohlcv(ticker, days=320)`) — the name's history is shorter than the window every other name on the screen was measured over |
+
+A reading nobody took is named, not dropped: `tail_unmeasured`, `vol_unmeasured`,
+`extended_unmeasured`, `sector_concentration_unmeasured` (the last one when the
+sector map itself was unavailable). `thin_history` is always measurable — the bar
+count is in hand. The flags never gate: a flagged name still carries its score,
+its rank and its verdict.
 
 ### 5.6 The basis line
 
-Every row (and the run header) prints: the gate that let the mode run
-(`enable_momentum_score`), the pinned floors actually used (`--min-market-cap`,
-`--min-adtv`), the ADTV window (63 sessions), `min_history = 253`, the price
-basis the bars came from, the CVaR limit read, the normalization method per
-member, the universe source and `n`, and the engine's `status`
-(`RESEARCH_ONLY`). The brief's "data freshness" output is this line plus the last
-bar's date, which `_pit_closes` already fixes to the run's own trade date.
+The run's basis line prints what it actually resolved: the gate that let the mode
+run (`enable_momentum_score`), the bar source and window (the engine's own PIT
+series, `analysis_tools._ohlcv`, 320 bars, as of the run's trade date), the size
+floor it used (the script's `--min-mcap`, else `capital_income.MIN_MARKET_CAP`)
+beside `MIN_ADTV_DOLLARS` over `adtv_dollar`'s own 63-session window, the history
+floor (274 = `momentum_12_1`'s window + skip), the reference population (`n` = the
+rows this run scanned) and the fact that only `rs_percentile` rides it, the tail
+convention (alpha 0.05, its window published as `single_cvar_n`, the
+250-observation floor, the limit read through `risk_governor.default_limits`), the
+row and eligible counts, and the engine's own `status` (`RESEARCH_ONLY`). Each
+row's audit trail (`momentum_screen`) adds the member vector, the aligned
+components, the leg scores, `present` / `absent` / `withheld`, the bar count, the
+market cap, the ADTV, `single_cvar` / `single_cvar_n` and the reference population
+size. The brief's "data freshness" output is this line plus the last bar's date,
+which the PIT fetch already fixes to the run's own trade date.
 
 ## 6. Data feasibility, and the four corners
 
@@ -261,6 +314,17 @@ statistics).
 4. **The reuse falsifier.** If the reference-normalised path does not beat the
    ramp-mapped path on the same panel, the screener falls back to the declared
    ramps and §5.2's decision is recorded as refuted.
+
+**What the first live run produced (2026-10-16, `--date 2026-10-15`, three
+mega-caps).** `AAPL`, `MSFT` and `NVDA` all scored (62.3 / 56.2 / 48.2) and all
+three were **ineligible**: two failed rule 7 against the owner's own configured
+3 % standalone CVaR limit, and one failed rule 5 (`trend_not_stacked`). The
+screen returned **0 eligible names of 3**, the exclusion census said exactly that,
+and the ranked block printed "no eligible name in this run" rather than inventing
+a row. That is the design working as specified — a gated screen, not a momentum
+list — but it is also the design's most likely surprise, so it is recorded here:
+with a 3 % per-name tail limit, most large-cap momentum names do not pass, and the
+rules that bite are the owner's own configured limit and the trend stack.
 
 ## 8. Honest disagreements with the source brief
 
