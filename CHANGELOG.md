@@ -12,6 +12,11 @@ entry here** — e.g. "web impact: the app's `GET /api/history/ohlcv` reads `ohl
 what depends on what is `trading_web/docs/web_TOPICS.md`; the app's contract tests (`tests/test_engine_contract.py`,
 `tests/test_doc_claims.py`) fail when this surface drifts, and this rule is what the engine side owes them.
 
+### Fixed
+**The exit engine's tool-guidance line overran the prompt budget, and the pin caught it (2026-10-16, the full suite's only failure).** `tests/test_prompt_budget_contract.py` pins the longest tool bullet at **523** chars, the market prompt at 50,000 and the bullet count at 95; the new `get_exit_engine` line shipped at **693** (`6927 passed, 1 failed`). It is trimmed to **489**, keeping every trigger phrase (`hold / reduce / exit / stop out / trend broken`), the argument contract (`entry_bars` or `entry_date`), the five mechanisms by name and the `HOLD / REDUCE / EXIT / RISK_EXIT / UNAVAILABLE` output; only the "walks the bars point-in-time" sentence was compressed to "Walked point-in-time (no bar sees its own high)". The whole-prompt ceiling was never the binding constraint (47,418 of 50,000) and the count is 86 of 95 - the per-bullet pin is the one that binds, which is what it is for.
+
+**Web impact**: none. No route, gate key, flag, JSON artefact or script signature moves; the app reads no prompt text, and the public-API table is generated from the tool registry rather than from this line.
+
 ### Added
 **The exit engine: the five mechanisms of a momentum exit composed into ONE decision, walked point-in-time (2026-10-16).** `strategies/exit_engine.py` publishes `HOLD / REDUCE / EXIT / RISK_EXIT / UNAVAILABLE` with the rule that decided, the levels behind it and every rule it could not measure. It **composes what the tree already had** — `size.atr` (the one ATR convention: a simple mean of true ranges), `swing.chandelier_exit`, `exits.exit_decision` + `EXIT_PRECEDENCE` (the §101 ladder), `exits.time_exit` (§58), `exits.net_of_cost` — and adds only the four things nothing answered: `sma_break_confirmed` (a *confirmed* MA50 breakdown: N consecutive closes, not one), `momentum_deterioration` (persistence, not level), `stall_exit` (days held + no progress + RS `lagging`, shipped **off**), and the point-in-time walk with `compare_exit_variants` (the four-variant A/B on identical entries).
 

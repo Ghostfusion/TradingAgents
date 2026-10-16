@@ -65,6 +65,16 @@ ANALYSTS = REPO / "tradingagents" / "agents" / "analysts"
 # visits exactly once, so the exclusion was not a dedup - it was a blind spot that
 # hid 2,177 chars of the news prompt and all but 1,406 chars of the sentiment system
 # message. Sizes above are post-fix; market/fundamentals did not move.
+#
+# 2026-10-16 (caught by the full suite, fixed on sight): the new exit-engine tool line
+# shipped at 693 chars - 170 OVER the longest-bullet pin - and was that run's only
+# failure. Trimmed to 489 with every trigger phrase, the argument contract, the five
+# mechanisms by name and the action vocabulary kept; only the "walks the bars
+# point-in-time" sentence was compressed. The pin is back to its two 523-char bullets.
+# Post-trim measurement: prompt 47,214 of 50,000 (slack 2,786 - roughly 5,200 chars of
+# tool guidance has landed since the ceiling was raised at 41,999, so the slack is no
+# longer the 8,001 that entry records) and 86 bullets of 95. The next growth should
+# expect to trim something rather than raise a number.
 MARKET_CEILING = 50_000
 MARKET_BULLET_LIMIT = 95
 LONGEST_BULLET_LIMIT = 523
