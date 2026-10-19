@@ -203,6 +203,16 @@ def get_analyst_ratings_finnhub(ticker: str) -> str:
     return "\n".join(lines)
 
 
+def _or_na(value) -> str:
+    """A vendor earnings cell renders ``n/a`` when the key is present but None.
+
+    ``row.get('epsActual', 'n/a')`` returns None (not the default) when the key
+    exists with a null value - the pre-report case - and the analyst then quotes
+    ``EPS actual None`` into the report.
+    """
+    return "n/a" if value is None else str(value)
+
+
 def get_earnings_calendar_finnhub(
     ticker: str,
     curr_date: str,
@@ -257,10 +267,10 @@ def get_earnings_calendar_finnhub(
             pass
         lines.append(
             f"- Earnings date: {date_txt}"
-            f" | EPS estimate: {row.get('epsEstimate', 'n/a')}"
-            f" | EPS actual: {row.get('epsActual', 'n/a')}"
-            f" | Surprise: {row.get('surprisePercent', 'n/a')}"
-            f" | Revenue estimate: {row.get('revenueEstimate', 'n/a')}"
+            f" | EPS estimate: {_or_na(row.get('epsEstimate'))}"
+            f" | EPS actual: {_or_na(row.get('epsActual'))}"
+            f" | Surprise: {_or_na(row.get('surprisePercent'))}"
+            f" | Revenue estimate: {_or_na(row.get('revenueEstimate'))}"
             f"{days_txt}"
         )
     return "\n".join(lines)

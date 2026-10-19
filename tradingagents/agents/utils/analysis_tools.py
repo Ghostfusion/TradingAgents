@@ -1286,9 +1286,9 @@ def get_swing_exits(
         tg = targets_rr(last, stop_ref) if stop_ref else None
         lines = [
             f"swing exits {ticker} (close {last:.2f}):",
-            f"  chandelier stop={ch.get('chandelier')} exit={ch.get('exit')} "
+            f"  chandelier stop={_nz_text(ch.get('chandelier'))} exit={ch.get('exit')} "
             f"(3x ATR(14, simple mean of TR)={atr_v:.4f} below 22-bar high)",
-            f"  ema20={tr.get('ema')} trail_exit={tr.get('exit')}",
+            f"  ema20={_nz_text(tr.get('ema'))} trail_exit={tr.get('exit')}",
         ]
         if tg:
             # R is measured to THIS tool's stop reference (the chandelier),
@@ -1296,10 +1296,16 @@ def get_swing_exits(
             # targets are different levels (NVDA 2026-09-12: 1R=6.7941 here
             # vs 11.0976 there). Name the reference so a report can say which
             # R it is quoting.
-            lines.append(f"  targets: t1={tg.get('t1')} t2={tg.get('t2')} "
-                         f"r1={tg.get('r1')} r2={tg.get('r2')} "
-                         f"(R vs chandelier stop {ch.get('chandelier')}: "
-                         f"1R={tg.get('risk')})")
+            # A long target set is undefined when the chandelier sits ABOVE the
+            # close (DB 2026-10-19): every level renders n/a, never None.
+            lines.append(
+                f"  targets: t1={_nz_text(tg.get('t1'))} "
+                f"t2={_nz_text(tg.get('t2'))} "
+                f"r1={_nz_text(tg.get('r1'))} "
+                f"r2={_nz_text(tg.get('r2'))} "
+                f"(R vs chandelier stop {_nz_text(ch.get('chandelier'))}: "
+                f"1R={_nz_text(tg.get('risk'))})"
+            )
         return "\n".join(lines) + _scale_note(ticker, closes)
     except Exception as exc:  # noqa: BLE001
         return f"swing exits unavailable for {ticker}: {exc}"
@@ -5374,16 +5380,28 @@ def get_exit_plan(
     gb = max_giveback_exit(float(entry), float(peak), float(current), float(giveback_pct))
     be_s = f"{be.get('price'):.2f}" if be.get("price") is not None else "unavailable"
     gb_v = "EXIT" if gb.get("exit") else "hold"
+    rem = gb.get("remaining_gain_pct")
+    rem_txt = "n/a" if rem is None else str(rem)
     return (
         f"exit_plan: breakeven_stop={be_s} (trigger={be.get('trigger')}) "
-        f"giveback_{gb_v} stop_px={gb.get('stop_px')} "
-        f"remaining_gain_pct={gb.get('remaining_gain_pct')} (giveback {float(giveback_pct):.0%}) "
+        f"giveback_{gb_v} stop_px={_nz_text(gb.get('stop_px'))} "
+        f"remaining_gain_pct={rem_txt} "
+        f"(giveback {float(giveback_pct):.0%}) "
         f"({levels['basis']})"
     ) + levels["note"]
 
 
 def _fmt_exit_price(value: float | None) -> str:
     return "n/a" if value is None else f"{float(value):.2f}"
+
+
+def _nz_text(value) -> str:
+    """A nullable tool field as its own value, or ``n/a`` when absent.
+
+    Unlike ``_fmt_exit_price`` this never rounds: the swing-exit and exit-plan
+    lines are reconciled against the R arithmetic, so the exact value survives.
+    """
+    return "n/a" if value is None else str(value)
 
 
 def _recorded_momentum_scores(ticker: str) -> tuple[list[float], str]:

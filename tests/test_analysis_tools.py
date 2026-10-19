@@ -2822,6 +2822,29 @@ def test_get_swing_exits_computes(monkeypatch):
     assert "ema20=" in out
 
 
+def test_get_swing_exits_renders_absent_targets_as_na(monkeypatch):
+    """A chandelier ABOVE the close leaves every long target undefined
+    (DB 2026-10-19): each level reads n/a, never None."""
+    closes = [300.0 - i for i in range(260)]
+    monkeypatch.setattr(T, "_ohlcv", lambda t: {
+        "closes": closes, "highs": [c + 1 for c in closes],
+        "lows": [c - 1 for c in closes], "volumes": [1e6] * 260, "opens": closes,
+    })
+    out = T.get_swing_exits.invoke({"ticker": "DB"})
+    assert "targets: t1=n/a" in out
+    assert "None" not in out
+
+
+def test_exit_plan_renders_absent_giveback_stop_as_na():
+    """Price below entry: the giveback stop is undefined and must read n/a."""
+    out = T.get_exit_plan.invoke(
+        {"entry": 100.0, "atr": 3.0, "current": 90.0, "peak": 100.0, "stop": 97.0}
+    )
+    assert "giveback_" in out
+    assert "stop_px=n/a" in out
+    assert "None" not in out
+
+
 def test_get_swing_exits_insufficient_history(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda ticker: {"closes": [100.0] * 50,
         "highs": [101.0] * 50, "lows": [99.0] * 50, "volumes": [1e6] * 50})

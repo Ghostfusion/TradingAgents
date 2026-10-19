@@ -56,6 +56,34 @@ def test_unknown_metric_key_is_emitted_and_labelled_unknown(monkeypatch):
     assert "beta (vendor, basis unknown): 2.2224941" in out
 
 
+def test_earnings_calendar_renders_null_cells_as_na(monkeypatch):
+    """The pre-report row's null EPS actual is a null, not a number: the vendor
+    key exists with value None, so `.get(k, 'n/a')` returned None and reports
+    quoted `EPS actual None` (AMKR/TROW 2026-10-19)."""
+
+    class _CalendarClient:
+        def earnings_calendar(self, **kwargs):
+            return {
+                "earningsCalendar": [
+                    {
+                        "date": "2026-10-26",
+                        "epsEstimate": 0.7986,
+                        "epsActual": None,
+                        "surprisePercent": None,
+                        "revenueEstimate": None,
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(finnhub, "_client", lambda: _CalendarClient())
+    out = finnhub.get_earnings_calendar_finnhub("AMKR", "2026-10-19")
+    assert "EPS estimate: 0.7986" in out
+    assert "EPS actual: n/a" in out
+    assert "Surprise: n/a" in out
+    assert "Revenue estimate: n/a" in out
+    assert "None" not in out
+
+
 def test_basis_labels_do_not_break_canonical_parsing(monkeypatch):
     # The screener reads this text back; the added label must stay additive.
     from tradingagents.dataflows.statement_parsing import _canonicalize
