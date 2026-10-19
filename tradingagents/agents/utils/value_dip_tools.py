@@ -300,6 +300,11 @@ def _period_fcf_value(rows: dict) -> float | None:
     return None
 
 
+def _flag_text(value) -> str:
+    """A tri-state boolean as ``yes`` / ``no`` / ``n/a`` (never Python's None)."""
+    return "n/a" if value is None else ("yes" if value else "no")
+
+
 def _num_text(value) -> str:
     """Render one canonical input for the basis line: `n/a` when absent.
 
@@ -1490,9 +1495,10 @@ def get_value_floors(
     epv_ps = _epv_ps(epv.get("epv"), sh) if epv else None
     lines = [
         f"value floors {ticker} (price {price if price is not None else 'n/a'}):",
-        f"  graham_number={g} cheap={_g_cheap(price, g)}",
-        f"  ncav_per_share={ncav} cheap={_n_cheap(price, ncav)}",
-        f"  epv={epv.get('epv') if epv else None} per_share={epv_ps} "
-        f"conclusion={epv.get('conclusion') if epv else None}",
+        f"  graham_number={_num_text(g)} cheap={_flag_text(_g_cheap(price, g))}",
+        f"  ncav_per_share={_num_text(ncav)} cheap={_flag_text(_n_cheap(price, ncav))}",
+        f"  epv={_num_text(epv.get('epv') if epv else None)} "
+        f"per_share={_num_text(epv_ps)} "
+        f"conclusion={_num_text(epv.get('conclusion') if epv else None)}",
     ]
     return "\n".join(lines)

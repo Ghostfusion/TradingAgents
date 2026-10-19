@@ -9801,7 +9801,7 @@ def get_post_close_confirmation(
             return f"post-close confirmation unavailable for {ticker}."
         return (
             f"post-close confirmation {ticker}: close={close:.2f} verdict={r['verdict']} "
-            f"action={r['action']} (stop={stop} target={target})"
+            f"action={r['action']} (stop={_txt(stop)} target={_txt(target)})"
         )
     except Exception as exc:  # noqa: BLE001
         return f"post-close confirmation unavailable for {ticker}: {exc}"

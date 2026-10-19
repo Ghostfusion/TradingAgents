@@ -2878,6 +2878,8 @@ def test_get_value_floors_computes(monkeypatch):
     assert "graham_number=" in out
     assert "ncav_per_share=" in out
     assert "epv=" in out
+    # Tri-state flags render yes/no, never a Python bool.
+    assert "cheap=yes" in out or "cheap=no" in out
 
 
 # ---------------------------------------------------------------------------
@@ -3051,6 +3053,19 @@ def test_get_value_floors_no_tax_does_not_crash(monkeypatch):
     monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
     out = VDT.get_value_floors.invoke({"ticker": "X", "current_date": "2026-08-19"})
     assert "value floors X" in out  # no crash
+    # An absent figure renders the module's n/a, never Python's None: the
+    # analyst copies this line into the report verbatim.
+    assert "None" not in out
+
+
+def test_post_close_confirmation_renders_absent_stop_as_na(monkeypatch):
+    """A first run has no prior decision.md, so the stop and target are both
+    absent. The analyst-facing line must say n/a, never Python's None."""
+    monkeypatch.setattr(T, "_ohlcv", lambda t: _uptrend_ohlcv())
+    out = T.get_post_close_confirmation.invoke({"ticker": "ZZZZNOPRIOR"})
+    assert "post-close confirmation ZZZZNOPRIOR" in out
+    assert "stop=n/a" in out and "target=n/a" in out
+    assert "None" not in out
 
 
 # ---------------------------------------------------------------------------
