@@ -4,6 +4,7 @@ import pytest
 
 from tradingagents.strategies.contract import (
     build_position_contract,
+    published_entry,
 )
 from tradingagents.strategies.sentiment import (
     decayed_weight,
@@ -90,6 +91,57 @@ def test_contract_entry_price_hook():
     assert tranched.stop_loss < base.stop_loss  # Pbar < P1 -> lower stop level
     assert "tranche weighted entry" in tranched.reason()
     assert "tranche weighted entry" not in base.reason()
+
+
+def test_contract_stop_anchors_on_the_published_entry():
+    """Owner ruling 2026-10-20: the stop anchors to the entry the decision
+    publishes, not the close.
+
+    Anchored on the close, an entry ceiling more than 2 ATR under the close
+    published stop > entry (EOG/SEIC/NEM 2026-10-20: EOG stop 153.6339 against
+    a published entry of 146.5977).
+    """
+    closes = _closes()
+    c = build_position_contract(
+        cfg=_cfg(),
+        closes=closes,
+        entry_price=95.0,
+        entry_basis="published entry (final entry price)",
+    )
+    assert c is not None
+    assert c.entry_price == pytest.approx(95.0)
+    assert c.stop_loss < c.entry_price  # never above the entry it protects
+    # stop_pct is published rounded to 4dp, so the level reconciles to ~1e-2.
+    assert c.stop_loss == pytest.approx(95.0 * (1.0 - c.stop_pct), abs=0.01)
+    assert "from entry 95.00" in c.summary()
+    assert "published entry (final entry price)" in c.reason()
+    assert "tranche weighted entry" not in c.reason()
+
+
+def test_published_entry_prefers_the_final_entry_price():
+    """The contract's anchor is §103's final entry price - the same field
+    ``research_decision.position.entry_price`` publishes.
+
+    Fails closed on an absent or non-positive value: the tranche fallback, or
+    None (last-close behaviour), never an invented price.
+    """
+    block = {"entry": {"final_entry_price": 146.5977, "max_entry_price": 155.11}}
+    value, basis = published_entry(block, 150.0)
+    assert value == pytest.approx(146.5977)
+    assert basis == "published entry (final entry price)"
+
+    assert published_entry({}, 150.0) == (150.0, "tranche weighted entry")
+    assert published_entry(None, None) == (None, None)
+    assert published_entry({"entry": {"final_entry_price": None}}, None) == (None, None)
+    # NaN is absent, never a number; a zero/negative price is a data error.
+    assert published_entry({"entry": {"final_entry_price": float("nan")}}, 150.0) == (
+        150.0,
+        "tranche weighted entry",
+    )
+    assert published_entry({"entry": {"final_entry_price": 0.0}}, 150.0) == (
+        150.0,
+        "tranche weighted entry",
+    )
 
 
 def test_contract_entry_price_ignored_when_nonpositive():

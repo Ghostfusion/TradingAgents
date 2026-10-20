@@ -1122,6 +1122,7 @@ class TradingAgentsGraph:
                 try:
                     from tradingagents.strategies.contract import (
                         build_position_contract,
+                        published_entry,
                     )
 
                     flow_use = None
@@ -1137,9 +1138,20 @@ class TradingAgentsGraph:
                         regime=regime_label,
                     )
                     tranche_read = self._tranche_risk_read(closes)
-                    entry_price = None
+                    # The stop and target anchor on the entry the decision
+                    # publishes (§103's final entry price, the same field
+                    # `research_decision.position.entry_price` carries), so the
+                    # published pair can never read stop > entry. Measured from
+                    # the close, an entry ceiling more than 2 ATR under the
+                    # close did exactly that (EOG/SEIC/NEM 2026-10-20). A
+                    # tranche plan's weighted entry is the fallback only when
+                    # no final entry was measured.
+                    _tranche_entry = None
                     if tranche_read and tranche_read.get("valid"):
-                        entry_price = tranche_read.get("avg_entry")
+                        _tranche_entry = tranche_read.get("avg_entry")
+                    entry_price, entry_basis = published_entry(
+                        final_state.get("entry_exit_block"), _tranche_entry
+                    )
                     _hard_guards: tuple[str, ...] = ()
                     if self.config.get("enable_hard_guards"):
                         # hard-guard sources from the deterministic risk state:
@@ -1223,6 +1235,7 @@ class TradingAgentsGraph:
                         calibrated_p=calibrated_p,
                         catalyst_scale=(catalyst_snapshot or {}).get("scale"),
                         entry_price=entry_price,
+                        entry_basis=entry_basis,
                         trail_stop=(final_state.get("swing_exits") or {}).get("chandelier"),
                         # The snapshot emits `implied_move` (a fraction); this
                         # read `implied_move_pct`, a key nothing ever wrote, so

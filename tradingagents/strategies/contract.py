@@ -143,6 +143,39 @@ def atr_or_proxy(closes, high, low, window: int = 14) -> float:
     return atr_with_source(closes, high, low, window=window)[0]
 
 
+def published_entry(
+    entry_exit_block: dict | None,
+    fallback: float | None = None,
+    *,
+    fallback_basis: str = "tranche weighted entry",
+) -> tuple[float | None, str | None]:
+    """The entry a position contract anchors on, plus the basis it came from.
+
+    §103's ``final_entry_price`` is the price the decision publishes as its
+    entry (``research_decision.position.entry_price`` reads the same field), so
+    a stop measured from it can never sit above it. The ``fallback`` (a tranche
+    plan's weighted average entry) is used only when no final entry was
+    measured; an absent, non-numeric or non-positive value returns
+    ``(None, None)`` and the contract keeps its last-close behaviour - never the
+    spot price.
+    """
+    entry = (entry_exit_block or {}).get("entry")
+    final = entry.get("final_entry_price") if isinstance(entry, dict) else None
+    try:
+        final = float(final)
+    except (TypeError, ValueError):
+        final = None
+    if final is not None and final > 0:
+        return final, "published entry (final entry price)"
+    try:
+        fb = float(fallback)
+    except (TypeError, ValueError):
+        return None, None
+    if fb > 0:
+        return fb, fallback_basis
+    return None, None
+
+
 def build_position_contract(
     decision=None,
     cfg=None,
@@ -154,6 +187,7 @@ def build_position_contract(
     calibrated_p: float | None = None,
     catalyst_scale: float | None = None,
     entry_price: float | None = None,
+    entry_basis: str | None = None,
     trail_stop: float | None = None,
     implied_move_pct: float | None = None,
     knife_factor: float = 1.0,
@@ -167,11 +201,18 @@ def build_position_contract(
     atr_mult (2.0), target_vol (0.15), position_odds (1.0), kelly_fraction
     (0.25). Returns None when no usable close prices are provided.
 
-    ``entry_price`` (optional): the reference entry for the stop/risk. When
-    set (e.g. a tranche plan's weighted average entry), dollar stop/risk
-    levels are measured from it instead of the last close so the G1 contract
-    matches the tranche execution. Position sizing stays a fraction of the
-    book and is unchanged; None keeps the last-close behaviour.
+    ``entry_price`` (optional): the ENTRY the contract publishes - §103's final
+    entry price (``research_decision.position.entry_price``), or a tranche
+    plan's weighted average entry. The dollar stop AND the target are measured
+    from it, so the published stop can never sit above the published entry.
+    Anchored on the close instead, an entry ceiling more than 2 ATR under the
+    close published stop > entry (EOG/SEIC/NEM 2026-10-20; owner ruling: the
+    stop anchors to the entry). Position sizing stays a fraction of the book
+    and is unchanged; None keeps the last-close behaviour.
+
+    ``entry_basis`` (optional): how the caller identified the anchor, printed
+    in ``reason()``. Omitted, an anchor that is not the last close is labelled
+    the legacy "tranche weighted entry".
 
     ``trail_stop`` (optional): a chandelier/ATR trailing stop level. When
     given, the contract's stop is the tighter of the ATR stop and the trail
@@ -320,6 +361,7 @@ def build_position_contract(
     note = None
     if be_stop is not None:
         note = f"exits: BE @ {be_stop:.2f}, target @ {target:.2f}"
+    entry_note = [entry_basis or "tranche weighted entry"] if entry != last else []
     return PositionContract(
         size_pct=round(_clamp(sized, 0.0, max_pct), 4),
         stop_loss=round(stop, 4),
@@ -327,11 +369,17 @@ def build_position_contract(
         atr=round(a, 4) if a > 0 else None,
         atr_source=atr_source,
         entry_price=round(float(entry), 4),
-        reason_parts=reasons + reasons_extra + (["tranche weighted entry"] if entry is not last else []),
+        reason_parts=reasons + reasons_extra + entry_note,
         breakeven_stop=round(be_stop, 4) if be_stop is not None else None,
         target=round(target, 4) if target is not None else None,
         exit_note=note,
     )
 
 
-__all__ = ["PositionContract", "atr_or_proxy", "atr_with_source", "build_position_contract"]
+__all__ = [
+    "PositionContract",
+    "atr_or_proxy",
+    "atr_with_source",
+    "build_position_contract",
+    "published_entry",
+]

@@ -154,6 +154,11 @@ than LLM narrative:
    dollar stop/BE/target match the new entry. If the re-anchored
    capital-at-risk or peak-deployed exceeds its cap → REVISE (smaller size)
    or REJECT.
+   The graph run resolves the same anchor through
+   `contract.published_entry` — §103's final entry price, else the tranche
+   weighted entry, else the last close — because the stop is published beside
+   `position.entry_price` and must never sit above it. A caller that passes
+   `entry_price` explicitly, as this re-anchor does, sets that entry itself.
 4. **Governor re-run** — `govern(peak_deployed_pct, cfg, cvar_pct=...,
    capital_at_risk_pct=..., risk_cap_pct=...)` → PASS/WARN/REJECT on the new
    numbers. REJECT here is the strongest signal, exactly as in
