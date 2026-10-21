@@ -2105,6 +2105,31 @@ def test_r_multiple_compound_4digit_3r_captured():
     assert rv._rmult_value(m) == 1521.68
 
 
+def test_r_multiple_identity_ignores_a_percent_stop_width():
+    # COKE 2026-10-21 market.md, verbatim shape: the tranche plan's own pair is
+    # correct (204.78 / 189.44 -> 250.80 = 3R), and the trailing "2R/3R off a
+    # 13.65% stop" states the OTHER framework's stop WIDTH. Reading 13.65 as
+    # the 3R target flagged the line's own correct 250.80.
+    text = (
+        "composite stop **189.44**, avg entry **204.78**, risk/share **15.34**, "
+        "T1 **232.39** (1.8R), T2 **250.80** (3.0R). I use this over the "
+        "swing-set's 269.95/298.90 targets, which are 2R/3R off a 13.65% stop."
+    )
+    assert rv._r_multiple_identity(text) == []
+
+
+def test_r_multiple_identity_ignores_a_percent_stop_and_a_sizing_label():
+    # STE 2026-10-21 market.md: "stop 8.75% / 2R = 6.2%" is a SIZING line. The
+    # 8.75 is the stop as a percent of price and 6.2 is a percent of book;
+    # taken as a price pair they implied a 213.71 risk off the report's spot.
+    text = (
+        "Last close 222.46.\n"
+        "- **Sizing:** `get_position_sizing` at confidence 0.5 / stop 8.75% / 2R = "
+        "**6.2%** (kelly 25% -> quarter 6.2%, risk_budget 11.4%)."
+    )
+    assert rv._r_multiple_identity(text) == []
+
+
 # ---------------------------------------------------------------------------
 # Macro-authority gate (SKHY 2026-09-09 review loop)
 # ---------------------------------------------------------------------------

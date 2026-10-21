@@ -4643,6 +4643,20 @@ _STOP_TAIL_REJECT = re.compile(
     r"^\s*\(\s*[^)]{0,24}?(?:sma|ema|vwma|atr|wall|mid|band|sma50|sma200)[^)]{0,12}\)",
     re.I,
 )
+# A number carrying a percent sign is a WIDTH, never a dollar level. Two live
+# 2026-10-21 trees produced a false INTERNAL_CONFLICT from exactly this:
+# COKE's market.md wrote "2R/3R off a 13.65% stop" (13.65 is the stop's width,
+# read as the 3R target) and STE's wrote "stop 8.75% / 2R = 6.2%" (the 8.75 is
+# the stop as a percent of price, read as a stop PRICE, which re-derived a
+# 213.71 risk against the report's spot and a 6.2% sizing label as the target).
+_PCT_AFTER_RE = re.compile(r"\s*\**\s*%")
+
+
+def _percent_at(line: str, end: int) -> bool:
+    """True when the number ending at ``end`` is followed by a percent sign."""
+    return _PCT_AFTER_RE.match(line, end) is not None
+
+
 # A line quoting a scale-in ladder: its targets come off the plan's averaged
 # entry, so the report-wide spot price is not their basis.
 _TRANCHE_LINE_RE = re.compile(r"(?i)\btranche\b|\bP1\b[^\n]{0,40}\bP3\b")
@@ -4790,6 +4804,10 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
             # as the stop and flagged a correct 2R target.
             if _STOP_TAIL_REJECT.match(line[cand.end(1) : cand.end(1) + 24]):
                 continue
+            # "stop 8.75%" is a WIDTH (STE 2026-10-21 market.md sizing line):
+            # as a dollar level it manufactured a risk 23x the real one.
+            if _percent_at(line, cand.end(1)):
+                continue
             line_stop = float(cand.group(1).replace(",", ""))
             break
         if line_stop is None:
@@ -4833,6 +4851,17 @@ def _r_multiple_identity(report_text: str) -> list[VerifierClaim]:
         )
         stated_mults = [float(x) for x in _RMULT_STATED_RE.findall(line)]
         for m in rs:
+            # The value the label owns must be a PRICE. "2R/3R off a 13.65%
+            # stop" (COKE 2026-10-21 market.md) is a basis statement about the
+            # stop's width, and "2R = 6.2%" on a sizing line is a percent of
+            # book; both were read as targets.
+            value_end = (
+                m.end(3)
+                if (m.group(1).upper() in ("3R", "T2") and m.group(3))
+                else m.end(2)
+            )
+            if _percent_at(line, value_end):
+                continue
             quoted = _rmult_value(m)
             mult = 2 if m.group(1).upper() in ("2R", "T1") else 3
             if own_basis:
