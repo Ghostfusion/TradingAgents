@@ -4658,8 +4658,15 @@ def _percent_at(line: str, end: int) -> bool:
 
 
 # A line quoting a scale-in ladder: its targets come off the plan's averaged
-# entry, so the report-wide spot price is not their basis.
-_TRANCHE_LINE_RE = re.compile(r"(?i)\btranche\b|\bP1\b[^\n]{0,40}\bP3\b")
+# entry, so the report-wide spot price is not their basis. The ladder is often
+# spelled without the words this pattern first knew: PR 2026-10-22 market.md
+# wrote "**Scale-in only:** 30/30/40 at 24.21/23.47/22.73, stop **21.62**,
+# T1 **26.59** ... T2 **28.72**" - no tool name and no "P1"/"P3" label - so the
+# readers fell back to the day's close (24.21, which IS P1) and flagged the
+# plan's own 1.8R/3.0R targets (23.40 + 1.8*1.78 = 26.60, + 3*1.78 = 28.74).
+_TRANCHE_LINE_RE = re.compile(
+    r"(?i)\btranche\b|\bP1\b[^\n]{0,40}\bP3\b|\bscal(?:e|ing)[\s_-]*in\b"
+)
 # "2R" / "3R" / "T1(2R)" / "T2(3R)" label followed by its value(s). A swing
 # line often quotes a pair "2R/3R targets 1357.69 / 1521.68" — group 2 is the
 # label-specific value (the one after "/" for the 3R in a "A / B" pair).

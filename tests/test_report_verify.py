@@ -2118,6 +2118,20 @@ def test_r_multiple_identity_ignores_a_percent_stop_width():
     assert rv._r_multiple_identity(text) == []
 
 
+def test_r_multiple_identity_ignores_a_scale_in_ladder_line():
+    # PR 2026-10-22 market.md, verbatim shape: the ladder names no tool and no
+    # "P1"/"P3" label, and its targets come off the plan's AVERAGED entry
+    # (23.40 with risk/share 1.78 -> 26.59 at 1.8R, 28.72 at 3.0R), not off the
+    # day's close (24.21, which happens to equal P1).
+    text = (
+        "Last close 24.21.\n"
+        "2. **Scale-in only:** 30/30/40 at 24.21/23.47/22.73, stop **21.62**, "
+        "T1 **26.59** (sell half, move to breakeven), T2 **28.72**, trail the "
+        "remainder on the **20-day EMA 23.5315**."
+    )
+    assert rv._r_multiple_identity(text) == []
+
+
 def test_r_multiple_identity_ignores_a_percent_stop_and_a_sizing_label():
     # STE 2026-10-21 market.md: "stop 8.75% / 2R = 6.2%" is a SIZING line. The
     # 8.75 is the stop as a percent of price and 6.2 is a percent of book;
