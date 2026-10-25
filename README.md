@@ -1344,7 +1344,7 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 >
 > ---
 >
-> **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays), [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports), the full developer map in [`docs/developer/`](docs/developer/00-index.md), and the strategy-plan index in [`Strategies/index.md`](Strategies/index.md).
+> **Docs**: [`docs/api_reference.md`](docs/api_reference.md) (config keys, graph, vendor contract, overlays), [`docs/design_score_calculations.md`](docs/design_score_calculations.md) (every score's arithmetic and the provider endpoint behind each input), [`docs/howto_end_to_end.md`](docs/howto_end_to_end.md) (screener → pipeline → reports), the full developer map in [`docs/developer/`](docs/developer/00-index.md), and the strategy-plan index in [`Strategies/index.md`](Strategies/index.md).
 >
 
 

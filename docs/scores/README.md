@@ -14,6 +14,16 @@
 | MarketScore | [`MarketScore.md`](MarketScore.md) | 140 numbered sections, **no weights given** | **[ADDED 2026-09-26]** designed, **not built** - zero code hits for `market_score`/`MarketScore`: no module, no gate, no leaf. The boundary against `TechnicalScore` is **open** (§1.1) |
 | ValuationScore | [`ValuationScore.md`](ValuationScore.md) | 85 numbered sections, **no weights given** | **[ADDED 2026-09-26]** designed, **not built** - zero code hits for `valuation_score`/`ValuationScore`. It overlaps `FundamentalScore`'s `valuation_subscore` (`fundamental_score.py:211`, 20% of that engine's weight) - **open** |
 
+**[ADDED 2026-10-22] The as-built arithmetic and its data provenance have their own
+reference:** [`docs/design_score_calculations.md`](../design_score_calculations.md).
+This directory answers *what an engine should be*; that document answers *what it
+computes today and where each input comes from* - the exact weight vector and
+coverage floor, the ramp edges or band literals behind every component, the
+producing function, and the client endpoint that supplied the raw field, for all
+nine `run_card.json` blocks and for the scores computed but never scored. It also
+records the one thing the vendor chains alone do not tell a reader: which engines
+bypass `route_to_vendor` entirely.
+
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
 and the decisions still open. Three cross-cutting documents sit beside it:
