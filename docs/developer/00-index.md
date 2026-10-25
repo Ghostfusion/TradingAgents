@@ -24,6 +24,7 @@ drill into whatever area you are touching.
 | 10 | `10-tests-layout.md` | the `tests/` directory map, fixtures, conventions |
 | 11 | `11-agent-decision-tools.md` | audit + plan: deterministic functions to expose as agent tools |
 | 12 | `12-data-providers.md` | the 13 data providers/sources and how each is wired |
+| 13 | `13-score-internals.md` | score gates, published surfaces, the one-producer rule, provenance seams, and the D1–D12 divergence ledger |
 
 Companion docs (repo root `docs/`):
 - [`docs/MASTER_DESIGN.md`](../MASTER_DESIGN.md) — **the whole system in one document**: invariants, layer map, graph, data layer, strategies, score engines, reporting, config/gates, entry surfaces, the executor boundary, the web app, the test architecture, and the current gap list. Read this before the numbered guides if you want the shape of the system rather than one area.

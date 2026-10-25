@@ -18,11 +18,13 @@
 reference:** [`docs/design_score_calculations.md`](../design_score_calculations.md).
 This directory answers *what an engine should be*; that document answers *what it
 computes today and where each input comes from* - the exact weight vector and
-coverage floor, the ramp edges or band literals behind every component, the
-producing function, and the client endpoint that supplied the raw field, for all
-nine `run_card.json` blocks and for the scores computed but never scored. It also
-records the one thing the vendor chains alone do not tell a reader: which engines
-bypass `route_to_vendor` entirely.
+coverage floor, the ramp edges or band literals behind every component, and the
+provider endpoint that supplied the raw field, for the nine composite engines and
+for the scores computed but never scored. It is written to be readable outside
+this tree (formulas and endpoints, no repo conventions), so the internal half -
+gate defaults, the published surfaces, the one-producer rule, the engines that
+bypass `route_to_vendor`, and the D1-D12 divergence ledger - is
+[`docs/developer/13-score-internals.md`](../developer/13-score-internals.md).
 
 The build order is [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - the
 prerequisites, the seven workstreams, the phases, the verification requirements
