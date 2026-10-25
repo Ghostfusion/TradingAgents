@@ -306,7 +306,7 @@ band-mapped and noted `NON-MONOTONIC` but is missing from
 `score_engine.NON_MONOTONIC_INPUTS`, so its raw→aligned triple is never printed
 (D7).
 
-### 4.3 MomentumScore — 8 legs, 36 members
+### 4.3 MomentumScore — 8 legs, 41 declared members
 
 Entry: `analysis_tools.py:7116 get_momentum_score`; builder
 `analysis_tools.py:6847 _momentum_components`; also `quant_scorecard.py:305`.
@@ -326,7 +326,7 @@ A 0.10, B 0.05, V 0.10, Q 0.10, D 0.05. Legs are equal-weighted internally
 | **Q** quality of trend | `efficiency_ratio` (0…0.60), `positive_day_ratio` (0.35…0.65), `autocorr1` (±0.20), `vol_adjusted` (±1.50) |
 | **D** downside | `realized_vol` (0.15…0.80, lower better), `downside_dev` (0.05…0.45), `max_drawdown` (0…0.40), `ulcer` (0…0.15), `atr_pct` (0.01…0.06) |
 
-**Data provenance.** All 36 members come from ONE fetch: `_ohlcv(ticker)` →
+**Data provenance.** All 41 members come from ONE fetch: `_ohlcv(ticker)` →
 `load_ohlcv` → **`yf.download`** (`stockstats_utils.py:336`), 320 bars. Two
 auxiliary reads: the benchmark closes for the RS legs (`_benchmark_closes`, same
 loader on SPY) and the sector ETF for `rs_vs_sector`
