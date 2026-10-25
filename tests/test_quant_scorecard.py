@@ -135,7 +135,7 @@ def wired(monkeypatch):
         calls.record("_sentiment_components", ticker, date)
         return {"stocktwits": 0.2}, "eodhd"
 
-    def _news_components(ticker, date=None, *, days=30):
+    def _news_components(ticker, date=None, *, days=30, fetch_errors=None):
         calls.record("_news_components", ticker, date)
         return {"sentiment": 0.1}
 
@@ -191,7 +191,7 @@ def wired(monkeypatch):
     )
     monkeypatch.setattr(
         "tradingagents.strategies.news_score.news_score",
-        lambda vals: dict(NEWS_RESULT),
+        lambda vals, **kw: dict(NEWS_RESULT),
     )
     monkeypatch.setattr(
         "tradingagents.strategies.event_state.event_state",

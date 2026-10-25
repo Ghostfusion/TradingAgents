@@ -270,6 +270,11 @@ The composite needs 2 of 11 components. Categories group these into relevance &
 materiality 20, novelty 15, fundamental impact 20, earnings & guidance 15,
 corporate events 10, regulatory 5, analyst 5, macro/industry 5, persistence 5.
 
+A category is a **view, not the aggregation step**: the composite combines the
+eleven components directly, so a category with one leg absent contributes only
+the present leg's weight — relevance present and materiality absent puts 10, not
+20, into both sides of §1's ratio.
+
 ### 4.6 EventScore — 7 families, imminence
 
 No weights: each family contributes one day-count, converted to imminence, and

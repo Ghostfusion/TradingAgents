@@ -161,3 +161,32 @@ ramp when `reference=` normalisation runs.
    (`LONGEST_BULLET_LIMIT` is the binding constraint).
 5. Land the engine change, the run-card block, the report render, the external
    formula document and this file in one commit.
+
+## 7. Fixed — 2026-10-25
+
+Two defects found while verifying that NewsScore could be computed at all. Both
+were display/provenance faults: no formula moved, and the published composite
+for the same inputs is unchanged.
+
+**F1 — a refused vendor was published as a missing producer.** `_av_news_articles`
+returns `[]` for both an empty window and a refused request, so the live MSFT
+read (2026-10-23) printed "no producer supplied it on this path" for `relevance`,
+`novelty` and `regulatory_legal` while the vendor was answering
+`AlphaVantageRateLimitError: … This is a premium endpoint`. Three of eleven legs
+(30 of 100 weight) are starved by that one request, and the render said the
+producer did not exist. Now `_av_news_articles_with_error` returns the reason,
+`_news_components(fetch_errors=…)` records it under `_AV_FEED_COMPONENTS`, and
+`news_score(fetch_errors=…)` overrides `ABSENT_REASONS` for those names. The
+resolved surface is `absent_reasons` in the tool render, the run card
+(`absent_reasons`, `unavailable_reason`, `categories[*].measured_weight`) and
+`quant_scorecard`'s news entry. **This does not restore the legs** — that needs
+an Alpha Vantage tier or a different article feed, which is the owner's source
+decision.
+
+**F2 — a category printed a weight that was not the one combined.** NewsScore
+aggregates the eleven components directly, so `relevance_materiality` with only
+materiality present contributes 10, while the row printed the declared pair sum
+20. The visible rows then recomputed to 56.98 against a published 60.9. The
+category block now carries `measured_weight` beside the declared `weight`, and
+the render prints `weight 10 of 20 declared` whenever the two differ. Same family
+as D8, which stays open for the two keys that share the name `coverage`.

@@ -404,10 +404,17 @@ def _read_news(ticker: str, date: str | None) -> dict:
         from tradingagents.agents.utils.analysis_tools import _news_components
         from tradingagents.strategies.news_score import news_score
 
-        vals = _news_components(ticker, date)
+        fetch_errors: dict = {}
+        vals = _news_components(ticker, date, fetch_errors=fetch_errors)
         if not vals:
-            return _entry("news", reason="no news producer measured")
-        res = news_score(vals)
+            return _entry(
+                "news",
+                reason=(
+                    "no news producer measured"
+                    + (f": {fetch_errors['relevance']}" if fetch_errors.get("relevance") else "")
+                ),
+            )
+        res = news_score(vals, fetch_errors=fetch_errors)
     except Exception as exc:  # noqa: BLE001
         return _entry("news", reason=f"{type(exc).__name__}: {exc}")
     return _entry(

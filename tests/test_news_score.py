@@ -390,7 +390,9 @@ def _silence_leaf(monkeypatch) -> None:
     from tradingagents.dataflows import config as cfg_mod, sec_edgar, yfinance_sector
     from tradingagents.strategies import analyst_revisions as ar
 
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    # The diagnosing reader is the one `_news_components` calls; the list-only
+    # sibling would bypass the stub and reach the vendor.
+    monkeypatch.setattr(at, "_av_news_articles_with_error", lambda *a, **k: ([], None))
     monkeypatch.setattr(at, "_catalyst_snapshot", lambda *a, **k: {})
     monkeypatch.setattr(at, "_sentiment_points_with_source", lambda *a, **k: ([], "unit"))
     monkeypatch.setattr(ar, "revision_ratio", lambda *a, **k: {})
@@ -754,11 +756,14 @@ def test_the_regulatory_legal_leg_reads_the_article_tags(monkeypatch) -> None:
     _silence_leaf(monkeypatch)
     monkeypatch.setattr(
         at,
-        "_av_news_articles",
-        lambda *a, **k: [
-            {"title": "Company faces a SEC investigation", "topics": [{"topic": "legal"}]},
-            {"title": "Routine product note", "topics": [{"topic": "technology"}]},
-        ],
+        "_av_news_articles_with_error",
+        lambda *a, **k: (
+            [
+                {"title": "Company faces a SEC investigation", "topics": [{"topic": "legal"}]},
+                {"title": "Routine product note", "topics": [{"topic": "technology"}]},
+            ],
+            None,
+        ),
     )
 
     vals = at._news_components("TAGS", "2026-09-04")
@@ -772,8 +777,8 @@ def test_an_unrecognised_tag_set_leaves_the_category_absent(monkeypatch) -> None
     _silence_leaf(monkeypatch)
     monkeypatch.setattr(
         at,
-        "_av_news_articles",
-        lambda *a, **k: [{"title": "x", "topics": [{"topic": "technology"}]}],
+        "_av_news_articles_with_error",
+        lambda *a, **k: ([{"title": "x", "topics": [{"topic": "technology"}]}], None),
     )
 
     assert "regulatory_legal" not in at._news_components("TAGS", "2026-09-04")
@@ -911,7 +916,7 @@ def test_news_novelty_leaf_renders_the_product_over_the_feed(monkeypatch) -> Non
         {"title": "Acme chief financial officer to depart next quarter"},
         {"title": "Acme opens a new plant in Ohio"},
     ]
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: arts)
+    monkeypatch.setattr(at, "_av_news_articles_with_error", lambda *a, **k: (arts, None))
     out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "2026-03-04"})
     assert "basis:" in out and "advisory" in out
     weighted = _rendered_number(out, "weighted_novelty")
@@ -924,7 +929,7 @@ def test_news_novelty_leaf_renders_the_product_over_the_feed(monkeypatch) -> Non
 def test_an_empty_news_window_is_unavailable_never_zero(monkeypatch) -> None:
     from tradingagents.agents.utils import analysis_tools as at
 
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: [])
+    monkeypatch.setattr(at, "_av_news_articles_with_error", lambda *a, **k: ([], None))
     out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "2026-03-04"})
     assert "unavailable" in out and "not zero" in out
     assert "weighted_novelty: 0" not in out
@@ -934,7 +939,135 @@ def test_a_bad_date_degrades_without_raising(monkeypatch) -> None:
     from tradingagents.agents.utils import analysis_tools as at
 
     called: list = []
-    monkeypatch.setattr(at, "_av_news_articles", lambda *a, **k: called.append(a) or [])
+    monkeypatch.setattr(
+        at, "_av_news_articles_with_error", lambda *a, **k: (called.append(a) or [], None)
+    )
     out = at.get_news_novelty.invoke({"ticker": "HORZ", "current_date": "not-a-date"})
     assert "unavailable" in out
     assert called == [], "the feed must not be queried with an unusable window"
+
+
+# ---------------------------------------------------------------------------
+# A refused vendor is not a missing producer (2026-10-25)
+# ---------------------------------------------------------------------------
+
+
+def _rate_limited(*_a, **_k):
+    from tradingagents.dataflows.alpha_vantage_common import AlphaVantageRateLimitError
+
+    raise AlphaVantageRateLimitError(
+        "Alpha Vantage rate limit exceeded: Thank you for using Alpha Vantage! "
+        "This is a premium endpoint."
+    )
+
+
+def test_the_news_reader_reports_a_refusal_while_the_list_reader_stays_empty(
+    monkeypatch,
+) -> None:
+    """The live MSFT read on 2026-10-25: `NEWS_SENTIMENT` answered
+    `AlphaVantageRateLimitError: ... This is a premium endpoint`. The list-only
+    reader returns `[]` for that AND for an empty window, so the engine could
+    not tell them apart; the diagnosing sibling names the cause."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import alpha_vantage_news as avn
+
+    monkeypatch.setattr(avn, "get_news", _rate_limited)
+    articles, reason = at._av_news_articles_with_error("MSFT", "2026-09-23", "2026-10-23")
+    assert articles == []
+    assert "AlphaVantageRateLimitError" in reason
+    assert "premium endpoint" in reason
+    assert "not a missing producer" in reason
+    # the old contract still holds for its other callers
+    assert at._av_news_articles("MSFT", "2026-09-23", "2026-10-23") == []
+
+
+def test_an_information_notice_is_a_refusal_not_an_empty_window(monkeypatch) -> None:
+    """Alpha Vantage's free tier answers premium endpoints with
+    `{"Information": ...}` instead of raising; that body is a refusal too."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.dataflows import alpha_vantage_news as avn
+
+    monkeypatch.setattr(
+        avn, "get_news", lambda *a, **k: '{"Information": "premium endpoint only"}'
+    )
+    _articles, reason = at._av_news_articles_with_error("MSFT", "2026-09-23", "2026-10-23")
+    assert reason and "Information" in reason and "premium endpoint only" in reason
+
+    # a served but empty feed is NOT a refusal
+    monkeypatch.setattr(avn, "get_news", lambda *a, **k: '{"feed": []}')
+    assert at._av_news_articles_with_error("MSFT", "2026-09-23", "2026-10-23") == ([], None)
+
+
+def test_a_refused_feed_names_all_three_legs_it_starves(monkeypatch) -> None:
+    """`relevance`, `novelty` and `regulatory_legal` read that one feed, so one
+    refusal is their shared reason - collected out of `_news_components` and
+    printed by the engine instead of "no producer supplied it on this path"."""
+    from tradingagents.agents.utils import analysis_tools as at
+
+    _silence_leaf(monkeypatch)
+    monkeypatch.setattr(
+        at, "_av_news_articles_with_error", lambda *a, **k: ([], "the feed refused it")
+    )
+
+    errors: dict = {}
+    vals = at._news_components("MSFT", "2026-10-23", fetch_errors=errors)
+    assert set(errors) == {"relevance", "novelty", "regulatory_legal"}
+    assert "relevance" not in vals and "novelty" not in vals
+    assert "regulatory_legal" not in vals
+
+
+def _msft_live_components() -> dict:
+    """The 2026-10-25 MSFT read: the four legs that did measure, verbatim."""
+    return {
+        "materiality": 0.05059,
+        "corporate_events": 55.0,
+        "industry_shock": 0.079161,
+        "persistence": 1.104815864022663,
+    }
+
+
+def test_a_partially_measured_category_prints_the_weight_it_contributed() -> None:
+    """The defect: `relevance_materiality` printed `weight 20` (the declared
+    pair) while only the materiality leg's 10 entered the composite, so the
+    visible rows recomputed to 56.98 against a published 60.9."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.news_score import news_score
+
+    res = news_score(_msft_live_components())
+    assert res["score"] == pytest.approx(60.9, abs=0.05)
+    pair = res["categories"]["relevance_materiality"]
+    assert pair["weight"] == 20.0
+    assert pair["measured_weight"] == 10.0
+    # the declared-only weight would give 56.98, not the published number
+    assert res["score"] != pytest.approx(56.98, abs=0.05)
+
+    row = at._render_news_score("MSFT", res)
+    assert "relevance_materiality (weight 10 of 20 declared)" in row
+    # a fully measured category still prints one number
+    assert "corporate_events (weight 10)" in row
+    assert "of 10 declared" not in row
+
+
+def test_the_refusal_reason_reaches_the_rendered_row(monkeypatch) -> None:
+    """End to end over the tool: the absent list names the vendor refusal and
+    the legs with no producer still say so."""
+    from tradingagents.agents.utils import analysis_tools as at
+    from tradingagents.strategies.news_score import news_score
+
+    reason = (
+        "the Alpha Vantage NEWS_SENTIMENT feed returned no articles - "
+        "AlphaVantageRateLimitError: This is a premium endpoint - so the article "
+        "set behind this leg never arrived; this is a vendor refusal, not a "
+        "missing producer"
+    )
+    errors = dict.fromkeys(("relevance", "novelty", "regulatory_legal"), reason)
+    res = news_score(_msft_live_components(), fetch_errors=errors)
+
+    row = at._render_news_score("MSFT", res)
+    lines = row.splitlines()
+    relevance = next(ln for ln in lines if ln.startswith("- relevance:"))
+    assert "premium endpoint" in relevance
+    assert "no producer supplied it on this path" not in relevance
+    analyst = next(ln for ln in lines if ln.startswith("- analyst_revision:"))
+    assert "no producer supplied it on this path" in analyst
+    assert "3 absent with a reason" not in row and "5 absent with a reason" in row

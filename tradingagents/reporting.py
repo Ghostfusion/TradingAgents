@@ -1766,8 +1766,11 @@ def _run_card_sentiment_score(ticker: str, cfg: dict, final_state: dict) -> dict
 def _run_card_news_score(ticker: str, cfg: dict, final_state: dict) -> dict | None:
     """NewsScore block for run_card.json (WP-6 / WP-9).
 
-    The five categories with no supplier are carried as `NA` **with their
-    reason**, never as 0, so a reader can see what the number is not made of.
+    Every absent component is carried as `NA` **with its reason** (`absent`,
+    `absent_reasons`), never as 0, so a reader can see what the number is not
+    made of - and a rate-limited vendor is named as such rather than reported
+    as a missing producer. `categories[*].measured_weight` is the weight share
+    that actually entered the composite beside the declared `weight`.
     """
     if not (cfg or {}).get("enable_news_score"):
         return None
@@ -1776,10 +1779,18 @@ def _run_card_news_score(ticker: str, cfg: dict, final_state: dict) -> dict | No
         from tradingagents.strategies.news_score import news_score
 
         date = (final_state.get("pm_decision") or {}).get("trade_date")
-        vals = _news_components(ticker, date)
+        # The reason a feed was refused travels the same way the tool's does,
+        # so the card never claims "no producer" for a rate-limited vendor.
+        fetch_errors: dict = {}
+        vals = _news_components(ticker, date, fetch_errors=fetch_errors)
         if not vals:
-            return {"status": None, "score": None, "unavailable": "no news producer measured"}
-        res = news_score(vals)
+            return {
+                "status": None,
+                "score": None,
+                "unavailable": "no news producer measured",
+                "unavailable_reason": fetch_errors.get("relevance"),
+            }
+        res = news_score(vals, fetch_errors=fetch_errors)
     except Exception as exc:  # noqa: BLE001 - an advisory block must never cost the card
         return {"status": None, "score": None, "unavailable": f"{type(exc).__name__}: {exc}"}
     return {
@@ -1788,10 +1799,12 @@ def _run_card_news_score(ticker: str, cfg: dict, final_state: dict) -> dict | No
         "coverage": res.get("coverage"),
         "categories": {
             cat: {"score": e.get("score"), "weight": e.get("weight"),
+                  "measured_weight": e.get("measured_weight"),
                   "withheld": e.get("withheld")}
             for cat, e in (res.get("categories") or {}).items()
         },
         "absent": res.get("absent"),
+        "absent_reasons": res.get("absent_reasons"),
         "basis": res.get("basis"),
     }
 

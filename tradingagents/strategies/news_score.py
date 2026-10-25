@@ -277,6 +277,15 @@ def _category_score(
     )
     res["category"] = category
     res["weight"] = NEWS_CATEGORY_WEIGHTS[category]
+    # ``weight`` is the DECLARED category weight, which every renderer prints;
+    # ``measured_weight`` is the share that actually entered the composite -
+    # the two differ whenever one leg of a two-component category is absent
+    # (relevance/materiality 10 of 20), and printing only the declared one made
+    # the rows impossible to recompute against the published composite
+    # (45.1*10 + 55*10 + 89.6*5 + 75.8*5)/30 = 60.9, not 56.98 from weight 20.
+    res["measured_weight"] = sum(
+        COMPONENT_WEIGHTS[name] for name in names if aligned.get(name) is not None
+    )
     res["band"] = band_label(res.get("score"), NEWS_BANDS)
     res["raw_directions"] = {name: COMPONENTS[name].direction for name in names}
     return res
@@ -1369,13 +1378,20 @@ def _weight_basis(weights) -> str:
 
 
 def news_score(components: dict, *, weights: dict | None = None,
-               min_coverage=COMPOSITE_MIN_COVERAGE, confidence: dict | None = None) -> dict:
+               min_coverage=COMPOSITE_MIN_COVERAGE, confidence: dict | None = None,
+               fetch_errors: dict | None = None) -> dict:
     """The eleven components and their weighted composite, or withheld with a reason.
 
     ``components`` is ``{component: raw value}`` over ``COMPONENTS``. The five
     ``ABSENT_COMPONENTS`` print ``NA`` with the reason from ``ABSENT_REASONS``
     unless the caller supplies a value (only ``materiality`` is ever supplyable -
     EventScore owns it, owner Q6).
+
+    ``fetch_errors`` is ``{component: reason}`` for legs whose producer was
+    REFUSED this call rather than missing - it overrides ``ABSENT_REASONS`` for
+    those names and gives the other absent legs a reason they otherwise lack.
+    Without it an Alpha Vantage rate limit is indistinguishable from "no
+    producer exists", which is what the render said on 2026-10-25.
 
     A repeated headline lowers ``novelty`` (feed the value from ``news_novelty``).
     Relevance and materiality are independent rows; relevance alone cannot raise
@@ -1415,9 +1431,12 @@ def news_score(components: dict, *, weights: dict | None = None,
     absent = [name for name in COMPONENT_ORDER if aligned.get(name) is None]
     # Only the declared-absent five carry a producer-gap reason; the rest are
     # simply not supplied on this call.
-    absent_reasons = {
-        name: ABSENT_REASONS[name] for name in absent if name in ABSENT_REASONS
-    }
+    why = dict(fetch_errors) if fetch_errors else {}
+    absent_reasons: dict[str, str] = {}
+    for name in absent:
+        reason = why.get(name) or ABSENT_REASONS.get(name)
+        if reason:
+            absent_reasons[name] = reason
     if conf is not None and conf.get("confidence") is not None:
         conf_txt = (
             f"confidence {conf['confidence']:.4f} from news_confidence "
@@ -1453,8 +1472,9 @@ def news_score(components: dict, *, weights: dict | None = None,
                 "producer": COMPONENTS[name].producer,
                 "note": COMPONENTS[name].note,
                 "reason": (
-                    ABSENT_REASONS[name]
-                    if aligned.get(name) is None and name in ABSENT_REASONS
+                    (why.get(name) or ABSENT_REASONS[name])
+                    if aligned.get(name) is None
+                    and (name in ABSENT_REASONS or name in why)
                     else ("not supplied" if name not in supplied else "unreadable")
                 ),
             }

@@ -8618,11 +8618,14 @@ def get_news_novelty(
     try:
         from tradingagents.strategies.news_score import news_novelty, weighted_novelty
 
-        articles = _av_news_articles(ticker, start, end) or []
+        articles, feed_error = _av_news_articles_with_error(ticker, start, end)
         if not articles:
+            why = feed_error or (
+                f"the Alpha Vantage NEWS_SENTIMENT feed carried no article for "
+                f"{start}..{end}"
+            )
             return (
-                f"news novelty unavailable for {ticker.upper()}: the feed returned no "
-                f"article for {start}..{end} (Alpha Vantage NEWS_SENTIMENT) - "
+                f"news novelty unavailable for {ticker.upper()}: {why} - "
                 "unavailable, not zero"
             )
         weighted = weighted_novelty(articles, window=int(days))
@@ -8656,12 +8659,19 @@ def get_news_novelty(
     return "\n".join(lines)
 
 
+#: The components whose only supplier is the Alpha Vantage NEWS_SENTIMENT feed:
+#: when that request is refused, all three are absent for ONE reason and the
+#: engine must print it rather than "no producer supplied it on this path".
+_AV_FEED_COMPONENTS: tuple[str, ...] = ("relevance", "novelty", "regulatory_legal")
+
+
 def _news_components(
     ticker: str,
     current_date: str | None,
     *,
     days: int = 30,
     evidence: list | None = None,
+    fetch_errors: dict | None = None,
 ) -> dict:
     """Assemble the NewsScore components from the news pipeline.
 
@@ -8670,6 +8680,13 @@ def _news_components(
     relevance first, so the renderer can show the per-article evidence rather
     than only the mean (`NEWS-14`). Passing nothing leaves every existing caller
     unchanged (the three of them pass nothing).
+
+    ``fetch_errors`` is the second out-collector: when a dict is passed, a
+    refused or unreadable Alpha Vantage news read records one reason under each
+    of `_AV_FEED_COMPONENTS`, which the caller hands to `news_score(...,
+    fetch_errors=...)`. Before 2026-10-25 the refusal was swallowed and those
+    three legs published "no producer supplied it on this path" - a false
+    statement about a producer that exists and was rate-limited.
 
     Relevance comes from `news_relevance.score_news_article` (the same producer
     the news analyst's leaf uses), novelty from the article set itself, the
@@ -8707,10 +8724,13 @@ def _news_components(
     except ValueError:
         return {}
     vals: dict = {}
-    try:
-        articles = _av_news_articles(ticker, start, end) or []
-    except Exception:  # noqa: BLE001
-        articles = []
+    # An empty window and a refused request both yield `[]` from the list-only
+    # reader; only this one says which. The reason reaches the engine, which
+    # prints it in place of the "no producer" default.
+    articles, feed_error = _av_news_articles_with_error(ticker, start, end)
+    if feed_error is not None and fetch_errors is not None:
+        for name in _AV_FEED_COMPONENTS:
+            fetch_errors[name] = feed_error
     if articles:
         scored: list[float] = []
         # The per-article evidence behind the aggregate, kept so the renderer can
@@ -8899,6 +8919,25 @@ def _news_components(
     return vals
 
 
+def _category_weight_text(entry: dict) -> str:
+    """The weight a category row should print: the share that was combined.
+
+    NewsScore combines the eleven components directly (`news_score.news_score`),
+    so a two-leg category with one leg absent contributes only that leg's weight
+    to the composite - while the block's ``weight`` is the declared pair sum.
+    Printing the declared number alone made the visible rows recompute to 56.98
+    against a published 60.9 (2026-10-25); the measured share is printed beside
+    it whenever the two differ.
+    """
+    declared = entry.get("weight")
+    measured = entry.get("measured_weight")
+    if declared is None:
+        return "weight n/a"
+    if measured is None or abs(float(measured) - float(declared)) < 1e-9:
+        return f"weight {float(declared):g}"
+    return f"weight {float(measured):g} of {float(declared):g} declared"
+
+
 def _render_news_score(
     ticker: str,
     res: dict,
@@ -8932,7 +8971,7 @@ def _render_news_score(
             )
             continue
         lines.append(
-            f"- {cat} (weight {entry.get('weight'):g}): {score:.1f}/100"
+            f"- {cat} ({_category_weight_text(entry)}): {score:.1f}/100"
             + (f" ({entry.get('band')})" if entry.get("band") else "")
             + f" - coverage {entry.get('coverage'):.0%}"
         )
@@ -9005,14 +9044,21 @@ def get_news_score(
         from tradingagents.strategies.news_score import news_score
 
         evidence: list = []
-        vals = _news_components(ticker, current_date, evidence=evidence)
+        fetch_errors: dict = {}
+        vals = _news_components(
+            ticker, current_date, evidence=evidence, fetch_errors=fetch_errors
+        )
         if not vals:
-            return f"news score unavailable for {ticker}: no news producer measured"
+            why = fetch_errors.get("relevance")
+            return (
+                f"news score unavailable for {ticker}: no news producer measured"
+                + (f" ({why})" if why else "")
+            )
         # NEWS-13: replace the hard-coded owner table with the measured
         # |IC|-derived vector when evidence is in hand; `(None, reason)` keeps
         # the declared table and the reason is printed in the render below.
         weights, weights_basis = _news_component_weights()
-        res = news_score(vals, weights=weights)
+        res = news_score(vals, weights=weights, fetch_errors=fetch_errors)
     except Exception as exc:  # noqa: BLE001 - an advisory read must not break the tool
         return f"news score unavailable for {ticker}: {type(exc).__name__}: {exc}"
     try:
@@ -11701,6 +11747,67 @@ def _sentiment_flag(name: str) -> bool:
         return False
 
 
+#: Longest vendor notice quoted in a feed-failure reason (the Alpha Vantage
+#: premium-plan pitch runs to ~400 characters and is printed once per leg).
+_AV_FEED_REASON_MAX = 180
+
+
+def _av_feed_reason(detail: str) -> str:
+    """One absent-component reason for a refused or unreadable AV news read."""
+    text = " ".join(str(detail).split())
+    if len(text) > _AV_FEED_REASON_MAX:
+        text = text[:_AV_FEED_REASON_MAX].rstrip() + " …"
+    return (
+        "the Alpha Vantage NEWS_SENTIMENT feed returned no articles - "
+        f"{text} - so the article set behind this leg never arrived; this is a "
+        "vendor refusal, not a missing producer"
+    )
+
+
+def _av_news_articles_with_error(
+    ticker: str, start: str, end: str
+) -> tuple[list, str | None]:
+    """Raw Alpha Vantage NEWS_SENTIMENT articles AND why the read came back empty.
+
+    `_av_news_articles` returns only the list, so an empty news window and a
+    refused request are indistinguishable to its callers. On 2026-10-25 that
+    cost NewsScore three legs: the vendor answered
+    `AlphaVantageRateLimitError: ... This is a premium endpoint`, the reader
+    swallowed it, and the render printed "no producer supplied it on this path"
+    for `relevance`, `novelty` and `regulatory_legal` - components whose
+    producer exists and had simply been refused. A refusal is reported here
+    and nowhere else; the list-only sibling keeps the old contract for its
+    other callers.
+
+    Returns ``(articles, None)`` for a served feed **or** an empty window with
+    no vendor notice, and ``([], reason)`` when the request raised, the body was
+    not JSON, or the payload carried an Alpha Vantage notice instead of a feed.
+    """
+    import json
+
+    try:
+        from tradingagents.dataflows.alpha_vantage_news import get_news
+
+        raw = get_news(ticker, start, end)
+    except Exception as exc:  # noqa: BLE001 - the reason is the return value
+        return [], _av_feed_reason(f"{type(exc).__name__}: {exc}")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return [], _av_feed_reason("the response body is not JSON")
+    if isinstance(raw, dict):
+        feed = raw.get("feed")
+        if feed is not None:
+            return list(feed or []), None
+        for key in ("Information", "Note", "Error Message"):
+            notice = raw.get(key)
+            if notice:
+                return [], _av_feed_reason(f"{key}: {notice}")
+        return [], None
+    return [], _av_feed_reason(f"the feed returned {type(raw).__name__}, not a payload")
+
+
 def _av_news_articles(ticker: str, start: str, end: str) -> list:
     """Raw Alpha Vantage NEWS_SENTIMENT articles (the S4 feed); [] on failure.
 
@@ -11714,23 +11821,11 @@ def _av_news_articles(ticker: str, start: str, end: str) -> list:
     fundamentals sibling already documents the same contract
     (`alpha_vantage_fundamentals.py:9`: *"``_make_api_request`` returns the
     fundamentals payload as a JSON string, so parse..."*).
+
+    The failure *reason* is dropped here by design - callers that must tell a
+    refusal from an empty window read `_av_news_articles_with_error`.
     """
-    import json
-
-    try:
-        from tradingagents.dataflows.alpha_vantage_news import get_news
-
-        raw = get_news(ticker, start, end)
-    except Exception:  # noqa: BLE001 - optional rows must not break the tool
-        return []
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return []
-    if isinstance(raw, dict):
-        return raw.get("feed") or []
-    return []
+    return _av_news_articles_with_error(ticker, start, end)[0]
 
 
 def _news_sentiment_points(ticker: str, start: str, end: str) -> list:
